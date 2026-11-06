@@ -17,6 +17,7 @@ internal sealed class SessionDir(string projectKey, string path)
     public string Container => $"{ComposeProject}-agent";
 
     public string ComposeFile => File("compose.yaml");
+    public string MountsFile => File("mounts.yaml");
     public string ProxyLog => File("proxy.log");
     public string LockFile => File("session.lock");
     public string EnvFile => File("session.env");
@@ -29,7 +30,9 @@ internal sealed class SessionDir(string projectKey, string path)
 
     /// <summary>docker compose for this session's stack, with the env it was started with.</summary>
     public string[] ComposeArgs(params string[] args) =>
-        ["compose", "--progress", "quiet", "-f", ComposeFile, "-p", ComposeProject, .. args];
+        System.IO.File.Exists(MountsFile)
+            ? ["compose", "--progress", "quiet", "-f", ComposeFile, "-f", MountsFile, "-p", ComposeProject, .. args]
+            : ["compose", "--progress", "quiet", "-f", ComposeFile, "-p", ComposeProject, .. args];
 
     public Dictionary<string, string> ReadEnv()
     {
@@ -62,7 +65,11 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         // 2. Sessions whose pen died get their end path now.
         FinishDeadSessions(project.Key, RuntimeDir);
 
-        // 3. Images current, then everything that can fail before a session exists.
+        // 3. The repo refusals, the mounts (creating .pen/ and .git/hooks if
+        // missing), images current, then everything else that can fail before
+        // a session exists.
+        RepoGuard.CheckAtStart(project.Dir);
+        var mounts = RepoGuard.PrepareMounts(project.Dir, host.Home);
         Image.EnsureCurrent();
         var owner = GitHub.ProjectOwner(project, projectConfig);
         var token = GitHub.TokenFor(owner, user, RuntimeDir, host);
@@ -95,6 +102,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         if (project.HasGitDir) File.WriteAllText(session.StartedWithGit, "");
         File.WriteAllText(session.File("squid.conf"), Embedded.Text("proxy/squid.conf"));
         File.WriteAllText(session.File("allowlist.txt"), Allowlist.Render(allowlist));
+        File.WriteAllText(session.MountsFile, RepoGuard.ComposeOverride(mounts));
         File.WriteAllText(session.ProxyLog, "");
         // Squid's own user writes the log on Linux; the session dir itself is 700.
         File.SetUnixFileMode(session.ProxyLog, (UnixFileMode)0b110_110_110);
@@ -175,7 +183,12 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         var env = session.ReadEnv();
         Proc.Capture("docker", ["rm", "-f", session.Container]);
 
-        // (chunk 15: the .git check goes here, before anything else touches git.)
+        // The .git check, now that the agent is gone and before anything runs git.
+        if (env.TryGetValue("PROJECT_DIR", out var projectDir))
+        {
+            var moved = GitCheck.Run(projectDir, File.Exists(session.StartedWithGit));
+            if (moved.Count > 0) Out.Raw(GitCheck.Warning(projectDir, moved));
+        }
 
         if (env.Count > 0)
         {

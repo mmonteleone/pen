@@ -1,0 +1,124 @@
+using System.Text;
+
+namespace Pen;
+
+/// <summary>One rename the check made. Inner is a second rename inside the moved item, if any.</summary>
+internal sealed record Quarantined(string From, string To, string Why, (string From, string To)? Inner = null);
+
+/// <summary>
+/// The session-end .git check (see "Session-end check" in PLAN.md). It reads
+/// files directly and never runs git, and it renames whatever would make host
+/// git read config or hooks the agent could write, before the shell prompt
+/// or an IDE runs git there. It runs before pen's own git calls.
+/// </summary>
+internal static class GitCheck
+{
+    public const string Suffix = ".pen-quarantine";
+
+    /// <summary>
+    /// Checks <paramref name="dir"/> and quarantines what it flags.
+    /// <paramref name="startedWithGit"/> is whether the session started with a .git there.
+    /// </summary>
+    public static List<Quarantined> Run(string dir, bool startedWithGit)
+    {
+        var moved = new List<Quarantined>();
+        if (!Directory.Exists(dir)) return moved;
+
+        var git = Path.Combine(dir, ".git");
+        if (!startedWithGit)
+        {
+            if (RepoGuard.Exists(git))
+                Move(git, "a repo created during the session (git init): its config and hooks were writable from the sandbox", moved, breakLayout: true);
+        }
+        else
+        {
+            var commondir = Path.Combine(git, "commondir");
+            if (RepoGuard.Exists(commondir))
+                Move(commondir, "a normal repo never has one: it makes git read config and hooks from another directory", moved);
+            var modules = Path.Combine(git, "modules");
+            if (RepoGuard.Exists(modules))
+                Move(modules, "submodule repos, made during the session: their config and hooks were writable from the sandbox", moved);
+        }
+
+        foreach (var n in RepoScan.FindNested(dir))
+        {
+            var why = n.Kind switch
+            {
+                NestedKind.Bare => "a bare repo: git takes this directory as one, with config and hooks from the sandbox",
+                NestedKind.GitFile => "a .git file that isn't one of this repo's worktrees: it points git at another directory",
+                NestedKind.GitLink => "a .git symlink: it points git at another directory",
+                _ => "a nested repo: its config and hooks were writable from the sandbox",
+            };
+            Move(n.Path, why, moved, breakLayout: n.Kind == NestedKind.GitDir);
+        }
+        return moved;
+    }
+
+    /// <summary>
+    /// Renames <paramref name="path"/> to a free "….pen-quarantine" name. For a
+    /// .git directory (<paramref name="breakLayout"/>), its HEAD goes too:
+    /// renamed, it would still look like a bare repo to git.
+    /// </summary>
+    private static void Move(string path, string why, List<Quarantined> moved, bool breakLayout = false)
+    {
+        try
+        {
+            var to = FreeName(path);
+            Native.Rename(path, to);
+            (string, string)? inner = null;
+            if (breakLayout && Directory.Exists(to) && !RepoGuard.IsLink(to))
+            {
+                var head = Path.Combine(to, "HEAD");
+                if (RepoGuard.Exists(head))
+                {
+                    var headTo = FreeName(head);
+                    Native.Rename(head, headTo);
+                    inner = (head, headTo);
+                }
+            }
+            moved.Add(new(path, to, why, inner));
+        }
+        catch (IOException e)
+        {
+            // Never fatal: the rest still gets checked, and the warning names it.
+            moved.Add(new(path, "", $"{why}. COULD NOT MOVE IT ({e.Message}): don't run git here until you've dealt with it"));
+        }
+    }
+
+    private static string FreeName(string path)
+    {
+        var to = path + Suffix;
+        for (int i = 2; RepoGuard.Exists(to); i++) to = $"{path}{Suffix}-{i}";
+        return to;
+    }
+
+    /// <summary>The loud warning: what moved, why, and how to put it back.</summary>
+    public static string Warning(string dir, IReadOnlyList<Quarantined> moved)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("pen: WARNING: this session left git files that would make git on this machine run code from the sandbox.");
+        sb.AppendLine("pen: They've been renamed out of git's way:");
+        foreach (var q in moved)
+        {
+            sb.Append("  ").Append(RepoGuard.Rel(dir, q.From));
+            if (q.To.Length > 0) sb.Append(" → ").Append(RepoGuard.Rel(dir, q.To));
+            sb.AppendLine().Append("      ").AppendLine(q.Why);
+        }
+        var restorable = moved.Where(q => q.To.Length > 0).ToList();
+        if (restorable.Count > 0)
+        {
+            sb.AppendLine("pen: Inspect each one before putting it back (a hook or a core.* setting in its config runs on this machine). To restore one:");
+            foreach (var q in restorable)
+            {
+                sb.Append("  mv ").Append(Quote(q.To)).Append(' ').Append(Quote(q.From));
+                if (q.Inner is { } i)
+                    sb.Append(" && mv ").Append(Quote(Path.Combine(q.From, Path.GetFileName(i.To))))
+                      .Append(' ').Append(Quote(Path.Combine(q.From, Path.GetFileName(i.From))));
+                sb.AppendLine();
+            }
+        }
+        return sb.ToString().TrimEnd('\n');
+    }
+
+    private static string Quote(string s) => "'" + s.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
+}

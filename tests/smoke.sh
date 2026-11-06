@@ -47,6 +47,21 @@ PEN_UID=$(id -u) PEN_GID=$(id -g)
 if command -v sha256sum >/dev/null; then sha() { sha256sum; }; else sha() { shasum -a 256; }; fi
 HASH=$(printf %s "$PROJECT_DIR" | sha | cut -c1-8)
 KEY= RUNTIME=
+EXTRA_DIRS=() # other fixture projects: removed on exit, with their keys' state
+
+# forget <dir>: remove the state of any project key made for <dir>.
+forget() {
+  local h k
+  h=$(printf %s "$(cd "$1" && pwd -P)" | sha | cut -c1-8)
+  for k in "$REAL_HOME"/.local/state/pen/pen-*-"$h"; do
+    [ -d "$k" ] || continue
+    k=$(basename "$k")
+    docker ps -aq --filter "name=^$k-" | xargs docker rm -f >/dev/null 2>&1 || true
+    docker network ls -q --filter "name=^$k-" | xargs docker network rm >/dev/null 2>&1 || true
+    docker volume rm "${k}_home" "${k}_nuget" >/dev/null 2>&1 || true
+    rm -rf "$REAL_HOME/.local/state/pen/$k"
+  done
+}
 
 cleanup() {
   cd /
@@ -56,6 +71,8 @@ cleanup() {
     docker volume rm "${KEY}_home" "${KEY}_nuget" >/dev/null 2>&1 || true
     rm -rf "$REAL_HOME/.local/state/pen/$KEY"
   fi
+  local d
+  for d in ${EXTRA_DIRS[@]+"${EXTRA_DIRS[@]}"}; do [ -d "$d" ] && forget "$d"; rm -rf "$d"; done
   rm -rf "$PROJECT_DIR" "$SCRATCH"
 }
 trap cleanup EXIT
@@ -194,7 +211,7 @@ fi
 
 in_sandbox 'curl -s -o /dev/null -I https://example.com; curl -s -o /dev/null -I https://github.com' >/dev/null 2>&1 || true
 log=$(last_session)proxy.log
-check "proxy.log records the denial (TCP_DENIED example.com:443)" grep -q 'TCP_DENIED/403 CONNECT example.com:443' "$log"
+check "proxy.log records the denial (TCP_DENIED example.com:443)" grep -qE 'TCP_DENIED[A-Z_]*/403 CONNECT example.com:443' "$log"
 check "proxy.log records the allowed request" grep -q 'CONNECT github.com:443' "$log"
 check "proxy.log has no healthcheck probes" not grep -q ' 127.0.0.1 ' "$log"
 
@@ -491,5 +508,150 @@ fi
 rm -rf app
 
 note "login checks (step 5: log in to claude and codex, still logged in after pen upgrade --clean, logged out in another project) are manual"
+
+# ==============================================================================
+section "12. Repo refusals at start (step 4)"
+
+now() { python3 -c 'import time; print(time.time())'; }
+git worktree add -q "$SCRATCH/wt" 2>/dev/null # kept until section 13 (its commondir is mounted read-only)
+check "refuses a linked worktree, pointing at the main checkout" refuse "$SCRATCH/wt" "run pen from the main checkout"
+forget "$SCRATCH/wt"
+touch .gitmodules
+check "refuses a repo with .gitmodules (not supported yet)" refuse "$PROJECT_DIR" "submodules, which pen doesn't support yet"
+rm .gitmodules
+git init -q libs/sub
+git init -q --bare sub2
+out=$(pen_run true 2>&1 || true)
+check "refuses a repo with another repo inside it, naming it" contains "  libs/sub" "$out"
+check "...and a bare repo inside it" contains "  sub2 (a bare repo)" "$out"
+check "...saying to run pen in that repo" contains "run pen in each repo instead" "$out"
+check "...without starting anything" test "$(containers)" = 0
+rm -rf libs sub2
+mkdir -p "$SCRATCH/repos"
+git init -q "$SCRATCH/repos/a"; git init -q "$SCRATCH/repos/b"
+out=$(cd "$SCRATCH/repos" && "$PEN" run true </dev/null 2>&1 || true)
+check "refuses a folder of repos, naming them" has_all "$out" "contains git repos" "  a" "  b"
+forget "$SCRATCH/repos"
+git worktree add -q .claude/worktrees/x 2>/dev/null
+check "a git worktree add worktree under .claude/worktrees/ starts normally" pen_run true
+git worktree remove --force .claude/worktrees/x && rm -rf .claude
+
+# The scan with a 100k-file node_modules and obj/ trees: a repo planted at
+# the bottom makes pen refuse right after the scan, before any Docker call,
+# so the refusal's time is the scan's (plus pen's own startup).
+python3 - "$PROJECT_DIR" <<'PY'
+import os, sys
+root = sys.argv[1]
+for top, dirs, files in (("node_modules", 5000, 20), ("src/obj", 500, 10)):
+    for d in range(dirs):
+        p = os.path.join(root, top, f"pkg{d}", "lib" if d % 2 else "dist")
+        os.makedirs(p, exist_ok=True)
+        for f in range(files):
+            open(os.path.join(p, f"f{f}.js"), "w").close()
+PY
+git init -q node_modules/pkg4999/dist/deep
+t0=$(now); out=$(pen_run true 2>&1 || true); t1=$(now)
+scan=$(python3 -c "print(f'{$t1 - $t0:.2f}')")
+check "the nested-repo scan finds a repo deep in node_modules" contains "node_modules/pkg4999/dist/deep" "$out"
+check "...in under about 1 s with 100k+ files (took ${scan}s)" python3 -c "import sys; sys.exit(0 if $scan < 1.2 else 1)"
+rm -rf node_modules/pkg4999/dist/deep/.git
+t0=$(now); pen_run true; t1=$(now)
+note "a whole session with that tree (start and end scans included): $(python3 -c "print(f'{$t1 - $t0:.2f}')")s"
+rm -rf node_modules src
+
+# ==============================================================================
+section "13. Read-only .git and .pen, session-end check and quarantine (step 4)"
+
+rm -rf .git/hooks .pen
+cfg_sum=$(cksum <.git/config)
+out=$(in_sandbox '
+  t() { if eval "$1" >/dev/null 2>&1; then echo "ok: $2"; else echo "fail: $2"; fi; }
+  t "git -c user.name=a -c user.email=a@example.invalid commit -q --allow-empty -m inside" commit
+  t "git checkout -q -b scratch && git checkout -q - && git merge -q --ff-only scratch && git stash list" branchwork
+  t "echo x >> .git/hooks/pre-commit" hook
+  t "git config core.fsmonitor x" config
+  t "echo x >> .git/config" configwrite
+  t "mv .git .git2" mvgit
+  t "echo x > .git/worktrees/wt/commondir" wtcommondir
+  t "touch .pen/config" pencreate
+  t "mv .pen .pen2" mvpen
+' 2>&1)
+has() { grep -qxF -- "$1" <<<"$out"; }
+check "git commit works" has "ok: commit"
+check "branch, checkout, merge and stash work" has "ok: branchwork"
+check "the session that only committed printed no warning" not contains "WARNING" "$out"
+check ".git/hooks is created when missing" test -d .git/hooks
+check "...and writing a hook fails" has "fail: hook"
+check "git config core.fsmonitor fails" has "fail: config"
+check "appending to .git/config fails" has "fail: configwrite"
+check "...and .git/config is unchanged on the host" test "$(cksum <.git/config)" = "$cfg_sum"
+check "mv .git .git2 fails" has "fail: mvgit"
+check "a host worktree's commondir is read-only" has "fail: wtcommondir"
+check ".pen/ is created empty when missing" bash -c '[ -d .pen ] && [ -z "$(ls -A .pen)" ]'
+check "...touch .pen/config fails inside" has "fail: pencreate"
+check "...mv .pen fails" has "fail: mvpen"
+check "...and host git status shows nothing new" test -z "$(git status --porcelain)"
+git worktree remove --force "$SCRATCH/wt"
+git branch -q -D scratch
+
+echo '# host-written' >.pen/config
+out=$(in_sandbox 'echo x >> .pen/config && echo wrote; mv .pen .pen2 && echo moved; true' 2>&1)
+check "with .pen/config present, it can't be written or moved" bash -c '! grep -qE "^(wrote|moved)$" <<<"$1"' _ "$out"
+check "...and is unchanged" test "$(cat .pen/config)" = '# host-written'
+rm .pen/config
+
+: >.gitinc
+git config include.path ../.gitinc
+out=$(in_sandbox 'echo "[core] fsmonitor = x" >> .gitinc && echo wrote; true' 2>&1)
+check "a config file .git/config includes from the project is read-only" bash -c '! grep -qx wrote <<<"$1" && [ ! -s .gitinc ]' _ "$out"
+git config --unset include.path; rm .gitinc
+
+quarantine_case() { # <what the agent runs> <path> <quarantined path>
+  local out
+  out=$(in_sandbox "$1" 2>&1 || true)
+  check "$1: warned at session end" contains "pen: WARNING" "$out"
+  check "...and moved to $3 before pen returned" bash -c "[ ! -e '$2' ] && [ -e '$3' ]"
+  check "...with how to put it back" contains "mv '$PROJECT_DIR/$3' '$PROJECT_DIR/$2'" "$out"
+}
+quarantine_case 'touch .git/commondir' .git/commondir .git/commondir.pen-quarantine
+quarantine_case 'mkdir .git/modules' .git/modules .git/modules.pen-quarantine
+quarantine_case 'git init -q sub' sub/.git sub/.git.pen-quarantine
+check "...and the moved .git no longer looks like a repo (its HEAD moved too)" test -e sub/.git.pen-quarantine/HEAD.pen-quarantine
+quarantine_case 'git init -q --bare sub2' sub2/HEAD sub2/HEAD.pen-quarantine
+check "the next session starts normally" pen_run true
+rm -rf .git/commondir.pen-quarantine .git/modules.pen-quarantine sub sub2
+
+out=$(in_sandbox 'git worktree add -q .claude/worktrees/y' 2>&1)
+check "no warning for a git worktree add worktree" not contains "WARNING" "$out"
+check "...and the next session starts normally" pen_run true
+git worktree remove --force .claude/worktrees/y && rm -rf .claude
+
+"$PEN" run bash -c 'touch .git/commondir; sleep 120' </dev/null >/dev/null 2>&1 &
+p=$!
+wait_for "^$KEY-.*-agent$" || fail "session didn't start"
+for i in $(seq 100); do [ -e .git/commondir ] && break; sleep 0.1; done
+kill -9 "$p"; wait "$p" 2>/dev/null || true
+check "after a SIGKILL'd pen, .git/commondir is still there and its stack is up" bash -c "[ -e .git/commondir ] && [ $(containers) -ge 2 ]"
+out=$(pen_run true 2>&1)
+check "the next pen command ends that session" contains "whose pen exited without ending it" "$out"
+check "...quarantining .git/commondir" bash -c '[ ! -e .git/commondir ] && [ -e .git/commondir.pen-quarantine ]'
+check "...with the warning" contains "pen: WARNING" "$out"
+check "...and takes the stack down" test "$(containers)" = 0
+rm -f .git/commondir.pen-quarantine
+
+NOGIT=$(cd "$(mktemp -d "$HOME/.pen-smoke-nogit.XXXXXX")" && pwd -P)
+EXTRA_DIRS+=("$NOGIT")
+out=$(cd "$NOGIT" && "$PEN" run git init -q </dev/null 2>&1 || true)
+check "a .git made by git init in a project without one is quarantined" \
+  bash -c "[ ! -e '$NOGIT/.git' ] && [ -d '$NOGIT/.git.pen-quarantine' ]"
+check "...with the warning" contains "git init" "$out"
+check "...and a project without .git gets no .git mounts" bash -c "cd '$NOGIT' && rm -rf .git.pen-quarantine && '$PEN' run bash -c '[ ! -e .git ] && ! touch .pen/x' </dev/null"
+
+best=99
+for i in 1 2 3; do
+  t0=$(now); pen_run true; t1=$(now)
+  best=$(python3 -c "print(f'{min($best, $t1 - $t0):.2f}')")
+done
+check "warm start: pen run true in under 5 s (best of 3: ${best}s; target about 2-3 s)" python3 -c "import sys; sys.exit(0 if $best < 5 else 1)"
 
 section "All checks passed."

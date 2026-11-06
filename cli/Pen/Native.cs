@@ -39,6 +39,20 @@ internal static partial class Native
     [LibraryImport(Libc, EntryPoint = "flock", SetLastError = true)]
     private static partial int FlockNative(int fd, int operation);
 
+    [LibraryImport(Libc, EntryPoint = "rename", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
+    private static partial int RenameNative(string from, string to);
+
+    /// <summary>
+    /// rename(2): moves whatever is at <paramref name="from"/> (a file, a
+    /// directory or a symlink itself), unlike File.Move/Directory.Move, which
+    /// follow symlinks to decide what they're moving.
+    /// </summary>
+    public static void Rename(string from, string to)
+    {
+        if (RenameNative(from, to) != 0)
+            throw new IOException(Marshal.GetLastPInvokeErrorMessage());
+    }
+
     public const int LOCK_SH = 1, LOCK_EX = 2, LOCK_NB = 4, LOCK_UN = 8;
 
     // open(2) flags differ between the platforms; O_RDWR is 2 and ENOENT 2 on both.
