@@ -5,51 +5,50 @@ using System.Text;
 namespace Pen;
 
 /// <summary>
-/// pen allow &lt;domain…&gt; [--global]: appends to allowlist.txt and applies them to
+/// pen allow &lt;domain…&gt; [--global]: adds to allow in config.toml and applies them to
 /// running sessions; pen allow: lists recently blocked domains (see "Network
 /// egress" in PLAN.md).
 /// </summary>
 internal static class AllowCommand
 {
-    public const string ProjectAllowlistStub = """
-        # Extra domains the sandbox may reach in this project, one per line; a
-        # leading dot (.example.com) also allows its subdomains. `pen allow
-        # <domain>` adds lines here. The sandbox can't change this file. Edits
-        # apply to the next session; `pen allow` also applies to running ones.
+    public const string ProjectConfigStub = """
+        # pen project config (TOML), read-only inside the sandbox. Not for secrets:
+        # it's usually committed. Edits apply to the next session; `pen allow` also
+        # applies to running ones.
+        #
+        # github_owner = "<owner>"   whose GitHub token to use (default: origin's owner)
+        # docker = true              Docker-in-Docker for every session
 
         """;
 
     /// <summary>
-    /// Appends each domain not already listed to the allowlist file at
-    /// <paramref name="path"/>, in place (comments and mode kept). Creates the
-    /// file from <paramref name="stub"/> if it's missing. Returns the added ones.
+    /// Adds the domains not already allowed to the config.toml at
+    /// <paramref name="path"/> (see <see cref="ConfigEdit"/>), creating it from
+    /// <paramref name="stub"/> if it's missing. Replaces the file by rename,
+    /// keeping its mode. Returns the added domains.
     /// </summary>
-    public static List<string> Append(string path, string displayPath, IReadOnlyList<string> domains, string? stub)
+    public static List<string> Append(string path, string displayPath, ConfigKind kind, IReadOnlyList<string> domains, string stub)
     {
-        // Parsing first also reports a broken file before touching it.
-        var existing = File.Exists(path) ? Config.ParseAllowlist(File.ReadAllText(path), displayPath) : [];
-        var added = domains.Where(d => !existing.Contains(d)).ToList();
+        bool exists = File.Exists(path);
+        var text = exists ? File.ReadAllText(path) : stub;
+        var updated = ConfigEdit.AddAllowed(text, displayPath, kind, domains, out var added);
         if (added.Count == 0) return added;
 
-        var sb = new StringBuilder();
-        if (File.Exists(path))
+        var mode = exists ? File.GetUnixFileMode(path)
+            : kind == ConfigKind.User ? UnixFileMode.UserRead | UnixFileMode.UserWrite
+            : UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead;
+        var tmp = $"{path}.tmp-{Environment.ProcessId}";
+        try
         {
-            var text = File.ReadAllText(path);
-            if (text.Length > 0 && !text.EndsWith('\n')) sb.Append('\n');
+            using (var f = new FileStream(tmp, new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write, UnixCreateMode = mode }))
+                f.Write(Encoding.UTF8.GetBytes(updated));
+            File.SetUnixFileMode(tmp, mode); // in case a stale tmp existed with another mode
+            File.Move(tmp, path, overwrite: true);
         }
-        else if (stub != null)
+        finally
         {
-            sb.Append(stub);
+            File.Delete(tmp);
         }
-        foreach (var d in added) sb.Append(d).Append('\n');
-
-        using var f = new FileStream(path, new FileStreamOptions
-        {
-            Mode = FileMode.Append,
-            Access = FileAccess.Write,
-            UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead,
-        });
-        f.Write(Encoding.UTF8.GetBytes(sb.ToString()));
         return added;
     }
 
@@ -68,15 +67,15 @@ internal static class AllowCommand
         string where;
         if (global)
         {
-            where = host.Display(host.UserAllowlistPath);
-            added = Append(host.UserAllowlistPath, where, domains, stub: null);
+            where = host.Display(host.UserConfigPath);
+            added = Append(host.UserConfigPath, where, ConfigKind.User, domains, stub: "");
         }
         else
         {
-            where = ".pen/" + Config.AllowlistName;
+            where = ".pen/" + Config.FileName;
             RepoGuard.EnsureDirectory(project!.Dir, project.PenDir);
-            RepoGuard.RequireNotLink(project.Dir, project.ProjectAllowlistPath);
-            added = Append(project.ProjectAllowlistPath, where, domains, ProjectAllowlistStub);
+            RepoGuard.RequireNotLink(project.Dir, project.ProjectConfigPath);
+            added = Append(project.ProjectConfigPath, where, ConfigKind.Project, domains, ProjectConfigStub);
         }
 
         var skipped = domains.Except(added).ToList();
@@ -127,6 +126,18 @@ internal static class AllowCommand
             Out.Line($"couldn't apply it to the running session {s.ComposeProject}: {e.Message}");
             return false;
         }
+    }
+
+    /// <summary>
+    /// pen allow --defaults: the built-in allowlist from its first section on,
+    /// keeping the section comments (which say why each domain is there) and
+    /// dropping the header about Squid's file format.
+    /// </summary>
+    internal static string Defaults()
+    {
+        var lines = Embedded.Text("proxy/allowlist.txt").Split('\n');
+        int first = Array.FindIndex(lines, l => l.StartsWith("# ---", StringComparison.Ordinal));
+        return string.Join('\n', lines[Math.Max(first, 0)..]).TrimEnd('\n') + "\n";
     }
 
     /// <summary>A blocked domain and when it was last blocked.</summary>

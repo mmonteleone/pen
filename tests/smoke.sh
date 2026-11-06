@@ -99,10 +99,8 @@ pen_run() { "$PEN" run "$@" </dev/null; }
 in_sandbox() { pen_run bash -c "$1"; }
 # fake_pen <args…>: pen with the throwaway HOME (its config in $FAKE_HOME/.config/pen).
 fake_pen() { HOME=$FAKE_HOME DOCKER_CONFIG=${DOCKER_CONFIG:-$REAL_HOME/.docker} "$PEN" "$@" </dev/null; }
-# fake_config <line…>: the throwaway config.toml, replacing it and clearing allowlist.txt.
-fake_config() { mkdir -p "$FAKE_HOME/.config/pen"; printf '%s\n' "$@" >"$FAKE_HOME/.config/pen/config.toml"; chmod 600 "$FAKE_HOME/.config/pen/config.toml"; rm -f "$FAKE_HOME/.config/pen/allowlist.txt"; }
-# fake_allow <domain…>: the throwaway allowlist.txt.
-fake_allow() { mkdir -p "$FAKE_HOME/.config/pen"; printf '%s\n' "$@" >"$FAKE_HOME/.config/pen/allowlist.txt"; }
+# fake_config <line…>: the throwaway config.toml, replacing it.
+fake_config() { mkdir -p "$FAKE_HOME/.config/pen"; printf '%s\n' "$@" >"$FAKE_HOME/.config/pen/config.toml"; chmod 600 "$FAKE_HOME/.config/pen/config.toml"; }
 # The newest session's dir (under the real HOME's runtime dir).
 last_session() { ls -td "$RUNTIME"/sessions/*/ | head -1; }
 containers() { docker ps -aq --filter "name=^$KEY-" | wc -l | tr -d ' '; }
@@ -446,8 +444,7 @@ out=$(fake_pen run true 2>&1)
 cfg=$FAKE_HOME/.config/pen/config.toml
 check "first run creates ~/.config/pen/config.toml" test -f "$cfg"
 check "...mode 600" test "$(mode_of "$cfg")" = 600
-check "...with every value commented out" not grep -qvE '^[[:space:]]*(#|$|\[)' "$cfg"
-check "...and allowlist.txt, every line a comment" not grep -qvE '^[[:space:]]*(#|$)' "$FAKE_HOME/.config/pen/allowlist.txt"
+check "...with every value commented out" not grep -qvE '^[[:space:]]*(#|$|\[[a-z]+\]$|allow = \[$|\]$)' "$cfg"
 check "...and says so in one line" test "$(grep -c 'created ~/.config/pen/' <<<"$out")" = 1
 seed=$FAKE_HOME/.config/pen/home
 check "...and creates home/ (the seed)" has_all "$(cd "$seed" && find . -type f | sort)" ./.gitconfig ./.claude.json ./.claude/CLAUDE.md ./.claude/settings.json ./.codex/AGENTS.md ./.codex/config.toml
@@ -519,11 +516,11 @@ check "session end prints the blocked line" contains "blocked: example.com → p
 out=$(in_sandbox 'curl -s -o /dev/null -I https://github.com' 2>&1 || true)
 check "...and nothing when nothing was blocked" not contains "blocked:" "$out"
 mkdir -p .pen
-echo "example.com" >.pen/allowlist.txt
-check "a .pen/allowlist.txt entry becomes reachable" \
+echo 'allow = ["example.com"]' >.pen/config.toml
+check "a domain in .pen/config.toml's allow becomes reachable" \
   test "$(in_sandbox 'curl -s -o /dev/null -w %{http_code} -I https://example.com' 2>/dev/null)" = 200
 rm -rf .pen
-fake_allow ".github.com"
+fake_config 'allow = [".github.com"]'
 fake_pen run bash -c 'sleep 5; curl -s -o /dev/null -w "%{http_code}" -I https://api.github.com' >"$SCRATCH/wild.out" 2>/dev/null &
 p=$!
 wait_for "^$KEY-.*-proxy-1$" || fail "proxy didn't start"
@@ -706,11 +703,11 @@ section "14. Project layer (step 10)"
 
 rm -rf .pen && mkdir .pen
 printf 'FROM pen:latest\nRUN echo layer-ok >/etc/pen-smoke-layer\n' >.pen/Dockerfile
-echo 'example.org' >.pen/allowlist.txt
+echo 'allow = ["example.org"]' >.pen/config.toml
 out=$(in_sandbox 'cat /etc/pen-smoke-layer; curl -s -o /dev/null -w "code=%{http_code}\n" -I https://example.org' 2>&1)
 check ".pen/Dockerfile is built and used" contains "layer-ok" "$out"
 check "...as <project key>:latest" bash -c 'docker image inspect "$1" >/dev/null' _ "$KEY:latest"
-check "...and the .pen/allowlist.txt entry is reachable" contains "code=200" "$out"
+check "...and the .pen/config.toml allow entry is reachable" contains "code=200" "$out"
 t0=$(now); pen_run true; t1=$(now)
 note "a session with a cached project layer: $(python3 -c "print(f'{$t1 - $t0:.2f}')")s"
 
@@ -744,18 +741,17 @@ wait "$a1" "$a2" || true
 check "pen allow applies to both running sessions" contains "applied to 2 running sessions" "$out"
 check "...and both reach the domain with no restart" bash -c 'grep -q got-200 "$1" && grep -q got-200 "$2"' _ "$SCRATCH/allow1.out" "$SCRATCH/allow2.out"
 check "...whose end line no longer suggests allowing it" not grep -q "pen allow example.com" "$SCRATCH/allow1.out"
-check "it creates .pen/allowlist.txt with the commented stub" bash -c 'head -1 .pen/allowlist.txt | grep -q "^# Extra domains"'
-check "...plus one line for the domain" test "$(grep -cx 'example.com' .pen/allowlist.txt)" = 1
+check "it creates .pen/config.toml with the commented stub" bash -c 'head -1 .pen/config.toml | grep -q "^# pen project config" && grep -q "^# github_owner" .pen/config.toml'
+check "...plus an allow list with the domain" test "$(grep -cx '  "example.com",' .pen/config.toml)" = 1
 out=$("$PEN" allow example.com 2>&1)
-check "running it again adds nothing" bash -c 'grep -q "already in .pen/allowlist.txt" <<<"$1" && [ "$(grep -cx "example.com" .pen/allowlist.txt)" = 1 ]' _ "$out"
+check "running it again adds nothing" bash -c 'grep -q "already in .pen/config.toml" <<<"$1" && [ "$(grep -c "example.com" .pen/config.toml)" = 1 ]' _ "$out"
 check "a non-domain is refused" not "$PEN" allow 'http://x.io' 2>/dev/null
 
 OTHER=$(cd "$(mktemp -d "$HOME/.pen-smoke-other.XXXXXX")" && pwd -P)
 EXTRA_DIRS+=("$OTHER")
 git -C "$OTHER" init -q
 OHASH=$(printf %s "$OTHER" | sha | cut -c1-8)
-fake_config "# none"
-fake_allow ".github.com"
+fake_config "# none" 'allow = [".github.com"]'
 loop=${loop//example.com/example.net}
 (cd "$OTHER" && fake_pen run bash -c "$loop; sleep 4") >"$SCRATCH/global.out" 2>&1 & # kept up so its proxy's logs can be read
 g=$!
@@ -765,7 +761,8 @@ oproxy=$(docker ps --format '{{.Names}}' | grep -E "^pen-.*-$OHASH-.*-proxy-1$" 
 sleep 1
 oproxy_log=$(docker logs "$oproxy" 2>&1 || true)
 wait "$g" || true
-check "pen allow --global writes ~/.config/pen/allowlist.txt" grep -qx 'example.net' "$FAKE_HOME/.config/pen/allowlist.txt"
+check "pen allow --global adds to ~/.config/pen/config.toml, keeping what was there" \
+  bash -c 'grep -qx "  \"example.net\"," "$1" && grep -qx "# none" "$1" && grep -q "\.github\.com" "$1" && [ "$(stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1")" = 600 ]' _ "$FAKE_HOME/.config/pen/config.toml"
 check "...and reaches a running session of another project" bash -c 'grep -q "applied to 1 running session" <<<"$1" && grep -q got-200 "$2"' _ "$out" "$SCRATCH/global.out"
 check "...whose reconfigure with .github.com plus api.github.com is clean" \
   bash -c 'grep -q "Reconfiguring Squid Cache" <<<"$1" && ! grep -qE "is a subdomain of|You should remove|FATAL" <<<"$1"' _ "$oproxy_log"

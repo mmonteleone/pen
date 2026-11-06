@@ -1,8 +1,18 @@
 # pen user config (TOML: https://toml.io). Settings here apply to every
-# project. A project's .pen/config.toml takes github_owner and docker (no tokens
-# or env, since it's usually committed). Extra allowed domains go in
-# allowlist.txt next to this file. Changes apply to the next session.
-# Keep this file private (mode 600): it holds secrets.
+# project. A project's .pen/config.toml takes allow, github_owner and docker (no
+# tokens or env, since it's usually committed); its allow adds to this one.
+# Changes apply to the next session. Keep this file private (mode 600): it
+# holds secrets.
+
+# --- Network -----------------------------------------------------------------------
+# Extra domains the sandbox may reach, on top of pen's defaults (AI providers,
+# GitHub, package registries). A leading dot also allows subdomains.
+# `pen allow --global <domain>` adds entries here.
+
+allow = [
+  # "example.com",
+  # ".example.org",
+]
 
 # --- GitHub (read-only) --------------------------------------------------------
 # One fine-grained, read-only PAT per owner (your account or an org):

@@ -59,8 +59,22 @@ public class ConfigTests
     }
 
     [Fact]
-    public void AllowPointsAtTheAllowlist() =>
-        Assert.Contains("allowlist.txt", Error(() => Proj("allow = [\"a.com\"]")));
+    public void AllowIsAListOfDomains_InEitherFile()
+    {
+        Assert.Equal(["example.com", ".foo.io"], User("allow = [\"Example.COM\", '.foo.io']").Allow);
+        Assert.Equal(["a.com", "b.com"], Proj("allow = [\n  \"a.com\",  # comment\n  # \"x.com\",\n  \"b.com\",\n]").Allow);
+        Assert.Empty(Proj("allow = []").Allow);
+        Assert.StartsWith($"{ProjFile}: allow must be a list", Error(() => Proj("allow = \"a.com\"")));
+    }
+
+    [Theory]
+    [InlineData("\"not a domain\"")]
+    [InlineData("\"1.2.3.4\"")]
+    [InlineData("\".com\"")]
+    [InlineData("\"https://example.com\"")]
+    [InlineData("1")]
+    public void InvalidAllowEntries(string entry) =>
+        Assert.StartsWith($"{UserFile}: allow: ", Error(() => User($"allow = [\"ok.com\", {entry}]")));
 
     [Fact]
     public void DockerIsAProjectBoolean()
@@ -105,28 +119,12 @@ public class ConfigTests
         Assert.StartsWith($"{UserFile}: {message}", Error(() => User(text)));
 
     [Fact]
-    public void AllowlistLines()
-    {
-        var list = Config.ParseAllowlist("# comment\n\n  Example.COM  \n.foo.io # trailing\r\nbar.org", "x");
-        Assert.Equal(["example.com", ".foo.io", "bar.org"], list);
-    }
-
-    [Theory]
-    [InlineData("not a domain")]
-    [InlineData("1.2.3.4")]
-    [InlineData(".com")]
-    [InlineData("https://example.com")]
-    public void InvalidAllowlistLinesNameFileAndLine(string line) =>
-        Assert.StartsWith(".pen/allowlist.txt:2:", Error(() => Config.ParseAllowlist("ok.com\n" + line, ".pen/allowlist.txt")));
-
-    [Fact]
-    public void LoadReadsBothFiles_EitherMayBeMissing()
+    public void LoadReadsConfigToml_WhichMayBeMissing()
     {
         using var t = new TempDir();
         Assert.Empty(Config.Load(t.Path, ".pen", ConfigKind.Project).Allow);
 
-        File.WriteAllText(Path.Combine(t.Path, "allowlist.txt"), "a.com\n");
-        File.WriteAllText(Path.Combine(t.Path, "config.toml"), "docker = true\n");
+        File.WriteAllText(Path.Combine(t.Path, "config.toml"), "docker = true\nallow = [\"a.com\"]\n");
         var c = Config.Load(t.Path, ".pen", ConfigKind.Project);
         Assert.Equal(["a.com"], c.Allow);
         Assert.True(c.Docker);
@@ -143,7 +141,6 @@ public class ConfigTests
         var msg = Error(() => Config.Load(t.Path, ".pen", ConfigKind.Project));
         Assert.StartsWith(".pen/config is pen's old config format", msg);
         Assert.Contains(".pen/config.toml", msg);
-        Assert.Contains(".pen/allowlist.txt", msg);
     }
 
     [Fact]
@@ -153,17 +150,16 @@ public class ConfigTests
         var empty = User(text);
         Assert.Empty(empty.Env);
         Assert.Empty(empty.GitHubTokens);
-        foreach (var example in new[] { "my-user = \"github_pat_", "ANTHROPIC_API_KEY = ", "OPENAI_API_KEY = ", "CLAUDE_CODE_OAUTH_TOKEN = " })
+        Assert.Empty(empty.Allow);
+        foreach (var example in new[] { "\"example.com\",", "my-user = \"github_pat_", "ANTHROPIC_API_KEY = ", "OPENAI_API_KEY = ", "CLAUDE_CODE_OAUTH_TOKEN = " })
             Assert.Contains("# " + example, text);
         // Uncommented, the examples parse.
-        var uncommented = string.Join('\n', text.Split('\n').Select(l => l.StartsWith("# my-") || l.StartsWith("# ANTHROPIC") || l.StartsWith("# OPENAI") || l.StartsWith("# CLAUDE_CODE") ? l[2..] : l));
+        string[] examples = ["  # \"", "# my-", "# ANTHROPIC", "# OPENAI", "# CLAUDE_CODE"];
+        var uncommented = string.Join('\n', text.Split('\n').Select(l => examples.Any(l.StartsWith) ? l.Replace("# ", "") : l));
         var full = User(uncommented);
+        Assert.Equal(["example.com", ".example.org"], full.Allow);
         Assert.Equal(2, full.GitHubTokens.Count);
         Assert.Equal(3, full.Env.Count);
-
-        var allow = Embedded.Text("templates/allowlist.txt");
-        Assert.Empty(Config.ParseAllowlist(allow, "x"));
-        Assert.Contains("# .example.org", allow);
     }
 
     [Fact]
@@ -174,7 +170,6 @@ public class ConfigTests
         Config.EnsureUserConfig(host, () => ("T", "t@example.invalid"));
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(host.UserConfigPath));
         Assert.Equal(Embedded.Text("templates/config.toml"), File.ReadAllText(host.UserConfigPath));
-        Assert.Equal(Embedded.Text("templates/allowlist.txt"), File.ReadAllText(host.UserAllowlistPath));
 
         File.WriteAllText(host.UserConfigPath, "[env]\nX = \"mine\"\n");
         Config.EnsureUserConfig(host, () => ("T", "t@example.invalid"));

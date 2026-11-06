@@ -15,7 +15,10 @@ internal static class Program
             switch (command.Kind)
             {
                 case CommandKind.Help:
-                    Console.Out.Write(Cli.Usage);
+                    Console.Out.Write(command.Args.Count > 0 ? Cli.SubcommandHelp[command.Args[0]] + "\n" : Cli.Usage);
+                    return 0;
+                case CommandKind.Allow when command.Defaults:
+                    Console.Out.Write(AllowCommand.Defaults());
                     return 0;
                 case CommandKind.Version:
                     Console.Out.WriteLine("pen " + (typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "?"));

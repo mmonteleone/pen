@@ -1,8 +1,0 @@
-# Extra domains the sandbox may reach in every project, one per line, on top of
-# pen's defaults (AI providers, GitHub, package registries). A leading dot
-# (.example.org) also allows its subdomains. `pen allow --global <domain>` adds
-# lines here; a project's own list is .pen/allowlist.txt. Changes apply to the
-# next session; `pen allow` also applies to running ones.
-#
-# example.com
-# .example.org

@@ -70,6 +70,7 @@ pen [--docker] [<cmd…>]         shell or command in this project's sandbox (--
 pen [--docker] run <cmd…>       same, for a command that clashes with a subcommand name
 pen allow <domain…> [--global]  allow domains for this project (or all projects)
 pen allow                       list recently blocked domains
+pen allow --defaults            list the domains pen allows out of the box
 pen sign [<base>]               re-sign your unpushed commits with your own key
 pen upgrade [--clean]           update the base image and agents
 pen reset                       wipe this project's sandbox state (logins, caches)
@@ -80,15 +81,16 @@ containing multiple repos, linked worktrees and repos with submodules.
 
 ## Configuration
 
-pen reads two files in `~/.config/pen/` (created on first run) and, optionally, the same two in a
-project's `.pen/`:
-
-- **`config.toml`** ([TOML](https://toml.io)): settings. Strings are quoted. Unknown keys are
-  errors, so a typo doesn't go unnoticed.
-- **`allowlist.txt`**: extra allowed domains, one per line, with `#` comments.
+Settings live in `~/.config/pen/config.toml` (created on first run) and, optionally, a project's
+`.pen/config.toml`. Both are [TOML](https://toml.io): strings are quoted, and unknown keys are
+errors so a typo doesn't go unnoticed.
 
 ```toml
 # ~/.config/pen/config.toml (keep it private: it holds secrets)
+allow = [
+  "example.com",
+]
+
 [github]
 my-org = "github_pat_…"
 
@@ -98,19 +100,24 @@ CLAUDE_CODE_OAUTH_TOKEN = "…"
 
 ```toml
 # .pen/config.toml (usually committed, so no secrets)
+allow = [
+  ".internal.example.org",
+]
 github_owner = "my-org"
 docker = true
 ```
 
-Changes apply to the next session. `pen allow` also applies to running ones.
+Each key belongs to one file, except `allow`: a project's list adds to yours, which adds to pen's
+defaults. Changes apply to the next session. `pen allow` also applies to running ones.
 
 ### Network
 
 All traffic goes through a proxy that allows only listed domains. The allowlist combines pen's
-defaults (AI providers, GitHub, common package registries, container registries) with
-`~/.config/pen/allowlist.txt` and the project's `.pen/allowlist.txt`. `.example.com` matches the
-domain and all its subdomains. `pen allow <domain>` adds a line to the project's list
-(`--global`: to yours).
+defaults (AI providers, GitHub, common package registries, container registries; see them with
+`pen allow --defaults`) with `allow` in
+`~/.config/pen/config.toml` and in the project's `.pen/config.toml`. `.example.com` matches the
+domain and all its subdomains. `pen allow <domain>` adds it to the project's list (`--global`: to
+yours), leaving the rest of the file as you wrote it.
 
 ### GitHub
 
@@ -154,9 +161,8 @@ Agents run in skip-permissions mode by default; the container is the boundary. E
 
 Optional, in the project's `.pen/` directory (read-only inside the sandbox):
 
-- **`.pen/config.toml`:** `github_owner = "<owner>"`, `docker = true`. Secrets (`[github]`,
-  `[env]`) aren't allowed here.
-- **`.pen/allowlist.txt`:** extra domains for this project, as written by `pen allow`.
+- **`.pen/config.toml`:** `allow = [...]`, `github_owner = "<owner>"`, `docker = true`. Secrets
+  (`[github]`, `[env]`) aren't allowed here.
 - **`.pen/Dockerfile`:** extra SDKs or tools on top of the base image (which pen keeps tagged
   locally as `pen:latest`):
 

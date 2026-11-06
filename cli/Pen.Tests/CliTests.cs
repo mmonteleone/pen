@@ -69,6 +69,54 @@ public class CliTests
     }
 
     [Theory]
+    [InlineData("run", "run", "--help")]
+    [InlineData("run", "run", "-h")]
+    [InlineData("upgrade", "upgrade", "--help")]
+    [InlineData("upgrade", "upgrade", "--clean", "-h")]
+    [InlineData("allow", "allow", "--help")]
+    [InlineData("allow", "allow", "example.com", "--help")]
+    [InlineData("allow", "allow", "--defaults", "--help")]
+    [InlineData("sign", "sign", "--help")]
+    [InlineData("reset", "reset", "-h")]
+    public void SubcommandHelp(string topic, params string[] args)
+    {
+        var c = P(args);
+        Assert.Equal(CommandKind.Help, c.Kind);
+        Assert.Equal([topic], c.Args);
+        Assert.StartsWith("usage: pen", Cli.SubcommandHelp[topic]);
+    }
+
+    [Fact]
+    public void HelpAfterTheCommandBelongsToTheCommand()
+    {
+        Assert.Equal(["claude", "--help"], P("claude", "--help").Args);
+        Assert.Equal(["claude", "--help"], P("run", "claude", "--help").Args);
+        Assert.Equal(["--help"], P("run", "--", "--help").Args);
+        Assert.Equal(CommandKind.Run, P("run", "claude", "-h").Kind);
+        Assert.Empty(P("--help").Args); // the general usage
+    }
+
+    [Fact]
+    public void EverySubcommandHasHelp_AndTheUsageMentionsIt()
+    {
+        foreach (var name in new[] { "run", "upgrade", "allow", "sign", "reset" })
+            Assert.True(Cli.SubcommandHelp.ContainsKey(name), name);
+        Assert.Contains("pen <subcommand> --help", Cli.Usage);
+    }
+
+    [Fact]
+    public void AllowDefaults()
+    {
+        var c = P("allow", "--defaults");
+        Assert.Equal(CommandKind.Allow, c.Kind);
+        Assert.True(c.Defaults);
+        Assert.Empty(c.Args);
+        Assert.False(P("allow").Defaults);
+    }
+
+    [Theory]
+    [InlineData("allow", "--defaults", "a.io")]
+    [InlineData("allow", "--defaults", "--global")]
     [InlineData("allow", "http://example.com")]
     [InlineData("allow", "1.2.3.4")]
     [InlineData("allow", "localhost")]

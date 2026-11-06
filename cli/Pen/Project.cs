@@ -12,7 +12,7 @@ internal sealed record Project(string Dir, string Key)
     public string GitDir => Path.Combine(Dir, ".git");
     public bool HasGitDir => Directory.Exists(GitDir);
     public string PenDir => Path.Combine(Dir, ".pen");
-    public string ProjectAllowlistPath => Path.Combine(PenDir, Config.AllowlistName);
+    public string ProjectConfigPath => Path.Combine(PenDir, Config.FileName);
 
     /// <summary>Resolves <paramref name="cwd"/> and applies the directory refusals.</summary>
     public static Project Resolve(string cwd, HostEnv host)

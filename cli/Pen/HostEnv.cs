@@ -5,7 +5,6 @@ internal sealed record HostEnv(string Home, uint Uid, uint Gid, string NuGetPack
 {
     public string ConfigDir => System.IO.Path.Combine(Home, ".config", "pen");
     public string UserConfigPath => System.IO.Path.Combine(ConfigDir, Config.FileName);
-    public string UserAllowlistPath => System.IO.Path.Combine(ConfigDir, Config.AllowlistName);
     public string SeedDir => System.IO.Path.Combine(ConfigDir, "home");
     public string StateRoot => System.IO.Path.Combine(Home, ".local", "state", "pen");
     public string RuntimeDir(string projectKey) => System.IO.Path.Combine(StateRoot, projectKey);

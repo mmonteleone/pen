@@ -4,9 +4,11 @@ internal enum CommandKind { Run, Upgrade, Allow, Sign, Reset, Help, Version }
 
 /// <summary>
 /// A parsed command line. For Run, Args is the command to run in the sandbox
-/// (empty: a shell); for Allow, the domains (lowercased); for Sign, the base, if given.
+/// (empty: a shell); for Allow, the domains (lowercased); for Sign, the base, if given;
+/// for Help, the subcommand to describe, if any.
+/// Defaults: pen allow --defaults.
 /// </summary>
-internal sealed record Command(CommandKind Kind, IReadOnlyList<string> Args, bool Clean = false, bool Global = false, bool Docker = false);
+internal sealed record Command(CommandKind Kind, IReadOnlyList<string> Args, bool Clean = false, bool Global = false, bool Docker = false, bool Defaults = false);
 
 internal static class Cli
 {
@@ -20,9 +22,78 @@ internal static class Cli
           pen allow <domain…> [--global]
                                     allow domains, applied to running sessions too
           pen allow                 list recently blocked domains
+          pen allow --defaults      list the domains pen allows out of the box
           pen sign [<base>]         on the host: re-sign unpushed commits with your key
           pen reset                 wipe this project's volumes (asks first)
+          pen <subcommand> --help   more about one of them
         """;
+
+    /// <summary>pen &lt;subcommand&gt; --help.</summary>
+    public static readonly Dictionary<string, string> SubcommandHelp = new(StringComparer.Ordinal)
+    {
+        ["run"] = """
+            usage: pen [--docker] [<cmd…>]
+                   pen [--docker] run [--] <cmd…>
+
+            Runs a command in this project's sandbox, or an interactive shell when there's
+            none, e.g. pen claude, pen codex, pen run npm ci. Everything after the command's
+            name is passed to it unchanged, including options like --help. Use pen run when
+            the command's name is also one of pen's subcommands (pen run reset).
+
+            Run it from a repo root. Ctrl-C goes to the command; the session ends when it
+            exits, and pen then lists any domains the proxy blocked.
+
+              --docker   give the session its own Docker daemon (one per project at a
+                         time); docker = true in .pen/config.toml does this for every session
+            """,
+        ["upgrade"] = """
+            usage: pen upgrade [--clean]
+
+            Updates the base image and reinstalls the agents at their latest versions,
+            then pulls newer proxy and Docker-in-Docker images. Run in a project with a
+            .pen/Dockerfile, it rebuilds that layer too. Logins and config are kept.
+
+              --clean    rebuild without the build cache
+            """,
+        ["allow"] = """
+            usage: pen allow
+                   pen allow <domain…> [--global]
+                   pen allow --defaults
+
+            With no arguments, lists domains the proxy blocked in this project's sessions
+            (last 7 days) that still aren't allowed.
+
+            With domains, adds them to allow in .pen/config.toml (creating it if needed)
+            and applies them to this project's running sessions. A leading dot
+            (.example.com) also allows subdomains.
+
+              --global     add them to ~/.config/pen/config.toml instead, for every
+                           project, and apply them to all running sessions
+              --defaults   list the domains pen allows out of the box
+            """,
+        ["sign"] = """
+            usage: pen sign [<base>]
+
+            Re-creates the commits in <base>..HEAD with your own signature, using your
+            normal git signing setup, so agent commits (unsigned in the sandbox) can be
+            pushed signed. Trees, authors and messages are kept; hashes change, and the
+            old commits stay in the reflog. Runs on the host, not in the sandbox.
+
+            <base> defaults to the branch's upstream (or origin/HEAD). pen refuses to
+            rewrite commits that are already on a remote branch, and won't run while a
+            session is open in this project.
+            """,
+        ["reset"] = """
+            usage: pen reset
+
+            Removes this project's sandbox volumes, after asking: its home (agent logins
+            and config, shell history), its NuGet cache and its Docker-in-Docker images.
+            The project's files and ~/.config/pen are untouched. Not while a session is
+            open in this project.
+            """,
+    };
+
+    private static bool IsHelp(string a) => a is "-h" or "--help";
 
     private static readonly Dictionary<string, CommandKind> Subcommands = new(StringComparer.Ordinal)
     {
@@ -66,6 +137,9 @@ internal static class Cli
 
         if (Subcommands.TryGetValue(first, out var kind))
         {
+            // run's own help only right after it: later, --help belongs to the command.
+            if (kind == CommandKind.Run ? rest.Count > 0 && IsHelp(rest[0]) : rest.Any(IsHelp))
+                return new(CommandKind.Help, [first]);
             switch (kind)
             {
                 case CommandKind.Run:
@@ -86,6 +160,11 @@ internal static class Cli
                 case CommandKind.Allow:
                     var global = false;
                     var domains = new List<string>();
+                    if (rest.Contains("--defaults"))
+                    {
+                        if (rest.Count > 1) throw Error("pen allow --defaults takes nothing else");
+                        return new(CommandKind.Allow, [], Defaults: true);
+                    }
                     foreach (var a in rest)
                     {
                         if (a == "--global") global = true;
