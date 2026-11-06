@@ -87,7 +87,10 @@ ENV GIT_CONFIG_COUNT=2 \
 # Proxy env (HTTP(S)_PROXY, NO_PROXY, both cases) is set by compose.yaml on the
 # agent service rather than here: ENV would also apply to RUN steps of a
 # project layer (FROM pen:latest), which build without a proxy.
+# npm_config_nodedir: node-gyp builds native modules against the headers in the
+# Node tarball (/usr/local/include/node) instead of downloading them.
 ENV NODE_USE_ENV_PROXY=1 \
+    npm_config_nodedir=/usr/local \
     DOTNET_CLI_TELEMETRY_OPTOUT=1 \
     DOTNET_NOLOGO=1 \
     GIT_TERMINAL_PROMPT=0 \

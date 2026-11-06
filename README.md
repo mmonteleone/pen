@@ -113,11 +113,15 @@ defaults. Changes apply to the next session. `pen allow` also applies to running
 ### Network
 
 All traffic goes through a proxy that allows only listed domains. The allowlist combines pen's
-defaults (AI providers, GitHub, common package registries, container registries; see them with
-`pen allow --defaults`) with `allow` in
-`~/.config/pen/config.toml` and in the project's `.pen/config.toml`. `.example.com` matches the
-domain and all its subdomains. `pen allow <domain>` adds it to the project's list (`--global`: to
-yours), leaving the rest of the file as you wrote it.
+defaults (AI providers, GitHub, common package registries, developer docs, container registries;
+see them with `pen allow --defaults`) with `allow` in `~/.config/pen/config.toml` and in the
+project's `.pen/config.toml`. `.example.com` matches the domain and all its subdomains.
+`pen allow <domain>` adds it to the project's list (`--global`: to yours), leaving the rest of the
+file as you wrote it.
+
+The defaults are sites an agent without credentials can only read from. A domain that accepts
+anonymous writes (a wiki, a pastebin) could be used to send your code out, so think twice before
+allowing one.
 
 ### GitHub
 

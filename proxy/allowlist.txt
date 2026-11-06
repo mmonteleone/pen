@@ -35,13 +35,26 @@ ocsp.digicert.com
 # --- npm --------------------------------------------------------------------
 registry.npmjs.org
 registry.yarnpkg.com
+# Yarn 2+ releases, fetched by corepack
+repo.yarnpkg.com
+# Node headers for node-gyp, if it ignores npm_config_nodedir; also the API docs
+nodejs.org
 
 # --- PyPI -------------------------------------------------------------------
 pypi.org
 files.pythonhosted.org
 
 # --- Docs -------------------------------------------------------------------
+# Read-only for an agent without credentials. Sites anyone can write to
+# anonymously (wikis, pastebins) don't belong here: they're exfiltration routes.
 learn.microsoft.com
+developer.mozilla.org
+docs.python.org
+docs.astral.sh
+docs.npmjs.com
+www.npmjs.com
+www.typescriptlang.org
+docs.github.com
 stackoverflow.com
 .stackexchange.com
 
