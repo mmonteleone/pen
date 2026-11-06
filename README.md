@@ -36,7 +36,7 @@ pen claude        # or: pen codex, pen opencode, pen pi, pen (a shell), pen run 
 **Prerequisites**
 - **Mac:** [OrbStack](https://orbstack.dev), the .NET 11 SDK and Xcode's command-line tools
   (`xcode-select --install`). The last two are only needed to build the CLI.
-- **Linux server:** Docker Engine with the Compose v2 plugin. The CLI builds inside a container,
+- **Linux server:** Docker Engine with the Compose v2 plugin, rootful or rootless. The CLI builds inside a container,
   so you don't need a .NET SDK. The binary needs glibc 2.34 or newer (Ubuntu 22.04+, Debian 12+).
 
 **Install**, once per machine:
@@ -377,6 +377,11 @@ Every git call pen makes on the host overrides hooks, fsmonitor and the pager.
 
 **DNS.** External names don't resolve inside the sandbox (checked on OrbStack: `getent hosts
 example.com` fails), so DNS isn't a side channel out. Only the proxy resolves names.
+
+**Rootless Docker.** Under rootless Docker your user is root *inside* containers, so the agent
+runs as container UID 0. That's still just your host user. It has no capabilities and can never
+regain any (the `noroot` securebits are locked), and its root filesystem is read-only, so it can't
+change the image's tools. `id` shows `root` in those sessions. pen detects rootless Docker by itself.
 
 **Limitations:**
 - Allowed domains, including the AI providers and github.com, are still possible exfiltration channels.

@@ -47,6 +47,13 @@ mkdir -p "$FAKE_HOME"
 printf '[user]\n\tname = Smoke Host\n\temail = smoke-host@example.invalid\n' >"$FAKE_HOME/.gitconfig"
 export NUGET_PACKAGES=${NUGET_PACKAGES:-$HOME/.nuget/packages}
 PEN_UID=$(id -u) PEN_GID=$(id -g)
+# Under rootless Docker the host user is container root, so the agent runs as
+# UID 0 inside (with no capabilities, on a read-only root filesystem).
+if docker info --format '{{json .SecurityOptions}}' | grep -q 'name=rootless'; then
+  ROOTLESS=1 AGENT_UID=0 AGENT_GID=0 AGENT_USER=root
+else
+  ROOTLESS= AGENT_UID=$PEN_UID AGENT_GID=$PEN_GID AGENT_USER=agent
+fi
 if command -v sha256sum >/dev/null; then sha() { sha256sum; }; else sha() { shasum -a 256; }; fi
 HASH=$(printf %s "$PROJECT_DIR" | sha | cut -c1-8)
 KEY= RUNTIME=
@@ -145,6 +152,10 @@ out=$(in_sandbox '
   command -v sudo >/dev/null && echo "sudo=present" || echo "sudo=absent"
   echo "pid1=$(cat /proc/1/comm) pid1uid=$(stat -c %u /proc/1)"
   echo "pids.max=$(cat /sys/fs/cgroup/pids.max 2>/dev/null)"
+  echo "core=$(ulimit -c)/$(ulimit -Hc)"
+  capsh --print | grep -E "^Securebits:"
+  touch /usr/local/bin/x 2>/dev/null && echo "rootfs=writable" || echo "rootfs=protected"
+  echo "is_sandbox=${IS_SANDBOX:-}"
   echo "home_owner=$(stat -c %u:%g /home/agent)"
   echo "nuget_owner=$(stat -c %u:%g "$NUGET_PACKAGES")"
   test -e /var/run/docker.sock && echo "docker.sock=present" || echo "docker.sock=absent"
@@ -155,18 +166,26 @@ out=$(in_sandbox '
   echo "gpgsign_effective=$(git config commit.gpgsign)"
 ')
 has() { grep -qxF -- "$1" <<<"$out"; }
-check "runs as host UID/GID ($PEN_UID:$PEN_GID)" has "id=$PEN_UID:$PEN_GID"
-check "user agent, HOME=/home/agent" has "user=agent home=/home/agent"
+[ -n "$ROOTLESS" ] && note "rootless Docker: the agent is container root, which is the host user"
+check "runs as the host user (inside: $AGENT_UID:$AGENT_GID)" has "id=$AGENT_UID:$AGENT_GID"
+check "user $AGENT_USER, HOME=/home/agent" has "user=$AGENT_USER home=/home/agent"
 for cap in CapInh CapPrm CapEff CapBnd CapAmb; do
   check "$cap empty" has "$cap:	0000000000000000"
 done
 check "no_new_privs set" has "NoNewPrivs:	1"
 check "capsh: empty bounding set" grep -qE '^Bounding set =$' <<<"$out"
 check "no sudo" has "sudo=absent"
-check "PID 1 is tini, running as agent (no root process left)" has "pid1=tini pid1uid=$PEN_UID"
+check "PID 1 is tini, running as the agent's UID" has "pid1=tini pid1uid=$AGENT_UID"
+check "the image's files can't be changed (/usr/local)" has "rootfs=protected"
+if [ -n "$ROOTLESS" ]; then
+  check "rootless: securebits noroot set and locked" grep -qE '^Securebits: [0-7]+/0x2f/' <<<"$out" # noroot, no_setuid_fixup, both locked, keep_caps_locked
+  check "rootless: the root filesystem is read-only" bash -c 'grep -q "rootfs=protected" <<<"$1"' _ "$out"
+  check "rootless: IS_SANDBOX=1 (Claude's skip-permissions as root)" has "is_sandbox=1"
+fi
 check "pids_limit applied" has "pids.max=4096"
-check "new home volume owned by runtime UID" has "home_owner=$PEN_UID:$PEN_GID"
-check "new NuGet volume owned by runtime UID" has "nuget_owner=$PEN_UID:$PEN_GID"
+check "no core dumps (soft and hard limit 0)" has "core=0/0"
+check "new home volume owned by the agent" has "home_owner=$AGENT_UID:$AGENT_GID"
+check "new NuGet volume owned by the agent" has "nuget_owner=$AGENT_UID:$AGENT_GID"
 check "no docker.sock" has "docker.sock=absent"
 check "/tmp is exec" has "tmp-exec-ok"
 check "working dir is the project path" has "pwd=$PROJECT_DIR"
@@ -343,7 +362,7 @@ out=$($PTY -- "$PEN" run tty)
 check "with a terminal, the agent gets one too" contains "/dev/pts/" "$out"
 out=$($PTY -- "$PEN" claude --version)
 check "pen claude runs claude" grep -qE '[0-9]+\.[0-9]+\.[0-9]+' <<<"$out"
-out=$($PTY --send-on '\$ $' 'echo shell-$((6*7)); exit\r' --timeout 60 -- "$PEN")
+out=$($PTY --send-on '[$#] $' 'echo shell-$((6*7)); exit\r' --timeout 60 -- "$PEN")
 check "pen with no arguments is an interactive shell" contains "shell-42" "$out"
 
 pen_run bash -c 'sleep 8; curl -s -o /dev/null -w "after:%{http_code}" -I https://github.com' >"$SCRATCH/first.out" 2>&1 &
@@ -608,7 +627,8 @@ check "a host worktree's commondir is read-only" has "fail: wtcommondir"
 check ".pen/ is created empty when missing" bash -c '[ -d .pen ] && [ -z "$(ls -A .pen)" ]'
 check "...touch .pen/config fails inside" has "fail: pencreate"
 check "...mv .pen fails" has "fail: mvpen"
-check "...and host git status shows nothing new" test -z "$(git status --porcelain)"
+st=$(git status --porcelain | tr '\n' ' ')
+check "...and host git status shows nothing new${st:+ (it shows: $st)}" test -z "$st"
 git worktree remove --force "$SCRATCH/wt"
 git branch -q -D scratch
 
@@ -813,7 +833,8 @@ check "a server added with claude mcp add in the sandbox is there" has 'mcp=["co
 sleep 1.1
 echo "added later" >"$seed/.added-later"
 { cat "$seed/.claude/CLAUDE.md"; echo "seed v2"; } >"$seed/.claude/CLAUDE.md.new" && mv "$seed/.claude/CLAUDE.md.new" "$seed/.claude/CLAUDE.md"
-jq '.mcpServers["seeded-later"] = {"type": "stdio", "command": "true"}' "$seed/.claude.json" >"$seed/.claude.json.new" && mv "$seed/.claude.json.new" "$seed/.claude.json"
+python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); d["mcpServers"]["seeded-later"] = {"type": "stdio", "command": "true"}; json.dump(d, open(sys.argv[1] + ".new", "w"))' "$seed/.claude.json" \
+  && mv "$seed/.claude.json.new" "$seed/.claude.json" # (python3, not jq: the host may not have jq)
 out=$(seed_pen 'cat ~/.added-later; tail -1 ~/.claude/CLAUDE.md; echo "mcp=$(jq -c ".mcpServers | keys" ~/.claude.json)"; echo "login=$(jq -c .oauthAccount ~/.claude.json)"')
 check "a file added to the seed later reaches the project's next session" has "added later"
 check "editing a seed file replaces the project's copy" has "seed v2"

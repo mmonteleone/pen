@@ -167,8 +167,11 @@ internal static class RepoGuard
     /// The compose override that adds <paramref name="mounts"/> to the agent
     /// service. It's JSON, which YAML reads as is, so any path is quoted
     /// correctly; $ is doubled, since compose interpolates it.
+    /// <paramref name="readOnlyRoot"/> also makes the agent's root filesystem
+    /// read-only (rootless Docker, where the agent is container root and would
+    /// otherwise own the image's files).
     /// </summary>
-    public static string ComposeOverride(IReadOnlyList<Mount> mounts)
+    public static string ComposeOverride(IReadOnlyList<Mount> mounts, bool readOnlyRoot = false)
     {
         using var ms = new MemoryStream();
         using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
@@ -177,6 +180,7 @@ internal static class RepoGuard
             w.WriteString("x-pen", "mounts over the project mount, written by pen for this session");
             w.WriteStartObject("services");
             w.WriteStartObject("agent");
+            if (readOnlyRoot) w.WriteBoolean("read_only", true);
             w.WriteStartArray("volumes");
             foreach (var m in mounts)
             {

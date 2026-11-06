@@ -72,6 +72,9 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         var mounts = RepoGuard.PrepareMounts(project.Dir, host.Home);
         Image.EnsureCurrent();
         var image = Image.EnsureProjectLayer(project) ?? Image.Name;
+        // Under rootless Docker, the host user is container root: the agent
+        // runs as UID 0 (with no capabilities) on a read-only root filesystem.
+        var rootless = Docker.IsRootless();
         var owner = GitHub.ProjectOwner(project, projectConfig);
         var token = GitHub.TokenFor(owner, user, RuntimeDir, host);
         var allowlist = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow, projectConfig.Allow);
@@ -94,8 +97,8 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         {
             ["PROJECT_DIR"] = project.Dir,
             ["PEN_PROJECT"] = project.Key,
-            ["PEN_UID"] = host.Uid.ToString(),
-            ["PEN_GID"] = host.Gid.ToString(),
+            ["PEN_UID"] = rootless ? "0" : host.Uid.ToString(),
+            ["PEN_GID"] = rootless ? "0" : host.Gid.ToString(),
             ["NUGET_PACKAGES"] = host.NuGetPackages,
             ["PEN_IMAGE"] = image,
             ["PEN_SEED"] = host.SeedDir,
@@ -104,7 +107,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         if (project.HasGitDir) File.WriteAllText(session.StartedWithGit, "");
         File.WriteAllText(session.File("squid.conf"), Embedded.Text("proxy/squid.conf"));
         File.WriteAllText(session.File("allowlist.txt"), Allowlist.Render(allowlist));
-        File.WriteAllText(session.MountsFile, RepoGuard.ComposeOverride(mounts));
+        File.WriteAllText(session.MountsFile, RepoGuard.ComposeOverride(mounts, readOnlyRoot: rootless));
         File.WriteAllText(session.ProxyLog, "");
         // Squid's own user writes the log on Linux; the session dir itself is 700.
         File.SetUnixFileMode(session.ProxyLog, (UnixFileMode)0b110_110_110);

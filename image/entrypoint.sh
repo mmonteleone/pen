@@ -4,16 +4,38 @@
 #      user from PEN_UID/PEN_GID, fix ownership of the volume mount points, then
 #      drop to that user with every capability cleared and re-run this script
 #      under tini;
+#      Under rootless Docker (PEN_UID=0), the host user *is* container root:
+#      no user is created, and the agent stays UID 0 with every capability
+#      cleared and the securebits locked so UID 0 never regains any;
 #   2. as agent: copy the home seed into $HOME, merge the seed's mcpServers
 #      into ~/.claude.json, then exec "$@".
 set -euo pipefail
 
 die() { echo "pen-entrypoint: $*" >&2; exit 1; }
 
-if [ "$(id -u)" = 0 ]; then
+if [ "$(id -u)" = 0 ] && [ "${PEN_PHASE:-}" != agent ]; then
   [ -n "${PEN_UID:-}" ] && [ -n "${PEN_GID:-}" ] || die "PEN_UID and PEN_GID must be set"
   [[ "$PEN_UID" =~ ^[0-9]+$ && "$PEN_GID" =~ ^[0-9]+$ ]] || die "PEN_UID/PEN_GID must be numeric"
-  [ "$PEN_UID" != 0 ] || die "refusing to run the agent as root (PEN_UID=0)"
+  export HOME=/home/agent USER=agent LOGNAME=agent PEN_PHASE=agent
+
+  if [ "$PEN_UID" = 0 ]; then
+    # Rootless Docker only: UID 0 here must be an unprivileged host user
+    # through a user namespace. Without one (identity map), it's real root.
+    read -r inside outside count </proc/self/uid_map
+    [ "$inside $outside $count" != "0 0 4294967295" ] \
+      || die "refusing to run the agent as root (PEN_UID=0) outside rootless Docker"
+    [ "$PEN_GID" = 0 ] || die "under rootless Docker PEN_GID must be 0 too"
+    # Claude Code refuses skip-permissions as root unless told it's sandboxed.
+    export IS_SANDBOX=1
+    # noroot: UID 0 gets no capabilities from execve; locked, so it can't be
+    # undone. With the bounding set empty and no-new-privileges, the agent
+    # has no capabilities at all, ever. The root filesystem is read-only
+    # (compose override), so UID 0 can't change the image's files either.
+    exec setpriv --reuid=0 --regid=0 --clear-groups \
+      --securebits=+noroot,+noroot_locked,+no_setuid_fixup,+no_setuid_fixup_locked,+keep_caps_locked \
+      --bounding-set=-all --inh-caps=-all \
+      /usr/bin/tini -s -g -- "$0" "$@"
+  fi
 
   # Reuse an existing group with this GID (on the Mac, GID 20 is Ubuntu's
   # `dialout`); otherwise create `agent`.
@@ -36,7 +58,6 @@ if [ "$(id -u)" = 0 ]; then
     fi
   done
 
-  export HOME=/home/agent USER=agent LOGNAME=agent
   # Drop to agent with an empty bounding set and no inheritable caps.
   # no-new-privileges (compose) stops it getting any back. tini becomes PID 1
   # as agent, so no root process is left in the container.

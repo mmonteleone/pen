@@ -35,8 +35,13 @@ services:
     cap_add: [CHOWN, SETUID, SETGID, SETPCAP]
     security_opt: ["no-new-privileges:true"]
     pids_limit: 4096
+    # No core dumps: they'd land in the project dir (cwd) on hosts whose
+    # core_pattern is a plain file name, holding process memory (GH_TOKEN, keys).
+    ulimits:
+      core: 0
     tmpfs:
       - /tmp:exec,mode=1777,size=4g
+      - /var/tmp:exec,mode=1777,size=1g
     volumes:
       - type: bind
         source: ${PROJECT_DIR}
