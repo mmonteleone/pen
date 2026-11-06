@@ -31,13 +31,20 @@ internal static class Program
                 case CommandKind.Upgrade:
                     Image.Upgrade(command.Clean);
                     return 0;
-                case CommandKind.Run:
-                    var project = Project.Resolve(Environment.CurrentDirectory, host);
-                    var projectConfig = Config.Load(project.ProjectConfigPath, ".pen/config", ConfigKind.Project);
-                    return new Session(host, project, user, projectConfig).Run(command.Args);
-                default:
-                    throw new PenException($"pen {command.Kind.ToString().ToLowerInvariant()} isn't implemented yet");
+                case CommandKind.Allow when command.Args.Count > 0:
+                    return AllowCommand.Add(host, command.Args, command.Global);
             }
+
+            var project = Project.Resolve(Environment.CurrentDirectory, host);
+            Config ProjectConfig() => Config.Load(project.ProjectConfigPath, ".pen/config", ConfigKind.Project);
+            return command.Kind switch
+            {
+                CommandKind.Run => new Session(host, project, user, ProjectConfig()).Run(command.Args),
+                CommandKind.Allow => AllowCommand.List(host, project, user, ProjectConfig()),
+                CommandKind.Sign => Sign.Run(host, project, command.Args.Count > 0 ? command.Args[0] : null),
+                CommandKind.Reset => Reset.Run(host, project, Console.In),
+                _ => throw new InvalidOperationException($"unhandled command {command.Kind}"),
+            };
         }
         catch (PenException e)
         {

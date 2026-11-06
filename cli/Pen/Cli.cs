@@ -2,8 +2,11 @@ namespace Pen;
 
 internal enum CommandKind { Run, Upgrade, Allow, Sign, Reset, Help, Version }
 
-/// <summary>A parsed command line. For Run, Args is the command to run in the sandbox (empty: a shell).</summary>
-internal sealed record Command(CommandKind Kind, IReadOnlyList<string> Args, bool Clean = false);
+/// <summary>
+/// A parsed command line. For Run, Args is the command to run in the sandbox
+/// (empty: a shell); for Allow, the domains (lowercased); for Sign, the base, if given.
+/// </summary>
+internal sealed record Command(CommandKind Kind, IReadOnlyList<string> Args, bool Clean = false, bool Global = false);
 
 internal static class Cli
 {
@@ -69,6 +72,23 @@ internal static class Cli
                 case CommandKind.Reset:
                     if (rest.Count > 0) throw Error($"pen reset: unexpected argument \"{rest[0]}\"");
                     return new(CommandKind.Reset, []);
+                case CommandKind.Allow:
+                    var global = false;
+                    var domains = new List<string>();
+                    foreach (var a in rest)
+                    {
+                        if (a == "--global") global = true;
+                        else if (a.StartsWith('-')) throw Error($"pen allow: unknown option \"{a}\"");
+                        else if (!Allowlist.IsValidDomain(a.ToLowerInvariant()))
+                            throw Error($"pen allow: \"{a}\" isn't a domain (use example.com, or .example.com to include its subdomains)");
+                        else if (!domains.Contains(a.ToLowerInvariant())) domains.Add(a.ToLowerInvariant());
+                    }
+                    if (global && domains.Count == 0) throw Error("pen allow --global: missing the domains to allow");
+                    return new(CommandKind.Allow, domains, Global: global);
+                case CommandKind.Sign:
+                    if (rest.Count > 1) throw Error($"pen sign: unexpected argument \"{rest[1]}\"");
+                    if (rest.Count == 1 && rest[0].StartsWith('-')) throw Error($"pen sign: unknown option \"{rest[0]}\"");
+                    return new(CommandKind.Sign, rest);
                 default:
                     return new(kind, rest);
             }

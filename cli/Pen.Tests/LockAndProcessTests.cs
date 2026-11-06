@@ -2,6 +2,14 @@ using System.Diagnostics;
 
 namespace Pen.Tests;
 
+/// <summary>
+/// Runs alone: a child that another test forks in parallel briefly shares
+/// every open fd until it execs, and a lock fd shared that way keeps its lock.
+/// </summary>
+[CollectionDefinition(nameof(LockAndProcessTests), DisableParallelization = true)]
+public sealed class LockCollection;
+
+[Collection(nameof(LockAndProcessTests))]
 public class LockAndProcessTests
 {
     [Fact]

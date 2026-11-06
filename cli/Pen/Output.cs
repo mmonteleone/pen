@@ -16,6 +16,14 @@ internal static class Out
 
     public static void Raw(string message) => Write(message);
 
+    /// <summary>A question, with the cursor left after it.</summary>
+    public static void Prompt(string question)
+    {
+        try { Console.Error.Write(question); Console.Error.Flush(); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
     private static void Write(string text)
     {
         try { Console.Error.WriteLine(text); }

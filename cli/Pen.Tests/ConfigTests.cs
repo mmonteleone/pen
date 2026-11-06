@@ -104,12 +104,12 @@ public class ConfigTests
     {
         using var t = new TempDir();
         var host = t.Host();
-        Config.EnsureUserConfig(host);
+        Config.EnsureUserConfig(host, () => ("T", "t@example.invalid"));
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(host.UserConfigPath));
         Assert.Equal(Embedded.Text("templates/config"), File.ReadAllText(host.UserConfigPath));
 
         File.WriteAllText(host.UserConfigPath, "env.X = mine\n");
-        Config.EnsureUserConfig(host);
+        Config.EnsureUserConfig(host, () => ("T", "t@example.invalid"));
         Assert.Equal("env.X = mine\n", File.ReadAllText(host.UserConfigPath));
     }
 

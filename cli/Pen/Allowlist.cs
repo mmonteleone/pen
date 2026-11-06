@@ -47,6 +47,10 @@ internal static partial class Allowlist
     private static bool Covers(string w, string d) =>
         d == w[1..] || d.EndsWith(w, StringComparison.Ordinal);
 
+    /// <summary>Whether <paramref name="host"/> is allowed by a merged list (exact, or under a wildcard).</summary>
+    public static bool IsAllowed(IEnumerable<string> list, string host) =>
+        list.Any(d => d == host || (d.StartsWith('.') && Covers(d, host)));
+
     public static string Render(IEnumerable<string> domains) => string.Join('\n', domains) + "\n";
 
     /// <summary>

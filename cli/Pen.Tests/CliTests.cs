@@ -48,7 +48,6 @@ public class CliTests
 
     [Theory]
     [InlineData("Allow", "allow")]
-    [InlineData("Allow", "allow", "example.com", "--global")]
     [InlineData("Sign", "sign")]
     [InlineData("Sign", "sign", "origin/main")]
     [InlineData("Reset", "reset")]
@@ -57,6 +56,30 @@ public class CliTests
         var c = P(args);
         Assert.Equal(kind, c.Kind.ToString());
         Assert.Equal(args.Skip(1), c.Args);
+    }
+
+    [Fact]
+    public void AllowTakesDomainsAndGlobal_Lowercased_WithoutDuplicates()
+    {
+        var c = P("allow", "Example.com", "--global", ".foo.io", "example.com");
+        Assert.Equal(CommandKind.Allow, c.Kind);
+        Assert.True(c.Global);
+        Assert.Equal(["example.com", ".foo.io"], c.Args);
+        Assert.False(P("allow", "a.io").Global);
+    }
+
+    [Theory]
+    [InlineData("allow", "http://example.com")]
+    [InlineData("allow", "1.2.3.4")]
+    [InlineData("allow", "localhost")]
+    [InlineData("allow", "--globl", "a.io")]
+    [InlineData("allow", "--global")]
+    [InlineData("sign", "--force")]
+    [InlineData("sign", "a", "b")]
+    public void BadAllowAndSignArgumentsAreUsageErrors(params string[] args)
+    {
+        var e = Assert.Throws<PenException>(() => P(args));
+        Assert.Equal(2, e.ExitCode);
     }
 
     [Fact]

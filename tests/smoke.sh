@@ -8,7 +8,8 @@
 #
 # Optional, for checks that need real credentials (values are only ever written
 # to a throwaway config file, mode 600, removed on exit):
-#   CLAUDE_CODE_OAUTH_TOKEN, OPENAI_API_KEY   trivial prompts in claude / codex
+#   CLAUDE_CODE_OAUTH_TOKEN, OPENAI_API_KEY   trivial prompts in claude / codex, and
+#                                             the seeded-behavior checks (section 17)
 #
 # Config-dependent checks run pen with a throwaway HOME, so your own
 # ~/.config/pen is never changed. Everything else uses your real HOME (pen
@@ -42,6 +43,8 @@ PROJECT_DIR=$(cd "$(mktemp -d "$HOME/.pen-smoke.XXXXXX")" && pwd -P)
 SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/pen-smoke.XXXXXX")
 FAKE_HOME=$SCRATCH/home
 mkdir -p "$FAKE_HOME"
+# The throwaway HOME's global git identity, which the first run copies into its seed.
+printf '[user]\n\tname = Smoke Host\n\temail = smoke-host@example.invalid\n' >"$FAKE_HOME/.gitconfig"
 export NUGET_PACKAGES=${NUGET_PACKAGES:-$HOME/.nuget/packages}
 PEN_UID=$(id -u) PEN_GID=$(id -g)
 if command -v sha256sum >/dev/null; then sha() { sha256sum; }; else sha() { shasum -a 256; }; fi
@@ -58,7 +61,8 @@ forget() {
     k=$(basename "$k")
     docker ps -aq --filter "name=^$k-" | xargs docker rm -f >/dev/null 2>&1 || true
     docker network ls -q --filter "name=^$k-" | xargs docker network rm >/dev/null 2>&1 || true
-    docker volume rm "${k}_home" "${k}_nuget" >/dev/null 2>&1 || true
+    docker volume rm "${k}_home" "${k}_nuget" "${k}_dind" >/dev/null 2>&1 || true
+    docker image rm "$k:latest" >/dev/null 2>&1 || true
     rm -rf "$REAL_HOME/.local/state/pen/$k"
   done
 }
@@ -68,7 +72,8 @@ cleanup() {
   if [ -n "$KEY" ]; then
     docker ps -aq --filter "name=^$KEY-" | xargs docker rm -f >/dev/null 2>&1 || true
     docker network ls -q --filter "name=^$KEY-" | xargs docker network rm >/dev/null 2>&1 || true
-    docker volume rm "${KEY}_home" "${KEY}_nuget" >/dev/null 2>&1 || true
+    docker volume rm "${KEY}_home" "${KEY}_nuget" "${KEY}_dind" >/dev/null 2>&1 || true
+    docker image rm "$KEY:latest" >/dev/null 2>&1 || true
     rm -rf "$REAL_HOME/.local/state/pen/$KEY"
   fi
   local d
@@ -271,6 +276,15 @@ section "5. CLI: install, dispatch, directory rules"
 
 PTY="python3 $REPO/tests/pty-run.py"
 mode_of() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
+# wait_count <docker name regex> <n>: until n such containers are running (max 30 s).
+wait_count() {
+  local i
+  for i in $(seq 300); do
+    [ "$(docker ps --format '{{.Names}}' | grep -cE "$1")" -ge "$2" ] && return 0
+    sleep 0.1
+  done
+  return 1
+}
 # wait_for <docker name regex>: until such a container is running (max 30 s).
 wait_for() {
   local i
@@ -302,7 +316,6 @@ rc=0; "$PEN" --bogus >/dev/null 2>&1 || rc=$?
 check "an unknown option is a usage error (exit 2)" test "$rc" = 2
 rc=0; "$PEN" run >/dev/null 2>&1 || rc=$?
 check "pen run without a command is a usage error (exit 2)" test "$rc" = 2
-check "a not-yet-built subcommand says so" bash -c "'$PEN' sign 2>&1 | grep -q \"isn't implemented yet\""
 
 refuse() { # refuse <dir> <expected message part>
   local out rc=0
@@ -406,16 +419,21 @@ check "...and no lock held" lock_free "$RUNTIME/project.lock" exclusive
 # ==============================================================================
 section "8. Config file"
 
+rm -rf "$FAKE_HOME/.config" # in case section 4's prompts made one
 out=$(fake_pen run true 2>&1)
 cfg=$FAKE_HOME/.config/pen/config
 check "first run creates ~/.config/pen/config" test -f "$cfg"
 check "...mode 600" test "$(mode_of "$cfg")" = 600
 check "...with every key commented out" not grep -qvE '^[[:space:]]*(#|$)' "$cfg"
 check "...and says so in one line" test "$(grep -c 'created ~/.config/pen/' <<<"$out")" = 1
-sum=$(cksum <"$cfg")
+seed=$FAKE_HOME/.config/pen/home
+check "...and creates home/ (the seed)" has_all "$(cd "$seed" && find . -type f | sort)" ./.gitconfig ./.claude.json ./.claude/CLAUDE.md ./.claude/settings.json ./.codex/AGENTS.md ./.codex/config.toml
+check "...whose .gitconfig has the host's user.name/user.email" \
+  test "$(git config --file "$seed/.gitconfig" user.name) <$(git config --file "$seed/.gitconfig" user.email)>" = "Smoke Host <smoke-host@example.invalid>"
+sum=$(cksum <"$cfg") seedsum=$(cd "$seed" && find . -type f -exec cksum {} + | sort)
 out=$(fake_pen run true 2>&1)
 check "a second run says nothing about config" not contains "created" "$out"
-check "...and changes nothing" test "$(cksum <"$cfg")" = "$sum"
+check "...and changes neither" bash -c '[ "$(cksum <"$1")" = "$2" ] && [ "$(cd "$3" && find . -type f -exec cksum {} + | sort)" = "$4" ]' _ "$cfg" "$sum" "$seed" "$seedsum"
 
 fake_config "# comment" "allw = example.com"
 check "a misspelled key is reported with its file and line" \
@@ -653,5 +671,253 @@ for i in 1 2 3; do
   best=$(python3 -c "print(f'{min($best, $t1 - $t0):.2f}')")
 done
 check "warm start: pen run true in under 5 s (best of 3: ${best}s; target about 2-3 s)" python3 -c "import sys; sys.exit(0 if $best < 5 else 1)"
+
+# ==============================================================================
+section "14. Project layer (step 10)"
+
+rm -rf .pen && mkdir .pen
+printf 'FROM pen:latest\nRUN echo layer-ok >/etc/pen-smoke-layer\n' >.pen/Dockerfile
+echo 'allow = example.org' >.pen/config
+out=$(in_sandbox 'cat /etc/pen-smoke-layer; curl -s -o /dev/null -w "code=%{http_code}\n" -I https://example.org' 2>&1)
+check ".pen/Dockerfile is built and used" contains "layer-ok" "$out"
+check "...as <project key>:latest" bash -c 'docker image inspect "$1" >/dev/null' _ "$KEY:latest"
+check "...and the .pen/config allow line is reachable" contains "code=200" "$out"
+t0=$(now); pen_run true; t1=$(now)
+note "a session with a cached project layer: $(python3 -c "print(f'{$t1 - $t0:.2f}')")s"
+
+# A rebuilt pen:latest (same hash label, new image) reaches the layer.
+docker image tag "$IMAGE" pen:smoke-backup
+printf 'FROM pen:smoke-backup\nLABEL smoke.base=rebuilt\n' | docker build -q -t "$IMAGE" - >/dev/null
+pen_run true
+docker image tag pen:smoke-backup "$IMAGE" && docker rmi pen:smoke-backup >/dev/null
+check "a FROM pen:latest layer picks up a base-image rebuild" \
+  test "$(docker image inspect --format '{{ index .Config.Labels "smoke.base" }}' "$KEY:latest")" = rebuilt
+
+printf 'FROM pen:latest\nRUN echo smoke-build-error && exit 3\n' >.pen/Dockerfile
+out=$(pen_run true 2>&1 || true)
+check "a failing layer build stops the launch" contains "building the project layer from .pen/Dockerfile failed" "$out"
+check "...showing the build output" contains "smoke-build-error" "$out"
+check "...without starting anything" test "$(containers)" = 0
+rm -rf .pen
+docker image rm "$KEY:latest" >/dev/null 2>&1 || true
+
+# ==============================================================================
+section "15. pen allow <domain…> (step 2)"
+
+loop='for i in $(seq 60); do [ "$(curl -s -o /dev/null -w %{http_code} -I https://example.com)" = 200 ] && { echo got-200; exit 0; }; sleep 0.5; done; echo never-200'
+"$PEN" run bash -c "$loop" </dev/null >"$SCRATCH/allow1.out" 2>&1 &
+a1=$!
+"$PEN" run bash -c "$loop" </dev/null >"$SCRATCH/allow2.out" 2>&1 &
+a2=$!
+wait_count "^$KEY-.*-agent$" 2 || fail "two sessions didn't start"
+out=$("$PEN" allow example.com 2>&1)
+wait "$a1" "$a2" || true
+check "pen allow applies to both running sessions" contains "applied to 2 running sessions" "$out"
+check "...and both reach the domain with no restart" bash -c 'grep -q got-200 "$1" && grep -q got-200 "$2"' _ "$SCRATCH/allow1.out" "$SCRATCH/allow2.out"
+check "...whose end line no longer suggests allowing it" not grep -q "pen allow example.com" "$SCRATCH/allow1.out"
+check "it creates .pen/config with the commented stub" bash -c 'head -1 .pen/config | grep -q "^# pen project config" && grep -q "^# github_owner" .pen/config'
+check "...plus one allow line" test "$(grep -c '^allow = example.com$' .pen/config)" = 1
+out=$("$PEN" allow example.com 2>&1)
+check "running it again adds nothing" bash -c 'grep -q "already in .pen/config" <<<"$1" && [ "$(grep -c "^allow = example.com$" .pen/config)" = 1 ]' _ "$out"
+check "a non-domain is refused" not "$PEN" allow 'http://x.io' 2>/dev/null
+
+OTHER=$(cd "$(mktemp -d "$HOME/.pen-smoke-other.XXXXXX")" && pwd -P)
+EXTRA_DIRS+=("$OTHER")
+git -C "$OTHER" init -q
+OHASH=$(printf %s "$OTHER" | sha | cut -c1-8)
+fake_config "allow = .github.com"
+loop=${loop//example.com/example.net}
+(cd "$OTHER" && fake_pen run bash -c "$loop; sleep 4") >"$SCRATCH/global.out" 2>&1 & # kept up so its proxy's logs can be read
+g=$!
+wait_for "^pen-.*-$OHASH-.*-agent$" || fail "the other project's session didn't start"
+out=$(HOME=$FAKE_HOME DOCKER_CONFIG=${DOCKER_CONFIG:-$REAL_HOME/.docker} "$PEN" allow --global example.net 2>&1)
+oproxy=$(docker ps --format '{{.Names}}' | grep -E "^pen-.*-$OHASH-.*-proxy-1$" | head -1)
+sleep 1
+oproxy_log=$(docker logs "$oproxy" 2>&1 || true)
+wait "$g" || true
+check "pen allow --global writes ~/.config/pen/config" grep -qx 'allow = example.net' "$FAKE_HOME/.config/pen/config"
+check "...and reaches a running session of another project" bash -c 'grep -q "applied to 1 running session" <<<"$1" && grep -q got-200 "$2"' _ "$out" "$SCRATCH/global.out"
+check "...whose reconfigure with .github.com plus api.github.com is clean" \
+  bash -c 'grep -q "Reconfiguring Squid Cache" <<<"$1" && ! grep -qE "is a subdomain of|You should remove|FATAL" <<<"$1"' _ "$oproxy_log"
+# (A reconfigured Squid, no longer root, logs "ERROR: Cannot open cache_log
+# (/dev/stderr)" and keeps writing to stderr anyway: harmless.)
+
+# ==============================================================================
+section "16. pen allow with no arguments (step 2)"
+
+"$PEN" run bash -c 'curl -s -o /dev/null -I https://example.net; sleep 1.5; curl -s -o /dev/null -I https://example.org; echo READY; sleep 120' \
+  </dev/null >"$SCRATCH/list.out" 2>&1 &
+p=$!
+for i in $(seq 300); do grep -q READY "$SCRATCH/list.out" 2>/dev/null && break; sleep 0.1; done
+out=$("$PEN" allow 2>/dev/null)
+check "lists blocked domains while the session runs" has_all "$out" example.org example.net
+check "...newest first" test "$(grep -oE 'example\.(org|net)' <<<"$out" | head -1)" = example.org
+check "...with the line to paste" contains "pen allow example.org example.net" "$out"
+check "...leaving out domains allowed since (example.com)" not contains "example.com" "$out"
+kill -9 "$p"; wait "$p" 2>/dev/null || true
+out=$("$PEN" allow 2>&1)
+check "...after a SIGKILL'd session (which it ends)" bash -c 'grep -q "example.org" <<<"$1" && grep -q "whose pen exited" <<<"$1"' _ "$out"
+check "...and once the session has exited normally" contains "example.org" "$(in_sandbox true 2>/dev/null; "$PEN" allow 2>/dev/null)"
+
+# ==============================================================================
+section "17. Home seed (step 11)"
+
+SEEDP=$(cd "$(mktemp -d "$HOME/.pen-smoke-seed.XXXXXX")" && pwd -P)
+EXTRA_DIRS+=("$SEEDP")
+git -C "$SEEDP" init -q
+git -C "$SEEDP" -c user.name=x -c user.email=x@example.invalid commit -q --allow-empty -m init
+fake_config "# none"
+slug=$(printf %s "$SEEDP" | LC_ALL=C sed 's/[^A-Za-z0-9]/-/g')
+mkdir -p "$seed/.claude/projects/$slug/memory" "$seed/.claude/projects/-elsewhere/memory"
+echo "seeded memory" >"$seed/.claude/projects/$slug/memory/MEMORY.md"
+echo "not yours" >"$seed/.claude/projects/-elsewhere/memory/MEMORY.md"
+seed_pen() { (cd "$SEEDP" && fake_pen run bash -c "$1" 2>&1); }
+
+out=$(seed_pen '
+  grep -q "running in a pen sandbox" ~/.claude/CLAUDE.md && echo claude-note
+  grep -q "running in a pen sandbox" ~/.codex/AGENTS.md && echo codex-note
+  echo "mcp=$(jq -c ".mcpServers | keys" ~/.claude.json)"
+  echo "mode=$(jq -r .permissions.defaultMode ~/.claude/settings.json)"
+  echo "attribution=$(jq -c .attribution ~/.claude/settings.json)"
+  grep -q "^approval_policy = \"never\"" ~/.codex/config.toml && echo codex-never
+  echo "projects=$(ls ~/.claude/projects | tr "\n" " ")"
+  echo "memory=$(cat ~/.claude/projects/*/memory/MEMORY.md)"
+  git commit -q --allow-empty -m "sandbox commit" && echo committed
+  mkdir -p .codegraph && touch .codegraph/db && echo "status=[$(git status --porcelain)]"
+  echo "local edit" >>~/.claude/CLAUDE.md
+  jq ".oauthAccount = {\"smoke\": true}" ~/.claude.json >/tmp/j && cat /tmp/j >~/.claude.json
+  claude mcp add -s user from-sandbox -- true >/dev/null 2>&1; true
+')
+has() { grep -qxF -- "$1" <<<"$out"; }
+check "a new project's first session has the seeded CLAUDE.md and AGENTS.md" bash -c 'grep -qx claude-note <<<"$1" && grep -qx codex-note <<<"$1"' _ "$out"
+check "...and the seeded CodeGraph mcpServers entry" has 'mcp=["codegraph"]'
+check "...Claude's default mode is bypassPermissions" has "mode=bypassPermissions"
+check "...with commit and PR attribution off" has 'attribution={"commit":"","pr":""}'
+check "...and Codex runs without approvals" has codex-never
+check "only this project's .claude/projects/<slug>/ is copied" has "projects=$slug "
+check "...with its memory" has "memory=seeded memory"
+check "a sandbox commit has the seeded author" \
+  test "$(git -C "$SEEDP" log -1 --format='%an <%ae>')" = "Smoke Host <smoke-host@example.invalid>"
+check "...and no co-author trailer" not grep -qi co-authored-by <<<"$(git -C "$SEEDP" log -1 --format=%B)"
+check "git status in the sandbox doesn't list .codegraph/" has "status=[]"
+
+out=$(seed_pen 'tail -1 ~/.claude/CLAUDE.md; echo "mcp=$(jq -c ".mcpServers | keys" ~/.claude.json)"')
+check "an edit to a seeded file persists for that project" has "local edit"
+check "...without changing the seed" not grep -q "local edit" "$seed/.claude/CLAUDE.md"
+check "...or another project" not contains "local edit" "$(fake_pen run tail -1 /home/agent/.claude/CLAUDE.md 2>/dev/null)"
+check "a server added with claude mcp add in the sandbox is there" has 'mcp=["codegraph","from-sandbox"]'
+
+# The seed edits must be newer than the project's copies. They replace each
+# file by rename, as editors save: on OrbStack, a host file rewritten in place
+# can look unchanged to a new container for several seconds.
+sleep 1.1
+echo "added later" >"$seed/.added-later"
+{ cat "$seed/.claude/CLAUDE.md"; echo "seed v2"; } >"$seed/.claude/CLAUDE.md.new" && mv "$seed/.claude/CLAUDE.md.new" "$seed/.claude/CLAUDE.md"
+jq '.mcpServers["seeded-later"] = {"type": "stdio", "command": "true"}' "$seed/.claude.json" >"$seed/.claude.json.new" && mv "$seed/.claude.json.new" "$seed/.claude.json"
+out=$(seed_pen 'cat ~/.added-later; tail -1 ~/.claude/CLAUDE.md; echo "mcp=$(jq -c ".mcpServers | keys" ~/.claude.json)"; echo "login=$(jq -c .oauthAccount ~/.claude.json)"')
+check "a file added to the seed later reaches the project's next session" has "added later"
+check "editing a seed file replaces the project's copy" has "seed v2"
+check "an MCP server added to the seed reaches an existing project, keeping the sandbox's" has 'mcp=["codegraph","from-sandbox","seeded-later"]'
+check "...and the project stays logged in (the rest of .claude.json is kept)" has 'login={"smoke":true}'
+
+if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+  fake_config "env.CLAUDE_CODE_OAUTH_TOKEN = $CLAUDE_CODE_OAUTH_TOKEN"
+  (cd "$SEEDP" && fake_pen run timeout 300 claude -p 'Create a file named perm-check.txt containing "ok", then commit it with git (message "perm check"). Reply "done".' >/dev/null 2>&1) || true
+  check "claude starts in skip-permissions mode (wrote and committed without asking)" test -f "$SEEDP/perm-check.txt"
+  check "...and its commit has the seeded author and no co-author trailer" \
+    bash -c '[ "$(git -C "$1" log -1 --format="%an")" = "Smoke Host" ] && ! git -C "$1" log -1 --format=%B | grep -qi co-authored-by' _ "$SEEDP"
+  out=$(cd "$SEEDP" && fake_pen run timeout 300 claude -p 'Fetch https://example.com and show me its title.' 2>&1 || true)
+  check "claude reports the blocked domain" grep -qiE 'example\.com.*(block|allow|proxy|403)|(block|allow|proxy|403).*example\.com' <<<"$out"
+else
+  note "claude skip-permissions, co-author and blocked-domain checks: skipped (set CLAUDE_CODE_OAUTH_TOKEN)"
+fi
+if [ -n "${OPENAI_API_KEY:-}" ]; then
+  fake_config "env.OPENAI_API_KEY = $OPENAI_API_KEY"
+  out=$(cd "$SEEDP" && fake_pen run timeout 300 codex exec 'Fetch https://example.com and show me its title.' 2>&1 || true)
+  check "codex reports the blocked domain" grep -qiE 'example\.com.*(block|allow|proxy|403)|(block|allow|proxy|403).*example\.com' <<<"$out"
+else
+  note "codex blocked-domain check: skipped (set OPENAI_API_KEY)"
+fi
+note "after codegraph init, codegraph_explore from Claude in the sandbox is a manual check (needs a login)"
+
+# ==============================================================================
+section "18. pen reset (step 5)"
+
+in_sandbox 'echo kept >~/.reset-marker'
+"$PEN" run sleep 120 </dev/null >/dev/null 2>&1 &
+p=$!
+wait_for "^$KEY-.*-agent$" || fail "session didn't start"
+name=$(docker ps --format '{{.Names}}' | grep -E "^$KEY-.*-agent$" | head -1)
+out=$(echo y | "$PEN" reset 2>&1 || true)
+check "pen reset refuses while a session is open" contains "refusing to reset while a session is running" "$out"
+check "...naming its agent container" contains "  $name" "$out"
+check "...and removes nothing" bash -c 'docker volume inspect "$1" >/dev/null' _ "${KEY}_home"
+docker rm -f "$name" >/dev/null
+wait "$p" 2>/dev/null || true
+check "after docker rm -f, that session's pen finishes its end path" test "$(containers)" = 0
+out=$(echo n | "$PEN" reset 2>&1 || true)
+check "answering no removes nothing" bash -c 'grep -q "nothing removed" <<<"$1" && docker volume inspect "$2" >/dev/null' _ "$out" "${KEY}_home"
+out=$(echo y | "$PEN" reset 2>&1)
+check "answering yes removes the project's volumes" bash -c 'grep -q "removed ${2}_home, ${2}_nuget" <<<"$1" && ! docker volume inspect "${2}_home" >/dev/null 2>&1' _ "$out" "$KEY"
+check "...so the next session starts with a fresh home" test "$(in_sandbox 'cat ~/.reset-marker 2>/dev/null || echo fresh')" = fresh
+note "reset logging out of claude and codex is a manual check (step 5)"
+
+# ==============================================================================
+section "19. Unsigned-commit reminder and pen sign (step 3)"
+
+ssh-keygen -q -t ed25519 -N '' -C pen-smoke -f "$SCRATCH/signkey"
+git config --file "$FAKE_HOME/.gitconfig" gpg.format ssh
+git config --file "$FAKE_HOME/.gitconfig" user.signingkey "$SCRATCH/signkey"
+git config --file "$FAKE_HOME/.gitconfig" gpg.ssh.program ssh-keygen
+fake_config "# none"
+git init -q --bare "$SCRATCH/origin.git"
+git remote add origin "$SCRATCH/origin.git"
+git push -q origin HEAD:refs/heads/smoke-base
+git branch -q -u origin/smoke-base
+git config commit.gpgsign true # the repo's own setting doesn't matter, only the host's global one
+
+out=$(fake_pen run git -c user.name=Agent -c user.email=agent@example.invalid commit -q --allow-empty -m s1 2>&1)
+check "no reminder when the host's global commit.gpgsign is off" not contains "unsigned commit" "$out"
+git config --file "$FAKE_HOME/.gitconfig" commit.gpgsign true
+out=$(fake_pen run git -c user.name=Agent -c user.email=agent@example.invalid commit -q --allow-empty -m s2 2>&1)
+check "with it on, session end counts the unsigned commits" contains "2 unsigned commits; review, then run pen sign" "$out"
+git config --unset commit.gpgsign
+
+fake_pen run sleep 120 >/dev/null 2>&1 & # pen sign below runs with this HOME too, so this is its project's session
+p=$!
+wait_for "^$KEY-.*-agent$" || fail "session didn't start"
+name=$(docker ps --format '{{.Names}}' | grep -E "^$KEY-.*-agent$" | head -1)
+out=$(fake_pen sign 2>&1 || true)
+check "pen sign refuses while a session is open" contains "refusing to sign while a session is running" "$out"
+check "...naming its agent container" contains "  $name" "$out"
+docker rm -f "$name" >/dev/null
+wait "$p" 2>/dev/null || true
+
+out=$(python3 -c '
+import fcntl, os, subprocess, sys
+f = open(sys.argv[1], "a")
+fcntl.flock(f, fcntl.LOCK_EX)  # what pen sign holds for its whole run
+r = subprocess.run(sys.argv[2:], stdin=subprocess.DEVNULL, capture_output=True, text=True)
+print(r.returncode, r.stderr)' "$FAKE_HOME/.local/state/pen/$KEY/project.lock" env HOME="$FAKE_HOME" DOCKER_CONFIG="${DOCKER_CONFIG:-$REAL_HOME/.docker}" "$PEN" run true)
+check "a session started while pen sign runs is refused" contains "a pen sign or pen reset is running" "$out"
+
+before=$(for c in $(git rev-list --reverse origin/smoke-base..HEAD); do git log -1 --format='%T %an <%ae> %ad' "$c"; done)
+out=$(fake_pen sign 2>&1)
+check "pen sign lists the commits it rewrites" has_all "$out" "re-signing 2 commits in origin/smoke-base..HEAD" " s1" " s2"
+check "...signs each of them" bash -c 'for c in $(git rev-list origin/smoke-base..HEAD); do git cat-file commit "$c" | grep -q "^gpgsig" || exit 1; done'
+check "...keeping their trees, authors and dates" \
+  test "$(for c in $(git rev-list --reverse origin/smoke-base..HEAD); do git log -1 --format='%T %an <%ae> %ad' "$c"; done)" = "$before"
+check "...with the host user as committer" test "$(git log -1 --format=%cn)" = "Smoke Host"
+check "...and the signatures verify" bash -c 'echo "smoke-host@example.invalid $(cat "$1.pub")" >"$1.signers" && git -c gpg.ssh.program=ssh-keygen -c gpg.ssh.allowedSignersFile="$1.signers" verify-commit HEAD 2>/dev/null' _ "$SCRATCH/signkey"
+check "the reminder is gone after signing" not contains "unsigned" "$(fake_pen run true 2>&1)"
+check "running pen sign again changes nothing" contains "are signed" "$(fake_pen sign 2>&1)"
+
+fake_pen run git -c user.name=Agent -c user.email=agent@example.invalid commit -q --allow-empty -m s3 >/dev/null 2>&1
+git update-ref refs/remotes/fork/s3 HEAD
+out=$(fake_pen sign 2>&1 || true)
+check "pen sign refuses when a commit is already on a remote branch" contains "on a remote branch" "$out"
+git update-ref -d refs/remotes/fork/s3
+git remote remove origin
+note "GitHub showing the signed commits as Verified after a push is a manual check (step 3)"
 
 section "All checks passed."

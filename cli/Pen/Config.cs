@@ -103,22 +103,43 @@ internal sealed partial class Config
     private static partial Regex EnvNameRegex();
 
     /// <summary>
-    /// First run: creates ~/.config/pen/ and its config file (600) from the
-    /// template. Never rewrites an existing file.
+    /// First run: creates ~/.config/pen/ with its config file (600) from the
+    /// template, and the home seed (see <see cref="Seed"/>), each only when
+    /// missing, and says so in one line. Never rewrites an existing file.
+    /// <paramref name="identity"/> gives the host's git user.name/user.email
+    /// for the seed's .gitconfig (default: the host's global git config).
     /// </summary>
-    public static void EnsureUserConfig(HostEnv host)
+    public static void EnsureUserConfig(HostEnv host, Func<(string? Name, string? Email)>? identity = null)
     {
-        if (Directory.Exists(host.ConfigDir)) return;
-        Directory.CreateDirectory(host.ConfigDir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        using (var f = new FileStream(host.UserConfigPath, new FileStreamOptions
+        bool createdConfig = false;
+        if (!Directory.Exists(host.ConfigDir))
         {
-            Mode = FileMode.CreateNew,
-            Access = FileAccess.Write,
-            UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
-        }))
-        {
-            Embedded.Open("templates/config").CopyTo(f);
+            Directory.CreateDirectory(host.ConfigDir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            using (var f = new FileStream(host.UserConfigPath, new FileStreamOptions
+            {
+                Mode = FileMode.CreateNew,
+                Access = FileAccess.Write,
+                UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
+            }))
+            {
+                Embedded.Open("templates/config").CopyTo(f);
+            }
+            createdConfig = true;
         }
-        Out.Line($"created {host.Display(host.ConfigDir)}/: add GitHub tokens to {host.Display(host.UserConfigPath)}");
+
+        bool createdSeed = false;
+        if (!Path.Exists(host.SeedDir) && !RepoGuard.IsLink(host.SeedDir))
+        {
+            var (name, email) = (identity ?? HostIdentity)();
+            createdSeed = Seed.EnsureExists(host, name, email);
+        }
+
+        if (createdConfig)
+            Out.Line($"created {host.Display(host.ConfigDir)}/: add GitHub tokens to {host.Display(host.UserConfigPath)}");
+        else if (createdSeed)
+            Out.Line($"created {host.Display(host.SeedDir)}/, the home seed: sandbox-wide agent config, copied into every project's sandbox home");
     }
+
+    private static (string?, string?) HostIdentity() =>
+        (HostGit.GlobalConfig("user.name"), HostGit.GlobalConfig("user.email"));
 }

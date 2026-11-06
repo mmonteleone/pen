@@ -200,7 +200,7 @@ internal static class RepoGuard
         return Encoding.UTF8.GetString(ms.ToArray()) + "\n";
     }
 
-    private static void EnsureDirectory(string dir, string path)
+    internal static void EnsureDirectory(string dir, string path)
     {
         RequireNotLink(dir, path);
         if (File.Exists(path))
@@ -216,7 +216,7 @@ internal static class RepoGuard
         if (!File.Exists(path)) File.WriteAllText(path, "");
     }
 
-    private static void RequireNotLink(string dir, string path)
+    internal static void RequireNotLink(string dir, string path)
     {
         if (IsLink(path))
             throw new PenException($"{Rel(dir, path)} is a symlink, which pen doesn't support here: it has to mount it read-only");

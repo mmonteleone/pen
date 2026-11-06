@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace Pen;
 
 /// <summary>
@@ -54,6 +56,64 @@ internal static class Image
     }
 
     /// <summary>
+    /// The project layer: .pen/Dockerfile (FROM pen:latest), built with .pen/
+    /// as its context as &lt;project key&gt;:latest. Built on every launch; the
+    /// cache makes that near-instant, and a rebuilt pen:latest invalidates it.
+    /// Returns the image to run, or null when the project has no layer.
+    /// Output stays hidden unless the build is slow or fails.
+    /// </summary>
+    public static string? EnsureProjectLayer(Project project, bool noCache = false)
+    {
+        var dockerfile = Path.Combine(project.PenDir, "Dockerfile");
+        if (!File.Exists(dockerfile)) return null;
+        var name = $"{project.Key}:latest";
+
+        var args = new List<string> { "build", "--progress", "plain", "-t", name, "--label", $"pen.project={project.Key}" };
+        if (noCache) args.Add("--no-cache");
+        args.AddRange(["-f", dockerfile, project.PenDir]);
+        var psi = Proc.Info("docker", args);
+        psi.RedirectStandardOutput = psi.RedirectStandardError = true;
+
+        var gate = new object();
+        var buffered = new List<string>();
+        bool live = false;
+        void OnLine(string? line)
+        {
+            if (line == null) return;
+            lock (gate)
+            {
+                if (live) Out.Raw(line); else buffered.Add(line);
+            }
+        }
+
+        using var p = Proc.Start(psi);
+        p.OutputDataReceived += (_, e) => OnLine(e.Data);
+        p.ErrorDataReceived += (_, e) => OnLine(e.Data);
+        p.BeginOutputReadLine();
+        p.BeginErrorReadLine();
+        if (!p.WaitForExit(TimeSpan.FromSeconds(1.5)))
+        {
+            lock (gate)
+            {
+                Out.Line($"building the project layer {name} from .pen/Dockerfile");
+                foreach (var l in buffered) Out.Raw(l);
+                buffered.Clear();
+                live = true;
+            }
+        }
+        p.WaitForExit(); // also drains the output
+        if (p.ExitCode != 0)
+        {
+            lock (gate)
+            {
+                foreach (var l in buffered.TakeLast(40)) Out.Raw(l);
+            }
+            throw new PenException($"building the project layer from .pen/Dockerfile failed (docker build exited {p.ExitCode})");
+        }
+        return name;
+    }
+
+    /// <summary>
     /// pen upgrade: a newer base image, the agents reinstalled (PEN_REFRESH
     /// busts their cached layers), and newer sidecar images.
     /// </summary>
@@ -61,6 +121,16 @@ internal static class Image
     {
         Out.Line($"upgrading {Name}{(clean ? " from scratch (--clean)" : "")}");
         Build(Embedded.ImageHash(), refresh: DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(), pull: true, noCache: clean);
+
+        // The project layer too, when run in a project that has one.
+        Project? project = null;
+        try { project = Project.Resolve(Environment.CurrentDirectory, HostEnv.FromProcess()); }
+        catch (PenException) { }
+        if (project != null && File.Exists(Path.Combine(project.PenDir, "Dockerfile")))
+        {
+            Out.Line($"rebuilding the project layer {project.Key}:latest");
+            EnsureProjectLayer(project, noCache: clean);
+        }
 
         Out.Line("pulling sidecar images");
         // compose reads the embedded compose.yaml from stdin. Its required
@@ -72,6 +142,7 @@ internal static class Image
             ["PEN_UID"] = "1",
             ["PEN_GID"] = "1",
             ["NUGET_PACKAGES"] = "/nonexistent",
+            ["PEN_SEED"] = "/nonexistent",
         };
         var psi = Proc.Info("docker", ["compose", "-f", "-", "-p", "pen-upgrade", "pull", "proxy"], env);
         psi.RedirectStandardInput = true;

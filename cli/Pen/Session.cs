@@ -71,6 +71,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         RepoGuard.CheckAtStart(project.Dir);
         var mounts = RepoGuard.PrepareMounts(project.Dir, host.Home);
         Image.EnsureCurrent();
+        var image = Image.EnsureProjectLayer(project) ?? Image.Name;
         var owner = GitHub.ProjectOwner(project, projectConfig);
         var token = GitHub.TokenFor(owner, user, RuntimeDir, host);
         var allowlist = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow, projectConfig.Allow);
@@ -96,7 +97,8 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
             ["PEN_UID"] = host.Uid.ToString(),
             ["PEN_GID"] = host.Gid.ToString(),
             ["NUGET_PACKAGES"] = host.NuGetPackages,
-            ["PEN_IMAGE"] = Image.Name,
+            ["PEN_IMAGE"] = image,
+            ["PEN_SEED"] = host.SeedDir,
         };
         File.WriteAllLines(session.EnvFile, env.Select(kv => $"{kv.Key}={kv.Value}"));
         if (project.HasGitDir) File.WriteAllText(session.StartedWithGit, "");
@@ -183,12 +185,21 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         var env = session.ReadEnv();
         Proc.Capture("docker", ["rm", "-f", session.Container]);
 
-        // The .git check, now that the agent is gone and before anything runs git.
+        // The .git check, now that the agent is gone and before anything runs
+        // git. pen's own git call (the unsigned-commit count) only runs when
+        // the check moved nothing.
+        string? reminder = null;
         if (env.TryGetValue("PROJECT_DIR", out var projectDir))
         {
             var moved = GitCheck.Run(projectDir, File.Exists(session.StartedWithGit));
             if (moved.Count > 0) Out.Raw(GitCheck.Warning(projectDir, moved));
+            else reminder = Sign.Reminder(projectDir);
         }
+
+        // What the session ended up allowing (pen allow may have added to it),
+        // so the blocked line doesn't suggest a domain that's allowed by now.
+        var allowedFile = session.File("allowlist.txt");
+        var allowed = File.Exists(allowedFile) ? Allowlist.ParseList(File.ReadAllText(allowedFile)).ToList() : [];
 
         if (env.Count > 0)
         {
@@ -208,9 +219,11 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
 
         if (File.Exists(session.ProxyLog))
         {
-            var line = Allowlist.BlockedLine(Allowlist.BlockedHosts(File.ReadLines(session.ProxyLog)));
+            var blocked = Allowlist.BlockedHosts(File.ReadLines(session.ProxyLog)).Where(h => !Allowlist.IsAllowed(allowed, h)).ToList();
+            var line = Allowlist.BlockedLine(blocked);
             if (line != null) Out.Line(line);
         }
+        if (reminder != null) Out.Line(reminder);
     }
 
     private static void DeleteSessionFiles(SessionDir session)
