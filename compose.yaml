@@ -9,6 +9,10 @@
 #   NUGET_PACKAGES  host NuGet cache path; the project's nuget volume mounts there
 #   PEN_IMAGE       image to run (default pen:latest; the project layer when there is one)
 #   PEN_SEED        host home seed (~/.config/pen/home), mounted read-only at /etc/pen/seed
+#
+# The CLI also writes a per-session override (mounts.yaml): the read-only
+# overlays on the project mount and, in docker sessions (--profile docker),
+# dind's container name and the agent's DOCKER_HOST and depends_on dind.
 
 x-proxy-env: &proxy-env
   HTTP_PROXY: http://proxy:3128
@@ -90,6 +94,39 @@ services:
       start_period: 30s
       start_interval: 100ms
 
+  # Docker-in-Docker, for docker sessions only (pen --docker). Privileged, on
+  # the internal network only, TLS off: port 2375 is reachable from this
+  # session's sandbox network alone. --tls=false must be explicit, or dockerd
+  # sleeps 15 s at startup to show its insecure-TCP warning.
+  dind:
+    image: docker:dind
+    profiles: [docker]
+    privileged: true
+    command: ["dockerd", "--host=tcp://0.0.0.0:2375", "--tls=false"]
+    environment:
+      <<: *proxy-env
+      DOCKER_TLS_CERTDIR: ""
+    pids_limit: 16384
+    # Containers inside inherit the daemon's limits; no core dumps in the project.
+    ulimits:
+      core: 0
+    volumes:
+      - type: bind
+        source: ${PROJECT_DIR}
+        target: ${PROJECT_DIR}
+      - type: volume
+        source: dind
+        target: /var/lib/docker
+    networks: [sandbox]
+    # 127.0.0.1 is in NO_PROXY, so this never goes through the proxy.
+    healthcheck:
+      test: ["CMD", "docker", "-H", "tcp://127.0.0.1:2375", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+      start_interval: 100ms
+
 # Shared by every session of the project, so they're external: each session is
 # its own compose project, and compose would otherwise warn that the volume was
 # "created for" another one. The CLI creates them (docker volume create is
@@ -100,6 +137,9 @@ volumes:
     external: true
   nuget:
     name: ${PEN_PROJECT}_nuget
+    external: true
+  dind:
+    name: ${PEN_PROJECT}_dind
     external: true
 
 networks:

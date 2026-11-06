@@ -39,7 +39,7 @@ internal static class Program
             Config ProjectConfig() => Config.Load(project.ProjectConfigPath, ".pen/config", ConfigKind.Project);
             return command.Kind switch
             {
-                CommandKind.Run => new Session(host, project, user, ProjectConfig()).Run(command.Args),
+                CommandKind.Run => RunSession(host, project, user, ProjectConfig(), command),
                 CommandKind.Allow => AllowCommand.List(host, project, user, ProjectConfig()),
                 CommandKind.Sign => Sign.Run(host, project, command.Args.Count > 0 ? command.Args[0] : null),
                 CommandKind.Reset => Reset.Run(host, project, Console.In),
@@ -52,4 +52,9 @@ internal static class Program
             return e.ExitCode;
         }
     }
+
+    // --docker turns Docker-in-Docker on for one session; docker = true in
+    // .pen/config for every session. Nothing turns it off per session.
+    private static int RunSession(HostEnv host, Project project, Config user, Config projectConfig, Command command) =>
+        new Session(host, project, user, projectConfig).Run(command.Args, docker: command.Docker || projectConfig.Docker == true);
 }

@@ -15,6 +15,7 @@ internal sealed class SessionDir(string projectKey, string path)
     public string Id { get; } = System.IO.Path.GetFileName(path);
     public string ComposeProject => $"{projectKey}-{Id}";
     public string Container => $"{ComposeProject}-agent";
+    public string DindContainer => $"{ComposeProject}-dind";
 
     public string ComposeFile => File("compose.yaml");
     public string MountsFile => File("mounts.yaml");
@@ -22,6 +23,8 @@ internal sealed class SessionDir(string projectKey, string path)
     public string LockFile => File("session.lock");
     public string EnvFile => File("session.env");
     public string StartedWithGit => File("started-with-git");
+    /// <summary>Marks a docker session: its compose calls all pass --profile docker.</summary>
+    public string DockerMarker => File("docker");
 
     public string File(string name) => System.IO.Path.Combine(Path, name);
 
@@ -29,10 +32,16 @@ internal sealed class SessionDir(string projectKey, string path)
     public bool IsOpen => System.IO.File.Exists(ComposeFile);
 
     /// <summary>docker compose for this session's stack, with the env it was started with.</summary>
-    public string[] ComposeArgs(params string[] args) =>
-        System.IO.File.Exists(MountsFile)
-            ? ["compose", "--progress", "quiet", "-f", ComposeFile, "-f", MountsFile, "-p", ComposeProject, .. args]
-            : ["compose", "--progress", "quiet", "-f", ComposeFile, "-p", ComposeProject, .. args];
+    public string[] ComposeArgs(params string[] args)
+    {
+        var a = new List<string> { "compose", "--progress", "quiet" };
+        if (System.IO.File.Exists(DockerMarker)) a.AddRange(["--profile", "docker"]);
+        a.AddRange(["-f", ComposeFile]);
+        if (System.IO.File.Exists(MountsFile)) a.AddRange(["-f", MountsFile]);
+        a.AddRange(["-p", ComposeProject]);
+        a.AddRange(args);
+        return [.. a];
+    }
 
     public Dictionary<string, string> ReadEnv()
     {
@@ -55,7 +64,8 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
 
     private string RuntimeDir => host.RuntimeDir(project.Key);
 
-    public int Run(IReadOnlyList<string> command)
+    /// <param name="docker">with Docker-in-Docker (pen --docker, or docker = true in .pen/config)</param>
+    public int Run(IReadOnlyList<string> command, bool docker = false)
     {
         // 1. Every session holds project.lock shared; pen sign/reset hold it exclusive.
         EnsureRuntimeDir(host, project.Key);
@@ -78,7 +88,13 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         var owner = GitHub.ProjectOwner(project, projectConfig);
         var token = GitHub.TokenFor(owner, user, RuntimeDir, host);
         var allowlist = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow, projectConfig.Allow);
-        foreach (var volume in new[] { "home", "nuget" })
+
+        // One docker session per project: two daemons can't share the dind
+        // volume. A dind still using it (an earlier session's teardown failed)
+        // would be corrupted by a second, so that's refused too.
+        using var dindLock = docker ? TakeDindLock() : null;
+
+        foreach (var volume in docker ? ["home", "nuget", "dind"] : new[] { "home", "nuget" })
         {
             var r = Proc.Capture("docker", ["volume", "create", $"{project.Key}_{volume}"]);
             if (r.ExitStatus.ExitCode != 0)
@@ -105,9 +121,10 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         };
         File.WriteAllLines(session.EnvFile, env.Select(kv => $"{kv.Key}={kv.Value}"));
         if (project.HasGitDir) File.WriteAllText(session.StartedWithGit, "");
+        if (docker) File.WriteAllText(session.DockerMarker, "");
         File.WriteAllText(session.File("squid.conf"), Embedded.Text("proxy/squid.conf"));
         File.WriteAllText(session.File("allowlist.txt"), Allowlist.Render(allowlist));
-        File.WriteAllText(session.MountsFile, RepoGuard.ComposeOverride(mounts, readOnlyRoot: rootless));
+        File.WriteAllText(session.MountsFile, RepoGuard.ComposeOverride(mounts, readOnlyRoot: rootless, dindContainer: docker ? session.DindContainer : null));
         File.WriteAllText(session.ProxyLog, "");
         // Squid's own user writes the log on Linux; the session dir itself is 700.
         File.SetUnixFileMode(session.ProxyLog, (UnixFileMode)0b110_110_110);
@@ -150,6 +167,20 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         return exitCode;
     }
 
+    private FileLock TakeDindLock()
+    {
+        var l = FileLock.TryTake(System.IO.Path.Combine(RuntimeDir, "dind.lock"), exclusive: true)
+            ?? throw new PenException("another --docker session is running in this project, and only one can run at a time (they'd share its Docker volume): exit it, or start this one without --docker");
+        var volume = $"{project.Key}_dind";
+        var stale = Docker.ContainersUsing(volume);
+        if (stale.Count > 0)
+        {
+            l.Dispose();
+            throw new PenException($"{string.Join(", ", stale)} still uses {volume}, left over from an earlier session: remove it with docker rm -f {string.Join(' ', stale)}, then rerun");
+        }
+        return l;
+    }
+
     /// <summary>Host env that would change what compose loads or starts.</summary>
     internal static void ScrubComposeEnv(ProcessStartInfo psi)
     {
@@ -179,14 +210,17 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
 
     /// <summary>
     /// The end path, for a live session or a dead one: the agent container
-    /// goes first (after a hangup compose may have left it running), then the
-    /// stack, then the session's files except proxy.log. The caller holds the
-    /// session's lock and releases it after.
+    /// goes first (after a hangup compose may have left it running), and in a
+    /// docker session dind with it, since containers inside dind can write to
+    /// the project until it's gone. Then the stack, then the session's files
+    /// except proxy.log. The caller holds the session's lock and releases it after.
     /// </summary>
     internal static void End(SessionDir session)
     {
         var env = session.ReadEnv();
-        Proc.Capture("docker", ["rm", "-f", session.Container]);
+        Proc.Capture("docker", File.Exists(session.DockerMarker)
+            ? ["rm", "-f", session.Container, session.DindContainer]
+            : ["rm", "-f", session.Container]);
 
         // The .git check, now that the agent is gone and before anything runs
         // git. pen's own git call (the unsigned-commit count) only runs when

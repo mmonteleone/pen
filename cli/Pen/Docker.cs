@@ -17,6 +17,18 @@ internal static class Docker
         return IsRootless(r.StandardOutput);
     }
 
+    /// <summary>
+    /// Containers (running or not) that use <paramref name="volume"/>. For the
+    /// dind volume, any at all means an earlier session's dind outlived it.
+    /// </summary>
+    public static List<string> ContainersUsing(string volume)
+    {
+        var r = Proc.Capture("docker", ["ps", "-a", "--filter", $"volume={volume}", "--format", "{{.Names}}"]);
+        if (r.ExitStatus.ExitCode != 0)
+            throw new PenException($"docker ps failed: {r.StandardError.Trim()}");
+        return r.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+    }
+
     /// <summary>Parses <c>docker info --format '{{json .SecurityOptions}}'</c> (e.g. ["name=seccomp,profile=builtin","name=rootless"]).</summary>
     internal static bool IsRootless(string securityOptionsJson) =>
         securityOptionsJson.Split('"').Any(opt => opt.Split(',').Contains("name=rootless", StringComparer.Ordinal));

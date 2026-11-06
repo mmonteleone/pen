@@ -378,7 +378,7 @@ s=$(last_session)
 check "an ended session keeps only its proxy.log" test "$(ls -A "$s")" = proxy.log
 check "runtime and session dirs are 700" bash -c "[ $(mode_of "$RUNTIME") = 700 ] && [ $(mode_of "$s") = 700 ] && [ $(mode_of "$RUNTIME/sessions") = 700 ]"
 check "proxy.log is 666" test "$(mode_of "${s}proxy.log")" = 666
-check "the project's volumes are named by its key" docker volume inspect "${KEY}_home" "${KEY}_nuget" >/dev/null
+check "the project's volumes are named by its key" bash -c 'docker volume inspect "$1" "$2" >/dev/null' _ "${KEY}_home" "${KEY}_nuget"
 check "pen:latest carries its image hash" test -n "$(docker image inspect --format '{{ index .Config.Labels "pen.image-hash" }}' "$IMAGE")"
 
 # ==============================================================================
@@ -940,5 +940,105 @@ check "pen sign refuses when a commit is already on a remote branch" contains "o
 git update-ref -d refs/remotes/fork/s3
 git remote remove origin
 note "GitHub showing the signed commits as Verified after a push is a manual check (step 3)"
+
+# ==============================================================================
+section "20. Docker-in-Docker (step 8)"
+
+pen_docker() { "$PEN" --docker run "$@" </dev/null; }
+rm -rf .pen && mkdir .pen
+
+t0=$(now)
+out=$(pen_docker docker run --rm hello-world 2>&1 || true)
+t1=$(now)
+check "pen --docker: docker run hello-world works" contains "Hello from Docker!" "$out"
+check "...and no dind is left after exit" test "$(containers)" = 0
+check "...nor its network" test -z "$(docker network ls -q --filter "name=^$KEY-")"
+check "the project's dind volume is named by its key" bash -c 'docker volume inspect "$1" >/dev/null' _ "${KEY}_dind"
+t2=$(now); pen_docker true; t3=$(now)
+note "docker session start: first $(python3 -c "print(f'{$t1 - $t0:.1f}')")s (with a pull), warm $(python3 -c "print(f'{$t3 - $t2:.1f}')")s"
+
+out=$(pen_docker bash -c '
+  t() { if docker run --rm -v "$PWD:/src" alpine sh -c "$1" >/dev/null 2>&1; then echo "ok: $2"; else echo "fail: $2"; fi; }
+  t "echo x >> /src/.git/config" config
+  t "echo x > /src/.git/hooks/pre-commit" hook
+  t "touch /src/.pen/x" pen
+  t "mv /src/.git /src/.git2" mvgit
+  t "echo inner > /src/inner-file" write
+' 2>&1)
+has() { grep -qxF -- "$1" <<<"$out"; }
+check "an inner container (-v \$PWD:/src) can't write .git/config" has "fail: config"
+check "...or .git/hooks" has "fail: hook"
+check "...or .pen/" has "fail: pen"
+check "...or move .git" has "fail: mvgit"
+check "...but can write the project" bash -c 'grep -qxF "ok: write" <<<"$1" && [ "$(cat inner-file)" = inner ]' _ "$out"
+owner=$(stat -c %u inner-file 2>/dev/null || stat -f %u inner-file)
+if [ -n "$ROOTLESS" ] || [ "$(uname -s)" = Darwin ]; then
+  check "...and the file an inner root container wrote belongs to the host user" test "$owner" = "$(id -u)"
+else
+  note "rootful Linux: the file an inner root container wrote is owned by UID $owner (expected: root; see the README's DinD gotchas)"
+fi
+rm -f inner-file 2>/dev/null || pen_docker docker run --rm -v "$PROJECT_DIR:/src" alpine rm -f /src/inner-file >/dev/null 2>&1 || true
+
+mkdir -p dind-compose
+printf 'hello-compose\n' >dind-compose/msg
+printf 'services:\n  cat:\n    image: alpine\n    volumes: ["./:/w:ro"]\n    command: ["cat", "/w/msg"]\n' >dind-compose/compose.yaml
+out=$(pen_docker bash -c 'cd dind-compose && docker compose run --rm -T cat; docker compose down -t 1' 2>&1 || true)
+check "a compose stack with a bind mount from the project works" contains "hello-compose" "$out"
+rm -rf dind-compose
+
+printf 'FROM curlimages/curl\nRUN curl -sSf -o /dev/null https://github.com && echo allowed-ok\nRUN curl -sSf -o /dev/null https://example.com && echo SHOULD-FAIL || echo blocked-ok\n' >Dockerfile.dind-smoke
+out=$(pen_docker docker build --no-cache --progress plain -f Dockerfile.dind-smoke . 2>&1 || true)
+rm -f Dockerfile.dind-smoke
+check "a docker build RUN step reaches an allowed domain" grep -qE '^#[0-9]+ [0-9.]+ allowed-ok' <<<"$out"
+check "...and not one that isn't allowed" bash -c 'grep -qE "^#[0-9]+ [0-9.]+ blocked-ok" <<<"$1" && ! grep -qE "^#[0-9]+ [0-9.]+ SHOULD-FAIL" <<<"$1"' _ "$out"
+check "...which shows up in the blocked line" contains "blocked: example.com" "$out"
+out=$(pen_docker docker run --rm curlimages/curl -s -o /dev/null -w '%{http_code}' -I https://github.com 2>&1 || true)
+check "a container inside dind reaches an allowed domain through the proxy" contains "200" "$out"
+
+rc=0; pen_run docker ps >/dev/null 2>&1 || rc=$?
+check "without --docker, docker ps fails" test "$rc" != 0
+check "...and the agent has no DOCKER_HOST" test "$(in_sandbox 'echo "[${DOCKER_HOST:-}]"' 2>/dev/null)" = "[]"
+
+printf 'FROM curlimages/curl\nRUN curl -sSf -o /dev/null https://github.com\n' >Dockerfile.dind-smoke
+"$PEN" --docker run bash -c 'for i in $(seq 600); do [ -e .dind-go ] && break; sleep 0.1; done
+  docker build -q --no-cache -f Dockerfile.dind-smoke . >/dev/null 2>&1 && echo build-after-plain:ok || echo build-after-plain:fail
+  sleep 120' </dev/null >"$SCRATCH/dind-bg.out" 2>&1 &
+p=$!
+wait_for "^$KEY-.*-agent$" || fail "docker session didn't start"
+check "the docker session's dind is running" wait_for "^$KEY-.*-dind$"
+check "the dind lock is held" not lock_free "$RUNTIME/dind.lock" exclusive
+out=$(in_sandbox 'curl -s --max-time 5 http://dind:2375/_ping && echo reached || echo unreachable' 2>&1)
+check "a plain session alongside can't reach dind:2375" contains "unreachable" "$out"
+rc=0; out=$(pen_docker true 2>&1) || rc=$?
+check "a second --docker session is refused" bash -c '[ "$1" != 0 ] && grep -q "another --docker session is running" <<<"$2"' _ "$rc" "$out"
+touch .dind-go
+for i in $(seq 900); do grep -q build-after-plain "$SCRATCH/dind-bg.out" && break; sleep 0.1; done
+check "after a plain session came and went, the docker session's builds still work" grep -q build-after-plain:ok "$SCRATCH/dind-bg.out"
+kill -9 "$p"; wait "$p" 2>/dev/null || true
+rm -f .dind-go Dockerfile.dind-smoke
+check "after a SIGKILL'd docker session, its dind is still up" wait_for "^$KEY-.*-dind$"
+out=$(pen_docker true 2>&1 || true)
+check "the next --docker session ends it and starts" contains "whose pen exited without ending it" "$out"
+check "...leaving nothing running" test "$(containers)" = 0
+
+docker run -d --name "$KEY-smoke-stale" --entrypoint sleep -v "${KEY}_dind:/x" "$IMAGE" 120 >/dev/null
+rc=0; out=$(pen_docker true 2>&1) || rc=$?
+check "a container still using the dind volume is refused, named" bash -c '[ "$1" != 0 ] && grep -q "$2 still uses" <<<"$3"' _ "$rc" "$KEY-smoke-stale" "$out"
+docker rm -f "$KEY-smoke-stale" >/dev/null
+check "...and the dind lock is free again" lock_free "$RUNTIME/dind.lock" exclusive
+
+out=$(pen_docker bash -c 'docker run --rm -v "$PWD:/src" alpine touch /src/.git/commondir' 2>&1 || true)
+check "an inner container's .git/commondir is quarantined at session end" \
+  bash -c '[ ! -e .git/commondir ] && [ -e .git/commondir.pen-quarantine ] && grep -q "pen: WARNING" <<<"$1"' _ "$out"
+rm -f .git/commondir.pen-quarantine
+
+echo 'docker = true' >.pen/config
+out=$(pen_run bash -c 'echo "[$DOCKER_HOST]"; docker version --format "server {{.Server.Version}}"' 2>&1 || true)
+check "docker = true in .pen/config turns dind on" has_all "$out" "[tcp://dind:2375]" "server "
+echo 'docker = maybe' >.pen/config
+rc=0; out=$(pen_run true 2>&1) || rc=$?
+check "...and a bad value names the file and line" bash -c '[ "$1" != 0 ] && grep -q "^pen: .pen/config:1: docker must be true or false" <<<"$2"' _ "$rc" "$out"
+rm -f .pen/config
+check "nothing is left running" test "$(containers)" = 0
 
 section "All checks passed."

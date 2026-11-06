@@ -91,9 +91,45 @@ public class CliTests
         Assert.Throws<PenException>(() => P("reset", "now"));
     }
 
+    [Fact]
+    public void DockerGoesWithACommandToRun()
+    {
+        Assert.False(P("claude").Docker);
+        Assert.False(P("run", "--docker").Docker);
+        Assert.Equal(["--docker"], P("run", "--docker").Args);
+        Assert.Equal(["claude", "--docker"], P("claude", "--docker").Args);
+
+        var shell = P("--docker");
+        Assert.Equal(CommandKind.Run, shell.Kind);
+        Assert.True(shell.Docker);
+        Assert.Empty(shell.Args);
+
+        var c = P("--docker", "codex", "exec", "hi");
+        Assert.True(c.Docker);
+        Assert.Equal(["codex", "exec", "hi"], c.Args);
+
+        var r = P("--docker", "run", "allow");
+        Assert.True(r.Docker);
+        Assert.Equal(["allow"], r.Args);
+        Assert.True(P("--docker", "--docker", "ls").Docker);
+        Assert.Equal(["ls"], P("--docker", "--", "ls").Args);
+    }
+
     [Theory]
-    [InlineData("--docker")]
+    [InlineData("upgrade")]
+    [InlineData("allow")]
+    [InlineData("sign")]
+    [InlineData("reset")]
+    [InlineData("--help")]
+    public void DockerWithAnythingButRunningIsAnError(string what)
+    {
+        var e = Assert.Throws<PenException>(() => P("--docker", what));
+        Assert.Contains("--docker goes only with a command to run", e.Message);
+    }
+
+    [Theory]
     [InlineData("-v")]
+    [InlineData("--dockr")]
     public void UnknownOptionsAreErrors(string opt)
     {
         var e = Assert.Throws<PenException>(() => P(opt, "claude"));

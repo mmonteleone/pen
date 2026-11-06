@@ -6,15 +6,16 @@ internal enum CommandKind { Run, Upgrade, Allow, Sign, Reset, Help, Version }
 /// A parsed command line. For Run, Args is the command to run in the sandbox
 /// (empty: a shell); for Allow, the domains (lowercased); for Sign, the base, if given.
 /// </summary>
-internal sealed record Command(CommandKind Kind, IReadOnlyList<string> Args, bool Clean = false, bool Global = false);
+internal sealed record Command(CommandKind Kind, IReadOnlyList<string> Args, bool Clean = false, bool Global = false, bool Docker = false);
 
 internal static class Cli
 {
     public const string Usage = """
         usage:
-          pen                       interactive shell in this project's sandbox
-          pen <cmd…>                run a command in the sandbox, e.g. pen claude
-          pen run <cmd…>            same, for a command whose name matches a subcommand
+          pen [--docker]            interactive shell in this project's sandbox
+          pen [--docker] <cmd…>     run a command in the sandbox, e.g. pen claude
+          pen [--docker] run <cmd…> same, for a command whose name matches a subcommand
+                                    --docker: with Docker-in-Docker (or docker = true in .pen/config)
           pen upgrade [--clean]     newer base image and agents; --clean skips the cache
           pen allow <domain…> [--global]
                                     allow domains, applied to running sessions too
@@ -34,11 +35,21 @@ internal static class Cli
 
     /// <summary>
     /// A first argument that's a subcommand selects it; any other first argument
-    /// is the command to run. Options before the command are pen's, and pen has
-    /// none yet beyond help and version, so any other one is an error.
+    /// is the command to run. Options before the command are pen's: --docker
+    /// (for running), help and version. Any other one is an error.
     /// </summary>
     public static Command Parse(IReadOnlyList<string> args)
     {
+        if (args.Count > 0 && args[0] == "--docker")
+        {
+            var after = args.Skip(1).SkipWhile(a => a == "--docker").ToList();
+            var c = Parse(after);
+            if (c.Kind != CommandKind.Run)
+                throw Error(after.Count > 0 && Subcommands.ContainsKey(after[0])
+                    ? $"--docker goes only with a command to run, not pen {after[0]}"
+                    : $"--docker goes only with a command to run");
+            return c with { Docker = true };
+        }
         if (args.Count == 0) return new(CommandKind.Run, []);
         var first = args[0];
         var rest = args.Skip(1).ToList();

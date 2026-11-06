@@ -41,7 +41,19 @@ public class ConfigTests
     public void UnknownKeyNamesFileAndLine()
     {
         Assert.Equal("~/.config/pen/config:3: unknown key \"githib.acme\"", Error(() => User("# x\n\ngithib.acme = t")));
-        Assert.Equal(".pen/config:1: unknown key \"docker\"", Error(() => Proj("docker = true"))); // not implemented yet
+        Assert.Equal(".pen/config:1: unknown key \"dockr\"", Error(() => Proj("dockr = true")));
+    }
+
+    [Fact]
+    public void DockerIsAProjectBoolean()
+    {
+        Assert.Null(Proj("allow = a.com").Docker);
+        Assert.True(Proj("docker = true").Docker);
+        Assert.True(Proj("docker = True").Docker);
+        Assert.False(Proj("docker = false").Docker);
+        Assert.Equal(".pen/config:1: docker must be true or false (it's \"yes\")", Error(() => Proj("docker = yes")));
+        Assert.StartsWith(".pen/config:2: docker is already set above", Error(() => Proj("docker = true\ndocker = false")));
+        Assert.StartsWith("~/.config/pen/config:1: \"docker\" belongs in a project's .pen/config", Error(() => User("docker = true")));
     }
 
     [Theory]

@@ -78,7 +78,7 @@ When it exits, pen lists any domains the proxy blocked. A missing SDK or tool sh
 error. Fix what turns up on the host:
 - `pen allow <domain…>` for blocked domains;
 - a [`.pen/Dockerfile`](#project-settings-pen) for SDKs or tools the image lacks;
-- Docker, if the project needs it, isn't available yet (see [Docker-in-Docker](#docker-in-docker)).
+- `docker = true` in `.pen/config` if the project needs Docker (see [Docker-in-Docker](#docker-in-docker)).
 
 For a brand-new project, run `git init` on the host first. pen quarantines a `.git` that the agent
 creates (see [Threat model](#threat-model-and-limitations)).
@@ -99,8 +99,9 @@ project's logins and caches.
 ## Commands
 
 ```
-pen [<cmd…>]                    a shell, or any command, in this project's sandbox (e.g. pen claude)
-pen run <cmd…>                  the same, for a command named like a subcommand (pen run upgrade)
+pen [--docker] [<cmd…>]         a shell, or any command, in this project's sandbox (e.g. pen claude);
+                                --docker adds Docker-in-Docker for this session
+pen [--docker] run <cmd…>       the same, for a command named like a subcommand (pen run upgrade)
 pen allow <domain…> [--global]  allow domains, applied to running sessions too
 pen allow                       list recently blocked domains
 pen sign [<base>]               on the host: re-sign your unpushed commits with your key
@@ -241,7 +242,7 @@ Everything here is optional. A project needs no files to use pen.
 - **`.pen/config`:** the same `key = value` format as the user config, with project keys only:
   - `allow = <domain>` (repeatable)
   - `github_owner = <owner>`
-  - `docker = true`, once [Docker-in-Docker](#docker-in-docker) is available
+  - `docker = true` turns on [Docker-in-Docker](#docker-in-docker) for every session
 
   Tokens and `env.` lines are refused here, since the file is usually committed.
 - **`.pen/Dockerfile`:** a project layer for SDKs and tools the base image lacks, e.g.
@@ -291,7 +292,7 @@ forgotten `pen sign` then fails at push time instead of slipping through.
 ## Upgrading and resetting
 
 - **Agents and tools:** `pen upgrade` pulls a newer base image, reinstalls the agents (never from
-  cache), pulls the proxy image and, run in a project, rebuilds its `.pen/Dockerfile` layer.
+  cache), pulls the proxy and dind images and, run in a project, rebuilds its `.pen/Dockerfile` layer.
   `pen upgrade --clean` rebuilds everything without the cache. Logins and config survive both.
 - **pen itself:** `git pull` here, then rerun `cli/install.sh`. The next session rebuilds the image
   if its files changed.
@@ -347,15 +348,39 @@ For Codex, copy `~/.codex/config.toml` (minus anything host-specific) and `AGENT
 
 ## Docker-in-Docker
 
-*Not in this version yet.* It will be turned on with `pen --docker …` or `docker = true` in
-`.pen/config`. It adds a privileged `docker:dind` sidecar on the sandbox network, with the project
-mounted at the same path and image pulls going through the proxy. Things to know once it lands:
+For projects that need Docker (Testcontainers, compose stacks, image builds), run `pen --docker claude`
+(or `pen --docker` for a shell), or put `docker = true` in `.pen/config` to have it in every session.
+The session gets its own privileged `docker:dind` sidecar on the sandbox network, and the agent gets
+`DOCKER_HOST=tcp://dind:2375`. Images and build cache persist in the project's `<project key>_dind`
+volume, which `pen reset` removes.
+
+- Only one `--docker` session per project runs at a time (they'd share the volume). Plain sessions
+  alongside it are fine, and can't reach its daemon.
+- The project is mounted into dind at the same path, so `docker run -v "$PWD:/src" …` and compose
+  bind mounts work. `.git/config`, `.git/hooks` and `.pen/` are read-only there too, and the
+  session-end check runs after dind is gone.
+- Image pulls, containers and `docker build` steps all go through the proxy and its allowlist.
+  Docker Hub, MCR and GHCR are on the default list.
+
+Things to know:
 - Published ports show up at `dind:<port>`, not `localhost`. Testcontainers handles this through `DOCKER_HOST`.
-- Containers inside dind get the same allowlist as the agent, so their registries and package feeds
-  must be on it.
-- Only one `--docker` session per project at a time.
-- While it's on, isolation is weaker: on OrbStack, a privileged escape reaches the VM, which can see
-  the Mac's `/Users`.
+- Containers inside dind get `HTTP(S)_PROXY` set, with `NO_PROXY` covering only `localhost` and
+  `127.0.0.1`. An app that honors those (curl, Go, .NET's `HttpClient`) and calls another container
+  by name, like `http://api:8080` in a compose stack, goes to the proxy and is refused. Add those
+  names to `NO_PROXY` in your compose file.
+- Busybox `wget` (Alpine's default) can't fetch `https://` through a proxy. Use curl.
+- Bind mounts resolve inside dind, which has only the project. `-v /tmp/x:/x` mounts dind's `/tmp`,
+  not the agent's.
+- On a rootful Linux host, files that containers write into the project as root are owned by root
+  on the host. Pass `--user "$(id -u):$(id -g)"` (or `user:` in compose) to containers that write
+  there. On OrbStack and rootless Docker they're yours.
+- Under rootless Docker, dind works the same, with the host's limits: containers get only the cgroup
+  controllers systemd delegates to your user (by default `cpu memory pids`, so no `--cpuset-cpus`
+  or block-IO limits), and overlayfs needs kernel 5.11 or newer (older kernels fall back to the
+  slow `vfs` driver).
+- While it's on, isolation is weaker: an escape from the privileged dind container reaches root on
+  a rootful Linux host, the VM (which can see the Mac's `/Users`) on OrbStack, and your user
+  account under rootless Docker.
 
 ## Threat model and limitations
 
@@ -385,7 +410,7 @@ change the image's tools. `id` shows `root` in those sessions. pen detects rootl
 
 **Limitations:**
 - Allowed domains, including the AI providers and github.com, are still possible exfiltration channels.
-- Docker-in-Docker, when on, weakens isolation (privileged container).
+- Docker-in-Docker, when on, weakens isolation (a privileged container; see [Docker-in-Docker](#docker-in-docker)).
 - Files the agent edits still get built or run on the host later: MSBuild `.props`/`.targets`,
   `package.json` scripts, `.vscode/tasks.json`, `.envrc`. These show up in the diff, so review it
   before building on the host.

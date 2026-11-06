@@ -49,6 +49,7 @@ registry-1.docker.io
 auth.docker.io
 index.docker.io
 production.cloudflare.docker.com
+production.cloudfront.docker.com
 mcr.microsoft.com
 .data.mcr.microsoft.com
 ghcr.io

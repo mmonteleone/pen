@@ -144,7 +144,7 @@ internal static class Image
             ["NUGET_PACKAGES"] = "/nonexistent",
             ["PEN_SEED"] = "/nonexistent",
         };
-        var psi = Proc.Info("docker", ["compose", "-f", "-", "-p", "pen-upgrade", "pull", "proxy"], env);
+        var psi = Proc.Info("docker", ["compose", "--profile", "docker", "-f", "-", "-p", "pen-upgrade", "pull", "proxy", "dind"], env);
         psi.RedirectStandardInput = true;
         using var p = Proc.Start(psi);
         using (var stdin = p.StandardInput)

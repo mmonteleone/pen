@@ -19,6 +19,8 @@ internal sealed partial class Config
     public List<string> Allow { get; } = [];
     /// <summary>Which owner's token to use (project only).</summary>
     public string? GitHubOwner { get; private set; }
+    /// <summary>docker = true|false: Docker-in-Docker for every session (project only); null when unset.</summary>
+    public bool? Docker { get; private set; }
 
     public static Config Empty { get; } = new();
 
@@ -87,6 +89,18 @@ internal sealed partial class Config
                 if (!OwnerRegex().IsMatch(value)) throw new PenException($"{Where()}: \"{value}\" isn't a GitHub owner name");
                 if (config.GitHubOwner != null) throw new PenException($"{Where()}: github_owner is already set above");
                 config.GitHubOwner = value;
+            }
+            else if (key == "docker")
+            {
+                if (kind == ConfigKind.User)
+                    throw new PenException($"{Where()}: \"docker\" belongs in a project's .pen/config (or use pen --docker)");
+                if (config.Docker != null) throw new PenException($"{Where()}: docker is already set above");
+                config.Docker = value.ToLowerInvariant() switch
+                {
+                    "true" => true,
+                    "false" => false,
+                    _ => throw new PenException($"{Where()}: docker must be true or false (it's \"{value}\")"),
+                };
             }
             else
             {

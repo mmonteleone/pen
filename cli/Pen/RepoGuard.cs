@@ -170,8 +170,12 @@ internal static class RepoGuard
     /// <paramref name="readOnlyRoot"/> also makes the agent's root filesystem
     /// read-only (rootless Docker, where the agent is container root and would
     /// otherwise own the image's files).
+    /// <paramref name="dindContainer"/>, in docker sessions, names the dind
+    /// container, gives dind the same mounts (so containers the agent starts
+    /// with -v $PWD:… can't write what the agent can't), and points the agent
+    /// at dind once it's healthy.
     /// </summary>
-    public static string ComposeOverride(IReadOnlyList<Mount> mounts, bool readOnlyRoot = false)
+    public static string ComposeOverride(IReadOnlyList<Mount> mounts, bool readOnlyRoot = false, string? dindContainer = null)
     {
         using var ms = new MemoryStream();
         using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
@@ -181,27 +185,51 @@ internal static class RepoGuard
             w.WriteStartObject("services");
             w.WriteStartObject("agent");
             if (readOnlyRoot) w.WriteBoolean("read_only", true);
-            w.WriteStartArray("volumes");
-            foreach (var m in mounts)
+            if (dindContainer != null)
             {
-                var path = m.Path.Replace("$", "$$", StringComparison.Ordinal);
-                w.WriteStartObject();
-                w.WriteString("type", "bind");
-                w.WriteString("source", path);
-                w.WriteString("target", path);
-                w.WriteBoolean("read_only", m.ReadOnly);
-                // A missing source is an error, never created (as root, on Linux).
-                w.WriteStartObject("bind");
-                w.WriteBoolean("create_host_path", false);
+                w.WriteStartObject("environment");
+                w.WriteString("DOCKER_HOST", "tcp://dind:2375");
+                w.WriteString("PEN_DOCKER", "1");
+                w.WriteEndObject();
+                w.WriteStartObject("depends_on");
+                w.WriteStartObject("dind");
+                w.WriteString("condition", "service_healthy");
                 w.WriteEndObject();
                 w.WriteEndObject();
             }
-            w.WriteEndArray();
+            WriteMounts(w, mounts);
             w.WriteEndObject();
+            if (dindContainer != null)
+            {
+                w.WriteStartObject("dind");
+                w.WriteString("container_name", dindContainer);
+                WriteMounts(w, mounts);
+                w.WriteEndObject();
+            }
             w.WriteEndObject();
             w.WriteEndObject();
         }
         return Encoding.UTF8.GetString(ms.ToArray()) + "\n";
+    }
+
+    private static void WriteMounts(Utf8JsonWriter w, IReadOnlyList<Mount> mounts)
+    {
+        w.WriteStartArray("volumes");
+        foreach (var m in mounts)
+        {
+            var path = m.Path.Replace("$", "$$", StringComparison.Ordinal);
+            w.WriteStartObject();
+            w.WriteString("type", "bind");
+            w.WriteString("source", path);
+            w.WriteString("target", path);
+            w.WriteBoolean("read_only", m.ReadOnly);
+            // A missing source is an error, never created (as root, on Linux).
+            w.WriteStartObject("bind");
+            w.WriteBoolean("create_host_path", false);
+            w.WriteEndObject();
+            w.WriteEndObject();
+        }
+        w.WriteEndArray();
     }
 
     internal static void EnsureDirectory(string dir, string path)

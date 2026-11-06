@@ -30,7 +30,7 @@ RUN apt-get update; \
     ln -s /usr/bin/fdfind /usr/local/bin/fd; \
     rm -rf /var/lib/apt/lists/*
 
-# gh and the docker CLI + compose plugin (client only) from their apt repos.
+# gh and the docker CLI + buildx and compose plugins (client only) from their apt repos.
 RUN install -d -m 0755 /etc/apt/keyrings; \
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli.gpg; \
     echo "deb [arch=${TARGETARCH} signed-by=/etc/apt/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" \
@@ -39,7 +39,7 @@ RUN install -d -m 0755 /etc/apt/keyrings; \
     echo "deb [arch=${TARGETARCH} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" \
       > /etc/apt/sources.list.d/docker.list; \
     apt-get update; \
-    apt-get install -y --no-install-recommends gh docker-ce-cli docker-compose-plugin; \
+    apt-get install -y --no-install-recommends gh docker-ce-cli docker-buildx-plugin docker-compose-plugin; \
     rm -rf /var/lib/apt/lists/*
 
 # uv / uvx.
