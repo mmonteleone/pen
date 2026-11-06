@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net11.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>pen</AssemblyName>
+    <RootNamespace>Pen</RootNamespace>
+    <Version>0.1.0</Version>
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <StripSymbols>true</StripSymbols>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Pen.Tests" />
+  </ItemGroup>
+
+  <!-- Everything the CLI needs at runtime is embedded, so it never reads this
+       repo once installed. Logical names are repo-relative paths. -->
+  <PropertyGroup>
+    <RepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../'))</RepoRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="$(RepoRoot)compose.yaml" LogicalName="compose.yaml" />
+    <EmbeddedResource Include="$(RepoRoot)image/**/*" LogicalName="image/%(RecursiveDir)%(Filename)%(Extension)" />
+    <EmbeddedResource Include="$(RepoRoot)proxy/**/*" LogicalName="proxy/%(RecursiveDir)%(Filename)%(Extension)" />
+    <EmbeddedResource Include="$(RepoRoot)templates/**/*" LogicalName="templates/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

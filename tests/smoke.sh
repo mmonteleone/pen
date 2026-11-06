@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
 # Container smoke checks for pen, accumulated chunk by chunk. Run on both the
-# Mac (OrbStack/arm64) and the server (Docker/amd64). Exits non-zero on the
-# first failure.
+# Mac (OrbStack/arm64) and the server (Docker/amd64), against the installed pen
+# (cli/install.sh). Exits non-zero on the first failure.
 #
-#   tests/smoke.sh            all checks
-#   SMOKE_SLOW=1 tests/smoke.sh   also the PEN_REFRESH rebuild check (~1 min)
+#   tests/smoke.sh                 all checks
+#   SMOKE_SLOW=1 tests/smoke.sh    also `pen upgrade` (reinstalls the agents, ~1 min)
 #
-# Until the CLI exists (chunk 7), sessions are stood up by hand the way the CLI
-# will: a session dir holding compose.yaml, squid.conf, allowlist.txt and an
-# empty proxy.log (666), then `compose run`, then `down`. The image must
-# already be built: docker build -t pen:latest image/
+# Optional, for checks that need real credentials (values are only ever written
+# to a throwaway config file, mode 600, removed on exit):
+#   CLAUDE_CODE_OAUTH_TOKEN, OPENAI_API_KEY   trivial prompts in claude / codex
+#
+# Config-dependent checks run pen with a throwaway HOME, so your own
+# ~/.config/pen is never changed. Everything else uses your real HOME (pen
+# creates ~/.config/pen/ on its first run, as it would anyway).
 set -euo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-IMAGE=${PEN_IMAGE:-pen:latest}
+IMAGE=pen:latest
+PEN=${PEN:-pen}
 
 # --- output -------------------------------------------------------------------
 pass() { printf '  \033[32mok\033[0m   %s\n' "$*"; }
@@ -25,58 +29,56 @@ check() { # check <description> <command…>
   local desc=$1; shift
   if "$@"; then pass "$desc"; else fail "$desc"; fi
 }
+contains() { grep -qF -- "$1" <<<"$2"; } # contains <needle> <haystack>
+
+command -v "$PEN" >/dev/null || fail "pen not found on PATH: run cli/install.sh"
+command -v python3 >/dev/null || fail "python3 is needed on the host (pty and lock checks)"
 
 # --- fixture project ------------------------------------------------------------
 # Under $HOME so the "only the project path exists under /Users" check means
-# something. Removed (with its volumes) on exit.
+# something. Removed (with its volumes, containers and runtime dir) on exit.
+REAL_HOME=$HOME
 PROJECT_DIR=$(cd "$(mktemp -d "$HOME/.pen-smoke.XXXXXX")" && pwd -P)
-PEN_PROJECT="pen-smoke-$(echo "${PROJECT_DIR##*.}" | tr 'A-Z' 'a-z')"
-STATE=$(mktemp -d "${TMPDIR:-/tmp}/pen-smoke-state.XXXXXX")
-chmod 700 "$STATE"
-export PROJECT_DIR PEN_PROJECT PEN_IMAGE=$IMAGE
-export PEN_UID=$(id -u) PEN_GID=$(id -g)
+SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/pen-smoke.XXXXXX")
+FAKE_HOME=$SCRATCH/home
+mkdir -p "$FAKE_HOME"
 export NUGET_PACKAGES=${NUGET_PACKAGES:-$HOME/.nuget/packages}
+PEN_UID=$(id -u) PEN_GID=$(id -g)
+if command -v sha256sum >/dev/null; then sha() { sha256sum; }; else sha() { shasum -a 256; }; fi
+HASH=$(printf %s "$PROJECT_DIR" | sha | cut -c1-8)
+KEY= RUNTIME=
 
 cleanup() {
-  local s
-  for s in "$STATE"/sessions/*/; do
-    [ -f "$s/compose.yaml" ] && docker compose -f "$s/compose.yaml" -p "$(cat "$s/name")" down -t 1 >/dev/null 2>&1 || true
-  done
-  docker volume rm "${PEN_PROJECT}_home" "${PEN_PROJECT}_nuget" >/dev/null 2>&1 || true
-  rm -rf "$PROJECT_DIR" "$STATE"
+  cd /
+  if [ -n "$KEY" ]; then
+    docker ps -aq --filter "name=^$KEY-" | xargs docker rm -f >/dev/null 2>&1 || true
+    docker network ls -q --filter "name=^$KEY-" | xargs docker network rm >/dev/null 2>&1 || true
+    docker volume rm "${KEY}_home" "${KEY}_nuget" >/dev/null 2>&1 || true
+    rm -rf "$REAL_HOME/.local/state/pen/$KEY"
+  fi
+  rm -rf "$PROJECT_DIR" "$SCRATCH"
 }
 trap cleanup EXIT
 
 git -C "$PROJECT_DIR" init -q
 git -C "$PROJECT_DIR" -c user.name=smoke -c user.email=smoke@example.invalid commit -q --allow-empty -m init
+cd "$PROJECT_DIR"
 
-# --- hand-written session (replaced by `pen run` from chunk 7) -------------------
-LAST_SESSION=
-session_new() {
-  local id; id=$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')
-  local dir="$STATE/sessions/$id"
-  mkdir -p "$dir"; chmod 700 "$STATE/sessions" "$dir"
-  cp "$REPO/compose.yaml" "$REPO/proxy/squid.conf" "$REPO/proxy/allowlist.txt" "$dir/"
-  : >"$dir/proxy.log"; chmod 666 "$dir/proxy.log"
-  echo "$PEN_PROJECT-$id" >"$dir/name"
-  LAST_SESSION=$dir
-  docker volume create "${PEN_PROJECT}_home" >/dev/null
-  docker volume create "${PEN_PROJECT}_nuget" >/dev/null
-}
-compose() { docker compose --progress quiet -f "$LAST_SESSION/compose.yaml" -p "$(cat "$LAST_SESSION/name")" "$@"; }
-session_down() { compose down -t 1 >/dev/null 2>&1; rm -f "$LAST_SESSION/compose.yaml"; }
-# pen_run <cmd…>: one whole session, like `pen run <cmd…>` without a TTY.
-pen_run() {
-  session_new
-  local rc=0
-  compose run --rm -T --name "$(cat "$LAST_SESSION/name")-agent" agent "$@" || rc=$?
-  session_down
-  return $rc
-}
+# pen_run <cmd…>: one whole session without a TTY, like `pen run <cmd…> </dev/null`.
+pen_run() { "$PEN" run "$@" </dev/null; }
 # in_sandbox <bash script>: run a script in a fresh session, as agent.
 in_sandbox() { pen_run bash -c "$1"; }
+# fake_pen <args…>: pen with the throwaway HOME (its config in $FAKE_HOME/.config/pen).
+fake_pen() { HOME=$FAKE_HOME DOCKER_CONFIG=${DOCKER_CONFIG:-$REAL_HOME/.docker} "$PEN" "$@" </dev/null; }
+fake_config() { mkdir -p "$FAKE_HOME/.config/pen"; printf '%s\n' "$@" >"$FAKE_HOME/.config/pen/config"; chmod 600 "$FAKE_HOME/.config/pen/config"; }
+# The newest session's dir (under the real HOME's runtime dir).
+last_session() { ls -td "$RUNTIME"/sessions/*/ | head -1; }
+containers() { docker ps -aq --filter "name=^$KEY-" | wc -l | tr -d ' '; }
 
-docker image inspect "$IMAGE" >/dev/null 2>&1 || fail "image $IMAGE not found; build it first: docker build -t pen:latest image/"
+# The first session builds pen:latest if it's missing or stale, and fixes the project key.
+"$PEN" run true </dev/null 2>&1 | grep '^pen:' || true
+RUNTIME=$(ls -d "$HOME"/.local/state/pen/pen-*-"$HASH")
+KEY=$(basename "$RUNTIME")
 
 # ==============================================================================
 section "1. Base image"
@@ -112,6 +114,7 @@ check "tools present (git gh rg fd jq curl less vim unzip make python3 uv node n
 # ==============================================================================
 section "2. Entrypoint and hardening (step 9)"
 
+git -C "$PROJECT_DIR" config commit.gpgsign true
 out=$(in_sandbox '
   echo "id=$(id -u):$(id -g)"
   echo "user=$(id -un) home=$HOME"
@@ -127,7 +130,7 @@ out=$(in_sandbox '
   cd "$PROJECT_DIR" && echo "pwd=$PWD"
   git status >/dev/null 2>/tmp/gs.err && echo git-status-ok || cat /tmp/gs.err
   touch "$PROJECT_DIR/created-inside"
-  git config commit.gpgsign true 2>/dev/null; echo "gpgsign_effective=$(git config commit.gpgsign)"
+  echo "gpgsign_effective=$(git config commit.gpgsign)"
 ')
 has() { grep -qxF -- "$1" <<<"$out"; }
 check "runs as host UID/GID ($PEN_UID:$PEN_GID)" has "id=$PEN_UID:$PEN_GID"
@@ -189,13 +192,11 @@ else
   note "DNS: external names do NOT resolve inside the sandbox → drop the DNS limitation from the README"
 fi
 
-session_new
-compose run --rm -T --name "$(cat "$LAST_SESSION/name")-agent" agent \
-  bash -c 'curl -s -o /dev/null -I https://example.com; curl -s -o /dev/null -I https://github.com' || true
-session_down
-check "proxy.log records the denial (TCP_DENIED example.com:443)" grep -q 'TCP_DENIED/403 CONNECT example.com:443' "$LAST_SESSION/proxy.log"
-check "proxy.log records the allowed request" grep -q 'CONNECT github.com:443' "$LAST_SESSION/proxy.log"
-check "proxy.log has no healthcheck probes" not grep -q ' 127.0.0.1 ' "$LAST_SESSION/proxy.log"
+in_sandbox 'curl -s -o /dev/null -I https://example.com; curl -s -o /dev/null -I https://github.com' >/dev/null 2>&1 || true
+log=$(last_session)proxy.log
+check "proxy.log records the denial (TCP_DENIED example.com:443)" grep -q 'TCP_DENIED/403 CONNECT example.com:443' "$log"
+check "proxy.log records the allowed request" grep -q 'CONNECT github.com:443' "$log"
+check "proxy.log has no healthcheck probes" not grep -q ' 127.0.0.1 ' "$log"
 
 fails=0
 for i in $(seq 10); do
@@ -219,29 +220,276 @@ check "auto-updaters off (env)" \
   in_sandbox '[ "$DISABLE_AUTOUPDATER" = 1 ] && [ "$OPENCODE_DISABLE_AUTOUPDATE" = 1 ] && [ "$PI_SKIP_VERSION_CHECK" = 1 ] && grep -q "check_for_update_on_startup = false" /etc/codex/managed_config.toml'
 
 # Trivial prompts, only when credentials are in the environment (otherwise log
-# in inside a session by hand). Values are passed by name, never on a command line.
+# in inside a session by hand). They reach the agent as env. lines in a
+# throwaway config, the way users pass them.
 prompt_check() { # prompt_check <agent> <env var> <cmd…>
   local agent=$1 var=$2; shift 2
   if [ -z "${!var:-}" ]; then note "$agent prompt: skipped (set $var to run it)"; return; fi
-  session_new
+  fake_config "env.$var = ${!var}"
   local out
-  out=$(compose run --rm -T -e "$var" --name "$(cat "$LAST_SESSION/name")-agent" agent timeout 180 "$@" </dev/null 2>&1 || true)
-  session_down
+  out=$(fake_pen run timeout 180 "$@" 2>&1 || true)
   check "$agent answers a trivial prompt through the proxy" grep -q 4 <<<"$out"
-  if grep -q TCP_DENIED "$LAST_SESSION/proxy.log"; then
-    note "$agent: denied → $(grep TCP_DENIED "$LAST_SESSION/proxy.log" | awk '{print $5}' | sort -u | tr '\n' ' ')"
+  local log; log=$(ls -td "$FAKE_HOME"/.local/state/pen/"$KEY"/sessions/*/ | head -1)proxy.log
+  if grep -q TCP_DENIED "$log"; then
+    note "$agent: denied → $(grep TCP_DENIED "$log" | awk '{print $5}' | sort -u | tr '\n' ' ')"
   fi
 }
+# The fixture project's home volume is fresh, so this also shows
+# env.CLAUDE_CODE_OAUTH_TOKEN starts Claude logged in.
 prompt_check claude CLAUDE_CODE_OAUTH_TOKEN claude -p 'What is 2+2? Reply with just the digit.'
 prompt_check codex OPENAI_API_KEY codex exec --skip-git-repo-check 'What is 2+2? Reply with just the digit.'
 
 if [ "${SMOKE_SLOW:-}" = 1 ]; then
   v1=$(docker run --rm --entrypoint stat "$IMAGE" -c %Y /usr/local/lib/node_modules/@anthropic-ai/claude-code/package.json)
-  docker build -q --build-arg "PEN_REFRESH=$(date +%s)" -t "$IMAGE" "$REPO/image" >/dev/null
+  "$PEN" upgrade >"$SCRATCH/upgrade.log" 2>&1 || { tail -20 "$SCRATCH/upgrade.log" >&2; fail "pen upgrade"; }
   v2=$(docker run --rm --entrypoint stat "$IMAGE" -c %Y /usr/local/lib/node_modules/@anthropic-ai/claude-code/package.json)
-  check "changing PEN_REFRESH reinstalls the agents" test "$v1" != "$v2"
+  check "pen upgrade reinstalls the agents (PEN_REFRESH), base image unchanged or not" test "$v1" != "$v2"
+  check "pen upgrade pulls the proxy image" grep -q 'ubuntu/squid' "$SCRATCH/upgrade.log"
 else
-  note "PEN_REFRESH rebuild check: skipped (SMOKE_SLOW=1 to run it)"
+  note "pen upgrade check: skipped (SMOKE_SLOW=1 to run it)"
 fi
+
+# ==============================================================================
+section "5. CLI: install, dispatch, directory rules"
+
+PTY="python3 $REPO/tests/pty-run.py"
+mode_of() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
+# wait_for <docker name regex>: until such a container is running (max 30 s).
+wait_for() {
+  local i
+  for i in $(seq 300); do
+    docker ps --format '{{.Names}}' | grep -qE "$1" && return 0
+    sleep 0.1
+  done
+  return 1
+}
+has_all() { local h=$1 n; shift; for n; do contains "$n" "$h" || return 1; done; }
+lock_free() { # lock_free <file> <exclusive|shared>: can another process take it now?
+  python3 -c '
+import fcntl, sys
+f = open(sys.argv[1], "a")
+try:
+    fcntl.flock(f, (fcntl.LOCK_EX if sys.argv[2] == "exclusive" else fcntl.LOCK_SH) | fcntl.LOCK_NB)
+except BlockingIOError:
+    sys.exit(1)' "$1" "$2"
+}
+
+check "pen --version" bash -c "'$PEN' --version | grep -qE '^pen [0-9]'"
+if command -v fish >/dev/null; then
+  check "pen runs from fish" fish -c "'$PEN' --version" >/dev/null
+else
+  note "fish not installed: skipped the fish check"
+fi
+check "pen --help lists the subcommands" bash -c "'$PEN' --help | grep -q 'pen allow' && '$PEN' --help | grep -q 'pen upgrade'"
+rc=0; "$PEN" --bogus >/dev/null 2>&1 || rc=$?
+check "an unknown option is a usage error (exit 2)" test "$rc" = 2
+rc=0; "$PEN" run >/dev/null 2>&1 || rc=$?
+check "pen run without a command is a usage error (exit 2)" test "$rc" = 2
+check "a not-yet-built subcommand says so" bash -c "'$PEN' sign 2>&1 | grep -q \"isn't implemented yet\""
+
+refuse() { # refuse <dir> <expected message part>
+  local out rc=0
+  out=$(cd "$1" && "$PEN" run true </dev/null 2>&1) || rc=$?
+  [ "$rc" != 0 ] && contains "$2" "$out"
+}
+check "refuses \$HOME" refuse "$HOME" "home directory"
+check "refuses /" refuse / "refusing to run in /"
+check "refuses an ancestor of \$HOME" refuse "$(dirname "$HOME")" "contains your home directory"
+check "refuses ~/.config (contains ~/.config/pen)" refuse "$HOME/.config" "~/.config/pen"
+mkdir -p "$PROJECT_DIR/sub/dir"
+check "refuses a repo subdirectory, naming the root" refuse "$PROJECT_DIR/sub/dir" "inside the git repo at $PROJECT_DIR"
+rmdir "$PROJECT_DIR/sub/dir" "$PROJECT_DIR/sub"
+ln -s "$PROJECT_DIR" "$SCRATCH/link"
+check "a symlinked path maps to the same project key" \
+  bash -c "cd '$SCRATCH/link' && '$PEN' run true </dev/null >/dev/null 2>&1 && [ \$(ls '$RUNTIME/sessions' | wc -l) -ge 1 ] && [ \$(ls -d '$HOME'/.local/state/pen/pen-*-$HASH | wc -l) = 1 ]"
+
+# ==============================================================================
+section "6. Sessions"
+
+rc=0; pen_run sh -c 'exit 7' 2>/dev/null || rc=$?
+check "the command's exit code passes through" test "$rc" = 7
+check "pen run ls | head works without a TTY" test "$("$PEN" run ls -a </dev/null 2>/dev/null | head -1)" = .
+out=$($PTY -- "$PEN" run tty)
+check "with a terminal, the agent gets one too" contains "/dev/pts/" "$out"
+out=$($PTY -- "$PEN" claude --version)
+check "pen claude runs claude" grep -qE '[0-9]+\.[0-9]+\.[0-9]+' <<<"$out"
+out=$($PTY --send-on '\$ $' 'echo shell-$((6*7)); exit\r' --timeout 60 -- "$PEN")
+check "pen with no arguments is an interactive shell" contains "shell-42" "$out"
+
+pen_run bash -c 'sleep 8; curl -s -o /dev/null -w "after:%{http_code}" -I https://github.com' >"$SCRATCH/first.out" 2>&1 &
+first=$!
+wait_for "^$KEY-.*-agent$" || fail "first session didn't start"
+check "a second session runs alongside the first" \
+  test "$(in_sandbox 'curl -s -o /dev/null -w %{http_code} -I https://github.com' 2>/dev/null)" = 200
+wait "$first" || true
+check "the first still works after the second exits" grep -q 'after:200' "$SCRATCH/first.out"
+check "docker ps is clean after the last session exits" test "$(containers)" = 0
+check "no session network is left" test -z "$(docker network ls -q --filter "name=^$KEY-")"
+s=$(last_session)
+check "an ended session keeps only its proxy.log" test "$(ls -A "$s")" = proxy.log
+check "runtime and session dirs are 700" bash -c "[ $(mode_of "$RUNTIME") = 700 ] && [ $(mode_of "$s") = 700 ] && [ $(mode_of "$RUNTIME/sessions") = 700 ]"
+check "proxy.log is 666" test "$(mode_of "${s}proxy.log")" = 666
+check "the project's volumes are named by its key" docker volume inspect "${KEY}_home" "${KEY}_nuget" >/dev/null
+check "pen:latest carries its image hash" test -n "$(docker image inspect --format '{{ index .Config.Labels "pen.image-hash" }}' "$IMAGE")"
+
+# ==============================================================================
+section "7. Locks, dead sessions, signals"
+
+"$PEN" run sleep 120 </dev/null >/dev/null 2>&1 &
+p=$!
+wait_for "^$KEY-.*-agent$" || fail "session didn't start"
+check "project.lock is held shared: another shared lock is fine" lock_free "$RUNTIME/project.lock" shared
+check "...and an exclusive one (pen sign/reset) is refused" not lock_free "$RUNTIME/project.lock" exclusive
+sdir=$(ls -td "$RUNTIME"/sessions/*/ | head -1)
+check "the running session's session.lock is held" not lock_free "${sdir}session.lock" exclusive
+compose_pid=$(pgrep -P "$p" | head -1)
+if command -v lsof >/dev/null; then
+  check "the compose child holds no lock fds (lsof)" not bash -c "lsof -p $compose_pid 2>/dev/null | grep -q '\.lock'"
+  check "while pen itself holds both locks" test "$(lsof -p "$p" 2>/dev/null | grep -c '\.lock$')" = 2
+else
+  note "lsof not installed: skipped the fd checks"
+fi
+kill -9 "$p"; wait "$p" 2>/dev/null || true
+check "after a SIGKILL'd pen, its stack is still up" test "$(containers)" -ge 2
+check "...and its session.lock is free" lock_free "${sdir}session.lock" exclusive
+out=$(pen_run true 2>&1)
+check "the next pen ends the dead session" contains "whose pen exited without ending it" "$out"
+check "...taking its stack down" test "$(containers)" = 0
+check "...and leaving only its proxy.log" test "$(ls -A "$sdir")" = proxy.log
+
+"$PEN" run sleep 120 </dev/null >/dev/null 2>&1 &
+p=$!
+wait_for "^$KEY-.*-agent$" || fail "session didn't start"
+kill -TERM "$p"
+wait "$p" 2>/dev/null || true
+check "SIGTERM: pen removes the container and tears down the stack" test "$(containers)" = 0
+
+out=$($PTY --hangup-on READY -- "$PEN" run bash -c 'echo READY; sleep 60')
+check "closing the terminal ends the session" contains "AFTER-HANGUP" "$out"
+check "...within 10 s" test "$(awk '/^AFTER-HANGUP/ { print ($2 < 10) }' <<<"$out")" = 1
+check "...with the container removed and the stack down" test "$(containers)" = 0
+
+# (bash ends a loop whose child dies of the signal, so each signal gets its own loop.)
+out=$($PTY --send-on READY1 '\x03' --send-on READY2 '\x1c' -- "$PEN" run bash -c 'trap "echo GOT-INT" INT; trap "echo GOT-QUIT" QUIT; wait_a_bit() { for i in $(seq 25); do sleep 0.2; done; }; echo READY1; wait_a_bit; echo READY2; wait_a_bit; echo DONE')
+check "Ctrl-C reaches the agent, not pen" contains "GOT-INT" "$out"
+check "Ctrl-\\ reaches the agent, not pen" contains "GOT-QUIT" "$out"
+check "...and the session carries on to a normal exit" has_all "$out" DONE "EXIT 0"
+
+# Ctrl-C during the automatic image build: make pen:latest stale (same image,
+# wrong label), interrupt the rebuild, then put the real image back.
+docker image tag "$IMAGE" pen:smoke-backup
+echo 'FROM pen:smoke-backup' | docker build -q --label pen.image-hash=stale -t "$IMAGE" - >/dev/null
+before=$(ls "$RUNTIME/sessions" | wc -l)
+out=$($PTY --send-on 'rebuilding' '\x03' -- "$PEN" run true)
+docker image tag pen:smoke-backup "$IMAGE" && docker rmi pen:smoke-backup >/dev/null
+check "Ctrl-C during the image build aborts the launch" bash -c 'grep -q rebuilding <<<"$1" && ! grep -qE "EXIT 0|TIMEOUT" <<<"$1"' _ "$out"
+check "...leaving no session dir" test "$(ls "$RUNTIME/sessions" | wc -l)" = "$before"
+check "...and no lock held" lock_free "$RUNTIME/project.lock" exclusive
+
+# ==============================================================================
+section "8. Config file"
+
+out=$(fake_pen run true 2>&1)
+cfg=$FAKE_HOME/.config/pen/config
+check "first run creates ~/.config/pen/config" test -f "$cfg"
+check "...mode 600" test "$(mode_of "$cfg")" = 600
+check "...with every key commented out" not grep -qvE '^[[:space:]]*(#|$)' "$cfg"
+check "...and says so in one line" test "$(grep -c 'created ~/.config/pen/' <<<"$out")" = 1
+sum=$(cksum <"$cfg")
+out=$(fake_pen run true 2>&1)
+check "a second run says nothing about config" not contains "created" "$out"
+check "...and changes nothing" test "$(cksum <"$cfg")" = "$sum"
+
+fake_config "# comment" "allw = example.com"
+check "a misspelled key is reported with its file and line" \
+  contains '~/.config/pen/config:2: unknown key "allw"' "$(fake_pen run true 2>&1 || true)"
+
+secret="smoke-$$-$RANDOM-secret"
+fake_config "env.SMOKE_SECRET = $secret"
+fake_pen run bash -c 'sleep 4; echo "[$SMOKE_SECRET]"' >"$SCRATCH/env.out" 2>&1 &
+p=$!
+wait_for "^$KEY-.*-agent$" || fail "session didn't start"
+check "an env. value never appears in any process's arguments" not bash -c "ps -axww -o args= | grep -v grep | grep -qF '$secret'"
+wait "$p" || true
+check "...and reaches the agent" grep -qF "[$secret]" "$SCRATCH/env.out"
+
+mkdir -p .pen
+echo "env.FOO = x" >.pen/config
+check "an env. key in .pen/config is refused with its file and line" contains ".pen/config:1:" "$(pen_run true 2>&1 || true)"
+echo "github.acme = x" >.pen/config
+check "a github. key in .pen/config is refused with its file and line" contains ".pen/config:1:" "$(pen_run true 2>&1 || true)"
+rm -rf .pen
+
+# ==============================================================================
+section "9. GitHub token"
+
+owner=pen-smoke-owner
+git remote add origin "git@github.com:$owner/repo.git"
+fake_config "# none"
+rm -f "$FAKE_HOME/.local/state/pen/$KEY/token-notice"
+out=$(fake_pen run true 2>&1)
+check "no token for the origin's owner: a notice with the line to add" contains "no GitHub token for '$owner': add \"github.$owner = github_pat_" "$out"
+check "...only on the project's first session" not contains "no GitHub token" "$(fake_pen run true 2>&1)"
+fake_config "github.$owner = ghp_smoke_fake_token"
+out=$(fake_pen run bash -c 'echo "[$GH_TOKEN]"' 2>&1)
+check "the owner's token reaches the agent as GH_TOKEN" contains "[ghp_smoke_fake_token]" "$out"
+check "...with no notice" not contains "no GitHub token" "$out"
+fake_config "# removed again"
+check "removing the token later shows the notice again" contains "no GitHub token for '$owner'" "$(fake_pen run true 2>&1)"
+mkdir -p .pen
+echo "github_owner = other-owner" >.pen/config
+fake_config "github.other-owner = ghp_other"
+check "github_owner in .pen/config picks the owner" contains "[ghp_other]" "$(fake_pen run bash -c 'echo "[$GH_TOKEN]"' 2>&1)"
+rm -rf .pen
+fake_config "# none"
+out=$(HOME=$FAKE_HOME DOCKER_CONFIG=${DOCKER_CONFIG:-$REAL_HOME/.docker} $PTY --timeout 60 -- "$PEN" run bash -c "git ls-remote https://github.com/$owner/private-$$; echo rc=\$?")
+check "a private fetch with no token fails with an error instead of prompting" \
+  bash -c 'grep -qE "rc=[1-9]" <<<"$1" && grep -q "EXIT 0" <<<"$1"' _ "$out"
+git remote remove origin
+note "real-token checks (gh repo view, clone, push 403, per-owner tokens) are manual: see PLAN.md Verification step 3"
+
+# ==============================================================================
+section "10. Allowlist merge and the blocked line"
+
+out=$(in_sandbox 'curl -s -o /dev/null -I https://example.com' 2>&1 || true)
+check "session end prints the blocked line" contains "blocked: example.com → pen allow example.com (add --global for all projects)" "$out"
+out=$(in_sandbox 'curl -s -o /dev/null -I https://github.com' 2>&1 || true)
+check "...and nothing when nothing was blocked" not contains "blocked:" "$out"
+mkdir -p .pen
+echo "allow = example.com" >.pen/config
+check "a project allow line becomes reachable" \
+  test "$(in_sandbox 'curl -s -o /dev/null -w %{http_code} -I https://example.com' 2>/dev/null)" = 200
+rm -rf .pen
+fake_config "allow = .github.com"
+fake_pen run bash -c 'sleep 5; curl -s -o /dev/null -w "%{http_code}" -I https://api.github.com' >"$SCRATCH/wild.out" 2>/dev/null &
+p=$!
+wait_for "^$KEY-.*-proxy-1$" || fail "proxy didn't start"
+sleep 2
+proxy_log=$(docker logs "$(docker ps --format '{{.Names}}' | grep -E "^$KEY-.*-proxy-1$" | head -1)" 2>&1)
+wait "$p" || true
+# Squid reports overlaps while parsing its config, e.g.
+# "WARNING: 'api.github.com' is a subdomain of '.github.com'".
+check ".github.com plus the default api.github.com: the proxy reports no overlap" \
+  bash -c 'grep -q "Processing Configuration File" <<<"$1" && ! grep -qE "is a subdomain of|You should remove" <<<"$1"' _ "$proxy_log"
+check "...and api.github.com is reachable" test "$(cat "$SCRATCH/wild.out")" = 200
+
+# ==============================================================================
+section "11. .NET and NuGet (step 7)"
+
+out=$(in_sandbox 'mkdir -p app && cd app && dotnet new console -o . --force >/dev/null && dotnet add package Humanizer.Core >/dev/null && dotnet run' 2>&1 || true)
+check "dotnet new console, a NuGet restore and dotnet run work" contains "Hello, World!" "$out"
+out=$(in_sandbox 'cd app && rm -rf obj bin && dotnet restore -v d' 2>&1 || true)
+check "a second restore finds the package in the cache volume (no download)" not grep -qiE 'GET https://[^ ]*humanizer' <<<"$out"
+check "NUGET_PACKAGES is the host's path, backed by the project's volume" \
+  test "$(in_sandbox 'echo $NUGET_PACKAGES; ls $NUGET_PACKAGES' 2>/dev/null | head -2 | tr '\n' ' ')" = "$NUGET_PACKAGES humanizer.core "
+if command -v dotnet >/dev/null; then
+  check "host build and run after the sandbox's build" bash -c "cd app && dotnet build -v q >/dev/null 2>&1 && dotnet run --no-build | grep -q 'Hello, World!'"
+  check "...then the sandbox builds again" contains "Hello, World!" "$(in_sandbox 'cd app && dotnet build -v q >/dev/null && dotnet run --no-build' 2>&1)"
+else
+  note "no .NET SDK on the host: skipped the host/sandbox round trip"
+fi
+rm -rf app
+
+note "login checks (step 5: log in to claude and codex, still logged in after pen upgrade --clean, logged out in another project) are manual"
 
 section "All checks passed."

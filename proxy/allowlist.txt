@@ -25,6 +25,11 @@ codeload.github.com
 .nuget.org
 builds.dotnet.microsoft.com
 aka.ms
+# dotnet's workload manifest check (dotnet new, build)
+www.microsoft.com
+# Certificate revocation (CRL/OCSP) for NuGet package signature verification
+crl3.digicert.com
+ocsp.digicert.com
 
 # --- npm --------------------------------------------------------------------
 registry.npmjs.org
