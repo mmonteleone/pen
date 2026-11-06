@@ -1,0 +1,26 @@
+# pen user config (TOML: https://toml.io). Settings here apply to every
+# project. A project's .pen/config.toml takes github_owner and docker (no tokens
+# or env, since it's usually committed). Extra allowed domains go in
+# allowlist.txt next to this file. Changes apply to the next session.
+# Keep this file private (mode 600): it holds secrets.
+
+# --- GitHub (read-only) --------------------------------------------------------
+# One fine-grained, read-only PAT per owner (your account or an org):
+# Contents and Metadata read (optionally Issues and Pull requests read). Pick
+# "Only select repositories" if you can. The owner comes from the project's
+# origin URL, or from github_owner in its .pen/config.toml.
+
+[github]
+# my-user = "github_pat_…"
+# my-org = "github_pat_…"
+
+# --- Agent environment -----------------------------------------------------------
+# Passed to the agent container only, by name (never on a command line).
+
+[env]
+# ANTHROPIC_API_KEY = "sk-ant-…"
+# OPENAI_API_KEY = "sk-…"
+#
+# Skip Claude's per-project login: run `claude setup-token` once, anywhere, and
+# paste the token here. It's long-lived, so treat it like an API key.
+# CLAUDE_CODE_OAUTH_TOKEN = "…"

@@ -1,6 +1,6 @@
 # pen
 
-`pen` (as in playpen) runs AI coding agents (Claude Code, Codex, OpenCode, Pi) in a container
+`pen` runs AI coding agents (Claude Code, Codex, OpenCode, Pi) in a container
 instead of directly on your machine. Inside, the agent:
 
 - sees only the project directory you run `pen` in;
@@ -9,31 +9,44 @@ instead of directly on your machine. Inside, the agent:
 
 Logins and config persist across sessions and image rebuilds. Projects need no pen-specific files.
 
-```
+```sh
 cd ~/source/repos/myproject
-pen claude        # or: pen codex, pen opencode, pen pi, pen (a shell), pen run <cmd…>
+pen claude
+# or: pen codex, pen opencode, pen pi, pen (a shell), pen run <cmd…>
 ```
 
 ## Install
 
-Requires [OrbStack](https://orbstack.dev) on macOS, or Docker Engine with Compose v2 on Linux
-(rootful or rootless, glibc 2.34+). On macOS, building the CLI also needs the .NET 11 SDK and
-Xcode command-line tools.
+Requires Docker with Compose v2:
 
+- **macOS:** any Docker engine, e.g. [OrbStack](https://orbstack.dev) (what pen is tested on),
+  Docker Desktop or Colima. pen bind-mounts your projects and `~/.config/pen` at their real paths,
+  so the engine's VM must share your home directory read-write. OrbStack and Docker Desktop do
+  this by default. Projects outside your home directory need their own share.
+- **Linux:** Docker Engine, rootful or rootless, on glibc 2.34+.
+
+```sh
+brew install mmonteleone/tap/pen
 ```
-git clone <this repo> ~/source/repos/pen
-~/source/repos/pen/cli/install.sh       # installs ~/.local/bin/pen
-```
 
-The first run creates `~/.config/pen/` (settings and agent config) and builds the image, which
-takes a few minutes.
+Homebrew on Linux works too. Without Homebrew, download the binary for your platform from
+[GitHub Releases](https://github.com/mmonteleone/pen/releases) and put it on your `PATH` (e.g.
+`~/.local/bin/pen`).
 
-For private repos, add a read-only GitHub token for each owner to `~/.config/pen/config`
+The first run creates `~/.config/pen/` (settings and agent config) and pulls the base image from
+`ghcr.io/mmonteleone/pen`.
+
+> **Note:** the Homebrew tap, release binaries and ghcr.io image aren't published yet. Until they
+> are, build both locally as described in
+> [Standing in for a release](CONTRIBUTING.md#standing-in-for-a-release).
+
+For private repos, add a read-only GitHub token for each owner to `~/.config/pen/config.toml`
 (see [GitHub](#github)):
 
-```
-github.my-user = github_pat_…
-github.my-org  = github_pat_…
+```toml
+[github]
+my-user = "github_pat_…"
+my-org = "github_pat_…"
 ```
 
 ## Usage
@@ -67,12 +80,37 @@ containing multiple repos, linked worktrees and repos with submodules.
 
 ## Configuration
 
+pen reads two files in `~/.config/pen/` (created on first run) and, optionally, the same two in a
+project's `.pen/`:
+
+- **`config.toml`** ([TOML](https://toml.io)): settings. Strings are quoted. Unknown keys are
+  errors, so a typo doesn't go unnoticed.
+- **`allowlist.txt`**: extra allowed domains, one per line, with `#` comments.
+
+```toml
+# ~/.config/pen/config.toml (keep it private: it holds secrets)
+[github]
+my-org = "github_pat_…"
+
+[env]
+CLAUDE_CODE_OAUTH_TOKEN = "…"
+```
+
+```toml
+# .pen/config.toml (usually committed, so no secrets)
+github_owner = "my-org"
+docker = true
+```
+
+Changes apply to the next session. `pen allow` also applies to running ones.
+
 ### Network
 
 All traffic goes through a proxy that allows only listed domains. The allowlist combines pen's
 defaults (AI providers, GitHub, common package registries, container registries) with
-`allow = <domain>` lines in `~/.config/pen/config` and in the project's `.pen/config`.
-`.example.com` matches the domain and all its subdomains.
+`~/.config/pen/allowlist.txt` and the project's `.pen/allowlist.txt`. `.example.com` matches the
+domain and all its subdomains. `pen allow <domain>` adds a line to the project's list
+(`--global`: to yours).
 
 ### GitHub
 
@@ -84,16 +122,17 @@ push. Public repos need no token. For private repos, create a fine-grained token
 - **Repository access:** only the repos you need.
 - **Permissions:** Contents *Read-only* (optionally Issues and Pull requests *Read-only*).
 
-Add it as `github.<owner> = …`. pen picks the token from the owner in `origin`; set
-`github_owner = <owner>` in `.pen/config` to override.
+Add it under `[github]` as `<owner> = "…"`. pen picks the token from the owner in `origin`; set
+`github_owner = "<owner>"` in `.pen/config.toml` to override.
 
 ### Logins and API keys
 
 Each agent logs in once per project, inside the sandbox (`claude`, `codex login --device-auth`,
 etc.). Logins aren't shared between projects.
 
-API keys go in `~/.config/pen/config` as `env.<NAME> = <value>`. To skip Claude's per-project
-login, run `claude setup-token` and add the result as `env.CLAUDE_CODE_OAUTH_TOKEN = …`.
+API keys go under `[env]` in `~/.config/pen/config.toml` as `<NAME> = "<value>"`. To skip
+Claude's per-project login, run `claude setup-token` and add the result as
+`CLAUDE_CODE_OAUTH_TOKEN = "…"`.
 
 ### Agent config (the home seed)
 
@@ -115,9 +154,11 @@ Agents run in skip-permissions mode by default; the container is the boundary. E
 
 Optional, in the project's `.pen/` directory (read-only inside the sandbox):
 
-- **`.pen/config`:** `allow = <domain>`, `github_owner = <owner>`, `docker = true`. Secrets aren't
-  allowed here.
-- **`.pen/Dockerfile`:** extra SDKs or tools on top of the base image:
+- **`.pen/config.toml`:** `github_owner = "<owner>"`, `docker = true`. Secrets (`[github]`,
+  `[env]`) aren't allowed here.
+- **`.pen/allowlist.txt`:** extra domains for this project, as written by `pen allow`.
+- **`.pen/Dockerfile`:** extra SDKs or tools on top of the base image (which pen keeps tagged
+  locally as `pen:latest`):
 
   ```dockerfile
   FROM pen:latest
@@ -137,7 +178,7 @@ Turning on "Require signed commits" on GitHub catches a forgotten `pen sign` at 
 ## Docker-in-Docker
 
 For projects that need Docker (Testcontainers, compose, image builds), run `pen --docker claude`
-or set `docker = true` in `.pen/config`. The session gets its own Docker daemon, reachable at
+or set `docker = true` in `.pen/config.toml`. The session gets its own Docker daemon, reachable at
 `DOCKER_HOST=tcp://dind:2375`, with traffic going through the same allowlist.
 
 - One `--docker` session per project at a time.
@@ -148,9 +189,10 @@ or set `docker = true` in `.pen/config`. The session gets its own Docker daemon,
 
 ## Upgrading and resetting
 
-- `pen upgrade` updates the base image and agents (`--clean` skips the build cache). Logins and
-  config are kept.
-- To update pen itself, `git pull` and rerun `cli/install.sh`.
+- `brew upgrade pen` updates pen and the base image that goes with it.
+- `pen upgrade` reinstalls the agents at their latest versions and pulls newer proxy and Docker
+  images, without waiting for a pen release (`--clean` skips the build cache). Run it in a project
+  with a `.pen/Dockerfile` to rebuild that layer too. Logins and config are kept.
 - `pen reset` wipes a project's sandbox state. Moved or deleted projects leave volumes behind; list
   them with `docker volume ls -q | grep '^pen-'` and remove with `docker volume rm`.
 
@@ -183,3 +225,7 @@ git config --global safe.bareRepository explicit
 ```
 
 and in VS Code, set `git.autoRepositoryDetection` to `false` or `openEditors`.
+
+## Developing pen
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for building, testing and releasing pen itself.

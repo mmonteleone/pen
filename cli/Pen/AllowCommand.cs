@@ -5,33 +5,30 @@ using System.Text;
 namespace Pen;
 
 /// <summary>
-/// pen allow &lt;domain…&gt; [--global]: appends allow lines and applies them to
+/// pen allow &lt;domain…&gt; [--global]: appends to allowlist.txt and applies them to
 /// running sessions; pen allow: lists recently blocked domains (see "Network
 /// egress" in PLAN.md).
 /// </summary>
 internal static class AllowCommand
 {
-    public const string ProjectConfigStub = """
-        # pen project config: one "key = value" per line, split at the first "=";
-        # comments go on their own lines. The sandbox can't change this file. Edits
+    public const string ProjectAllowlistStub = """
+        # Extra domains the sandbox may reach in this project, one per line; a
+        # leading dot (.example.com) also allows its subdomains. `pen allow
+        # <domain>` adds lines here. The sandbox can't change this file. Edits
         # apply to the next session; `pen allow` also applies to running ones.
-        #
-        # allow = example.com       an extra allowed domain; .example.com also allows
-        #                           its subdomains. Repeatable.
-        # github_owner = <owner>    whose GitHub token to use, from ~/.config/pen/config
-        #                           (default: the owner in origin's URL)
 
         """;
 
     /// <summary>
-    /// Appends an "allow = d" line to <paramref name="path"/> for each domain
-    /// not already listed there, in place (comments and mode kept). Creates
-    /// the file from <paramref name="stub"/> if it's missing. Returns the added ones.
+    /// Appends each domain not already listed to the allowlist file at
+    /// <paramref name="path"/>, in place (comments and mode kept). Creates the
+    /// file from <paramref name="stub"/> if it's missing. Returns the added ones.
     /// </summary>
-    public static List<string> Append(string path, string displayPath, ConfigKind kind, IReadOnlyList<string> domains, string? stub)
+    public static List<string> Append(string path, string displayPath, IReadOnlyList<string> domains, string? stub)
     {
-        var existing = Config.Load(path, displayPath, kind); // also reports a broken file before touching it
-        var added = domains.Where(d => !existing.Allow.Contains(d)).ToList();
+        // Parsing first also reports a broken file before touching it.
+        var existing = File.Exists(path) ? Config.ParseAllowlist(File.ReadAllText(path), displayPath) : [];
+        var added = domains.Where(d => !existing.Contains(d)).ToList();
         if (added.Count == 0) return added;
 
         var sb = new StringBuilder();
@@ -44,15 +41,13 @@ internal static class AllowCommand
         {
             sb.Append(stub);
         }
-        foreach (var d in added) sb.Append("allow = ").Append(d).Append('\n');
+        foreach (var d in added) sb.Append(d).Append('\n');
 
         using var f = new FileStream(path, new FileStreamOptions
         {
             Mode = FileMode.Append,
             Access = FileAccess.Write,
-            UnixCreateMode = kind == ConfigKind.User
-                ? UnixFileMode.UserRead | UnixFileMode.UserWrite
-                : UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead,
+            UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead,
         });
         f.Write(Encoding.UTF8.GetBytes(sb.ToString()));
         return added;
@@ -73,15 +68,15 @@ internal static class AllowCommand
         string where;
         if (global)
         {
-            where = host.Display(host.UserConfigPath);
-            added = Append(host.UserConfigPath, where, ConfigKind.User, domains, stub: null);
+            where = host.Display(host.UserAllowlistPath);
+            added = Append(host.UserAllowlistPath, where, domains, stub: null);
         }
         else
         {
-            where = ".pen/config";
+            where = ".pen/" + Config.AllowlistName;
             RepoGuard.EnsureDirectory(project!.Dir, project.PenDir);
-            RepoGuard.RequireNotLink(project.Dir, project.ProjectConfigPath);
-            added = Append(project.ProjectConfigPath, where, ConfigKind.Project, domains, ProjectConfigStub);
+            RepoGuard.RequireNotLink(project.Dir, project.ProjectAllowlistPath);
+            added = Append(project.ProjectAllowlistPath, where, domains, ProjectAllowlistStub);
         }
 
         var skipped = domains.Except(added).ToList();
@@ -111,8 +106,8 @@ internal static class AllowCommand
             var env = s.ReadEnv();
             if (!env.TryGetValue("PROJECT_DIR", out var projectDir))
                 throw new PenException("its session.env is missing");
-            var user = Config.Load(host.UserConfigPath, host.Display(host.UserConfigPath), ConfigKind.User);
-            var projectConfig = Config.Load(Path.Combine(projectDir, ".pen", "config"), Path.Combine(projectDir, ".pen/config"), ConfigKind.Project);
+            var user = Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User);
+            var projectConfig = Config.Load(Path.Combine(projectDir, ".pen"), Path.Combine(projectDir, ".pen"), ConfigKind.Project);
             var merged = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow, projectConfig.Allow);
             // Truncate and write, never rename: the proxy's single-file bind
             // mount pins the inode.

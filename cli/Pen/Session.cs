@@ -64,7 +64,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
 
     private string RuntimeDir => host.RuntimeDir(project.Key);
 
-    /// <param name="docker">with Docker-in-Docker (pen --docker, or docker = true in .pen/config)</param>
+    /// <param name="docker">with Docker-in-Docker (pen --docker, or docker = true in .pen/config.toml)</param>
     public int Run(IReadOnlyList<string> command, bool docker = false)
     {
         // 1. Every session holds project.lock shared; pen sign/reset hold it exclusive.

@@ -22,7 +22,7 @@ internal static partial class GitHub
     [GeneratedRegex(@"^(?:(?:https?|ssh|git)://(?:[^@/]+@)?github\.com(?::\d+)?/|(?:[^@/:]+@)?github\.com:/?)([A-Za-z0-9][A-Za-z0-9-]*)/", RegexOptions.IgnoreCase)]
     private static partial Regex OwnerRegex();
 
-    /// <summary>The owner to use: github_owner from .pen/config, else origin's.</summary>
+    /// <summary>The owner to use: github_owner from .pen/config.toml, else origin's.</summary>
     public static string? ProjectOwner(Project project, Config projectConfig)
     {
         if (projectConfig.GitHubOwner != null) return projectConfig.GitHubOwner;
@@ -48,7 +48,7 @@ internal static partial class GitHub
         }
         if (!File.Exists(marker))
         {
-            Out.Line($"no GitHub token for '{owner}': add \"github.{owner} = github_pat_…\" to {host.Display(host.UserConfigPath)}");
+            Out.Line($"no GitHub token for '{owner}': add {owner} = \"github_pat_…\" under [github] in {host.Display(host.UserConfigPath)}");
             File.WriteAllText(marker, "");
         }
         return null;

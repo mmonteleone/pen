@@ -99,7 +99,10 @@ pen_run() { "$PEN" run "$@" </dev/null; }
 in_sandbox() { pen_run bash -c "$1"; }
 # fake_pen <args…>: pen with the throwaway HOME (its config in $FAKE_HOME/.config/pen).
 fake_pen() { HOME=$FAKE_HOME DOCKER_CONFIG=${DOCKER_CONFIG:-$REAL_HOME/.docker} "$PEN" "$@" </dev/null; }
-fake_config() { mkdir -p "$FAKE_HOME/.config/pen"; printf '%s\n' "$@" >"$FAKE_HOME/.config/pen/config"; chmod 600 "$FAKE_HOME/.config/pen/config"; }
+# fake_config <line…>: the throwaway config.toml, replacing it and clearing allowlist.txt.
+fake_config() { mkdir -p "$FAKE_HOME/.config/pen"; printf '%s\n' "$@" >"$FAKE_HOME/.config/pen/config.toml"; chmod 600 "$FAKE_HOME/.config/pen/config.toml"; rm -f "$FAKE_HOME/.config/pen/allowlist.txt"; }
+# fake_allow <domain…>: the throwaway allowlist.txt.
+fake_allow() { mkdir -p "$FAKE_HOME/.config/pen"; printf '%s\n' "$@" >"$FAKE_HOME/.config/pen/allowlist.txt"; }
 # The newest session's dir (under the real HOME's runtime dir).
 last_session() { ls -td "$RUNTIME"/sessions/*/ | head -1; }
 containers() { docker ps -aq --filter "name=^$KEY-" | wc -l | tr -d ' '; }
@@ -261,12 +264,12 @@ check "auto-updaters off (env)" \
   in_sandbox '[ "$DISABLE_AUTOUPDATER" = 1 ] && [ "$OPENCODE_DISABLE_AUTOUPDATE" = 1 ] && [ "$PI_SKIP_VERSION_CHECK" = 1 ] && grep -q "check_for_update_on_startup = false" /etc/codex/managed_config.toml'
 
 # Trivial prompts, only when credentials are in the environment (otherwise log
-# in inside a session by hand). They reach the agent as env. lines in a
+# in inside a session by hand). They reach the agent as [env] entries in a
 # throwaway config, the way users pass them.
 prompt_check() { # prompt_check <agent> <env var> <cmd…>
   local agent=$1 var=$2; shift 2
   if [ -z "${!var:-}" ]; then note "$agent prompt: skipped (set $var to run it)"; return; fi
-  fake_config "env.$var = ${!var}"
+  fake_config "[env]" "$var = \"${!var}\""
   local out
   out=$(fake_pen run timeout 180 "$@" 2>&1 || true)
   check "$agent answers a trivial prompt through the proxy" grep -q 4 <<<"$out"
@@ -276,7 +279,7 @@ prompt_check() { # prompt_check <agent> <env var> <cmd…>
   fi
 }
 # The fixture project's home volume is fresh, so this also shows
-# env.CLAUDE_CODE_OAUTH_TOKEN starts Claude logged in.
+# [env] CLAUDE_CODE_OAUTH_TOKEN starts Claude logged in.
 prompt_check claude CLAUDE_CODE_OAUTH_TOKEN claude -p 'What is 2+2? Reply with just the digit.'
 prompt_check codex OPENAI_API_KEY codex exec --skip-git-repo-check 'What is 2+2? Reply with just the digit.'
 
@@ -440,10 +443,11 @@ section "8. Config file"
 
 rm -rf "$FAKE_HOME/.config" # in case section 4's prompts made one
 out=$(fake_pen run true 2>&1)
-cfg=$FAKE_HOME/.config/pen/config
-check "first run creates ~/.config/pen/config" test -f "$cfg"
+cfg=$FAKE_HOME/.config/pen/config.toml
+check "first run creates ~/.config/pen/config.toml" test -f "$cfg"
 check "...mode 600" test "$(mode_of "$cfg")" = 600
-check "...with every key commented out" not grep -qvE '^[[:space:]]*(#|$)' "$cfg"
+check "...with every value commented out" not grep -qvE '^[[:space:]]*(#|$|\[)' "$cfg"
+check "...and allowlist.txt, every line a comment" not grep -qvE '^[[:space:]]*(#|$)' "$FAKE_HOME/.config/pen/allowlist.txt"
 check "...and says so in one line" test "$(grep -c 'created ~/.config/pen/' <<<"$out")" = 1
 seed=$FAKE_HOME/.config/pen/home
 check "...and creates home/ (the seed)" has_all "$(cd "$seed" && find . -type f | sort)" ./.gitconfig ./.claude.json ./.claude/CLAUDE.md ./.claude/settings.json ./.codex/AGENTS.md ./.codex/config.toml
@@ -454,24 +458,29 @@ out=$(fake_pen run true 2>&1)
 check "a second run says nothing about config" not contains "created" "$out"
 check "...and changes neither" bash -c '[ "$(cksum <"$1")" = "$2" ] && [ "$(cd "$3" && find . -type f -exec cksum {} + | sort)" = "$4" ]' _ "$cfg" "$sum" "$seed" "$seedsum"
 
-fake_config "# comment" "allw = example.com"
-check "a misspelled key is reported with its file and line" \
-  contains '~/.config/pen/config:2: unknown key "allw"' "$(fake_pen run true 2>&1 || true)"
+fake_config "# comment" "allw = 1"
+check "a misspelled key is reported with its file" \
+  contains '~/.config/pen/config.toml: unknown key "allw"' "$(fake_pen run true 2>&1 || true)"
+fake_config "[env]" "X = unquoted"
+check "a TOML error is reported with its file and line" \
+  contains '~/.config/pen/config.toml:2:' "$(fake_pen run true 2>&1 || true)"
 
 secret="smoke-$$-$RANDOM-secret"
-fake_config "env.SMOKE_SECRET = $secret"
+fake_config "[env]" "SMOKE_SECRET = \"$secret\""
 fake_pen run bash -c 'sleep 4; echo "[$SMOKE_SECRET]"' >"$SCRATCH/env.out" 2>&1 &
 p=$!
 wait_for "^$KEY-.*-agent$" || fail "session didn't start"
-check "an env. value never appears in any process's arguments" not bash -c "ps -axww -o args= | grep -v grep | grep -qF '$secret'"
+check "an [env] value never appears in any process's arguments" not bash -c "ps -axww -o args= | grep -v grep | grep -qF '$secret'"
 wait "$p" || true
 check "...and reaches the agent" grep -qF "[$secret]" "$SCRATCH/env.out"
 
 mkdir -p .pen
-echo "env.FOO = x" >.pen/config
-check "an env. key in .pen/config is refused with its file and line" contains ".pen/config:1:" "$(pen_run true 2>&1 || true)"
-echo "github.acme = x" >.pen/config
-check "a github. key in .pen/config is refused with its file and line" contains ".pen/config:1:" "$(pen_run true 2>&1 || true)"
+printf '[env]\nFOO = "x"\n' >.pen/config.toml
+check "[env] in .pen/config.toml is refused, naming the file" contains '.pen/config.toml: "env" belongs in' "$(pen_run true 2>&1 || true)"
+printf '[github]\nacme = "x"\n' >.pen/config.toml
+check "[github] in .pen/config.toml is refused, naming the file" contains '.pen/config.toml: "github" belongs in' "$(pen_run true 2>&1 || true)"
+echo "allow = example.com" >.pen/config
+check "a legacy .pen/config is refused with a pointer to the new files" contains ".pen/config is pen's old config format" "$(pen_run true 2>&1 || true)"
 rm -rf .pen
 
 # ==============================================================================
@@ -482,18 +491,18 @@ git remote add origin "git@github.com:$owner/repo.git"
 fake_config "# none"
 rm -f "$FAKE_HOME/.local/state/pen/$KEY/token-notice"
 out=$(fake_pen run true 2>&1)
-check "no token for the origin's owner: a notice with the line to add" contains "no GitHub token for '$owner': add \"github.$owner = github_pat_" "$out"
+check "no token for the origin's owner: a notice with the line to add" contains "no GitHub token for '$owner': add $owner = \"github_pat_…\" under [github]" "$out"
 check "...only on the project's first session" not contains "no GitHub token" "$(fake_pen run true 2>&1)"
-fake_config "github.$owner = ghp_smoke_fake_token"
+fake_config "[github]" "$owner = \"ghp_smoke_fake_token\""
 out=$(fake_pen run bash -c 'echo "[$GH_TOKEN]"' 2>&1)
 check "the owner's token reaches the agent as GH_TOKEN" contains "[ghp_smoke_fake_token]" "$out"
 check "...with no notice" not contains "no GitHub token" "$out"
 fake_config "# removed again"
 check "removing the token later shows the notice again" contains "no GitHub token for '$owner'" "$(fake_pen run true 2>&1)"
 mkdir -p .pen
-echo "github_owner = other-owner" >.pen/config
-fake_config "github.other-owner = ghp_other"
-check "github_owner in .pen/config picks the owner" contains "[ghp_other]" "$(fake_pen run bash -c 'echo "[$GH_TOKEN]"' 2>&1)"
+echo 'github_owner = "other-owner"' >.pen/config.toml
+fake_config "[github]" "other-owner = \"ghp_other\""
+check "github_owner in .pen/config.toml picks the owner" contains "[ghp_other]" "$(fake_pen run bash -c 'echo "[$GH_TOKEN]"' 2>&1)"
 rm -rf .pen
 fake_config "# none"
 out=$(HOME=$FAKE_HOME DOCKER_CONFIG=${DOCKER_CONFIG:-$REAL_HOME/.docker} $PTY --timeout 60 -- "$PEN" run bash -c "git ls-remote https://github.com/$owner/private-$$; echo rc=\$?")
@@ -510,11 +519,11 @@ check "session end prints the blocked line" contains "blocked: example.com → p
 out=$(in_sandbox 'curl -s -o /dev/null -I https://github.com' 2>&1 || true)
 check "...and nothing when nothing was blocked" not contains "blocked:" "$out"
 mkdir -p .pen
-echo "allow = example.com" >.pen/config
-check "a project allow line becomes reachable" \
+echo "example.com" >.pen/allowlist.txt
+check "a .pen/allowlist.txt entry becomes reachable" \
   test "$(in_sandbox 'curl -s -o /dev/null -w %{http_code} -I https://example.com' 2>/dev/null)" = 200
 rm -rf .pen
-fake_config "allow = .github.com"
+fake_allow ".github.com"
 fake_pen run bash -c 'sleep 5; curl -s -o /dev/null -w "%{http_code}" -I https://api.github.com' >"$SCRATCH/wild.out" 2>/dev/null &
 p=$!
 wait_for "^$KEY-.*-proxy-1$" || fail "proxy didn't start"
@@ -610,7 +619,7 @@ out=$(in_sandbox '
   t "echo x >> .git/config" configwrite
   t "mv .git .git2" mvgit
   t "echo x > .git/worktrees/wt/commondir" wtcommondir
-  t "touch .pen/config" pencreate
+  t "touch .pen/config.toml" pencreate
   t "mv .pen .pen2" mvpen
 ' 2>&1)
 has() { grep -qxF -- "$1" <<<"$out"; }
@@ -625,18 +634,18 @@ check "...and .git/config is unchanged on the host" test "$(cksum <.git/config)"
 check "mv .git .git2 fails" has "fail: mvgit"
 check "a host worktree's commondir is read-only" has "fail: wtcommondir"
 check ".pen/ is created empty when missing" bash -c '[ -d .pen ] && [ -z "$(ls -A .pen)" ]'
-check "...touch .pen/config fails inside" has "fail: pencreate"
+check "...touch .pen/config.toml fails inside" has "fail: pencreate"
 check "...mv .pen fails" has "fail: mvpen"
 st=$(git status --porcelain | tr '\n' ' ')
 check "...and host git status shows nothing new${st:+ (it shows: $st)}" test -z "$st"
 git worktree remove --force "$SCRATCH/wt"
 git branch -q -D scratch
 
-echo '# host-written' >.pen/config
-out=$(in_sandbox 'echo x >> .pen/config && echo wrote; mv .pen .pen2 && echo moved; true' 2>&1)
-check "with .pen/config present, it can't be written or moved" bash -c '! grep -qE "^(wrote|moved)$" <<<"$1"' _ "$out"
-check "...and is unchanged" test "$(cat .pen/config)" = '# host-written'
-rm .pen/config
+echo '# host-written' >.pen/config.toml
+out=$(in_sandbox 'echo x >> .pen/config.toml && echo wrote; mv .pen .pen2 && echo moved; true' 2>&1)
+check "with .pen/config.toml present, it can't be written or moved" bash -c '! grep -qE "^(wrote|moved)$" <<<"$1"' _ "$out"
+check "...and is unchanged" test "$(cat .pen/config.toml)" = '# host-written'
+rm .pen/config.toml
 
 : >.gitinc
 git config include.path ../.gitinc
@@ -697,11 +706,11 @@ section "14. Project layer (step 10)"
 
 rm -rf .pen && mkdir .pen
 printf 'FROM pen:latest\nRUN echo layer-ok >/etc/pen-smoke-layer\n' >.pen/Dockerfile
-echo 'allow = example.org' >.pen/config
+echo 'example.org' >.pen/allowlist.txt
 out=$(in_sandbox 'cat /etc/pen-smoke-layer; curl -s -o /dev/null -w "code=%{http_code}\n" -I https://example.org' 2>&1)
 check ".pen/Dockerfile is built and used" contains "layer-ok" "$out"
 check "...as <project key>:latest" bash -c 'docker image inspect "$1" >/dev/null' _ "$KEY:latest"
-check "...and the .pen/config allow line is reachable" contains "code=200" "$out"
+check "...and the .pen/allowlist.txt entry is reachable" contains "code=200" "$out"
 t0=$(now); pen_run true; t1=$(now)
 note "a session with a cached project layer: $(python3 -c "print(f'{$t1 - $t0:.2f}')")s"
 
@@ -735,17 +744,18 @@ wait "$a1" "$a2" || true
 check "pen allow applies to both running sessions" contains "applied to 2 running sessions" "$out"
 check "...and both reach the domain with no restart" bash -c 'grep -q got-200 "$1" && grep -q got-200 "$2"' _ "$SCRATCH/allow1.out" "$SCRATCH/allow2.out"
 check "...whose end line no longer suggests allowing it" not grep -q "pen allow example.com" "$SCRATCH/allow1.out"
-check "it creates .pen/config with the commented stub" bash -c 'head -1 .pen/config | grep -q "^# pen project config" && grep -q "^# github_owner" .pen/config'
-check "...plus one allow line" test "$(grep -c '^allow = example.com$' .pen/config)" = 1
+check "it creates .pen/allowlist.txt with the commented stub" bash -c 'head -1 .pen/allowlist.txt | grep -q "^# Extra domains"'
+check "...plus one line for the domain" test "$(grep -cx 'example.com' .pen/allowlist.txt)" = 1
 out=$("$PEN" allow example.com 2>&1)
-check "running it again adds nothing" bash -c 'grep -q "already in .pen/config" <<<"$1" && [ "$(grep -c "^allow = example.com$" .pen/config)" = 1 ]' _ "$out"
+check "running it again adds nothing" bash -c 'grep -q "already in .pen/allowlist.txt" <<<"$1" && [ "$(grep -cx "example.com" .pen/allowlist.txt)" = 1 ]' _ "$out"
 check "a non-domain is refused" not "$PEN" allow 'http://x.io' 2>/dev/null
 
 OTHER=$(cd "$(mktemp -d "$HOME/.pen-smoke-other.XXXXXX")" && pwd -P)
 EXTRA_DIRS+=("$OTHER")
 git -C "$OTHER" init -q
 OHASH=$(printf %s "$OTHER" | sha | cut -c1-8)
-fake_config "allow = .github.com"
+fake_config "# none"
+fake_allow ".github.com"
 loop=${loop//example.com/example.net}
 (cd "$OTHER" && fake_pen run bash -c "$loop; sleep 4") >"$SCRATCH/global.out" 2>&1 & # kept up so its proxy's logs can be read
 g=$!
@@ -755,7 +765,7 @@ oproxy=$(docker ps --format '{{.Names}}' | grep -E "^pen-.*-$OHASH-.*-proxy-1$" 
 sleep 1
 oproxy_log=$(docker logs "$oproxy" 2>&1 || true)
 wait "$g" || true
-check "pen allow --global writes ~/.config/pen/config" grep -qx 'allow = example.net' "$FAKE_HOME/.config/pen/config"
+check "pen allow --global writes ~/.config/pen/allowlist.txt" grep -qx 'example.net' "$FAKE_HOME/.config/pen/allowlist.txt"
 check "...and reaches a running session of another project" bash -c 'grep -q "applied to 1 running session" <<<"$1" && grep -q got-200 "$2"' _ "$out" "$SCRATCH/global.out"
 check "...whose reconfigure with .github.com plus api.github.com is clean" \
   bash -c 'grep -q "Reconfiguring Squid Cache" <<<"$1" && ! grep -qE "is a subdomain of|You should remove|FATAL" <<<"$1"' _ "$oproxy_log"
@@ -842,7 +852,7 @@ check "an MCP server added to the seed reaches an existing project, keeping the 
 check "...and the project stays logged in (the rest of .claude.json is kept)" has 'login={"smoke":true}'
 
 if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
-  fake_config "env.CLAUDE_CODE_OAUTH_TOKEN = $CLAUDE_CODE_OAUTH_TOKEN"
+  fake_config "[env]" "CLAUDE_CODE_OAUTH_TOKEN = \"$CLAUDE_CODE_OAUTH_TOKEN\""
   (cd "$SEEDP" && fake_pen run timeout 300 claude -p 'Create a file named perm-check.txt containing "ok", then commit it with git (message "perm check"). Reply "done".' >/dev/null 2>&1) || true
   check "claude starts in skip-permissions mode (wrote and committed without asking)" test -f "$SEEDP/perm-check.txt"
   check "...and its commit has the seeded author and no co-author trailer" \
@@ -853,7 +863,7 @@ else
   note "claude skip-permissions, co-author and blocked-domain checks: skipped (set CLAUDE_CODE_OAUTH_TOKEN)"
 fi
 if [ -n "${OPENAI_API_KEY:-}" ]; then
-  fake_config "env.OPENAI_API_KEY = $OPENAI_API_KEY"
+  fake_config "[env]" "OPENAI_API_KEY = \"$OPENAI_API_KEY\""
   out=$(cd "$SEEDP" && fake_pen run timeout 300 codex exec 'Fetch https://example.com and show me its title.' 2>&1 || true)
   check "codex reports the blocked domain" grep -qiE 'example\.com.*(block|allow|proxy|403)|(block|allow|proxy|403).*example\.com' <<<"$out"
 else
@@ -1032,13 +1042,13 @@ check "an inner container's .git/commondir is quarantined at session end" \
   bash -c '[ ! -e .git/commondir ] && [ -e .git/commondir.pen-quarantine ] && grep -q "pen: WARNING" <<<"$1"' _ "$out"
 rm -f .git/commondir.pen-quarantine
 
-echo 'docker = true' >.pen/config
+echo 'docker = true' >.pen/config.toml
 out=$(pen_run bash -c 'echo "[$DOCKER_HOST]"; docker version --format "server {{.Server.Version}}"' 2>&1 || true)
-check "docker = true in .pen/config turns dind on" has_all "$out" "[tcp://dind:2375]" "server "
-echo 'docker = maybe' >.pen/config
+check "docker = true in .pen/config.toml turns dind on" has_all "$out" "[tcp://dind:2375]" "server "
+echo 'docker = "maybe"' >.pen/config.toml
 rc=0; out=$(pen_run true 2>&1) || rc=$?
-check "...and a bad value names the file and line" bash -c '[ "$1" != 0 ] && grep -q "^pen: .pen/config:1: docker must be true or false" <<<"$2"' _ "$rc" "$out"
-rm -f .pen/config
+check "...and a bad value names the file" bash -c '[ "$1" != 0 ] && grep -q "^pen: .pen/config.toml: docker must be true or false" <<<"$2"' _ "$rc" "$out"
+rm -f .pen/config.toml
 check "nothing is left running" test "$(containers)" = 0
 
 section "All checks passed."

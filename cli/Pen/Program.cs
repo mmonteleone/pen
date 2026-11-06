@@ -24,7 +24,7 @@ internal static class Program
 
             var host = HostEnv.FromProcess();
             Config.EnsureUserConfig(host);
-            var user = Config.Load(host.UserConfigPath, host.Display(host.UserConfigPath), ConfigKind.User);
+            var user = Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User);
 
             switch (command.Kind)
             {
@@ -36,7 +36,7 @@ internal static class Program
             }
 
             var project = Project.Resolve(Environment.CurrentDirectory, host);
-            Config ProjectConfig() => Config.Load(project.ProjectConfigPath, ".pen/config", ConfigKind.Project);
+            Config ProjectConfig() => Config.Load(project.PenDir, ".pen", ConfigKind.Project);
             return command.Kind switch
             {
                 CommandKind.Run => RunSession(host, project, user, ProjectConfig(), command),
@@ -54,7 +54,7 @@ internal static class Program
     }
 
     // --docker turns Docker-in-Docker on for one session; docker = true in
-    // .pen/config for every session. Nothing turns it off per session.
+    // .pen/config.toml for every session. Nothing turns it off per session.
     private static int RunSession(HostEnv host, Project project, Config user, Config projectConfig, Command command) =>
         new Session(host, project, user, projectConfig).Run(command.Args, docker: command.Docker || projectConfig.Docker == true);
 }

@@ -4,34 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`pen` runs AI coding agents (Claude Code, Codex, OpenCode, Pi) in a Docker container scoped to one project directory, with egress limited to a domain allowlist and read-only GitHub access. The host CLI is a .NET 11 Native AOT binary (`cli/Pen`); the container side is `compose.yaml`, `image/` (Dockerfile + entrypoint), `proxy/` (squid + default allowlist) and `templates/` (first-run user config and home seed). See README.md for user-facing behavior; Design.md has the original requirements.
+`pen` runs AI coding agents (Claude Code, Codex, OpenCode, Pi) in a Docker container scoped to one project directory, with egress limited to a domain allowlist and read-only GitHub access. The host CLI is a .NET 11 Native AOT binary (`cli/Pen`); the container side is `compose.yaml`, `image/` (Dockerfile + entrypoint), `proxy/` (squid + default allowlist) and `templates/` (first-run user config and home seed). See README.md for user-facing behavior (written for the planned Homebrew/ghcr.io distribution) and CONTRIBUTING.md for the full build/test/release workflow.
 
 ## Commands
 
-All .NET commands run from `cli/` (SDK pinned in `cli/global.json`: 11.0 prerelease, tests on Microsoft.Testing.Platform, xunit v3).
+Full details in CONTRIBUTING.md. The essentials (.NET commands run from `cli/`; SDK pinned in `cli/global.json`, xunit v3 on Microsoft.Testing.Platform):
 
 ```
-cd cli
-dotnet build                                   # warnings are errors
-dotnet test                                    # unit tests (Pen.Tests)
-dotnet test --filter-class Pen.Tests.CliTests # one class (xunit v3 filters; also --filter-method "*Name*")
-dotnet run --project Pen/Pen.csproj -- <args>  # run the CLI without installing
+cd cli && dotnet build         # warnings are errors
+cd cli && dotnet test          # unit tests; --filter-class Pen.Tests.CliTests / --filter-method "*Name*"
+cli/install.sh                 # AOT-publish and install ~/.local/bin/pen
+tests/smoke.sh                 # end-to-end checks against the *installed* pen; needs Docker
 ```
-
-Installing and container-level testing:
-
-```
-cli/install.sh                 # AOT-publish and install ~/.local/bin/pen (Linux: builds in a container)
-cli/install.sh --out DIR       # build only
-tests/smoke.sh                 # end-to-end checks against the *installed* pen; needs Docker/OrbStack
-SMOKE_SLOW=1 tests/smoke.sh    # also exercises pen upgrade
-```
-
-`tests/smoke.sh` is run on both macOS/OrbStack (arm64) and Linux Docker (amd64, rootful and rootless); it uses throwaway projects/HOME for config-dependent checks. Optional `CLAUDE_CODE_OAUTH_TOKEN` / `OPENAI_API_KEY` enable agent-prompt checks. `tests/pty-run.py` drives commands on a real PTY for signal/hangup checks. `tests/dev-session.sh` is a legacy CLI-less session runner.
 
 ## Architecture
 
-**Embedded resources.** `Pen.csproj` embeds `compose.yaml`, `image/**`, `proxy/**`, `templates/**` under their repo-relative paths (`Embedded.cs`). The installed binary never reads this repo, so **changes to any of those files only take effect after rebuilding/reinstalling the CLI**. `Embedded.ImageHash()` hashes `image/`; `Image.EnsureCurrent()` rebuilds `pen:latest` when the label doesn't match, so editing `image/` triggers a rebuild on next session.
+**Embedded resources.** `Pen.csproj` embeds `compose.yaml`, `image/**`, `proxy/**`, `templates/**` under their repo-relative paths (`Embedded.cs`). The installed binary never reads this repo, so **changes to any of those files only take effect after rebuilding/reinstalling the CLI**. `Embedded.ImageHash()` hashes `image/`; `Image.EnsureCurrent()` rebuilds `pen:latest` when the label doesn't match, so editing `image/` triggers a rebuild on next session. (Planned: release builds will pull a version-pinned `ghcr.io/mmonteleone/pen` image instead and tag it `pen:latest`, with `pen upgrade` reinstalling agents in a local layer; source builds keep building locally; CONTRIBUTING.md "Standing in for a release" covers the interim setup.)
 
 **Flow** (`Program.cs`): `Cli.Parse` → `Config.EnsureUserConfig` (creates `~/.config/pen/` from `templates/`) → `Project.Resolve` (cwd real path; key `pen-<dir>-<hash>` names volumes, project image and runtime dir) → command (`Session`, `AllowCommand`, `Sign`, `Reset`). User-facing errors are `PenException` (message + exit code).
 
@@ -41,9 +29,9 @@ SMOKE_SLOW=1 tests/smoke.sh    # also exercises pen upgrade
 
 **Protecting the host's git** (`RepoGuard`, `RepoScan`, `GitCheck`, `GitConfigFile`): pen refuses linked worktrees, submodules, nested repos, symlinked `.git`, `commondir`. It mounts `.git/config`, `.git/hooks` and `.pen/` read-only over themselves (via `mounts.yaml`), and checks `.git` at session end before running any host git. `RepoGuard` reads files directly and never runs git — keep it that way, since the agent may have planted git config/hooks.
 
-**GitHub**: read-only fine-grained PAT per owner from `github.<owner>` in user config, chosen by `origin` owner (`GitHub.cs`). `pen sign` (`Sign.cs`) re-creates unpushed commits on the host with the user's signature.
+**GitHub**: read-only fine-grained PAT per owner from `[github]` in user `config.toml`, chosen by `origin` owner (`GitHub.cs`). `pen sign` (`Sign.cs`) re-creates unpushed commits on the host with the user's signature.
 
-**Config** (`Config.cs`): `key = value` files. User config (`~/.config/pen/config`, secrets allowed: `github.*`, `env.*`, `allow`) vs project `.pen/config` (`allow`, `github_owner`, `docker` only — no secrets). An optional `.pen/Dockerfile` builds a per-project image `FROM pen:latest`.
+**Config** (`Config.cs`): `~/.config/pen/` and a project's `.pen/` each hold `config.toml` (TOML via Tomlyn) and `allowlist.txt` (one domain per line; separate so `pen allow` can append without rewriting hand-edited TOML). Parsing validates the TOML syntax tree first (`SyntaxParser.Parse(…, validate: true)`, errors with line numbers), then reads the untyped `TomlTable` through the source-generated `TomlContext` (never reflection-based `TomlSerializer` overloads: AOT) and applies pen's own key checks. User `config.toml` (secrets allowed): `[github]` tokens per owner, `[env]`. Project `.pen/config.toml`: `github_owner`, `docker` only — no secrets. A pre-TOML `config` file in either dir is an error, not silently ignored. An optional `.pen/Dockerfile` builds a per-project image `FROM pen:latest`.
 
 ## Conventions
 

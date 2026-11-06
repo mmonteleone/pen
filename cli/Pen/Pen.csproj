@@ -22,6 +22,11 @@
     <InternalsVisibleTo Include="Pen.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- TOML config parsing; source-generated metadata only (see TomlContext), so AOT-safe. -->
+    <PackageReference Include="Tomlyn" Version="2.10.2" />
+  </ItemGroup>
+
   <!-- Everything the CLI needs at runtime is embedded, so it never reads this
        repo once installed. Logical names are repo-relative paths. -->
   <PropertyGroup>

@@ -15,7 +15,7 @@ internal static class Cli
           pen [--docker]            interactive shell in this project's sandbox
           pen [--docker] <cmd…>     run a command in the sandbox, e.g. pen claude
           pen [--docker] run <cmd…> same, for a command whose name matches a subcommand
-                                    --docker: with Docker-in-Docker (or docker = true in .pen/config)
+                                    --docker: with Docker-in-Docker (or docker = true in .pen/config.toml)
           pen upgrade [--clean]     newer base image and agents; --clean skips the cache
           pen allow <domain…> [--global]
                                     allow domains, applied to running sessions too

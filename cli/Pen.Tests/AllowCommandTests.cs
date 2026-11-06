@@ -3,47 +3,45 @@ namespace Pen.Tests;
 public class AllowCommandTests
 {
     [Fact]
-    public void AppendCreatesTheStub_ThatListsTheProjectKeys_AndParses()
+    public void AppendCreatesTheStub_AndParses()
     {
         using var t = new TempDir();
-        var path = Path.Combine(t.Path, "config");
-        var added = AllowCommand.Append(path, ".pen/config", ConfigKind.Project, ["example.com", ".foo.io"], AllowCommand.ProjectConfigStub);
+        var path = Path.Combine(t.Path, "allowlist.txt");
+        var added = AllowCommand.Append(path, ".pen/allowlist.txt", ["example.com", ".foo.io"], AllowCommand.ProjectAllowlistStub);
         Assert.Equal(["example.com", ".foo.io"], added);
 
         var text = File.ReadAllText(path);
-        Assert.StartsWith(AllowCommand.ProjectConfigStub, text);
-        Assert.EndsWith("allow = example.com\nallow = .foo.io\n", text);
-        Assert.Contains("# allow = example.com", text);
-        Assert.Contains("# github_owner = <owner>", text);
-        Assert.Equal(["example.com", ".foo.io"], Config.Parse(text, "x", ConfigKind.Project).Allow);
+        Assert.StartsWith(AllowCommand.ProjectAllowlistStub, text);
+        Assert.EndsWith("\nexample.com\n.foo.io\n", text);
+        Assert.Equal(["example.com", ".foo.io"], Config.ParseAllowlist(text, "x"));
     }
 
     [Fact]
     public void AppendSkipsWhatsListed_KeepsCommentsAndMode_AndFixesAMissingNewline()
     {
         using var t = new TempDir();
-        var path = Path.Combine(t.Path, "config");
-        File.WriteAllText(path, "# mine\nallow = a.io");
+        var path = Path.Combine(t.Path, "allowlist.txt");
+        File.WriteAllText(path, "# mine\na.io");
         File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
 
-        var added = AllowCommand.Append(path, "~/.config/pen/config", ConfigKind.User, ["a.io", "b.io"], stub: null);
+        var added = AllowCommand.Append(path, "~/.config/pen/allowlist.txt", ["a.io", "b.io"], stub: null);
         Assert.Equal(["b.io"], added);
-        Assert.Equal("# mine\nallow = a.io\nallow = b.io\n", File.ReadAllText(path));
+        Assert.Equal("# mine\na.io\nb.io\n", File.ReadAllText(path));
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path));
 
-        Assert.Empty(AllowCommand.Append(path, "x", ConfigKind.User, ["b.io", "a.io"], stub: null));
-        Assert.Equal("# mine\nallow = a.io\nallow = b.io\n", File.ReadAllText(path));
+        Assert.Empty(AllowCommand.Append(path, "x", ["b.io", "a.io"], stub: null));
+        Assert.Equal("# mine\na.io\nb.io\n", File.ReadAllText(path));
     }
 
     [Fact]
     public void AppendRefusesABrokenFile_WithoutTouchingIt()
     {
         using var t = new TempDir();
-        var path = Path.Combine(t.Path, "config");
-        File.WriteAllText(path, "allw = a.io\n");
-        var e = Assert.Throws<PenException>(() => AllowCommand.Append(path, ".pen/config", ConfigKind.Project, ["b.io"], AllowCommand.ProjectConfigStub));
-        Assert.Contains(".pen/config:1", e.Message);
-        Assert.Equal("allw = a.io\n", File.ReadAllText(path));
+        var path = Path.Combine(t.Path, "allowlist.txt");
+        File.WriteAllText(path, "not a domain\n");
+        var e = Assert.Throws<PenException>(() => AllowCommand.Append(path, ".pen/allowlist.txt", ["b.io"], AllowCommand.ProjectAllowlistStub));
+        Assert.Contains(".pen/allowlist.txt:1", e.Message);
+        Assert.Equal("not a domain\n", File.ReadAllText(path));
     }
 
     [Fact]
