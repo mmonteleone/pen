@@ -1,0 +1,49 @@
+# pen default egress allowlist (Squid dstdomain). One domain per line.
+# A leading dot covers the domain and all its subdomains (.example.com).
+# Don't list a domain that a wildcard here already covers: Squid warns about
+# overlapping entries. Extra domains go in `allow =` lines (user or project config).
+
+# --- AI providers -----------------------------------------------------------
+# Anthropic (API, OAuth login, Claude Code telemetry/feature flags)
+.anthropic.com
+.claude.ai
+.claude.com
+# OpenAI (API, auth, ChatGPT login for Codex)
+.openai.com
+.chatgpt.com
+# OpenCode
+.opencode.ai
+models.dev
+
+# --- GitHub -----------------------------------------------------------------
+github.com
+api.github.com
+codeload.github.com
+.githubusercontent.com
+
+# --- .NET / NuGet -----------------------------------------------------------
+.nuget.org
+builds.dotnet.microsoft.com
+aka.ms
+
+# --- npm --------------------------------------------------------------------
+registry.npmjs.org
+registry.yarnpkg.com
+
+# --- PyPI -------------------------------------------------------------------
+pypi.org
+files.pythonhosted.org
+
+# --- Docs -------------------------------------------------------------------
+learn.microsoft.com
+stackoverflow.com
+.stackexchange.com
+
+# --- Container registries (used only with Docker-in-Docker) -----------------
+registry-1.docker.io
+auth.docker.io
+index.docker.io
+production.cloudflare.docker.com
+mcr.microsoft.com
+.data.mcr.microsoft.com
+ghcr.io

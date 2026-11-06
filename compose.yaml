@@ -1,0 +1,99 @@
+# pen session stack: one compose project per session ("<project key>-<session>").
+# The CLI copies this file into the session's dir next to squid.conf,
+# allowlist.txt and proxy.log, so the relative paths below resolve there.
+#
+# Required env (set by the CLI; by hand in tests/smoke.sh until the CLI exists):
+#   PROJECT_DIR     host absolute path of the project, mounted at the same path
+#   PEN_PROJECT     project key (pen-<dir>-<hash>); names the volumes
+#   PEN_UID/PEN_GID host user, created in the container at start
+#   NUGET_PACKAGES  host NuGet cache path; the project's nuget volume mounts there
+#   PEN_IMAGE       image to run (default pen:latest)
+
+x-proxy-env: &proxy-env
+  HTTP_PROXY: http://proxy:3128
+  HTTPS_PROXY: http://proxy:3128
+  NO_PROXY: localhost,127.0.0.1,proxy,dind
+  http_proxy: http://proxy:3128
+  https_proxy: http://proxy:3128
+  no_proxy: localhost,127.0.0.1,proxy,dind
+
+services:
+  agent:
+    image: ${PEN_IMAGE:-pen:latest}
+    hostname: pen
+    working_dir: ${PROJECT_DIR:?PROJECT_DIR is required}
+    environment:
+      <<: *proxy-env
+      PEN_UID: ${PEN_UID:?PEN_UID is required}
+      PEN_GID: ${PEN_GID:?PEN_GID is required}
+      PROJECT_DIR: ${PROJECT_DIR}
+      NUGET_PACKAGES: ${NUGET_PACKAGES:?NUGET_PACKAGES is required}
+    # Root phase of the entrypoint needs only these; it then drops to the agent
+    # user with an empty bounding set (see image/entrypoint.sh).
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, SETPCAP]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 4096
+    tmpfs:
+      - /tmp:exec,mode=1777,size=4g
+    volumes:
+      - type: bind
+        source: ${PROJECT_DIR}
+        target: ${PROJECT_DIR}
+      - type: volume
+        source: home
+        target: /home/agent
+      - type: volume
+        source: nuget
+        target: ${NUGET_PACKAGES}
+    networks: [sandbox]
+    depends_on:
+      proxy:
+        condition: service_healthy
+
+  proxy:
+    image: ubuntu/squid:latest
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    volumes:
+      - type: bind
+        source: ./squid.conf
+        target: /etc/squid/squid.conf
+        read_only: true
+      - type: bind
+        source: ./allowlist.txt
+        target: /etc/squid/allowlist.txt
+        read_only: true
+      - type: bind
+        source: ./proxy.log
+        target: /var/log/squid/access.log
+    networks: [sandbox, egress]
+    # Healthy once something listens on 3128 (0x0C38, state 0A). Reads
+    # /proc/net instead of connecting, so probes never show up in proxy.log.
+    healthcheck:
+      test: ["CMD", "grep", "-qE", "^ *[0-9]+: [0-9A-F]+:0C38 [0-9A-F]+:[0-9A-F]+ 0A ", "/proc/net/tcp", "/proc/net/tcp6"]
+      interval: 30s
+      timeout: 2s
+      retries: 3
+      start_period: 30s
+      start_interval: 100ms
+
+# Shared by every session of the project, so they're external: each session is
+# its own compose project, and compose would otherwise warn that the volume was
+# "created for" another one. The CLI creates them (docker volume create is
+# idempotent) before `compose run`.
+volumes:
+  home:
+    name: ${PEN_PROJECT:?PEN_PROJECT is required}_home
+    external: true
+  nuget:
+    name: ${PEN_PROJECT}_nuget
+    external: true
+
+networks:
+  # No route out: anything that ignores the proxy fails.
+  sandbox:
+    internal: true
+  egress: {}

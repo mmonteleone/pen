@@ -1,0 +1,3 @@
+# Global excludes for git inside the pen sandbox (core.excludesFile in /etc/gitconfig).
+# The sandbox never sees the host's global gitignore.
+.codegraph/
