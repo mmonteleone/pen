@@ -367,6 +367,16 @@ rc=0; "$PEN" --bogus >/dev/null 2>&1 || rc=$?
 check "an unknown option is a usage error (exit 2)" test "$rc" = 2
 rc=0; "$PEN" run >/dev/null 2>&1 || rc=$?
 check "pen run without a command is a usage error (exit 2)" test "$rc" = 2
+for bad in "--port 0" "--port 65536" "--port http" "--port=80x ls" "--port"; do
+  rc=0; out=$("$PEN" $bad 2>&1 </dev/null) || rc=$?
+  check "pen $bad is a usage error (exit 2), before any session" bash -c '[ "$1" = 2 ] && grep -q "^pen: --port: " <<<"$2"' _ "$rc" "$out"
+done
+rc=0; out=$("$PEN" --port 8765 allow 2>&1 </dev/null) || rc=$?
+check "--port with a subcommand is a usage error" bash -c '[ "$1" = 2 ] && grep -qF -- "--port goes only with a command to run, not pen allow" <<<"$2"' _ "$rc" "$out"
+check "pen --help documents --port" contains "--port <n>" "$("$PEN" --help)"
+check "pen run --help documents --port and ports" bash -c "'$PEN' run --help | grep -qF -- '--port <n>' && '$PEN' run --help | grep -qF 'ports = ['"
+check "pen --port 8765 --port=8766 starts a session" bash -c "'$PEN' --port 8765 --port=8766 run true </dev/null >/dev/null 2>&1"
+check "...and --port after the command is the command's" contains "[--port 8765]" "$("$PEN" run sh -c 'echo "[$*]"' _ --port 8765 </dev/null 2>/dev/null)"
 
 check "refuses \$HOME" refuse "$HOME" "home directory"
 check "refuses /" refuse / "refusing to run in /"
@@ -514,6 +524,17 @@ printf '[env]\nFOO = "x"\n' >.pen/config.toml
 check "[env] in .pen/config.toml is refused, naming the file" contains '.pen/config.toml: "env" belongs in' "$(pen_run true 2>&1 || true)"
 printf '[github]\nacme = "x"\n' >.pen/config.toml
 check "[github] in .pen/config.toml is refused, naming the file" contains '.pen/config.toml: "github" belongs in' "$(pen_run true 2>&1 || true)"
+printf 'ports = [3000, 5173]\n' >.pen/config.toml
+check "ports in .pen/config.toml is accepted" pen_run true
+printf 'ports = [70000]\n' >.pen/config.toml
+check "an out-of-range port in .pen/config.toml is refused, naming the file" contains '.pen/config.toml: ports: 70000 isn'"'"'t a port number' "$(pen_run true 2>&1 || true)"
+printf 'ports = ["3000"]\n' >.pen/config.toml
+check "...and so is a quoted one" contains '.pen/config.toml: ports: "3000" isn'"'"'t a port number' "$(pen_run true 2>&1 || true)"
+rm .pen/config.toml
+fake_config "ports = [3000]"
+check "ports in ~/.config/pen/config.toml is refused, pointing to .pen/config.toml" \
+  contains '~/.config/pen/config.toml: "ports" belongs in .pen/config.toml (or use pen --port)' "$(fake_pen run true 2>&1 || true)"
+fake_config "# empty"
 echo "allow = example.com" >.pen/config
 check "a legacy .pen/config is refused with a pointer to the new files" contains ".pen/config is pen's old config format" "$(pen_run true 2>&1 || true)"
 rm -rf .pen

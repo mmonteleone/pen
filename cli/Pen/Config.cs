@@ -30,6 +30,8 @@ internal sealed partial class Config
     public string? GitHubOwner { get; private set; }
     /// <summary>docker = true|false: Docker-in-Docker for every session (project only); null when unset.</summary>
     public bool? Docker { get; private set; }
+    /// <summary>ports = [3000, …]: ports to forward from the host's 127.0.0.1, in file order without duplicates (project only).</summary>
+    public List<int> Ports { get; } = [];
 
     public static Config Empty { get; } = new();
 
@@ -95,6 +97,8 @@ internal sealed partial class Config
                     throw BelongsIn(projectFile);
                 case "docker" when kind == ConfigKind.User:
                     throw BelongsIn(projectFile, " (or use pen --docker)");
+                case "ports" when kind == ConfigKind.User:
+                    throw BelongsIn(projectFile, " (or use pen --port)");
                 case "allow":
                     if (value is not TomlArray domains) throw Error("allow must be a list of domains, e.g. allow = [\"example.com\"]");
                     foreach (var d in domains)
@@ -133,6 +137,16 @@ internal sealed partial class Config
 
                 case "docker":
                     config.Docker = value as bool? ?? throw Error("docker must be true or false (unquoted)");
+                    break;
+
+                case "ports":
+                    if (value is not TomlArray ports) throw Error("ports must be a list of port numbers, e.g. ports = [3000, 5173]");
+                    foreach (var p in ports)
+                    {
+                        if (p is not long n || !Port.IsValid(n))
+                            throw Error($"ports: {(p is string ? $"\"{p}\"" : p?.ToString() ?? "null")} isn't a port number (1 to 65535, unquoted)");
+                        if (!config.Ports.Contains((int)n)) config.Ports.Add((int)n);
+                    }
                     break;
 
                 default:

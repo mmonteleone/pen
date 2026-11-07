@@ -6,18 +6,24 @@ internal enum CommandKind { Run, Upgrade, Allow, Sign, Reset, Ps, Help, Version 
 /// A parsed command line. For Run, Args is the command to run in the sandbox
 /// (empty: a shell); for Allow, the domains (lowercased); for Sign, the base, if given;
 /// for Help, the subcommand to describe, if any.
-/// Defaults: pen allow --defaults.
+/// Defaults: pen allow --defaults. Ports: pen --port, in order without duplicates.
 /// </summary>
-internal sealed record Command(CommandKind Kind, IReadOnlyList<string> Args, bool Clean = false, bool Global = false, bool Docker = false, bool Defaults = false);
+internal sealed record Command(CommandKind Kind, IReadOnlyList<string> Args, bool Clean = false, bool Global = false, bool Docker = false, bool Defaults = false)
+{
+    public IReadOnlyList<int> Ports { get; init; } = [];
+}
 
 internal static class Cli
 {
     public const string Usage = """
         usage:
-          pen [--docker]            interactive shell in this project's sandbox
-          pen [--docker] <cmd…>     run a command in the sandbox, e.g. pen claude
-          pen [--docker] run <cmd…> same, for a command whose name matches a subcommand
+          pen [<options>]           interactive shell in this project's sandbox
+          pen [<options>] <cmd…>    run a command in the sandbox, e.g. pen claude
+          pen [<options>] run <cmd…>
+                                    same, for a command whose name matches a subcommand
                                     --docker: with Docker-in-Docker (or docker = true in .pen/config.toml)
+                                    --port <n>: forward localhost:<n> to the sandbox (repeatable;
+                                    or ports = [<n>, …] in .pen/config.toml)
           pen upgrade [--clean]     newer base image and agents; --clean skips the cache
           pen allow <domain…> [--global]
                                     allow domains, applied to running sessions too
@@ -33,8 +39,8 @@ internal static class Cli
     public static readonly Dictionary<string, string> SubcommandHelp = new(StringComparer.Ordinal)
     {
         ["run"] = """
-            usage: pen [--docker] [<cmd…>]
-                   pen [--docker] run [--] <cmd…>
+            usage: pen [--docker] [--port <n>]… [<cmd…>]
+                   pen [--docker] [--port <n>]… run [--] <cmd…>
 
             Runs a command in this project's sandbox, or an interactive shell when there's
             none, e.g. pen claude, pen codex, pen run npm ci. Everything after the command's
@@ -46,6 +52,10 @@ internal static class Cli
 
               --docker   give the session its own Docker daemon (one per project at a
                          time); docker = true in .pen/config.toml does this for every session
+              --port <n> forward port <n> on the host's 127.0.0.1 to port <n> in the
+                         sandbox (repeatable); ports = [<n>, …] in .pen/config.toml does
+                         this for every session. A server in the sandbox must listen on
+                         0.0.0.0, not only localhost
             """,
         ["upgrade"] = """
             usage: pen upgrade [--clean]
@@ -115,20 +125,45 @@ internal static class Cli
 
     /// <summary>
     /// A first argument that's a subcommand selects it; any other first argument
-    /// is the command to run. Options before the command are pen's: --docker
-    /// (for running), help and version. Any other one is an error.
+    /// is the command to run. Options before the command are pen's: --docker and
+    /// --port (for running), help and version. Any other one is an error.
     /// </summary>
     public static Command Parse(IReadOnlyList<string> args)
     {
-        if (args.Count > 0 && args[0] == "--docker")
+        // The options for running, in any order and repeatable.
+        string? runOption = null;
+        var docker = false;
+        var ports = new List<int>();
+        var i = 0;
+        while (i < args.Count)
         {
-            var after = args.Skip(1).SkipWhile(a => a == "--docker").ToList();
+            var a = args[i];
+            if (a == "--docker")
+            {
+                docker = true;
+                i++;
+            }
+            else if (a == "--port" || a.StartsWith("--port=", StringComparison.Ordinal))
+            {
+                var value = a == "--port" ? (i + 1 < args.Count ? args[i + 1] : null) : a["--port=".Length..];
+                if (value == null) throw Error("--port: missing the port number");
+                if (!int.TryParse(value, System.Globalization.NumberStyles.None, null, out var port) || !Port.IsValid(port))
+                    throw Error($"--port: \"{value}\" isn't a port number (1 to 65535)");
+                if (!ports.Contains(port)) ports.Add(port);
+                i += a == "--port" ? 2 : 1;
+            }
+            else break;
+            runOption ??= a.StartsWith("--port", StringComparison.Ordinal) ? "--port" : a;
+        }
+        if (runOption != null)
+        {
+            var after = args.Skip(i).ToList();
             var c = Parse(after);
             if (c.Kind != CommandKind.Run)
                 throw Error(after.Count > 0 && Subcommands.ContainsKey(after[0])
-                    ? $"--docker goes only with a command to run, not pen {after[0]}"
-                    : $"--docker goes only with a command to run");
-            return c with { Docker = true };
+                    ? $"{runOption} goes only with a command to run, not pen {after[0]}"
+                    : $"{runOption} goes only with a command to run");
+            return c with { Docker = docker, Ports = ports };
         }
         if (args.Count == 0) return new(CommandKind.Run, []);
         var first = args[0];

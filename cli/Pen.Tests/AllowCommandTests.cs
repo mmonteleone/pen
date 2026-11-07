@@ -65,6 +65,15 @@ public class AllowCommandTests
     }
 
     [Fact]
+    public void KeepsAProjectFilesOtherKeys_PortsIncluded()
+    {
+        var text = "github_owner = \"acme\"\ndocker = true\nports = [3000, 5173]\nallow = [\"a.io\"]\n";
+        var result = ConfigEdit.AddAllowed(text, ".pen/config.toml", ConfigKind.Project, ["b.io"], out _);
+        Assert.Equal(text.Replace("[\"a.io\"]", "[\n  \"a.io\",\n  \"b.io\",\n]"), result);
+        Assert.Equal([3000, 5173], Config.Parse(result, "x", ConfigKind.Project).Ports);
+    }
+
+    [Fact]
     public void KeepsCrLf() =>
         Assert.Equal("allow = [\r\n  \"a.io\",\r\n  \"b.io\",\r\n]\r\n", Add("allow = [\r\n  \"a.io\",\r\n]\r\n", "b.io"));
 

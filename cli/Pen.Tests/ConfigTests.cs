@@ -86,6 +86,34 @@ public class ConfigTests
         Assert.StartsWith($"{UserFile}: \"docker\" belongs in {ProjFile}", Error(() => User("docker = true")));
     }
 
+    [Fact]
+    public void PortsIsAProjectListOfPortNumbers_WithoutDuplicates()
+    {
+        Assert.Empty(Proj("").Ports);
+        Assert.Empty(Proj("ports = []").Ports);
+        Assert.Equal([3000, 1, 65535], Proj("ports = [3000, 1, 65535, 3000]").Ports);
+        Assert.Equal([5173, 8080], Proj("ports = [\n  5173,  # vite\n  8080,\n]").Ports);
+        Assert.Equal([8080], Proj("ports = [0x1F90]").Ports); // TOML integers in any base
+    }
+
+    [Theory]
+    [InlineData("ports = 3000", "ports must be a list of port numbers")]
+    [InlineData("ports = \"3000\"", "ports must be a list of port numbers")]
+    [InlineData("ports = [0]", "ports: 0 isn't a port number (1 to 65535, unquoted)")]
+    [InlineData("ports = [65536]", "ports: 65536 isn't a port number")]
+    [InlineData("ports = [-80]", "ports: -80 isn't a port number")]
+    [InlineData("ports = [4294967376]", "ports: 4294967376 isn't a port number")] // 2^32 + 80: no truncation to 80
+    [InlineData("ports = [\"3000\"]", "ports: \"3000\" isn't a port number")]
+    [InlineData("ports = [80.0]", "ports: 80 isn't a port number")]
+    [InlineData("ports = [true]", "ports: True isn't a port number")]
+    [InlineData("ports = [[80]]", "ports: ")]
+    public void InvalidPorts(string text, string message) =>
+        Assert.StartsWith($"{ProjFile}: {message}", Error(() => Proj(text)));
+
+    [Fact]
+    public void PortsBelongInTheProjectFile() =>
+        Assert.Equal($"{UserFile}: \"ports\" belongs in {ProjFile} (or use pen --port)", Error(() => User("ports = [3000]")));
+
     [Theory]
     [InlineData("[github]\nacme = \"t\"")]
     [InlineData("[env]\nFOO = \"x\"")]
@@ -124,10 +152,11 @@ public class ConfigTests
         using var t = new TempDir();
         Assert.Empty(Config.Load(t.Path, ".pen", ConfigKind.Project).Allow);
 
-        File.WriteAllText(Path.Combine(t.Path, "config.toml"), "docker = true\nallow = [\"a.com\"]\n");
+        File.WriteAllText(Path.Combine(t.Path, "config.toml"), "docker = true\nallow = [\"a.com\"]\nports = [3000]\n");
         var c = Config.Load(t.Path, ".pen", ConfigKind.Project);
         Assert.Equal(["a.com"], c.Allow);
         Assert.True(c.Docker);
+        Assert.Equal([3000], c.Ports);
 
         File.WriteAllText(Path.Combine(t.Path, "config.toml"), "docker = 1\n");
         Assert.StartsWith(".pen/config.toml: docker", Error(() => Config.Load(t.Path, ".pen", ConfigKind.Project)));

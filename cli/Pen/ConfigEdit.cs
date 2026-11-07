@@ -48,6 +48,7 @@ internal static class ConfigEdit
         catch (PenException) { after = new(); }
         if (!after.Allow.SequenceEqual(before.Allow.Concat(added))
             || after.GitHubOwner != before.GitHubOwner || after.Docker != before.Docker
+            || !after.Ports.SequenceEqual(before.Ports)
             || !after.Env.SequenceEqual(before.Env)
             || !after.GitHubTokens.OrderBy(kv => kv.Key).SequenceEqual(before.GitHubTokens.OrderBy(kv => kv.Key)))
             throw new PenException($"{displayPath}: couldn't add to allow automatically; add {string.Join(", ", added.Select(Quote))} by hand");

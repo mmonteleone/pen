@@ -187,6 +187,76 @@ public class CliTests
         Assert.Contains("--docker goes only with a command to run", e.Message);
     }
 
+    [Fact]
+    public void PortIsRepeatable_InOrder_WithoutDuplicates()
+    {
+        Assert.Empty(P("claude").Ports);
+        Assert.Empty(P("--docker", "claude").Ports);
+
+        var c = P("--port", "3000", "--port=5173", "--port", "3000", "claude", "--port", "9");
+        Assert.Equal(CommandKind.Run, c.Kind);
+        Assert.Equal([3000, 5173], c.Ports);
+        Assert.Equal(["claude", "--port", "9"], c.Args); // after the command, it's the command's
+        Assert.False(c.Docker);
+
+        var shell = P("--port", "1");
+        Assert.Equal(CommandKind.Run, shell.Kind);
+        Assert.Empty(shell.Args);
+        Assert.Equal([1], shell.Ports);
+
+        var r = P("--port", "65535", "--docker", "--port", "8080", "run", "--", "ps");
+        Assert.True(r.Docker);
+        Assert.Equal([65535, 8080], r.Ports);
+        Assert.Equal(["ps"], r.Args);
+        Assert.Equal([80], P("--docker", "--port", "80", "--docker", "ls").Ports);
+        Assert.Equal(["--port", "80"], P("run", "--port", "80").Args);
+    }
+
+    [Theory]
+    [InlineData("--port")]
+    [InlineData("--port=")]
+    [InlineData("--port", "0")]
+    [InlineData("--port", "65536")]
+    [InlineData("--port", "-1")]
+    [InlineData("--port", "+80")]
+    [InlineData("--port", " 80")]
+    [InlineData("--port", "80x")]
+    [InlineData("--port", "0x50")]
+    [InlineData("--port", "99999999999")]
+    [InlineData("--port", "claude")]
+    [InlineData("--port=8o", "ls")]
+    [InlineData("--docker", "--port", "ls")]
+    public void BadPortsAreUsageErrors(params string[] args)
+    {
+        var e = Assert.Throws<PenException>(() => P(args));
+        Assert.Equal(2, e.ExitCode);
+        Assert.StartsWith("--port: ", e.Message);
+    }
+
+    [Theory]
+    [InlineData("upgrade")]
+    [InlineData("allow")]
+    [InlineData("sign")]
+    [InlineData("reset")]
+    [InlineData("ps")]
+    [InlineData("--help")]
+    [InlineData("--version")]
+    public void PortWithAnythingButRunningIsAnError(string what)
+    {
+        var e = Assert.Throws<PenException>(() => P("--port", "3000", what));
+        Assert.StartsWith("--port goes only with a command to run", e.Message);
+        Assert.StartsWith("--docker goes only", Assert.Throws<PenException>(() => P("--docker", "--port", "3000", what)).Message);
+    }
+
+    [Fact]
+    public void FlagPortsAppendToConfigPorts_WithoutDuplicates_FlagWinning()
+    {
+        Assert.Empty(Port.Merge([], []));
+        Assert.Equal([new(3000, false), new(5173, false)], Port.Merge([3000, 5173], []));
+        Assert.Equal([new(3000, false), new(5173, true), new(8080, true)], Port.Merge([3000, 5173], [8080, 5173]));
+        Assert.Equal([new(9, true)], Port.Merge([], [9]));
+    }
+
     [Theory]
     [InlineData("-v")]
     [InlineData("--dockr")]
