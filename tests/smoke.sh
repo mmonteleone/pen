@@ -291,6 +291,10 @@ check "bare IP ($gh_ip) → 403 from the proxy" test "$(code "https://$gh_ip" | 
 check "--noproxy '*' fails (fail-closed)" \
   not pen_run curl -s -m 10 -o /dev/null --noproxy '*' https://github.com
 check "port other than 443 refused for CONNECT" test "$(code https://github.com:8443 | cut -d' ' -f2)" = 403
+before=$(docker volume ls -q --filter dangling=true | sort)
+pen_run true >/dev/null 2>&1
+check "a session leaves no anonymous volumes behind (squid's log and spool dirs are tmpfs)" \
+  test -z "$(comm -13 <(echo "$before") <(docker volume ls -q --filter dangling=true | sort))"
 
 if in_sandbox 'getent hosts example.com' >/dev/null 2>&1; then
   note "DNS: external names RESOLVE inside the sandbox → keep the DNS-tunneling limitation in the README"

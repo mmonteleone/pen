@@ -73,7 +73,16 @@ services:
     cap_add: [SETUID, SETGID]
     security_opt: ["no-new-privileges:true"]
     pids_limit: 256
+    # tmpfs over the dirs the image declares as volumes, which would otherwise
+    # leave two anonymous volumes behind per session (proxy.log is bound into
+    # the log dir, and squid keeps no disk cache).
     volumes:
+      - type: tmpfs
+        target: /var/log/squid
+        tmpfs: {size: 16m, mode: 01777}
+      - type: tmpfs
+        target: /var/spool/squid
+        tmpfs: {size: 16m, mode: 01777}
       - type: bind
         source: ./squid.conf
         target: /etc/squid/squid.conf
