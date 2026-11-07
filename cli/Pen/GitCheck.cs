@@ -18,8 +18,11 @@ internal static class GitCheck
     /// <summary>
     /// Checks <paramref name="dir"/> and quarantines what it flags.
     /// <paramref name="startedWithGit"/> is whether the session started with a .git there.
+    /// <paramref name="commonGitDir"/> is the git dir it started with (default
+    /// dir/.git; for a linked worktree, the main checkout's): the .git-level
+    /// checks run on it, and worktrees of it in the tree are the project's own.
     /// </summary>
-    public static List<Quarantined> Run(string dir, bool startedWithGit)
+    public static List<Quarantined> Run(string dir, bool startedWithGit, string? commonGitDir = null)
     {
         var moved = new List<Quarantined>();
         if (!Directory.Exists(dir)) return moved;
@@ -32,6 +35,7 @@ internal static class GitCheck
         }
         else
         {
+            git = commonGitDir ?? git;
             var commondir = Path.Combine(git, "commondir");
             if (RepoGuard.Exists(commondir))
                 Move(commondir, "a normal repo never has one: it makes git read config and hooks from another directory", moved);
@@ -40,7 +44,7 @@ internal static class GitCheck
                 Move(modules, "submodule repos, made during the session: their config and hooks were writable from the sandbox", moved);
         }
 
-        foreach (var n in RepoScan.FindNested(dir))
+        foreach (var n in RepoScan.FindNested(dir, startedWithGit ? commonGitDir : null))
         {
             var why = n.Kind switch
             {

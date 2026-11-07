@@ -202,12 +202,11 @@ internal static class Sign
     public static int Run(HostEnv host, Project project, string? baseArg)
     {
         if (!project.IsRepo) throw new PenException($"{project.Dir} isn't a git repo");
-        if (project.IsWorktree) throw new PenException("this is a linked worktree, which pen sign doesn't support yet: run it from the main checkout");
         Session.EnsureRuntimeDir(host, project.Key);
         using var locks = Sessions.TakeForSign(host, project);
         Session.FinishDeadSessions(project.Key, host.RuntimeDir(project.Key));
 
-        var moved = GitCheck.Run(project.Dir, startedWithGit: true);
+        var moved = GitCheck.Run(project.Dir, startedWithGit: true, project.CommonGitDir);
         if (moved.Count > 0)
         {
             Out.Raw(GitCheck.Warning(project.Dir, moved));
@@ -259,7 +258,7 @@ internal static class Sign
     {
         try
         {
-            if (!Directory.Exists(Path.Combine(projectDir, ".git")) || !HostGit.GlobalBool("commit.gpgsign")) return null;
+            if (!Path.Exists(Path.Combine(projectDir, ".git")) || !HostGit.GlobalBool("commit.gpgsign")) return null;
             var git = new HostGit(projectDir);
             var head = git.TryOut("rev-parse", "--verify", "-q", "HEAD^{commit}");
             if (string.IsNullOrEmpty(head)) return null;

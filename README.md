@@ -26,7 +26,7 @@ around what can still go wrong once the agent is in a container:
 
 - **Your git, on the host.** An agent that can write to the project can also write `.git/config`
   or `.git/hooks`, which run the next time *you* use git. pen mounts both read-only, refuses repo
-  layouts it can't protect (submodules, linked worktrees, nested repos), and checks `.git` before
+  layouts it can't protect (submodules, nested repos), and checks `.git` before
   running any git on the host.
 - **GitHub without push.** The agent gets a read-only token per owner. It can clone and fetch but
   never push: you review, then push.
@@ -45,7 +45,7 @@ the host, commits signed on the host. If that doesn't fit how you work, pen will
 
 - you approve agent actions one by one anyway. An agent's built-in sandbox is lighter.
 - you need protection from a deliberate container escape. Use a VM.
-- your repos rely on submodules, or you start agents from a linked worktree.
+- your repos rely on submodules.
 - you're on Windows. pen supports macOS and Linux.
 
 ## Install
@@ -111,7 +111,14 @@ pen reset                       wipe this project's sandbox state (logins, cache
 ```
 
 pen must run from a repo root. It refuses your home directory, subdirectories of a repo, folders
-containing multiple repos, linked worktrees and repos with submodules.
+containing multiple repos and repos with submodules.
+
+A linked worktree (`git worktree add ../feat -b feat`) is a repo root too, so you can run an agent
+per branch in parallel. All worktrees of a repo are one project: they share its logins, caches,
+`pen reset` and the one-`--docker`-session limit, and `pen ps` lists their sessions together. Each
+worktree has its own `.pen/`, and `pen sign` in one isn't held up by a session in another. In the
+sandbox, the worktree sees the repo's shared git data (objects, branches) but not the main
+checkout's files. Worktrees of a bare repo aren't supported.
 
 ## Configuration
 

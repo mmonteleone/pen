@@ -16,13 +16,13 @@ public class RepoGuardTests
     }
 
     [Fact]
-    public void RefusesALinkedWorktree()
+    public void RefusesAGitFileThatIsntAValidWorktree()
     {
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
         Git.Run(repo, "worktree", "add", "-q", Path.Combine(t.Path, "wt"));
-        Assert.Contains("linked worktree", Refusal(Path.Combine(t.Path, "wt")));
-        Assert.Contains("main checkout", Refusal(Path.Combine(t.Path, "wt")));
+        File.WriteAllText(Path.Combine(repo, ".git", "worktrees", "wt", "commondir"), "/tmp/evil\n");
+        Assert.Contains("isn't a valid linked worktree", Refusal(Path.Combine(t.Path, "wt")));
         RepoGuard.CheckAtStart(repo); // the main checkout itself is fine
     }
 

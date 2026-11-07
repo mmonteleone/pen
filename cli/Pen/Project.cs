@@ -6,6 +6,9 @@ namespace Pen;
 /// <summary>
 /// The project pen runs in: the current directory, by its real path. Its key,
 /// pen-&lt;dir&gt;-&lt;hash&gt;, names the project's volumes, image and runtime dir.
+/// It comes from <see cref="RepoDir"/>, so all worktrees of a repo share one
+/// key (logins, caches, sessions and locks), while each keeps its own
+/// <see cref="Dir"/> (mounted as the project, with its own .pen/).
 /// <para>
 /// The repo is modeled apart from the dir: <see cref="CommonGitDir"/> is the
 /// git dir holding config, hooks and objects (the dir's own .git, or for a
@@ -28,7 +31,7 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
         var dir = Native.RealPath(cwd) ?? throw new PenException($"can't resolve the current directory {cwd}");
         CheckAllowed(dir, host);
         var (common, repoDir) = FindRepo(dir);
-        return new Project(dir, KeyFor(dir), common, repoDir);
+        return new Project(dir, KeyFor(repoDir), common, repoDir);
     }
 
     /// <summary>
@@ -44,7 +47,7 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
         var common = RepoScan.ResolveWorktree(git);
         if (common == null) return (null, dir);
         // A bare repo's worktree has no main checkout; the dir stands in for it.
-        return (common, Path.GetFileName(common) == ".git" ? Path.GetDirectoryName(common)! : dir);
+        return (common, RepoGuard.IsMainCheckoutGitDir(common) ? Path.GetDirectoryName(common)! : dir);
     }
 
     public static string KeyFor(string realDir) => $"pen-{CleanName(realDir)}-{Hash(realDir)}";

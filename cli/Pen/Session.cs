@@ -23,6 +23,7 @@ internal sealed class SessionDir(string projectKey, string path)
     public string ProxyLog => File("proxy.log");
     public string LockFile => File("session.lock");
     public string EnvFile => File("session.env");
+    /// <summary>Present when the session started in a repo; holds its common git dir (empty from older pens: PROJECT_DIR/.git).</summary>
     public string StartedWithGit => File("started-with-git");
     /// <summary>The command run in the sandbox, each argument NUL-terminated (empty: a shell), for pen ps.</summary>
     public string CommandFile => File("command");
@@ -57,6 +58,14 @@ internal sealed class SessionDir(string projectKey, string path)
 
     public void WriteStarted(DateTime utc) =>
         System.IO.File.WriteAllText(StartedFile, utc.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture));
+
+    /// <summary>The common git dir the session started with, or null when it didn't start in a repo.</summary>
+    public (bool StartedWithGit, string? CommonGitDir) ReadGit()
+    {
+        if (!System.IO.File.Exists(StartedWithGit)) return (false, null);
+        var common = System.IO.File.ReadAllText(StartedWithGit).TrimEnd('\n');
+        return (true, common.Length == 0 ? null : common);
+    }
 
     public DateTime? ReadStarted() =>
         System.IO.File.Exists(StartedFile)
@@ -140,7 +149,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
             ["PEN_SEED"] = host.SeedDir,
         };
         File.WriteAllLines(session.EnvFile, env.Select(kv => $"{kv.Key}={kv.Value}"));
-        if (project.IsRepo) File.WriteAllText(session.StartedWithGit, "");
+        if (project.IsRepo) File.WriteAllText(session.StartedWithGit, project.CommonGitDir + "\n");
         if (docker) File.WriteAllText(session.DockerMarker, "");
         session.WriteCommand(command);
         session.WriteStarted(DateTime.UtcNow);
@@ -250,7 +259,8 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         string? reminder = null;
         if (env.TryGetValue("PROJECT_DIR", out var projectDir))
         {
-            var moved = GitCheck.Run(projectDir, File.Exists(session.StartedWithGit));
+            var (startedWithGit, commonGitDir) = session.ReadGit();
+            var moved = GitCheck.Run(projectDir, startedWithGit, commonGitDir);
             if (moved.Count > 0) Out.Raw(GitCheck.Warning(projectDir, moved));
             else reminder = Sign.Reminder(projectDir);
         }

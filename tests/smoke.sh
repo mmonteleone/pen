@@ -73,7 +73,7 @@ forget() {
     docker ps -aq --filter "name=^$k-" | xargs docker rm -f >/dev/null 2>&1 || true
     docker network ls -q --filter "name=^$k-" | xargs docker network rm >/dev/null 2>&1 || true
     docker volume rm "${k}_home" "${k}_nuget" "${k}_dind" >/dev/null 2>&1 || true
-    docker image rm "$k:latest" >/dev/null 2>&1 || true
+    docker image ls -q --filter "reference=$k*" | xargs docker image rm -f >/dev/null 2>&1 || true
     rm -rf "$REAL_HOME/.local/state/pen/$k"
   done
 }
@@ -84,7 +84,7 @@ cleanup() {
     docker ps -aq --filter "name=^$KEY-" | xargs docker rm -f >/dev/null 2>&1 || true
     docker network ls -q --filter "name=^$KEY-" | xargs docker network rm >/dev/null 2>&1 || true
     docker volume rm "${KEY}_home" "${KEY}_nuget" "${KEY}_dind" >/dev/null 2>&1 || true
-    docker image rm "$KEY:latest" >/dev/null 2>&1 || true
+    docker image ls -q --filter "reference=$KEY*" | xargs docker image rm -f >/dev/null 2>&1 || true
     rm -rf "$REAL_HOME/.local/state/pen/$KEY"
   fi
   local d
@@ -602,8 +602,10 @@ if want 12; then
 section "12. Repo refusals at start (step 4)"
 
 git worktree add -q "$SCRATCH/wt" 2>/dev/null # kept until section 13 (its .git/worktrees entry is mounted read-only)
-check "refuses a linked worktree, pointing at the main checkout" refuse "$SCRATCH/wt" "run pen from the main checkout"
-forget "$SCRATCH/wt"
+mkdir -p "$SCRATCH/forged"
+printf 'gitdir: %s/.git/worktrees/wt\n' "$PROJECT_DIR" >"$SCRATCH/forged/.git"
+check "refuses a .git file that isn't a valid linked worktree (section 21 runs in one)" refuse "$SCRATCH/forged" "isn't a valid linked worktree"
+forget "$SCRATCH/forged"; rm -rf "$SCRATCH/forged"
 touch .gitmodules
 check "refuses a repo with .gitmodules (not supported yet)" refuse "$PROJECT_DIR" "submodules, which pen doesn't support yet"
 rm .gitmodules
@@ -1132,6 +1134,112 @@ rc=0; out=$(pen_run true 2>&1) || rc=$?
 check "...and a bad value names the file" bash -c '[ "$1" != 0 ] && grep -q "^pen: .pen/config.toml: docker must be true or false" <<<"$2"' _ "$rc" "$out"
 rm -f .pen/config.toml
 check "nothing is left running" test "$(containers)" = 0
+fi
+
+if want 21; then
+# ==============================================================================
+section "21. Linked worktrees (worktrees B4)"
+
+git worktree add -q -b smoke-wt "$SCRATCH/wt21" 2>/dev/null
+WT=$(cd "$SCRATCH/wt21" && pwd -P)
+WT_HASH=$(printf %s "$WT" | sha | cut -c1-8)
+base=$(git -C "$WT" rev-parse HEAD)
+main_head=$(git rev-parse HEAD)
+echo main-only >main-only.txt
+G=$PROJECT_DIR/.git
+
+out=$(cd "$WT" && in_sandbox "
+  t() { if eval \"\$1\" >/dev/null 2>&1; then echo \"ok: \$2\"; else echo \"fail: \$2\"; fi; }
+  t 'git -c user.name=a -c user.email=a@example.invalid commit -q --allow-empty -m in-wt' commit
+  t 'git checkout -q -b smoke-wt2 && git checkout -q smoke-wt' checkout
+  t 'echo x >> \"$G/config\"' configwrite
+  t 'git config core.fsmonitor x' config
+  t 'echo x >> \"$G/hooks/pre-commit\"' hook
+  t 'echo \"gitdir: /tmp\" > .git' gitfile
+  t 'mv \"$G\" \"$G.2\"' mvcommon
+  t 'echo 0000000000000000000000000000000000000000 > \"$G/HEAD\"' mainhead
+  t 'test \"\$(ls -A \"$PROJECT_DIR\")\" = .git' mainhidden
+  t 'touch .pen/x' pen
+" 2>&1)
+has() { grep -qxF -- "$1" <<<"$out"; }
+check "pen starts in a linked worktree, and git commit works there" has "ok: commit"
+check "...as does switching branches (its own worktrees/ entry is writable)" has "ok: checkout"
+check "...and the host sees the commit" test "$(git log -1 --format=%s smoke-wt)" = in-wt
+check "the session printed no warning" not contains "WARNING" "$out"
+check "writing the common .git/config fails" has "fail: configwrite"
+check "...as does git config" has "fail: config"
+check "writing a hook in the common .git/hooks fails" has "fail: hook"
+check "writing the worktree's .git file fails" has "fail: gitfile"
+check "mv of the common git dir fails" has "fail: mvcommon"
+check "the main checkout's HEAD is read-only" has "fail: mainhead"
+check "...and stays as it was" test "$(git rev-parse HEAD)" = "$main_head"
+check "the main checkout's files aren't visible, only its .git" has "ok: mainhidden"
+check "the worktree's own .pen/ is created" test -d "$WT/.pen"
+check "...and read-only inside" has "fail: pen"
+check "the worktree shares the main checkout's key: no state of its own" \
+  bash -c "! ls -d '$REAL_HOME'/.local/state/pen/pen-*-'$WT_HASH' >/dev/null 2>&1 && ! docker volume inspect pen-wt21-'$WT_HASH'_home >/dev/null 2>&1"
+check "...and its session ran under the main checkout's runtime dir, with its own worktree lock" test -e "$RUNTIME/worktree-$WT_HASH.lock"
+git -C "$WT" branch -q -D smoke-wt2
+
+out=$(cd "$WT" && in_sandbox "touch '$G/commondir'" 2>&1 || true)
+check "a commondir planted in the common dir is quarantined when a worktree session ends" \
+  bash -c "[ ! -e '$G/commondir' ] && [ -e '$G/commondir.pen-quarantine' ]"
+check "...with the warning" contains "pen: WARNING" "$out"
+check "...and the worktree's .git file is left alone" test -f "$WT/.git"
+rm -f "$G/commondir.pen-quarantine"
+
+cd "$WT"
+"$PEN" run bash -c "touch '$G/commondir'; sleep 120" </dev/null >/dev/null 2>&1 &
+p=$!
+cd "$PROJECT_DIR"
+wait_for "^$KEY-.*-agent$" || fail "worktree session didn't start"
+for i in $(seq 100); do [ -e "$G/commondir" ] && break; sleep 0.1; done
+kill -9 "$p"; wait "$p" 2>/dev/null || true
+out=$(pen_run true 2>&1)
+check "a pen in the main checkout ends a dead worktree session" contains "whose pen exited without ending it" "$out"
+check "...checking it with its own saved dirs (the commondir is quarantined)" \
+  bash -c "[ ! -e '$G/commondir' ] && [ -e '$G/commondir.pen-quarantine' ]"
+check "...and takes its stack down" test "$(containers)" = 0
+rm -f "$G/commondir.pen-quarantine"
+
+# Parallel sessions, pen ps and pen sign, all with the throwaway HOME (one runtime dir).
+[ -e "$SCRATCH/signkey" ] || ssh-keygen -q -t ed25519 -N '' -C pen-smoke -f "$SCRATCH/signkey"
+git config --file "$FAKE_HOME/.gitconfig" gpg.format ssh
+git config --file "$FAKE_HOME/.gitconfig" user.signingkey "$SCRATCH/signkey"
+git config --file "$FAKE_HOME/.gitconfig" gpg.ssh.program ssh-keygen
+fake_config "# none"
+(cd "$WT" && fake_pen run sleep 120 >/dev/null 2>&1) &
+p_wt=$!
+wait_for "^$KEY-.*-agent$" || fail "worktree session didn't start"
+name_wt=$(docker ps --format '{{.Names}}' | grep -E "^$KEY-.*-agent$" | head -1)
+fake_pen run sleep 120 >/dev/null 2>&1 &
+p_main=$!
+check "sessions run in parallel in the main checkout and the worktree" wait_count "^$KEY-.*-agent$" 2
+name_main=$(docker ps --format '{{.Names}}' | grep -E "^$KEY-.*-agent$" | grep -vxF "$name_wt" | head -1)
+out=$(fake_pen ps)
+check "pen ps lists both" bash -c 'grep -qE "^$1 +[0-9a-f]{8} .*sleep 120$" <<<"$3" && grep -qE "^$2 +[0-9a-f]{8} .*sleep 120$" <<<"$3"' _ "$PROJECT_DIR" "$WT" "$out"
+out=$(cd "$WT" && fake_pen sign "$base" 2>&1 || true)
+check "pen sign in the worktree is refused while the worktree has a session" contains "refusing to sign while a session is running in this directory" "$out"
+check "...naming only that session" bash -c 'grep -qF "  $1" <<<"$3" && ! grep -qF "$2" <<<"$3"' _ "$name_wt" "$name_main" "$out"
+docker rm -f "$name_wt" >/dev/null
+wait "$p_wt" 2>/dev/null || true
+out=$(cd "$WT" && fake_pen sign "$base" 2>&1)
+check "pen sign in the worktree succeeds while the main checkout has a session" contains "re-signing 1 commit" "$out"
+check "...and signs the worktree's branch" bash -c "git cat-file commit smoke-wt | grep -q '^gpgsig'"
+check "...leaving the main checkout's HEAD alone" test "$(git rev-parse HEAD)" = "$main_head"
+docker rm -f "$name_main" >/dev/null
+wait "$p_main" 2>/dev/null || true
+
+mkdir -p "$WT/.pen"; echo 'FROM pen:latest' >"$WT/.pen/Dockerfile"
+check "a worktree's .pen/Dockerfile builds its own layer, $KEY-$WT_HASH:latest" \
+  bash -c "cd '$WT' && '$PEN' run true </dev/null >/dev/null 2>&1 && docker image inspect '$KEY-$WT_HASH:latest' >/dev/null 2>&1"
+docker image rm -f "$KEY-$WT_HASH:latest" >/dev/null 2>&1 || true
+
+check "nothing is left running" test "$(containers)" = 0
+rm -f main-only.txt
+git worktree remove --force "$WT"
+git branch -q -D smoke-wt
+note "manual: git worktree add ../x -b feat && cd ../x && pen claude"
 fi
 
 section "All checks passed."

@@ -57,7 +57,7 @@ internal static class Image
 
     /// <summary>
     /// The project layer: .pen/Dockerfile (FROM pen:latest), built with .pen/
-    /// as its context as &lt;project key&gt;:latest. Built on every launch; the
+    /// as its context as <see cref="ProjectLayerName"/>. Built on every launch; the
     /// cache makes that near-instant, and a rebuilt pen:latest invalidates it.
     /// Returns the image to run, or null when the project has no layer.
     /// Output stays hidden unless the build is slow or fails.
@@ -66,7 +66,7 @@ internal static class Image
     {
         var dockerfile = Path.Combine(project.PenDir, "Dockerfile");
         if (!File.Exists(dockerfile)) return null;
-        var name = $"{project.Key}:latest";
+        var name = ProjectLayerName(project);
 
         var args = new List<string> { "build", "--progress", "plain", "-t", name, "--label", $"pen.project={project.Key}" };
         if (noCache) args.Add("--no-cache");
@@ -114,6 +114,13 @@ internal static class Image
     }
 
     /// <summary>
+    /// &lt;key&gt;:latest for the main checkout (or a plain dir), and
+    /// &lt;key&gt;-&lt;hash(dir)&gt;:latest for a linked worktree, whose .pen/ is its own.
+    /// </summary>
+    public static string ProjectLayerName(Project project) =>
+        project.Dir == project.RepoDir ? $"{project.Key}:latest" : $"{project.Key}-{Project.Hash(project.Dir)}:latest";
+
+    /// <summary>
     /// pen upgrade: a newer base image, the agents reinstalled (PEN_REFRESH
     /// busts their cached layers), and newer sidecar images.
     /// </summary>
@@ -128,7 +135,7 @@ internal static class Image
         catch (PenException) { }
         if (project != null && File.Exists(Path.Combine(project.PenDir, "Dockerfile")))
         {
-            Out.Line($"rebuilding the project layer {project.Key}:latest");
+            Out.Line($"rebuilding the project layer {ProjectLayerName(project)}");
             EnsureProjectLayer(project, noCache: clean);
         }
 

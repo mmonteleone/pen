@@ -42,10 +42,13 @@ internal static class RepoScan
     /// Every repo below <paramref name="root"/> (which must be a real path),
     /// plus a bare layout in the root itself. The root's own .git is the
     /// project's and is skipped. Names compare case-insensitively, because on
-    /// the Mac's file system .GIT is .git.
+    /// the Mac's file system .GIT is .git. <paramref name="commonGitDir"/> is
+    /// the project's common git dir (default root/.git; for a linked worktree,
+    /// the main checkout's): worktrees of it below the root are the project's own.
     /// </summary>
-    public static List<NestedRepo> FindNested(string root)
+    public static List<NestedRepo> FindNested(string root, string? commonGitDir = null)
     {
+        commonGitDir ??= Path.Combine(root, ".git");
         var found = new List<NestedRepo>();
         var pending = new Stack<string>();
         pending.Push(root);
@@ -70,7 +73,7 @@ internal static class RepoScan
                     if (dir == root) continue; // the project's own; never descended into
                     if (e.IsLink) found.Add(new(path, NestedKind.GitLink));
                     else if (e.IsDir) found.Add(new(path, NestedKind.GitDir));
-                    else if (!IsProjectWorktree(root, path)) found.Add(new(path, NestedKind.GitFile));
+                    else if (ResolveWorktree(path) != commonGitDir) found.Add(new(path, NestedKind.GitFile));
                     continue; // a .git's contents belong to that repo
                 }
                 if (Is(e.Name, "HEAD")) head |= !e.IsDir;

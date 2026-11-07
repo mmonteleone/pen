@@ -16,20 +16,26 @@ internal static class RepoGuard
 {
     private const int MaxListed = 10;
 
-    /// <summary>Refuses layouts whose config and hooks the sandbox can't protect.</summary>
+    /// <summary>
+    /// Refuses layouts whose config and hooks the sandbox can't protect. A
+    /// linked worktree of a non-bare main checkout is accepted when its .git
+    /// file validates (<see cref="RepoScan.ResolveWorktree"/>); the main
+    /// repo's git dir then gets the same checks as a main checkout's own.
+    /// </summary>
     public static void CheckAtStart(string dir)
     {
         var git = Path.Combine(dir, ".git");
         if (IsLink(git))
             throw new PenException($"{Rel(dir, git)} is a symlink, which pen doesn't support: run pen in the repo it points to");
+        var common = git;
         if (File.Exists(git))
-            throw new PenException("this is a linked worktree (or a submodule's checkout), which pen doesn't support yet: run pen from the main checkout");
-        if (Path.Exists(Path.Combine(dir, ".gitmodules")) || Path.Exists(Path.Combine(git, "modules")))
+            common = CheckWorktree(dir, git);
+        if (Path.Exists(Path.Combine(dir, ".gitmodules")) || Path.Exists(Path.Combine(common, "modules")))
             throw new PenException("this repo has submodules, which pen doesn't support yet");
-        if (Exists(Path.Combine(git, "commondir")))
-            throw new PenException(".git/commondir exists, which a normal repo never has: it makes git read config and hooks from another directory. Inspect it and remove it, then rerun");
+        if (Exists(Path.Combine(common, "commondir")))
+            throw new PenException($"{Rel(dir, Path.Combine(common, "commondir"))} exists, which a normal repo never has: it makes git read config and hooks from another directory. Inspect it and remove it, then rerun");
 
-        var nested = RepoScan.FindNested(dir);
+        var nested = RepoScan.FindNested(dir, common);
         if (nested.Count == 0) return;
         var sb = new StringBuilder();
         sb.Append(Directory.Exists(git)
@@ -40,6 +46,36 @@ internal static class RepoGuard
         if (nested.Count > MaxListed) sb.Append($"\n  … and {nested.Count - MaxListed} more");
         sb.Append("\nrun pen in each repo instead");
         throw new PenException(sb.ToString());
+    }
+
+    /// <summary>
+    /// The common git dir of the linked worktree whose .git file is
+    /// <paramref name="git"/>, refusing anything else: a .git file that doesn't
+    /// validate (a submodule's checkout, or a forged one), or a worktree of a
+    /// bare repo, which has no main checkout to share pen's state with.
+    /// </summary>
+    private static string CheckWorktree(string dir, string git)
+    {
+        var common = RepoScan.ResolveWorktree(git)
+            ?? throw new PenException(".git is a file that isn't a valid linked worktree (a submodule's checkout, or a worktree whose entry in the main repo is missing or moved), which pen doesn't support. For a worktree, git worktree repair in the main checkout may fix it");
+        // ResolveWorktree requires the path to be real already; this is belt and braces.
+        if (IsLink(common) || !Directory.Exists(common) || Native.RealPath(common) != common)
+            throw new PenException($"this worktree's git dir {common} isn't a real directory, which pen doesn't support");
+        if (!IsMainCheckoutGitDir(common))
+            throw new PenException($"this is a worktree of the bare repo {common}, which pen doesn't support: run pen in a worktree of a repo with a main checkout");
+        return common;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="common"/> is a non-bare main checkout's .git:
+    /// named .git, a directory, and not core.bare.
+    /// </summary>
+    internal static bool IsMainCheckoutGitDir(string common)
+    {
+        if (Path.GetFileName(common) != ".git" || !Directory.Exists(common)) return false;
+        var bare = GitConfigFile.ParseFile(Path.Combine(common, "config"))
+            .Where(e => e.Section == "core" && e.Key == "bare").Select(e => e.Value).LastOrDefault();
+        return bare == null || !GitConfigFile.IsTrue(bare);
     }
 
     private static string Describe(NestedKind kind) => kind switch
@@ -54,12 +90,37 @@ internal static class RepoGuard
     /// The mounts over the project mount, creating what must exist to be
     /// mounted (.pen/, .git/hooks, and a few files inside .git) so that the
     /// agent can't create them instead. Call after <see cref="CheckAtStart"/>.
+    /// <para>
+    /// For a linked worktree, the main repo's git dir (the common dir: objects,
+    /// refs, the worktree's own entry) is mounted read-write, protected like a
+    /// main checkout's .git; the worktree's .git file read-only; and the main
+    /// checkout's own HEAD and index read-only, since the main checkout isn't
+    /// visible in the sandbox.
+    /// </para>
     /// </summary>
     public static List<Mount> PrepareMounts(string dir, string hostHome)
     {
         var mounts = new List<Mount>();
         var git = Path.Combine(dir, ".git");
-        if (Directory.Exists(git)) ProtectGitDir(git, dir, hostHome, mounts);
+        if (Directory.Exists(git))
+        {
+            ProtectGitDir(git, dir, hostHome, mounts);
+        }
+        else if (File.Exists(git))
+        {
+            var common = RepoScan.ResolveWorktree(git)
+                ?? throw new PenException(".git is a file that isn't a valid linked worktree");
+            ProtectGitDir(common, dir, hostHome, mounts);
+            foreach (var name in new[] { "HEAD", "index" })
+            {
+                var f = Path.Combine(common, name);
+                if (!File.Exists(f)) continue;
+                RequireNotLink(dir, f);
+                mounts.Add(new(f, ReadOnly: true));
+            }
+            // The .git file names the git dir, so the agent must not repoint it.
+            mounts.Add(new(git, ReadOnly: true));
+        }
 
         // .pen/ sets the next session's policy, so the agent must not change or create it.
         EnsureDirectory(dir, Path.Combine(dir, ".pen"));
