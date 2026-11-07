@@ -1419,4 +1419,52 @@ out=$(echo n | fake_prune 2>&1)
 check "run again, it finds nothing to prune" bash -c 'grep -q "pen: nothing to prune" <<<"$1" && ! grep -q "$2" <<<"$1"' _ "$out" "$gkey"
 fi
 
+if want 24; then
+# ==============================================================================
+section "24. Submodule repos protected (submodules E1)"
+
+# The project itself can't have submodules yet (section 12), but a worktree
+# inside it can: its submodule repos live in .git/worktrees/<n>/modules/. With
+# the checkout deinitialized, nothing in the tree points at the module repo, so
+# pen starts, and the repo must still be protected like .git itself.
+SMLIB=$SCRATCH/smlib
+git init -q "$SMLIB"
+git -C "$SMLIB" -c user.name=smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m lib
+git worktree add -q .claude/worktrees/sm 2>/dev/null
+SMWT=$PROJECT_DIR/.claude/worktrees/sm
+git -C "$SMWT" -c protocol.file.allow=always submodule add -q "$SMLIB" libs/x 2>/dev/null
+git -C "$SMWT" submodule deinit -q -f libs/x
+M=$PROJECT_DIR/.git/worktrees/sm/modules/libs/x
+check "the worktree's submodule repo exists, with its checkout deinitialized" \
+  bash -c "[ -f '$M/HEAD' ] && [ ! -e '$SMWT/libs/x/.git' ]"
+
+out=$(in_sandbox "
+  t() { if eval \"\$1\" >/dev/null 2>&1; then echo \"ok: \$2\"; else echo \"fail: \$2\"; fi; }
+  t 'echo x >> \"$M/config\"' configwrite
+  t 'git --git-dir=\"$M\" config core.fsmonitor x' config
+  t 'echo x >> \"$M/hooks/post-checkout\"' hook
+  t 'mv \"$M\" \"$M.2\"' mvrepo
+  t 'git --git-dir=\"$M\" update-ref refs/heads/smoke HEAD' ref
+" 2>&1)
+has() { grep -qxF -- "$1" <<<"$out"; }
+check "pen starts with a submodule repo in a worktree's entry" has "ok: ref"
+check "writing the submodule repo's config fails" has "fail: configwrite"
+check "...as does git config there" has "fail: config"
+check "writing a hook in the submodule repo fails" has "fail: hook"
+check "mv of the submodule repo fails" has "fail: mvrepo"
+check "the session printed no warning" not contains "WARNING" "$out"
+git --git-dir="$M" update-ref -d refs/heads/smoke
+
+touch "$M/commondir"
+check "a submodule repo with a commondir is refused at start" refuse "$PROJECT_DIR" "libs/x/commondir exists"
+rm "$M/commondir"
+ln -s "$SMLIB/.git" "$PROJECT_DIR/.git/worktrees/sm/modules/evil"
+check "a symlinked submodule repo is refused at start" refuse "$PROJECT_DIR" "modules/evil is a symlink"
+rm "$PROJECT_DIR/.git/worktrees/sm/modules/evil"
+
+check "nothing is left running" test "$(containers)" = 0
+git worktree remove --force "$SMWT"
+rm -rf .claude
+fi
+
 section "All checks passed."

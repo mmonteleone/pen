@@ -105,6 +105,10 @@ internal static class RepoGuard
     /// checkout's own HEAD and index read-only, since the main checkout isn't
     /// visible in the sandbox.
     /// </para>
+    /// <para>
+    /// The submodule repos kept in that git dir are protected the same way
+    /// (<see cref="ProtectModuleRepos"/>).
+    /// </para>
     /// </summary>
     public static List<Mount> PrepareMounts(string dir, string hostHome)
     {
@@ -113,6 +117,7 @@ internal static class RepoGuard
         if (Directory.Exists(git))
         {
             ProtectGitDir(git, dir, hostHome, mounts);
+            ProtectModuleRepos(git, dir, hostHome, mounts);
         }
         else if (File.Exists(git))
         {
@@ -128,6 +133,7 @@ internal static class RepoGuard
             }
             // The .git file names the git dir, so the agent must not repoint it.
             mounts.Add(new(git, ReadOnly: true));
+            ProtectModuleRepos(common, dir, hostHome, mounts);
         }
 
         // .pen/ sets the next session's policy, so the agent must not change or create it.
@@ -194,6 +200,30 @@ internal static class RepoGuard
         }
 
         AddIncludes(dir, gitDir, config, hostHome, mounts, depth: 0);
+    }
+
+    /// <summary>
+    /// Each submodule repo kept in <paramref name="gitDir"/> (see
+    /// <see cref="RepoScan.FindModuleRepos"/>) gets the same protection as the
+    /// git dir itself: host git running in a submodule checkout reads its
+    /// config and runs its hooks. One under a path already mounted read-only
+    /// (an external worktree's entry) is left alone: it's read-only with it,
+    /// and a writable mount of its own would undo that. A module repo that's a
+    /// symlink or has a commondir is refused, since either makes git read
+    /// config and hooks from another directory.
+    /// </summary>
+    private static void ProtectModuleRepos(string gitDir, string dir, string hostHome, List<Mount> mounts)
+    {
+        foreach (var repo in RepoScan.FindModuleRepos(gitDir))
+        {
+            if (IsLink(repo))
+                throw new PenException($"{Rel(dir, repo)} is a symlink, which pen doesn't support: a submodule's git dir has to be a real directory inside {Rel(dir, gitDir)}");
+            var commondir = Path.Combine(repo, "commondir");
+            if (Exists(commondir))
+                throw new PenException($"{Rel(dir, commondir)} exists, which a submodule's repo never has: it makes git read config and hooks from another directory. Inspect it and remove it, then rerun");
+            if (mounts.Any(m => m.ReadOnly && IsInside(m.Path, repo))) continue;
+            ProtectGitDir(repo, dir, hostHome, mounts);
+        }
     }
 
     /// <summary>

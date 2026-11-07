@@ -145,6 +145,56 @@ internal static class RepoScan
         catch (UnauthorizedAccessException) { return null; }
     }
 
+    /// <summary>
+    /// The submodule repos git keeps in <paramref name="gitDir"/>: every git
+    /// dir under modules/ (a submodule's name may contain "/", so they can sit
+    /// at any depth) and under worktrees/*/modules/ (a linked worktree's own
+    /// submodules), and recursively those of each one found (nested
+    /// submodules). A git dir is a directory with HEAD plus objects/ and refs/,
+    /// or HEAD plus commondir (which callers refuse). Any symlink met along the
+    /// way is listed as is and not followed: git would follow it to a repo
+    /// elsewhere, so callers refuse it too. Parents come before their nested
+    /// repos; siblings in ordinal order. Reads directories only; never runs git.
+    /// </summary>
+    internal static List<string> FindModuleRepos(string gitDir)
+    {
+        var found = new List<string>();
+        AddModuleRepos(gitDir, found);
+        return found;
+    }
+
+    private static void AddModuleRepos(string gitDir, List<string> found)
+    {
+        WalkModules(Path.Combine(gitDir, "modules"), found);
+        var worktrees = Path.Combine(gitDir, "worktrees");
+        if (IsLinkPath(worktrees) || !Directory.Exists(worktrees)) return; // a symlinked worktrees/ is refused by the mounts
+        foreach (var wt in Directory.EnumerateDirectories(worktrees).Order(StringComparer.Ordinal))
+            if (!IsLinkPath(wt)) WalkModules(Path.Combine(wt, "modules"), found);
+    }
+
+    private static void WalkModules(string dir, List<string> found)
+    {
+        if (IsLinkPath(dir)) { found.Add(dir); return; }
+        if (!Directory.Exists(dir)) return;
+        foreach (var entry in Directory.EnumerateFileSystemEntries(dir).Order(StringComparer.Ordinal))
+        {
+            if (IsLinkPath(entry)) found.Add(entry);
+            else if (!Directory.Exists(entry)) continue; // git keeps only directories here
+            else if (IsGitDirLayout(entry))
+            {
+                found.Add(entry);
+                AddModuleRepos(entry, found);
+            }
+            else WalkModules(entry, found); // a level of a name with "/" in it
+        }
+    }
+
+    /// <summary>git's is_git_directory: HEAD, plus objects/ and refs/ or a commondir naming them.</summary>
+    private static bool IsGitDirLayout(string dir) =>
+        File.Exists(Path.Combine(dir, "HEAD")) &&
+        ((Directory.Exists(Path.Combine(dir, "objects")) && Directory.Exists(Path.Combine(dir, "refs")))
+         || Path.Exists(Path.Combine(dir, "commondir")) || IsLinkPath(Path.Combine(dir, "commondir")));
+
     /// <summary>A one-line file's value after <paramref name="prefix"/>, or null if it doesn't have that shape.</summary>
     private static string? ReadPathFile(string path, string prefix)
     {
