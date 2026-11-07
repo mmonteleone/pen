@@ -1,6 +1,6 @@
 namespace Pen;
 
-internal enum CommandKind { Run, Upgrade, Allow, Sign, Reset, Help, Version }
+internal enum CommandKind { Run, Upgrade, Allow, Sign, Reset, Ps, Help, Version }
 
 /// <summary>
 /// A parsed command line. For Run, Args is the command to run in the sandbox
@@ -23,6 +23,7 @@ internal static class Cli
                                     allow domains, applied to running sessions too
           pen allow                 list recently blocked domains
           pen allow --defaults      list the domains pen allows out of the box
+          pen ps                    list running sessions, in every project
           pen sign [<base>]         on the host: re-sign unpushed commits with your key
           pen reset                 wipe this project's volumes (asks first)
           pen <subcommand> --help   more about one of them
@@ -71,6 +72,13 @@ internal static class Cli
                            project, and apply them to all running sessions
               --defaults   list the domains pen allows out of the box
             """,
+        ["ps"] = """
+            usage: pen ps
+
+            Lists the running sessions of every project: the project's directory, the
+            session's id (its containers are named pen-<dir>-<hash>-<id>-…), docker for
+            a session with Docker-in-Docker, how long it has been running, and its command.
+            """,
         ["sign"] = """
             usage: pen sign [<base>]
 
@@ -102,6 +110,7 @@ internal static class Cli
         ["allow"] = CommandKind.Allow,
         ["sign"] = CommandKind.Sign,
         ["reset"] = CommandKind.Reset,
+        ["ps"] = CommandKind.Ps,
     };
 
     /// <summary>
@@ -157,6 +166,9 @@ internal static class Cli
                 case CommandKind.Reset:
                     if (rest.Count > 0) throw Error($"pen reset: unexpected argument \"{rest[0]}\"");
                     return new(CommandKind.Reset, []);
+                case CommandKind.Ps:
+                    if (rest.Count > 0) throw Error($"pen ps: unexpected argument \"{rest[0]}\"");
+                    return new(CommandKind.Ps, []);
                 case CommandKind.Allow:
                     var global = false;
                     var domains = new List<string>();

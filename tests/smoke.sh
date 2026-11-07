@@ -5,6 +5,8 @@
 #
 #   tests/smoke.sh                 all checks
 #   SMOKE_SLOW=1 tests/smoke.sh    also `pen upgrade` (reinstalls the agents, ~1 min)
+#   SMOKE_ONLY="7 13" tests/smoke.sh
+#                                  only those sections (the fixture setup always runs)
 #
 # Optional, for checks that need real credentials (values are only ever written
 # to a throwaway config file, mode 600, removed on exit):
@@ -31,6 +33,8 @@ check() { # check <description> <command…>
   if "$@"; then pass "$desc"; else fail "$desc"; fi
 }
 contains() { grep -qF -- "$1" <<<"$2"; } # contains <needle> <haystack>
+# want <n>: whether section n runs (all of them unless SMOKE_ONLY lists some).
+want() { [ -z "${SMOKE_ONLY:-}" ] || [[ " ${SMOKE_ONLY//,/ } " == *" $1 "* ]]; }
 
 command -v "$PEN" >/dev/null || fail "pen not found on PATH: run cli/install.sh"
 command -v python3 >/dev/null || fail "python3 is needed on the host (pty and lock checks)"
@@ -90,7 +94,7 @@ cleanup() {
 trap cleanup EXIT
 
 git -C "$PROJECT_DIR" init -q
-git -C "$PROJECT_DIR" -c user.name=smoke -c user.email=smoke@example.invalid commit -q --allow-empty -m init
+git -C "$PROJECT_DIR" -c user.name=smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m init
 cd "$PROJECT_DIR"
 
 # pen_run <cmd…>: one whole session without a TTY, like `pen run <cmd…> </dev/null`.
@@ -104,12 +108,51 @@ fake_config() { mkdir -p "$FAKE_HOME/.config/pen"; printf '%s\n' "$@" >"$FAKE_HO
 # The newest session's dir (under the real HOME's runtime dir).
 last_session() { ls -td "$RUNTIME"/sessions/*/ | head -1; }
 containers() { docker ps -aq --filter "name=^$KEY-" | wc -l | tr -d ' '; }
+PTY="python3 $REPO/tests/pty-run.py"
+mode_of() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
+# wait_count <docker name regex> <n>: until n such containers are running (max 30 s).
+wait_count() {
+  local i
+  for i in $(seq 300); do
+    [ "$(docker ps --format '{{.Names}}' | grep -cE "$1")" -ge "$2" ] && return 0
+    sleep 0.1
+  done
+  return 1
+}
+# wait_for <docker name regex>: until such a container is running (max 30 s).
+wait_for() {
+  local i
+  for i in $(seq 300); do
+    docker ps --format '{{.Names}}' | grep -qE "$1" && return 0
+    sleep 0.1
+  done
+  return 1
+}
+has_all() { local h=$1 n; shift; for n; do contains "$n" "$h" || return 1; done; }
+lock_free() { # lock_free <file> <exclusive|shared>: can another process take it now?
+  python3 -c '
+import fcntl, sys
+f = open(sys.argv[1], "a")
+try:
+    fcntl.flock(f, (fcntl.LOCK_EX if sys.argv[2] == "exclusive" else fcntl.LOCK_SH) | fcntl.LOCK_NB)
+except BlockingIOError:
+    sys.exit(1)' "$1" "$2"
+}
+refuse() { # refuse <dir> <expected message part>
+  local out rc=0
+  out=$(cd "$1" && "$PEN" run true </dev/null 2>&1) || rc=$?
+  [ "$rc" != 0 ] && contains "$2" "$out"
+}
+now() { python3 -c 'import time; print(time.time())'; }
+# The throwaway HOME's seed (section 8 checks its creation; section 17 adds to it).
+seed=$FAKE_HOME/.config/pen/home
 
 # The first session builds pen:latest if it's missing or stale, and fixes the project key.
 "$PEN" run true </dev/null 2>&1 | grep '^pen:' || true
 RUNTIME=$(ls -d "$HOME"/.local/state/pen/pen-*-"$HASH")
 KEY=$(basename "$RUNTIME")
 
+if want 1; then
 # ==============================================================================
 section "1. Base image"
 
@@ -140,7 +183,9 @@ check "SSH remote rewritten to https" \
   docker run --rm --entrypoint bash "$IMAGE" -c '[ "$(git ls-remote --get-url git@github.com:octo/repo.git)" = https://github.com/octo/repo.git ]'
 check "tools present (git gh rg fd jq curl less vim unzip make python3 uv node npm tini capsh docker 'docker compose' dotnet)" \
   docker run --rm --entrypoint bash "$IMAGE" -c 'for c in git gh rg fd jq curl less vim unzip make gcc python3 uv uvx node npm tini capsh setpriv docker dotnet; do command -v $c >/dev/null || { echo "missing $c" >&2; exit 1; }; done; docker compose version >/dev/null'
+fi
 
+if want 2; then
 # ==============================================================================
 section "2. Entrypoint and hardening (step 9)"
 
@@ -213,7 +258,9 @@ check "under $home_root only the project and NuGet paths exist${stray:+ (stray: 
 
 out=$(in_sandbox 'echo hi >"$HOME/.persist"'; in_sandbox 'cat "$HOME/.persist"')
 check "home volume persists across sessions" test "$out" = hi
+fi
 
+if want 3; then
 # ==============================================================================
 section "3. Proxy and network (step 2)"
 
@@ -246,7 +293,9 @@ for i in $(seq 10); do
   [ "$c" = 200 ] || fails=$((fails + 1))
 done
 check "first request after start succeeds 10/10 (proxy healthcheck)" test "$fails" = 0
+fi
 
+if want 4; then
 # ==============================================================================
 section "4. Agents and CodeGraph"
 
@@ -290,40 +339,12 @@ if [ "${SMOKE_SLOW:-}" = 1 ]; then
 else
   note "pen upgrade check: skipped (SMOKE_SLOW=1 to run it)"
 fi
+fi
 
+if want 5; then
 # ==============================================================================
 section "5. CLI: install, dispatch, directory rules"
 
-PTY="python3 $REPO/tests/pty-run.py"
-mode_of() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
-# wait_count <docker name regex> <n>: until n such containers are running (max 30 s).
-wait_count() {
-  local i
-  for i in $(seq 300); do
-    [ "$(docker ps --format '{{.Names}}' | grep -cE "$1")" -ge "$2" ] && return 0
-    sleep 0.1
-  done
-  return 1
-}
-# wait_for <docker name regex>: until such a container is running (max 30 s).
-wait_for() {
-  local i
-  for i in $(seq 300); do
-    docker ps --format '{{.Names}}' | grep -qE "$1" && return 0
-    sleep 0.1
-  done
-  return 1
-}
-has_all() { local h=$1 n; shift; for n; do contains "$n" "$h" || return 1; done; }
-lock_free() { # lock_free <file> <exclusive|shared>: can another process take it now?
-  python3 -c '
-import fcntl, sys
-f = open(sys.argv[1], "a")
-try:
-    fcntl.flock(f, (fcntl.LOCK_EX if sys.argv[2] == "exclusive" else fcntl.LOCK_SH) | fcntl.LOCK_NB)
-except BlockingIOError:
-    sys.exit(1)' "$1" "$2"
-}
 
 check "pen --version" bash -c "'$PEN' --version | grep -qE '^pen [0-9]'"
 if command -v fish >/dev/null; then
@@ -337,11 +358,6 @@ check "an unknown option is a usage error (exit 2)" test "$rc" = 2
 rc=0; "$PEN" run >/dev/null 2>&1 || rc=$?
 check "pen run without a command is a usage error (exit 2)" test "$rc" = 2
 
-refuse() { # refuse <dir> <expected message part>
-  local out rc=0
-  out=$(cd "$1" && "$PEN" run true </dev/null 2>&1) || rc=$?
-  [ "$rc" != 0 ] && contains "$2" "$out"
-}
 check "refuses \$HOME" refuse "$HOME" "home directory"
 check "refuses /" refuse / "refusing to run in /"
 check "refuses an ancestor of \$HOME" refuse "$(dirname "$HOME")" "contains your home directory"
@@ -352,7 +368,9 @@ rmdir "$PROJECT_DIR/sub/dir" "$PROJECT_DIR/sub"
 ln -s "$PROJECT_DIR" "$SCRATCH/link"
 check "a symlinked path maps to the same project key" \
   bash -c "cd '$SCRATCH/link' && '$PEN' run true </dev/null >/dev/null 2>&1 && [ \$(ls '$RUNTIME/sessions' | wc -l) -ge 1 ] && [ \$(ls -d '$HOME'/.local/state/pen/pen-*-$HASH | wc -l) = 1 ]"
+fi
 
+if want 6; then
 # ==============================================================================
 section "6. Sessions"
 
@@ -381,13 +399,18 @@ check "runtime and session dirs are 700" bash -c "[ $(mode_of "$RUNTIME") = 700 
 check "proxy.log is 666" test "$(mode_of "${s}proxy.log")" = 666
 check "the project's volumes are named by its key" bash -c 'docker volume inspect "$1" "$2" >/dev/null' _ "${KEY}_home" "${KEY}_nuget"
 check "pen:latest carries its image hash" test -n "$(docker image inspect --format '{{ index .Config.Labels "pen.image-hash" }}' "$IMAGE")"
+fi
 
+if want 7; then
 # ==============================================================================
 section "7. Locks, dead sessions, signals"
 
 "$PEN" run sleep 120 </dev/null >/dev/null 2>&1 &
 p=$!
 wait_for "^$KEY-.*-agent$" || fail "session didn't start"
+out=$("$PEN" ps)
+check "pen ps lists the running session: project, id, age and command" \
+  grep -qE "^~${PROJECT_DIR#"$HOME"} +[0-9a-f]{8} +[0-9]+[smh][0-9m]* +sleep 120$" <<<"$out"
 check "project.lock is held shared: another shared lock is fine" lock_free "$RUNTIME/project.lock" shared
 check "...and an exclusive one (pen sign/reset) is refused" not lock_free "$RUNTIME/project.lock" exclusive
 sdir=$(ls -td "$RUNTIME"/sessions/*/ | head -1)
@@ -435,7 +458,9 @@ docker image tag pen:smoke-backup "$IMAGE" && docker rmi pen:smoke-backup >/dev/
 check "Ctrl-C during the image build aborts the launch" bash -c 'grep -q rebuilding <<<"$1" && ! grep -qE "EXIT 0|TIMEOUT" <<<"$1"' _ "$out"
 check "...leaving no session dir" test "$(ls "$RUNTIME/sessions" | wc -l)" = "$before"
 check "...and no lock held" lock_free "$RUNTIME/project.lock" exclusive
+fi
 
+if want 8; then
 # ==============================================================================
 section "8. Config file"
 
@@ -479,7 +504,9 @@ check "[github] in .pen/config.toml is refused, naming the file" contains '.pen/
 echo "allow = example.com" >.pen/config
 check "a legacy .pen/config is refused with a pointer to the new files" contains ".pen/config is pen's old config format" "$(pen_run true 2>&1 || true)"
 rm -rf .pen
+fi
 
+if want 9; then
 # ==============================================================================
 section "9. GitHub token"
 
@@ -507,7 +534,9 @@ check "a private fetch with no token fails with an error instead of prompting" \
   bash -c 'grep -qE "rc=[1-9]" <<<"$1" && grep -q "EXIT 0" <<<"$1"' _ "$out"
 git remote remove origin
 note "real-token checks (gh repo view, clone, push 403, per-owner tokens) are manual: see PLAN.md Verification step 3"
+fi
 
+if want 10; then
 # ==============================================================================
 section "10. Allowlist merge and the blocked line"
 
@@ -532,7 +561,9 @@ wait "$p" || true
 check ".github.com plus the default api.github.com: the proxy reports no overlap" \
   bash -c 'grep -q "Processing Configuration File" <<<"$1" && ! grep -qE "is a subdomain of|You should remove" <<<"$1"' _ "$proxy_log"
 check "...and api.github.com is reachable" test "$(cat "$SCRATCH/wild.out")" = 200
+fi
 
+if want 11; then
 # ==============================================================================
 section "11. .NET and NuGet (step 7)"
 
@@ -551,11 +582,12 @@ fi
 rm -rf app
 
 note "login checks (step 5: log in to claude and codex, still logged in after pen upgrade --clean, logged out in another project) are manual"
+fi
 
+if want 12; then
 # ==============================================================================
 section "12. Repo refusals at start (step 4)"
 
-now() { python3 -c 'import time; print(time.time())'; }
 git worktree add -q "$SCRATCH/wt" 2>/dev/null # kept until section 13 (its commondir is mounted read-only)
 check "refuses a linked worktree, pointing at the main checkout" refuse "$SCRATCH/wt" "run pen from the main checkout"
 forget "$SCRATCH/wt"
@@ -601,9 +633,14 @@ rm -rf node_modules/pkg4999/dist/deep/.git
 t0=$(now); pen_run true; t1=$(now)
 note "a whole session with that tree (start and end scans included): $(python3 -c "print(f'{$t1 - $t0:.2f}')")s"
 rm -rf node_modules src
+fi
 
+if want 13; then
 # ==============================================================================
 section "13. Read-only .git and .pen, session-end check and quarantine (step 4)"
+
+# Section 12 leaves this worktree for the commondir checks below.
+[ -e "$SCRATCH/wt" ] || git worktree add -q "$SCRATCH/wt" 2>/dev/null
 
 rm -rf .git/hooks .pen
 cfg_sum=$(cksum <.git/config)
@@ -697,7 +734,9 @@ for i in 1 2 3; do
   best=$(python3 -c "print(f'{min($best, $t1 - $t0):.2f}')")
 done
 check "warm start: pen run true in under 5 s (best of 3: ${best}s; target about 2-3 s)" python3 -c "import sys; sys.exit(0 if $best < 5 else 1)"
+fi
 
+if want 14; then
 # ==============================================================================
 section "14. Project layer (step 10)"
 
@@ -726,7 +765,9 @@ check "...showing the build output" contains "smoke-build-error" "$out"
 check "...without starting anything" test "$(containers)" = 0
 rm -rf .pen
 docker image rm "$KEY:latest" >/dev/null 2>&1 || true
+fi
 
+if want 15; then
 # ==============================================================================
 section "15. pen allow <domain…> (step 2)"
 
@@ -768,7 +809,9 @@ check "...whose reconfigure with .github.com plus api.github.com is clean" \
   bash -c 'grep -q "Reconfiguring Squid Cache" <<<"$1" && ! grep -qE "is a subdomain of|You should remove|FATAL" <<<"$1"' _ "$oproxy_log"
 # (A reconfigured Squid, no longer root, logs "ERROR: Cannot open cache_log
 # (/dev/stderr)" and keeps writing to stderr anyway: harmless.)
+fi
 
+if want 16; then
 # ==============================================================================
 section "16. pen allow with no arguments (step 2)"
 
@@ -780,20 +823,23 @@ out=$("$PEN" allow 2>/dev/null)
 check "lists blocked domains while the session runs" has_all "$out" example.org example.net
 check "...newest first" test "$(grep -oE 'example\.(org|net)' <<<"$out" | head -1)" = example.org
 check "...with the line to paste" contains "pen allow example.org example.net" "$out"
-check "...leaving out domains allowed since (example.com)" not contains "example.com" "$out"
+want 15 && check "...leaving out domains allowed since (example.com, by section 15)" not contains "example.com" "$out"
 kill -9 "$p"; wait "$p" 2>/dev/null || true
 out=$("$PEN" allow 2>&1)
 check "...after a SIGKILL'd session (which it ends)" bash -c 'grep -q "example.org" <<<"$1" && grep -q "whose pen exited" <<<"$1"' _ "$out"
 check "...and once the session has exited normally" contains "example.org" "$(in_sandbox true 2>/dev/null; "$PEN" allow 2>/dev/null)"
+fi
 
+if want 17; then
 # ==============================================================================
 section "17. Home seed (step 11)"
 
 SEEDP=$(cd "$(mktemp -d "$HOME/.pen-smoke-seed.XXXXXX")" && pwd -P)
 EXTRA_DIRS+=("$SEEDP")
 git -C "$SEEDP" init -q
-git -C "$SEEDP" -c user.name=x -c user.email=x@example.invalid commit -q --allow-empty -m init
+git -C "$SEEDP" -c user.name=x -c user.email=x@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m init
 fake_config "# none"
+[ -d "$seed" ] || fake_pen run true >/dev/null 2>&1 # section 8 makes it
 slug=$(printf %s "$SEEDP" | LC_ALL=C sed 's/[^A-Za-z0-9]/-/g')
 mkdir -p "$seed/.claude/projects/$slug/memory" "$seed/.claude/projects/-elsewhere/memory"
 echo "seeded memory" >"$seed/.claude/projects/$slug/memory/MEMORY.md"
@@ -867,7 +913,9 @@ else
   note "codex blocked-domain check: skipped (set OPENAI_API_KEY)"
 fi
 note "after codegraph init, codegraph_explore from Claude in the sandbox is a manual check (needs a login)"
+fi
 
+if want 18; then
 # ==============================================================================
 section "18. pen reset (step 5)"
 
@@ -889,7 +937,9 @@ out=$(echo y | "$PEN" reset 2>&1)
 check "answering yes removes the project's volumes" bash -c 'grep -q "removed ${2}_home, ${2}_nuget" <<<"$1" && ! docker volume inspect "${2}_home" >/dev/null 2>&1' _ "$out" "$KEY"
 check "...so the next session starts with a fresh home" test "$(in_sandbox 'cat ~/.reset-marker 2>/dev/null || echo fresh')" = fresh
 note "reset logging out of claude and codex is a manual check (step 5)"
+fi
 
+if want 19; then
 # ==============================================================================
 section "19. Unsigned-commit reminder and pen sign (step 3)"
 
@@ -947,7 +997,9 @@ check "pen sign refuses when a commit is already on a remote branch" contains "o
 git update-ref -d refs/remotes/fork/s3
 git remote remove origin
 note "GitHub showing the signed commits as Verified after a push is a manual check (step 3)"
+fi
 
+if want 20; then
 # ==============================================================================
 section "20. Docker-in-Docker (step 8)"
 
@@ -1047,5 +1099,6 @@ rc=0; out=$(pen_run true 2>&1) || rc=$?
 check "...and a bad value names the file" bash -c '[ "$1" != 0 ] && grep -q "^pen: .pen/config.toml: docker must be true or false" <<<"$2"' _ "$rc" "$out"
 rm -f .pen/config.toml
 check "nothing is left running" test "$(containers)" = 0
+fi
 
 section "All checks passed."

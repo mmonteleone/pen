@@ -51,6 +51,7 @@ public class CliTests
     [InlineData("Sign", "sign")]
     [InlineData("Sign", "sign", "origin/main")]
     [InlineData("Reset", "reset")]
+    [InlineData("Ps", "ps")]
     public void SubcommandsAreRecognized(string kind, params string[] args)
     {
         var c = P(args);
@@ -78,6 +79,7 @@ public class CliTests
     [InlineData("allow", "allow", "--defaults", "--help")]
     [InlineData("sign", "sign", "--help")]
     [InlineData("reset", "reset", "-h")]
+    [InlineData("ps", "ps", "--help")]
     public void SubcommandHelp(string topic, params string[] args)
     {
         var c = P(args);
@@ -99,7 +101,7 @@ public class CliTests
     [Fact]
     public void EverySubcommandHasHelp_AndTheUsageMentionsIt()
     {
-        foreach (var name in new[] { "run", "upgrade", "allow", "sign", "reset" })
+        foreach (var name in new[] { "run", "upgrade", "allow", "sign", "reset", "ps" })
             Assert.True(Cli.SubcommandHelp.ContainsKey(name), name);
         Assert.Contains("pen <subcommand> --help", Cli.Usage);
     }
@@ -139,6 +141,15 @@ public class CliTests
         Assert.Throws<PenException>(() => P("reset", "now"));
     }
 
+    [Theory]
+    [InlineData("ps", "-a")]
+    [InlineData("ps", "all")]
+    public void PsTakesNoArguments(params string[] args)
+    {
+        var e = Assert.Throws<PenException>(() => P(args));
+        Assert.Equal(2, e.ExitCode);
+    }
+
     [Fact]
     public void DockerGoesWithACommandToRun()
     {
@@ -168,6 +179,7 @@ public class CliTests
     [InlineData("allow")]
     [InlineData("sign")]
     [InlineData("reset")]
+    [InlineData("ps")]
     [InlineData("--help")]
     public void DockerWithAnythingButRunningIsAnError(string what)
     {

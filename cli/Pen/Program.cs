@@ -26,6 +26,7 @@ internal static class Program
             }
 
             var host = HostEnv.FromProcess();
+            if (command.Kind == CommandKind.Ps) return Ps.Run(host);
             Config.EnsureUserConfig(host);
             var user = Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User);
 

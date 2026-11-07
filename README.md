@@ -1,7 +1,7 @@
 # pen
 
-`pen` runs AI coding agents (Claude Code, Codex, OpenCode, Pi) in a container
-instead of directly on your machine. Inside, the agent:
+`pen` is an opinionated sandbox for AI coding agents (Claude Code, Codex, OpenCode, Pi). It runs
+them in a container instead of directly on your machine. Inside, the agent:
 
 - sees only the project directory you run `pen` in;
 - reaches only an allowlist of domains;
@@ -14,6 +14,39 @@ cd ~/source/repos/myproject
 pen claude
 # or: pen codex, pen opencode, pen pi, pen (a shell), pen run <cmd…>
 ```
+
+The base image is .NET-first, with Node and Python built in. Anything else goes in a
+[`.pen/Dockerfile`](#project-settings).
+
+## Why pen
+
+Agents increasingly ship their own sandboxes, and a devcontainer with a firewall gets you part of
+the way. pen is for letting agents run unattended with permission prompts off, and it's built
+around what can still go wrong once the agent is in a container:
+
+- **Your git, on the host.** An agent that can write to the project can also write `.git/config`
+  or `.git/hooks`, which run the next time *you* use git. pen mounts both read-only, refuses repo
+  layouts it can't protect (submodules, linked worktrees, nested repos), and checks `.git` before
+  running any git on the host.
+- **GitHub without push.** The agent gets a read-only token per owner. It can clone and fetch but
+  never push: you review, then push.
+- **Signed commits without a key in the sandbox.** `pen sign` re-creates the agent's unpushed
+  commits with your own signature.
+- **An allowlist you can adjust mid-session.** All traffic goes through a proxy. `pen allow`
+  updates running sessions, and pen lists blocked domains on exit. The defaults are sites an agent
+  without credentials can only read from.
+- **One setup for several agents.** Claude Code, Codex, OpenCode and Pi share the same image and
+  network rules. Each project keeps its own logins, caches and home directory.
+
+It's opinionated: run from a repo root, one sandbox per project, git config and remotes managed on
+the host, commits signed on the host. If that doesn't fit how you work, pen will get in your way.
+
+**pen isn't a good fit if:**
+
+- you approve agent actions one by one anyway. An agent's built-in sandbox is lighter.
+- you need protection from a deliberate container escape. Use a VM.
+- your repos rely on submodules, or you start agents from a linked worktree.
+- you're on Windows. pen supports macOS and Linux.
 
 ## Install
 
@@ -71,6 +104,7 @@ pen [--docker] run <cmd…>       same, for a command that clashes with a subcom
 pen allow <domain…> [--global]  allow domains for this project (or all projects)
 pen allow                       list recently blocked domains
 pen allow --defaults            list the domains pen allows out of the box
+pen ps                          list running sessions, in every project
 pen sign [<base>]               re-sign your unpushed commits with your own key
 pen upgrade [--clean]           update the base image and agents
 pen reset                       wipe this project's sandbox state (logins, caches)

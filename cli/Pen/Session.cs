@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 
@@ -23,6 +24,10 @@ internal sealed class SessionDir(string projectKey, string path)
     public string LockFile => File("session.lock");
     public string EnvFile => File("session.env");
     public string StartedWithGit => File("started-with-git");
+    /// <summary>The command run in the sandbox, each argument NUL-terminated (empty: a shell), for pen ps.</summary>
+    public string CommandFile => File("command");
+    /// <summary>When the session started, in UTC, for pen ps.</summary>
+    public string StartedFile => File("started");
     /// <summary>Marks a docker session: its compose calls all pass --profile docker.</summary>
     public string DockerMarker => File("docker");
 
@@ -42,6 +47,21 @@ internal sealed class SessionDir(string projectKey, string path)
         a.AddRange(args);
         return [.. a];
     }
+
+    public void WriteCommand(IReadOnlyList<string> command) =>
+        System.IO.File.WriteAllText(CommandFile, string.Concat(command.Select(a => a + "\0")));
+
+    /// <summary>The command, or null for a session started by a pen that didn't record it.</summary>
+    public string[]? ReadCommand() =>
+        System.IO.File.Exists(CommandFile) ? System.IO.File.ReadAllText(CommandFile).Split('\0')[..^1] : null;
+
+    public void WriteStarted(DateTime utc) =>
+        System.IO.File.WriteAllText(StartedFile, utc.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture));
+
+    public DateTime? ReadStarted() =>
+        System.IO.File.Exists(StartedFile)
+        && DateTime.TryParse(System.IO.File.ReadAllText(StartedFile).Trim(), CultureInfo.InvariantCulture,
+            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var t) ? t : null;
 
     public Dictionary<string, string> ReadEnv()
     {
@@ -122,6 +142,8 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         File.WriteAllLines(session.EnvFile, env.Select(kv => $"{kv.Key}={kv.Value}"));
         if (project.HasGitDir) File.WriteAllText(session.StartedWithGit, "");
         if (docker) File.WriteAllText(session.DockerMarker, "");
+        session.WriteCommand(command);
+        session.WriteStarted(DateTime.UtcNow);
         File.WriteAllText(session.File("squid.conf"), Embedded.Text("proxy/squid.conf"));
         File.WriteAllText(session.File("allowlist.txt"), Allowlist.Render(allowlist));
         File.WriteAllText(session.MountsFile, RepoGuard.ComposeOverride(mounts, readOnlyRoot: rootless, dindContainer: docker ? session.DindContainer : null));
