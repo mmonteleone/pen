@@ -83,16 +83,24 @@ internal static class AllowCommand
         if (skipped.Count > 0) Out.Line($"already in {where}: {string.Join(' ', skipped)}");
 
         if (added.Count == 0) return 0;
-        var sessions = global ? Sessions.RunningEverywhere(host) : Sessions.Running(project!.Key, host.RuntimeDir(project.Key));
         int applied = 0, failed = 0;
-        foreach (var s in sessions)
+        foreach (var s in Targets(host, project, global))
         {
             if (Apply(host, s)) applied++; else failed++;
         }
         if (applied > 0)
-            Out.Line($"applied to {applied} running session{(applied == 1 ? "" : "s")}{(global ? "" : " of this project")}");
+            Out.Line($"applied to {applied} running session{(applied == 1 ? "" : "s")}{(global ? "" : " in this directory")}");
         return failed == 0 ? 0 : 1;
     }
+
+    /// <summary>
+    /// The running sessions an added domain applies to: with --global, every
+    /// project's; otherwise only those started in this dir, since .pen/ is per
+    /// worktree (a session in another worktree of the repo reads its own).
+    /// </summary>
+    internal static List<SessionDir> Targets(HostEnv host, Project? project, bool global) =>
+        global ? Sessions.RunningEverywhere(host)
+        : Sessions.RunningIn(project!.Key, host.RuntimeDir(project.Key), project.Dir);
 
     /// <summary>
     /// Regenerates one running session's allowlist from the current config

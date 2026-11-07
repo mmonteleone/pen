@@ -1138,7 +1138,7 @@ fi
 
 if want 21; then
 # ==============================================================================
-section "21. Linked worktrees (worktrees B4)"
+section "21. Linked worktrees (worktrees B4, B5)"
 
 git worktree add -q -b smoke-wt "$SCRATCH/wt21" 2>/dev/null
 WT=$(cd "$SCRATCH/wt21" && pwd -P)
@@ -1218,6 +1218,13 @@ check "sessions run in parallel in the main checkout and the worktree" wait_coun
 name_main=$(docker ps --format '{{.Names}}' | grep -E "^$KEY-.*-agent$" | grep -vxF "$name_wt" | head -1)
 out=$(fake_pen ps)
 check "pen ps lists both" bash -c 'grep -qE "^$1 +[0-9a-f]{8} .*sleep 120$" <<<"$3" && grep -qE "^$2 +[0-9a-f]{8} .*sleep 120$" <<<"$3"' _ "$PROJECT_DIR" "$WT" "$out"
+out=$(cd "$WT" && fake_pen allow example.org 2>&1)
+check "pen allow in the worktree adds to the worktree's .pen/config.toml only" \
+  bash -c 'grep -qx "  \"example.org\"," "$1/.pen/config.toml" && ! grep -qs example.org .pen/config.toml' _ "$WT"
+check "...and applies only to the worktree's session, not the main checkout's" contains "applied to 1 running session in this directory" "$out"
+fsess=$FAKE_HOME/.local/state/pen/$KEY/sessions
+check "...whose allowlist alone now has the domain" \
+  bash -c 'n=0; for d in "$1"/*/; do [ -e "$d/compose.yaml" ] || continue; grep -qx "PROJECT_DIR=$2" "$d/session.env" && w=1 || w=; grep -q "example\.org" "$d/allowlist.txt" && a=1 || a=; [ "$w" = "$a" ] || exit 1; n=$((n+1)); done; [ "$n" = 2 ]' _ "$fsess" "$WT"
 out=$(cd "$WT" && fake_pen sign "$base" 2>&1 || true)
 check "pen sign in the worktree is refused while the worktree has a session" contains "refusing to sign while a session is running in this directory" "$out"
 check "...naming only that session" bash -c 'grep -qF "  $1" <<<"$3" && ! grep -qF "$2" <<<"$3"' _ "$name_wt" "$name_main" "$out"

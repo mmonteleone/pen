@@ -149,4 +149,25 @@ public sealed class SessionLockTests : IDisposable
         Assert.Empty(Sessions.RunningIn(Key, _runtime, _t.Sub("elsewhere")));
         Assert.Equal(2, Sessions.Running(Key, _runtime).Count);
     }
+
+    [Fact]
+    public void AllowTargets_ThisDirsSessions_OrEveryProjectsWithGlobal()
+    {
+        using var sm = OpenSession("aaaa0001", _main);
+        using var sw1 = OpenSession("aaaa0002", _wt);
+        using var sw2 = OpenSession("aaaa0003", _wt);
+
+        const string otherKey = "pen-other-11111111";
+        var other = new SessionDir(otherKey, Path.Combine(_host.RuntimeDir(otherKey), "sessions", "bbbb0001"));
+        Directory.CreateDirectory(other.Path);
+        File.WriteAllText(other.EnvFile, $"PROJECT_DIR={_t.Sub("other")}\n");
+        File.WriteAllText(other.ComposeFile, "");
+        using var so = FileLock.TryTake(other.LockFile, exclusive: true)!;
+
+        Assert.Equal(["aaaa0001"], AllowCommand.Targets(_host, _main, global: false).Select(s => s.Id));
+        Assert.Equal(["aaaa0002", "aaaa0003"], AllowCommand.Targets(_host, _wt, global: false).Select(s => s.Id));
+        Assert.Equal(["aaaa0001", "aaaa0002", "aaaa0003", "bbbb0001"],
+            AllowCommand.Targets(_host, _wt, global: true).Select(s => s.Id).Order(StringComparer.Ordinal));
+        Assert.Equal(4, AllowCommand.Targets(_host, project: null, global: true).Count);
+    }
 }

@@ -116,7 +116,8 @@ containing multiple repos and repos with submodules.
 A linked worktree (`git worktree add ../feat -b feat`) is a repo root too, so you can run an agent
 per branch in parallel. All worktrees of a repo are one project: they share its logins, caches,
 `pen reset` and the one-`--docker`-session limit, and `pen ps` lists their sessions together. Each
-worktree has its own `.pen/`, and `pen sign` in one isn't held up by a session in another. In the
+worktree has its own `.pen/`, so `pen allow` in one adds to that worktree's list and applies only
+to its running sessions; likewise `pen sign` in one isn't held up by a session in another. In the
 sandbox, the worktree sees the repo's shared git data (objects, branches) but not the main
 checkout's files. Worktrees of a bare repo aren't supported.
 
