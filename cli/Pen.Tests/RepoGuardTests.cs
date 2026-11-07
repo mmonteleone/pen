@@ -37,15 +37,13 @@ public class RepoGuardTests
     }
 
     [Fact]
-    public void RefusesSubmodules()
+    public void AcceptsGitmodulesAndAModulesDir()
     {
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
-        File.WriteAllText(Path.Combine(repo, ".gitmodules"), "");
-        Assert.Contains("submodules", Refusal(repo));
-        File.Delete(Path.Combine(repo, ".gitmodules"));
+        File.WriteAllText(Path.Combine(repo, ".gitmodules"), "[submodule \"x\"]\n\tpath = x\n\turl = ../x\n");
         Directory.CreateDirectory(Path.Combine(repo, ".git", "modules"));
-        Assert.Contains("submodules", Refusal(repo));
+        RepoGuard.CheckAtStart(repo);
     }
 
     [Fact]

@@ -2,7 +2,8 @@ namespace Pen.Tests;
 
 /// <summary>
 /// Finding and protecting the submodule repos kept in a git dir (submodules
-/// E1); accepting their checkouts and quarantining only new ones (E2).
+/// E1); accepting their checkouts and quarantining only new ones (E2);
+/// starting with submodules in the project (E3).
 /// </summary>
 public class ModuleRepoTests
 {
@@ -175,12 +176,97 @@ public class ModuleRepoTests
         Assert.Contains(".git/modules/fake/commondir exists", Assert.Throws<PenException>(() => Mounts(repo)).Message);
     }
 
+    // --- E3: submodules in the project itself ---
+
     [Fact]
-    public void StartStillRefusesSubmodulesInTheProject()
+    public void StartAcceptsInitializedSubmodules_NestedAndSlashNamed()
     {
         using var t = new TempDir();
         var super = Super(t);
-        Assert.Contains("submodules", Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(super)).Message);
+        RepoGuard.CheckAtStart(super);
+        // ...and uninitialized ones: .gitmodules alone, module repos without checkouts.
+        Sub(super, "deinit", "-q", "-f", "--all");
+        Assert.False(File.Exists(Path.Combine(super, "libs", "mid", ".git")));
+        RepoGuard.CheckAtStart(super);
+    }
+
+    [Fact]
+    public void StartRefusesACheckoutPointingAtAnUnknownRepo()
+    {
+        using var t = new TempDir();
+        var super = Super(t);
+        var other = Git.Repo(t.Sub("other"));
+        File.WriteAllText(Path.Combine(super, "libs", "mid", ".git"), $"gitdir: {Path.Combine(other, ".git")}\n");
+        var msg = Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(super)).Message;
+        Assert.Contains("\n  libs/mid (a .git file that isn't one of this repo's worktrees or submodules)", msg);
+        Assert.DoesNotContain("absorbgitdirs", msg);
+    }
+
+    [Fact]
+    public void StartRefusesASubmoduleWithItsOwnGitDir_SuggestingAbsorbgitdirs()
+    {
+        using var t = new TempDir();
+        var lib = Git.Repo(t.Sub("lib"));
+        var super = Git.Repo(t.Sub("super"));
+        // A clone in place, then added as is: git keeps its .git dir (the old layout).
+        Git.Run(super, "clone", "-q", lib, "libs/x");
+        Sub(super, "add", "-q", lib, "libs/x");
+        Git.Run(super, "commit", "-q", "-m", "x");
+        Assert.True(Directory.Exists(Path.Combine(super, "libs", "x", ".git")));
+
+        var msg = Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(super)).Message;
+        Assert.Contains("\n  libs/x (a submodule with its own .git dir)", msg);
+        Assert.Contains("git submodule absorbgitdirs", msg);
+        Assert.DoesNotContain("run pen in each repo instead", msg);
+
+        // With a plain nested repo too, both pieces of advice.
+        Git.Run(super, "init", "-q", "other");
+        msg = Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(super)).Message;
+        Assert.Contains("\n  other\n", msg);
+        Assert.Contains("git submodule absorbgitdirs", msg);
+        Assert.Contains("run pen in each repo instead", msg);
+        Directory.Delete(Path.Combine(super, "other"), recursive: true);
+
+        // Doing what it says fixes it.
+        Sub(super, "absorbgitdirs");
+        Assert.True(File.Exists(Path.Combine(super, "libs", "x", ".git")));
+        RepoGuard.CheckAtStart(super);
+    }
+
+    [Fact]
+    public void StartAcceptsAnExternalWorktreeWithItsOwnSubmodules_ProtectingTheirRepos()
+    {
+        using var t = new TempDir();
+        var super = Super(t);
+        var wt = Path.Combine(t.Path, "wt");
+        Git.Run(super, "worktree", "add", "-q", wt);
+        Sub(wt, "update", "-q", "--init", "--recursive");
+        Assert.True(File.Exists(Path.Combine(wt, "libs", "mid", "deps", "leaf", ".git")));
+        RepoGuard.CheckAtStart(wt);
+
+        var m = RepoGuard.PrepareMounts(wt, "/nonexistent-home").Select(x => (x.Path, x.ReadOnly)).ToList();
+        var mods = Path.Combine(super, ".git", "worktrees", "wt", "modules", "libs", "mid");
+        Assert.Contains((Path.Combine(mods, "config"), true), m);
+        Assert.Contains((Path.Combine(mods, "hooks"), true), m);
+        Assert.Contains((Path.Combine(mods, "modules", "deps", "leaf", "config"), true), m);
+        // The main checkout's module repos are protected too: the main checkout uses them.
+        Assert.Contains((Path.Combine(super, ".git", "modules", "libs", "mid", "config"), true), m);
+    }
+
+    [Fact]
+    public void IsSubmodulePath_ReadsTheGitmodulesOfEachSuperproject()
+    {
+        using var t = new TempDir();
+        var root = t.Sub("root");
+        File.WriteAllText(Path.Combine(root, ".gitmodules"), "[submodule \"a\"]\n\tpath = libs/a/\n");
+        File.WriteAllText(Path.Combine(t.Sub("root", "libs", "a"), ".gitmodules"), "[submodule \"b\"]\n\tpath = deps/b\n");
+        Assert.True(RepoGuard.IsSubmodulePath(root, Path.Combine(root, "libs", "a")));
+        Assert.True(RepoGuard.IsSubmodulePath(root, Path.Combine(root, "libs", "a", "deps", "b")));
+        Assert.False(RepoGuard.IsSubmodulePath(root, Path.Combine(root, "libs", "c")));
+        Assert.False(RepoGuard.IsSubmodulePath(root, Path.Combine(root, "libs", "a", "deps")));
+        // .gitmodules above the project doesn't count.
+        File.WriteAllText(Path.Combine(t.Path, ".gitmodules"), "[submodule \"r\"]\n\tpath = root/x\n");
+        Assert.False(RepoGuard.IsSubmodulePath(root, Path.Combine(root, "x")));
     }
 
     // --- E2: submodule checkouts in the tree, and the session-end check ---

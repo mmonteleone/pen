@@ -640,7 +640,7 @@ printf 'gitdir: %s/.git/worktrees/wt\n' "$PROJECT_DIR" >"$SCRATCH/forged/.git"
 check "refuses a .git file that isn't a valid linked worktree (section 21 runs in one)" refuse "$SCRATCH/forged" "isn't a valid linked worktree"
 forget "$SCRATCH/forged"; rm -rf "$SCRATCH/forged"
 touch .gitmodules
-check "refuses a repo with .gitmodules (not supported yet)" refuse "$PROJECT_DIR" "submodules, which pen doesn't support yet"
+check "a repo with .gitmodules starts (section 26 runs with real submodules)" pen_run true
 rm .gitmodules
 git init -q libs/sub
 git init -q --bare sub2
@@ -754,7 +754,7 @@ quarantine_case() { # <what the agent runs> <path> <quarantined path>
 }
 quarantine_case 'touch .git/commondir' .git/commondir .git/commondir.pen-quarantine
 quarantine_case 'git init -q --bare .git/modules/x' .git/modules/x .git/modules/x.pen-quarantine
-rm -rf .git/modules # the project itself can't have submodule repos at start yet
+rm -rf .git/modules
 quarantine_case 'git init -q sub' sub/.git sub/.git.pen-quarantine
 check "...and the moved .git no longer looks like a repo (its HEAD moved too)" test -e sub/.git.pen-quarantine/HEAD.pen-quarantine
 quarantine_case 'git init -q --bare sub2' sub2/HEAD sub2/HEAD.pen-quarantine
@@ -1424,8 +1424,8 @@ if want 24; then
 # ==============================================================================
 section "24. Submodule repos protected (submodules E1)"
 
-# The project itself can't have submodules yet (section 12), but a worktree
-# inside it can: its submodule repos live in .git/worktrees/<n>/modules/. With
+# A worktree inside the project with submodules of its own: their repos live
+# in .git/worktrees/<n>/modules/ (section 26 has the project's own). With
 # the checkout deinitialized, nothing in the tree points at the module repo, so
 # pen starts, and the repo must still be protected like .git itself.
 SMLIB=$SCRATCH/smlib
@@ -1518,6 +1518,65 @@ check "nothing is left running" test "$(containers)" = 0
 git -C "$SMWT" submodule deinit -q -f libs/x
 git worktree remove --force "$SMWT"
 rm -rf .claude
+fi
+
+if want 26; then
+# ==============================================================================
+section "26. Submodules in the project (submodules E3)"
+
+SMLIB=$SCRATCH/smlib
+[ -d "$SMLIB/.git" ] || { git init -q "$SMLIB"
+  git -C "$SMLIB" -c user.name=smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m lib; }
+SMSTART=$(git rev-parse HEAD)
+hostgit() { git -c user.name=smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false -c protocol.file.allow=always "$@"; }
+hostgit submodule add -q "$SMLIB" libs/x 2>/dev/null
+hostgit commit -q -m "add libs/x"
+M=$PROJECT_DIR/.git/modules/libs/x
+check "the submodule is initialized, its repo in .git/modules" bash -c "[ -f libs/x/.git ] && [ -f '$M/HEAD' ]"
+
+out=$(in_sandbox "
+  t() { if eval \"\$1\" >/dev/null 2>&1; then echo \"ok: \$2\"; else echo \"fail: \$2\"; fi; }
+  g() { git -c user.name=a -c user.email=a@example.invalid \"\$@\"; }
+  t 'g -C libs/x commit -q --allow-empty -m in-sub' commit
+  t 'g add libs/x && g commit -q -m bump' bump
+  t 'echo x >> \"$M/config\"' configwrite
+  t 'git -C libs/x config core.fsmonitor x' config
+  t 'echo x >> \"$M/hooks/post-checkout\"' hook
+" 2>&1)
+has() { grep -qxF -- "$1" <<<"$out"; }
+check "pen starts with an initialized submodule" has "ok: commit"
+check "...and committing inside it works" test "$(git -C libs/x log -1 --format=%s)" = in-sub
+check "...as does committing the bump in the superproject" test "$(git log -1 --format=%s)" = bump
+check "writing the submodule repo's config fails" has "fail: configwrite"
+check "...as does git config in the submodule" has "fail: config"
+check "writing a hook in the submodule repo fails" has "fail: hook"
+check "the session printed no warning" not contains "WARNING" "$out"
+# The checkout's .git file is the project's own (writable, like any file);
+# repointing it is caught at the end.
+out=$(in_sandbox 'echo "gitdir: /tmp" > libs/x/.git' 2>&1 || true)
+check "repointing the checkout's .git file is quarantined at the end" \
+  bash -c "grep -qF 'libs/x/.git → ' <<<\"\$1\" && [ -f libs/x/.git.pen-quarantine ]" _ "$out"
+rm libs/x/.git.pen-quarantine
+printf 'gitdir: ../../.git/modules/libs/x\n' >libs/x/.git
+check "with it put back, git in the submodule works on the host" git -C libs/x status --porcelain
+check "...and the next session ends without a warning" not contains "WARNING" "$(in_sandbox true 2>&1)"
+
+hostgit submodule deinit -q -f libs/x
+git rm -q -f libs/x
+rm -rf .git/modules
+hostgit commit -q -m "remove libs/x"
+# The old layout: a submodule with its own .git dir in the checkout.
+git clone -q "$SMLIB" libs/y 2>/dev/null
+hostgit submodule add -q "$SMLIB" libs/y >/dev/null 2>&1
+check "a submodule with its own .git dir is refused, naming it" refuse "$PROJECT_DIR" "libs/y (a submodule with its own .git dir)"
+check "...suggesting git submodule absorbgitdirs" refuse "$PROJECT_DIR" "git submodule absorbgitdirs"
+hostgit submodule absorbgitdirs 2>/dev/null
+check "after absorbgitdirs, pen starts" pen_run true
+
+check "nothing is left running" test "$(containers)" = 0
+hostgit submodule deinit -q -f libs/y
+git reset -q --hard "$SMSTART"
+rm -rf libs .git/modules .gitmodules
 fi
 
 section "All checks passed."

@@ -26,7 +26,7 @@ around what can still go wrong once the agent is in a container:
 
 - **Your git, on the host.** An agent that can write to the project can also write `.git/config`
   or `.git/hooks`, which run the next time *you* use git. pen mounts both read-only, refuses repo
-  layouts it can't protect (submodules, nested repos), and checks `.git` before
+  layouts it can't protect (nested repos), and checks `.git` before
   running any git on the host.
 - **GitHub without push.** The agent gets a read-only token per owner. It can clone and fetch but
   never push: you review, then push.
@@ -45,7 +45,6 @@ the host, commits signed on the host. If that doesn't fit how you work, pen will
 
 - you approve agent actions one by one anyway. An agent's built-in sandbox is lighter.
 - you need protection from a deliberate container escape. Use a VM.
-- your repos rely on submodules.
 - you're on Windows. pen supports macOS and Linux.
 
 ## Install
@@ -113,8 +112,8 @@ pen reset                       wipe this project's sandbox state (logins, cache
 pen prune                       remove what moved or deleted projects left behind
 ```
 
-pen must run from a repo root. It refuses your home directory, subdirectories of a repo, folders
-containing multiple repos and repos with submodules.
+pen must run from a repo root. It refuses your home directory, subdirectories of a repo and folders
+containing multiple repos.
 
 A linked worktree (`git worktree add ../feat -b feat`) is a repo root too, so you can run an agent
 per branch in parallel. All worktrees of a repo are one project: they share its logins, caches,
@@ -123,6 +122,13 @@ worktree has its own `.pen/`, so `pen allow` in one adds to that worktree's list
 to its running sessions; likewise `pen sign` in one isn't held up by a session in another. In the
 sandbox, the worktree sees the repo's shared git data (objects, branches) but not the main
 checkout's files. Worktrees of a bare repo aren't supported.
+
+Submodules work once they're set up on the host: run `git submodule update --init --recursive`
+(and `git submodule add`, `sync`) there, since they clone and change `.git/config`. In the
+sandbox, the agent can commit inside a submodule and commit the bump in the parent repo; each
+submodule's config and hooks are read-only like the parent's. A submodule whose checkout has its
+own `.git` directory (made by older git, or by cloning in place before `git submodule add`) is
+refused: `git submodule absorbgitdirs` on the host moves it into the parent's `.git/modules/`.
 
 ## Configuration
 
@@ -180,7 +186,8 @@ push. Public repos need no token. For private repos, create a fine-grained token
 - **Permissions:** Contents *Read-only* (optionally Issues and Pull requests *Read-only*).
 
 Add it under `[github]` as `<owner> = "…"`. pen picks the token from the owner in `origin`; set
-`github_owner = "<owner>"` in `.pen/config.toml` to override.
+`github_owner = "<owner>"` in `.pen/config.toml` to override. Only that owner's token is in the
+sandbox, so submodules from another owner can be fetched there only if they're public.
 
 ### Logins and API keys
 
@@ -282,6 +289,8 @@ or set `docker = true` in `.pen/config.toml`. The session gets its own Docker da
   (commit, branch, merge, rebase, fetch, worktrees) works. Worktrees outside the project aren't
   visible in the sandbox and their `.git/worktrees/` entries are read-only, so `git worktree
   prune` and `remove` for them must be run on the host.
+- `git submodule add`, `update --init` and `sync` must be run on the host (they write
+  `.git/config`); committing inside a submodule works in the sandbox.
 - Run `git init` on the host for new projects.
 
 ## Limitations
@@ -295,6 +304,8 @@ a defense against a deliberate container escape.
 - Files the agent edits may later run on the host (build scripts, `package.json` scripts,
   `.envrc`, hooks under a `core.hooksPath` in the repo). Review the diff before building or
   committing on the host.
+- `.gitmodules` is a project file the agent can edit, and host `git submodule` commands clone the
+  URLs and paths it names. Review `.gitmodules` diffs before running submodule commands on the host.
 - Docker-in-Docker weakens isolation.
 
 Recommended on the host:

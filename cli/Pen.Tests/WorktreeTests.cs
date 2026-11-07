@@ -299,9 +299,7 @@ public class WorktreeTests
         File.WriteAllText(commondir, "/tmp/evil\n");
         Assert.Contains("commondir exists", Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(wt)).Message);
         File.Delete(commondir);
-
-        Directory.CreateDirectory(Path.Combine(repo, ".git", "modules"));
-        Assert.Contains("submodules", Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(wt)).Message);
+        RepoGuard.CheckAtStart(wt);
     }
 
     [Fact]

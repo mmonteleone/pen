@@ -29,6 +29,10 @@ internal static class RepoGuard
     /// linked worktree of a non-bare main checkout is accepted when its .git
     /// file validates (<see cref="RepoScan.ResolveWorktree"/>); the main
     /// repo's git dir then gets the same checks as a main checkout's own.
+    /// Submodules are accepted when their repos are kept in that git dir
+    /// (modules/), so their checkouts have .git files that
+    /// <see cref="RepoScan.FindNested"/> validates; one with its own .git dir
+    /// is refused like any nested repo, with advice to absorb it.
     /// </summary>
     public static void CheckAtStart(string dir)
     {
@@ -38,8 +42,6 @@ internal static class RepoGuard
         var common = git;
         if (File.Exists(git))
             common = CheckWorktree(dir, git);
-        if (Path.Exists(Path.Combine(dir, ".gitmodules")) || Path.Exists(Path.Combine(common, "modules")))
-            throw new PenException("this repo has submodules, which pen doesn't support yet");
         if (Exists(Path.Combine(common, "commondir")))
             throw new PenException($"{Rel(dir, Path.Combine(common, "commondir"))} exists, which a normal repo never has: it makes git read config and hooks from another directory. Inspect it and remove it, then rerun");
 
@@ -49,11 +51,39 @@ internal static class RepoGuard
         sb.Append(Directory.Exists(git)
             ? $"refusing to run in {dir}: it has other git repos inside it, whose config and hooks pen can't protect:"
             : $"refusing to run in {dir}: it contains git repos, whose config and hooks pen can't protect:");
+        bool anySubmodule = false, anyOther = false;
         foreach (var n in nested.Take(MaxListed))
-            sb.Append($"\n  {Rel(dir, n.RepoDir)}{Describe(n.Kind)}");
-        if (nested.Count > MaxListed) sb.Append($"\n  … and {nested.Count - MaxListed} more");
-        sb.Append("\nrun pen in each repo instead");
+        {
+            bool submodule = n.Kind == NestedKind.GitDir && IsSubmodulePath(dir, n.RepoDir);
+            sb.Append($"\n  {Rel(dir, n.RepoDir)}{(submodule ? " (a submodule with its own .git dir)" : Describe(n.Kind))}");
+            if (submodule) anySubmodule = true; else anyOther = true;
+        }
+        if (nested.Count > MaxListed) { sb.Append($"\n  … and {nested.Count - MaxListed} more"); anyOther = true; }
+        if (anySubmodule)
+            sb.Append("\nfor a submodule, run git submodule absorbgitdirs here on this machine: it moves the submodule's .git dir into this repo's, where pen can protect it");
+        if (anyOther) sb.Append("\nrun pen in each repo instead");
         throw new PenException(sb.ToString());
+    }
+
+    /// <summary>
+    /// Whether <paramref name="repoDir"/> is a submodule's checkout by the
+    /// .gitmodules of the project or of a directory between it and the
+    /// checkout (a nested submodule's superproject): one lists it as a
+    /// submodule.*.path. Only for the refusal's advice, so a forged entry
+    /// changes nothing but the wording.
+    /// </summary>
+    internal static bool IsSubmodulePath(string dir, string repoDir)
+    {
+        for (var super = Path.GetDirectoryName(repoDir); super != null && IsInside(dir, super); super = Path.GetDirectoryName(super))
+        {
+            var gitmodules = Path.Combine(super, ".gitmodules");
+            if (!File.Exists(gitmodules) || IsLink(gitmodules)) continue;
+            var rel = Path.GetRelativePath(super, repoDir);
+            if (GitConfigFile.ParseFile(gitmodules).Any(e =>
+                    e.Section == "submodule" && e.Key == "path" && e.Value.TrimEnd('/') == rel))
+                return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -65,7 +95,7 @@ internal static class RepoGuard
     private static string CheckWorktree(string dir, string git)
     {
         var common = RepoScan.ResolveWorktree(git)
-            ?? throw new PenException(".git is a file that isn't a valid linked worktree (a submodule's checkout, or a worktree whose entry in the main repo is missing or moved), which pen doesn't support. For a worktree, git worktree repair in the main checkout may fix it");
+            ?? throw new PenException(".git is a file that isn't a valid linked worktree (a submodule's checkout, or a worktree whose entry in the main repo is missing or moved), which pen doesn't support. For a submodule, run pen in the repo that has it; for a worktree, git worktree repair in the main checkout may fix it");
         // ResolveWorktree requires the path to be real already; this is belt and braces.
         if (IsLink(common) || !Directory.Exists(common) || Native.RealPath(common) != common)
             throw new PenException($"this worktree's git dir {common} isn't a real directory, which pen doesn't support");
