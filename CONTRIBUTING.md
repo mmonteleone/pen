@@ -4,8 +4,7 @@ This covers building, testing and releasing pen itself. For using pen, see [READ
 
 ## Prerequisites
 
-- Docker with Compose v2, as in the [README](README.md#install). Any engine works on macOS;
-  OrbStack is the one that's tested.
+- Docker with Compose v2, as in the [README](README.md#install).
 - **macOS:** the .NET 11 SDK (version pinned in `cli/global.json`; prereleases allowed) and the
   Xcode command-line tools (`xcode-select --install`).
 - **Linux:** nothing else. `cli/install.sh` builds inside a .NET SDK container. The default
@@ -28,6 +27,13 @@ This covers building, testing and releasing pen itself. For using pen, see [READ
 `compose.yaml`, `image/`, `proxy/` and `templates/` are **embedded in the CLI binary**. The
 installed pen never reads this repo, so changes to those files take effect only after you
 rebuild and reinstall the CLI.
+
+## Making a change
+
+1. `cd cli && dotnet build && dotnet test`
+2. `cli/install.sh` — the smoke tests run against the *installed* pen, so reinstall first.
+3. `SMOKE_ONLY="<n> …" tests/smoke.sh` for the sections your change touches.
+4. Before finishing a larger piece of work, the full `tests/smoke.sh`.
 
 ## Build and unit tests
 
@@ -65,33 +71,16 @@ files, labelled with their hash, instead of pulling from ghcr.io. When you chang
 ## Standing in for a release
 
 Until releases are published ([see below](#releasing-planned)), a source build is how you get
-pen. These steps leave you set up the way `brew install` and the first ghcr.io pull would.
+pen:
 
-1. **The binary** (instead of `brew install mmonteleone/tap/pen`):
-
-   ```
-   cli/install.sh                 # installs ~/.local/bin/pen; make sure that's on your PATH
-   pen --version
-   ```
-
-   For another machine, build the binary for it and copy it to `~/.local/bin/pen` there:
-   `cli/install.sh --out DIR` on that machine, or `cli/install.sh --container --out DIR` on a Mac
-   for a Linux machine of the same architecture.
-
-2. **The base image** (instead of pulling `ghcr.io/mmonteleone/pen`):
-
-   ```
-   pen upgrade                    # builds pen:latest and pulls the proxy and Docker-in-Docker images
-   ```
-
-   This works from any directory, and the build takes a few minutes. You can skip it, and the
-   first session builds the image instead. Optionally, to have the image under its release name
-   too, run `docker tag pen:latest ghcr.io/mmonteleone/pen:0.1.0` (the version
-   `pen --version` prints, before the `+`). pen itself only uses `pen:latest` for now.
-
-3. **Updating** (instead of `brew upgrade pen`): `git pull && cli/install.sh`. If `image/`
-   changed, the next session rebuilds `pen:latest` automatically. `pen upgrade` works as the
-   README describes and refreshes the agents.
+1. **Install** (instead of `brew install`): `cli/install.sh`, then make sure `~/.local/bin` is on
+   your `PATH` and check `pen --version`. For another machine, build there with
+   `cli/install.sh --out DIR`, or on a Mac with `cli/install.sh --container --out DIR` for a Linux
+   machine of the same architecture, and copy the binary to `~/.local/bin/pen`.
+2. **The base image** (instead of the ghcr.io pull): the first session builds it, which takes a
+   few minutes. Run `pen upgrade` from any directory to do it ahead of time.
+3. **Update** (instead of `brew upgrade`): `git pull && cli/install.sh`. If `image/` changed, the
+   next session rebuilds the base image.
 
 When the tap goes live, delete `~/.local/bin/pen` (or put Homebrew's bin earlier on your
 `PATH`) and run `brew install mmonteleone/tap/pen`. Your config, logins and project volumes
@@ -104,22 +93,21 @@ don't depend on how pen was installed.
 that depends on config, so your own `~/.config/pen` is never changed.
 
 ```
-tests/smoke.sh                 # all checks
-SMOKE_SLOW=1 tests/smoke.sh    # also runs pen upgrade (~1 min)
+tests/smoke.sh                     # all checks
+SMOKE_ONLY="7 13" tests/smoke.sh   # only those sections (the fixture setup always runs)
+SMOKE_SLOW=1 tests/smoke.sh        # also runs pen upgrade (~1 min)
 ```
 
-Optional credentials enable the agent-prompt checks: `CLAUDE_CODE_OAUTH_TOKEN` and
-`OPENAI_API_KEY`. They are written only to a throwaway config file (mode 600) and removed on exit.
+Section numbers are in `tests/smoke.sh`. Optional credentials enable the agent-prompt checks:
+`CLAUDE_CODE_OAUTH_TOKEN` and `OPENAI_API_KEY`. They are written only to a throwaway config file
+(mode 600) and removed on exit.
 
 Before merging, run the suite on macOS (arm64; OrbStack so far) and on Linux Docker (amd64), both
 rootful and rootless. Runs on other macOS engines, such as Docker Desktop and Colima, are
 welcome.
 
-Helpers:
-
-- `tests/pty-run.py` runs a command on a real pseudo-terminal, for signal and hangup checks (see
-  its header for options).
-- `tests/dev-session.sh` is a legacy session runner that doesn't use the CLI.
+`tests/pty-run.py` runs a command on a real pseudo-terminal, for signal and hangup checks (see its
+header for options).
 
 ## Architecture
 

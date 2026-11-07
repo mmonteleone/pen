@@ -26,15 +26,13 @@ around what can still go wrong once the agent is in a container:
 
 - **Your git, on the host.** An agent that can write to the project can also write `.git/config`
   or `.git/hooks`, which run the next time *you* use git. pen mounts both read-only, refuses repo
-  layouts it can't protect (nested repos), and checks `.git` before
-  running any git on the host.
+  layouts it can't protect (nested repos), and checks `.git` before running any git on the host.
 - **GitHub without push.** The agent gets a read-only token per owner. It can clone and fetch but
   never push: you review, then push.
 - **Signed commits without a key in the sandbox.** `pen sign` re-creates the agent's unpushed
   commits with your own signature.
 - **An allowlist you can adjust mid-session.** All traffic goes through a proxy. `pen allow`
-  updates running sessions, and pen lists blocked domains on exit. The defaults are sites an agent
-  without credentials can only read from.
+  updates running sessions, and pen lists blocked domains on exit.
 - **One setup for several agents.** Claude Code, Codex, OpenCode and Pi share the same image and
   network rules. Each project keeps its own logins, caches and home directory.
 
@@ -48,6 +46,10 @@ the host, commits signed on the host. If that doesn't fit how you work, pen will
 - you're on Windows. pen supports macOS and Linux.
 
 ## Install
+
+> **Note:** the Homebrew tap, release binaries and ghcr.io image aren't published yet. Until they
+> are, build pen from source as described in
+> [Standing in for a release](CONTRIBUTING.md#standing-in-for-a-release).
 
 Requires Docker with Compose v2:
 
@@ -66,20 +68,7 @@ Homebrew on Linux works too. Without Homebrew, download the binary for your plat
 `~/.local/bin/pen`).
 
 The first run creates `~/.config/pen/` (settings and agent config) and pulls the base image from
-`ghcr.io/mmonteleone/pen`.
-
-> **Note:** the Homebrew tap, release binaries and ghcr.io image aren't published yet. Until they
-> are, build both locally as described in
-> [Standing in for a release](CONTRIBUTING.md#standing-in-for-a-release).
-
-For private repos, add a read-only GitHub token for each owner to `~/.config/pen/config.toml`
-(see [GitHub](#github)):
-
-```toml
-[github]
-my-user = "github_pat_…"
-my-org = "github_pat_…"
-```
+`ghcr.io/mmonteleone/pen`. For private repos, add a GitHub token (see [GitHub](#github)).
 
 ## Usage
 
@@ -95,11 +84,16 @@ session picks it up immediately. Several sessions can run in the same project at
 lists any blocked domains; missing tools show up as build errors. Fix them with `pen allow` or a
 [`.pen/Dockerfile`](#project-settings).
 
+pen must run from a repo root. It refuses your home directory, subdirectories of a repo and folders
+containing multiple repos.
+
 ### Commands
 
 ```
+pen claude | codex | opencode | pi
+                                start an agent in this project's sandbox
 pen [--docker] [--port <n>]… [<cmd…>]
-                                shell or command in this project's sandbox (--docker, --port: see below)
+                                shell or command in the sandbox (--docker, --port: see below)
 pen [--docker] [--port <n>]… run <cmd…>
                                 same, for a command that clashes with a subcommand name
 pen allow <domain…> [--global]  allow domains for this project (or all projects)
@@ -112,23 +106,7 @@ pen reset                       wipe this project's sandbox state (logins, cache
 pen prune                       remove what moved or deleted projects left behind
 ```
 
-pen must run from a repo root. It refuses your home directory, subdirectories of a repo and folders
-containing multiple repos.
-
-A linked worktree (`git worktree add ../feat -b feat`) is a repo root too, so you can run an agent
-per branch in parallel. All worktrees of a repo are one project: they share its logins, caches,
-`pen reset` and the one-`--docker`-session limit, and `pen ps` lists their sessions together. Each
-worktree has its own `.pen/`, so `pen allow` in one adds to that worktree's list and applies only
-to its running sessions; likewise `pen sign` in one isn't held up by a session in another. In the
-sandbox, the worktree sees the repo's shared git data (objects, branches) but not the main
-checkout's files. Worktrees of a bare repo aren't supported.
-
-Submodules work once they're set up on the host: run `git submodule update --init --recursive`
-(and `git submodule add`, `sync`) there, since they clone and change `.git/config`. In the
-sandbox, the agent can commit inside a submodule and commit the bump in the parent repo; each
-submodule's config and hooks are read-only like the parent's. A submodule whose checkout has its
-own `.git` directory (made by older git, or by cloning in place before `git submodule add`) is
-refused: `git submodule absorbgitdirs` on the host moves it into the parent's `.git/modules/`.
+Options go before the agent: `pen --docker --port 5173 claude`.
 
 ## Configuration
 
@@ -164,12 +142,10 @@ defaults. Changes apply to the next session. `pen allow` also applies to running
 
 ### Network
 
-All traffic goes through a proxy that allows only listed domains. The allowlist combines pen's
-defaults (AI providers, GitHub, common package registries, developer docs, container registries;
-see them with `pen allow --defaults`) with `allow` in `~/.config/pen/config.toml` and in the
-project's `.pen/config.toml`. `.example.com` matches the domain and all its subdomains.
-`pen allow <domain>` adds it to the project's list (`--global`: to yours), leaving the rest of the
-file as you wrote it.
+The default allowlist covers AI providers, GitHub, common package registries, developer docs and
+container registries (`pen allow --defaults` shows it). `.example.com` matches the domain and all
+its subdomains. `pen allow <domain>` adds to the project's `allow` (`--global`: to yours), leaving
+the rest of the file as you wrote it.
 
 The defaults are sites an agent without credentials can only read from. A domain that accepts
 anonymous writes (a wiki, a pastebin) could be used to send your code out, so think twice before
@@ -185,9 +161,9 @@ push. Public repos need no token. For private repos, create a fine-grained token
 - **Repository access:** only the repos you need.
 - **Permissions:** Contents *Read-only* (optionally Issues and Pull requests *Read-only*).
 
-Add it under `[github]` as `<owner> = "…"`. pen picks the token from the owner in `origin`; set
-`github_owner = "<owner>"` in `.pen/config.toml` to override. Only that owner's token is in the
-sandbox, so submodules from another owner can be fetched there only if they're public.
+Add it under `[github]` in `~/.config/pen/config.toml` as `<owner> = "…"`. pen picks the token
+from the owner in `origin`; set `github_owner = "<owner>"` in `.pen/config.toml` to override.
+Only that owner's token is in the sandbox.
 
 ### Logins and API keys
 
@@ -218,9 +194,7 @@ Agents run in skip-permissions mode by default; the container is the boundary. E
 
 Optional, in the project's `.pen/` directory (read-only inside the sandbox):
 
-- **`.pen/config.toml`:** `allow = [...]`, `github_owner = "<owner>"`, `docker = true`,
-  `ports = [<n>, …]` (see [Dev servers](#dev-servers)). Secrets
-  (`[github]`, `[env]`) aren't allowed here.
+- **`.pen/config.toml`:** the keys shown above. Secrets (`[github]`, `[env]`) aren't allowed here.
 - **`.pen/Dockerfile`:** extra SDKs or tools on top of the base image (which pen keeps tagged
   locally as `pen:latest`):
 
@@ -230,7 +204,37 @@ Optional, in the project's `.pen/` directory (read-only inside the sandbox):
    && rm -rf /var/lib/apt/lists/*
   ```
 
-## Commit signing
+## Git in the sandbox
+
+Everyday git works inside: commit, branch, merge, rebase, fetch, worktrees. `.git/config` and
+`.git/hooks` are read-only, so these must run on the host:
+
+- `git init` for a new project;
+- `git config`, `git remote add`, setting upstreams, deleting branches, hook installers (husky);
+- `git submodule add`, `update --init` and `sync`;
+- `git worktree prune` and `remove` for worktrees outside the project;
+- pushing.
+
+### Worktrees
+
+A linked worktree (`git worktree add ../feat -b feat`) is a repo root too, so you can run an agent
+per branch in parallel. All worktrees of a repo are one project: they share its logins, caches,
+`pen reset` and the one-`--docker`-session limit. Each worktree has its own `.pen/`, so `pen allow`
+in one applies only to that worktree. In the sandbox, a worktree sees the repo's shared git data
+(objects, branches) but not the main checkout's files. Worktrees of a bare repo aren't supported.
+
+### Submodules
+
+Set submodules up on the host (`git submodule update --init --recursive`). In the sandbox, the
+agent can commit inside a submodule and commit the bump in the parent repo; each submodule's config
+and hooks are read-only like the parent's. Only the `origin` owner's GitHub token is available, so
+submodules from another owner can be fetched only if they're public.
+
+A submodule whose checkout has its own `.git` directory (made by older git, or by cloning in place
+before `git submodule add`) is refused: `git submodule absorbgitdirs` on the host moves it into the
+parent's `.git/modules/`.
+
+### Commit signing
 
 There's no signing key in the sandbox, so agent commits are unsigned. After reviewing them, run
 `pen sign` on the host: it re-creates `<base>..HEAD` (default: the upstream branch) with your
@@ -248,12 +252,9 @@ same on both sides, and only the host's `127.0.0.1` listens.
 
 - The server must listen on `0.0.0.0`, not only `localhost`: e.g. `vite --host`,
   `ASPNETCORE_URLS=http://0.0.0.0:5000`.
-- A port that's already in use on the host isn't remapped: a `--port` is an error, and a port from
-  `.pen/config.toml` is skipped with a warning, so a second session of the same project still
-  starts (the first keeps the port). `pen ps` shows which session forwards what.
+- A port that's already in use on the host isn't remapped: `--port` fails, and a port from
+  `.pen/config.toml` is skipped with a warning. `pen ps` shows which session has it.
 - Forwarding goes from the host into the sandbox only; it gives the sandbox no way out.
-- In a `--docker` session, containers' published ports are at `dind:<port>`, which only the
-  sandbox can reach.
 
 ## Docker-in-Docker
 
@@ -275,23 +276,14 @@ or set `docker = true` in `.pen/config.toml`. The session gets its own Docker da
   with a `.pen/Dockerfile` to rebuild that layer too. Logins and config are kept.
 - `pen reset` wipes a project's sandbox state.
 - `pen prune` finds the volumes, project layers and state of projects you've moved or deleted, and
-  removes them after asking. Each pen command records its project's directory; a project pen hasn't
-  run in since it began doing that is listed with the commands to remove it by hand, never removed.
-  A directory on a volume that isn't mounted looks deleted, so mount it first.
+  removes them after asking. Ones it can't place are listed with the commands to remove them by
+  hand. A directory on a volume that isn't mounted looks deleted, so mount it first.
 
 ## Differences from running on the host
 
 - Pasting images into the agent doesn't work; save the image to the project and pass its path.
-- Servers the agent starts are reachable from the host only on [forwarded ports](#dev-servers),
-  and must listen on `0.0.0.0`.
-- `.git/config` and `.git/hooks` are read-only, so `git config`, `git remote add`, setting
-  upstreams, deleting branches and hook installers (husky) must be run on the host. Everyday git
-  (commit, branch, merge, rebase, fetch, worktrees) works. Worktrees outside the project aren't
-  visible in the sandbox and their `.git/worktrees/` entries are read-only, so `git worktree
-  prune` and `remove` for them must be run on the host.
-- `git submodule add`, `update --init` and `sync` must be run on the host (they write
-  `.git/config`); committing inside a submodule works in the sandbox.
-- Run `git init` on the host for new projects.
+- Servers the agent starts are reachable from the host only on [forwarded ports](#dev-servers).
+- Some git commands must run on the host; see [Git in the sandbox](#git-in-the-sandbox).
 
 ## Limitations
 
@@ -308,13 +300,15 @@ a defense against a deliberate container escape.
   URLs and paths it names. Review `.gitmodules` diffs before running submodule commands on the host.
 - Docker-in-Docker weakens isolation.
 
-Recommended on the host:
+pen moves nested repos aside at session end, but during a session the agent can create one, with
+its own config and hooks, that host tools would run git in. To close that gap, on the host:
 
 ```
 git config --global safe.bareRepository explicit
 ```
 
-and in VS Code, set `git.autoRepositoryDetection` to `false` or `openEditors`.
+and in VS Code, set `git.autoRepositoryDetection` to `false` or `openEditors` so it doesn't scan
+subfolders for repos.
 
 ## Developing pen
 
