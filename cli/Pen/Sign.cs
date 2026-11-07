@@ -204,7 +204,7 @@ internal static class Sign
         if (!project.IsRepo) throw new PenException($"{project.Dir} isn't a git repo");
         if (project.IsWorktree) throw new PenException("this is a linked worktree, which pen sign doesn't support yet: run it from the main checkout");
         Session.EnsureRuntimeDir(host, project.Key);
-        using var projectLock = Sessions.TakeExclusive(host, project, "sign");
+        using var locks = Sessions.TakeForSign(host, project);
         Session.FinishDeadSessions(project.Key, host.RuntimeDir(project.Key));
 
         var moved = GitCheck.Run(project.Dir, startedWithGit: true);

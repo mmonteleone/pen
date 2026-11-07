@@ -138,6 +138,16 @@ try:
 except BlockingIOError:
     sys.exit(1)' "$1" "$2"
 }
+# holding <file> <exclusive|shared> <cmd…>: run cmd (stdin closed) while another process holds that
+# lock; prints its exit code and stderr.
+holding() {
+  python3 -c '
+import fcntl, subprocess, sys
+f = open(sys.argv[1], "a")
+fcntl.flock(f, fcntl.LOCK_EX if sys.argv[2] == "exclusive" else fcntl.LOCK_SH)
+r = subprocess.run(sys.argv[3:], stdin=subprocess.DEVNULL, capture_output=True, text=True)
+print(r.returncode, r.stderr)' "$@"
+}
 refuse() { # refuse <dir> <expected message part>
   local out rc=0
   out=$(cd "$1" && "$PEN" run true </dev/null 2>&1) || rc=$?
@@ -412,13 +422,15 @@ out=$("$PEN" ps)
 check "pen ps lists the running session: project, id, age and command" \
   grep -qE "^~${PROJECT_DIR#"$HOME"} +[0-9a-f]{8} +[0-9]+[smh][0-9m]* +sleep 120$" <<<"$out"
 check "project.lock is held shared: another shared lock is fine" lock_free "$RUNTIME/project.lock" shared
-check "...and an exclusive one (pen sign/reset) is refused" not lock_free "$RUNTIME/project.lock" exclusive
+check "...and an exclusive one (pen reset) is refused" not lock_free "$RUNTIME/project.lock" exclusive
+check "this dir's worktree lock is held shared too" lock_free "$RUNTIME/worktree-$HASH.lock" shared
+check "...so pen sign's exclusive hold on it is refused" not lock_free "$RUNTIME/worktree-$HASH.lock" exclusive
 sdir=$(ls -td "$RUNTIME"/sessions/*/ | head -1)
 check "the running session's session.lock is held" not lock_free "${sdir}session.lock" exclusive
 compose_pid=$(pgrep -P "$p" | head -1)
 if command -v lsof >/dev/null; then
   check "the compose child holds no lock fds (lsof)" not bash -c "lsof -p $compose_pid 2>/dev/null | grep -q '\.lock'"
-  check "while pen itself holds both locks" test "$(lsof -p "$p" 2>/dev/null | grep -c '\.lock$')" = 2
+  check "while pen itself holds all three locks (project, worktree, session)" test "$(lsof -p "$p" 2>/dev/null | grep -c '\.lock$')" = 3
 else
   note "lsof not installed: skipped the fd checks"
 fi
@@ -458,6 +470,7 @@ docker image tag pen:smoke-backup "$IMAGE" && docker rmi pen:smoke-backup >/dev/
 check "Ctrl-C during the image build aborts the launch" bash -c 'grep -q rebuilding <<<"$1" && ! grep -qE "EXIT 0|TIMEOUT" <<<"$1"' _ "$out"
 check "...leaving no session dir" test "$(ls "$RUNTIME/sessions" | wc -l)" = "$before"
 check "...and no lock held" lock_free "$RUNTIME/project.lock" exclusive
+check "...not even the worktree lock" lock_free "$RUNTIME/worktree-$HASH.lock" exclusive
 fi
 
 if want 8; then
@@ -984,13 +997,20 @@ check "...naming its agent container" contains "  $name" "$out"
 docker rm -f "$name" >/dev/null
 wait "$p" 2>/dev/null || true
 
-out=$(python3 -c '
-import fcntl, os, subprocess, sys
-f = open(sys.argv[1], "a")
-fcntl.flock(f, fcntl.LOCK_EX)  # what pen sign holds for its whole run
-r = subprocess.run(sys.argv[2:], stdin=subprocess.DEVNULL, capture_output=True, text=True)
-print(r.returncode, r.stderr)' "$FAKE_HOME/.local/state/pen/$KEY/project.lock" env HOME="$FAKE_HOME" DOCKER_CONFIG="${DOCKER_CONFIG:-$REAL_HOME/.docker}" "$PEN" run true)
-check "a session started while pen sign runs is refused" contains "a pen sign or pen reset is running" "$out"
+fake_runtime=$FAKE_HOME/.local/state/pen/$KEY
+fake_env=(env HOME="$FAKE_HOME" DOCKER_CONFIG="${DOCKER_CONFIG:-$REAL_HOME/.docker}" "$PEN")
+# pen sign holds this dir's worktree lock exclusive (and project.lock shared) for its whole run.
+out=$(holding "$fake_runtime/worktree-$HASH.lock" exclusive "${fake_env[@]}" run true)
+check "a session started while pen sign runs here is refused" contains "a pen sign is running in this directory" "$out"
+out=$(holding "$fake_runtime/worktree-$HASH.lock" exclusive "${fake_env[@]}" sign)
+check "...as is a second pen sign here" contains "another pen sign is running in this directory" "$out"
+out=$(holding "$fake_runtime/project.lock" shared "${fake_env[@]}" reset)
+check "...and pen reset (sign holds project.lock shared)" contains "a pen sign or another pen reset is running" "$out"
+# pen reset holds project.lock exclusive.
+out=$(holding "$fake_runtime/project.lock" exclusive "${fake_env[@]}" run true)
+check "a session started while pen reset runs is refused" contains "a pen reset is running in this project" "$out"
+out=$(holding "$fake_runtime/project.lock" exclusive "${fake_env[@]}" sign)
+check "...as is pen sign" contains "refusing to sign: a pen reset is running" "$out"
 
 before=$(for c in $(git rev-list --reverse origin/smoke-base..HEAD); do git log -1 --format='%T %an <%ae> %ad' "$c"; done)
 out=$(fake_pen sign 2>&1)

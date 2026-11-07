@@ -8,7 +8,7 @@ internal static class Reset
     public static int Run(HostEnv host, Project project, TextReader input)
     {
         Session.EnsureRuntimeDir(host, project.Key);
-        using var projectLock = Sessions.TakeExclusive(host, project, "reset");
+        using var projectLock = Sessions.TakeForReset(host, project);
         Session.FinishDeadSessions(project.Key, host.RuntimeDir(project.Key));
 
         var volumes = VolumeSuffixes.Select(s => $"{project.Key}_{s}")

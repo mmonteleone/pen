@@ -87,10 +87,10 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
     /// <param name="docker">with Docker-in-Docker (pen --docker, or docker = true in .pen/config.toml)</param>
     public int Run(IReadOnlyList<string> command, bool docker = false)
     {
-        // 1. Every session holds project.lock shared; pen sign/reset hold it exclusive.
+        // 1. Every session holds project.lock and its dir's worktree lock
+        // shared; pen reset holds the first exclusive, pen sign the second.
         EnsureRuntimeDir(host, project.Key);
-        using var projectLock = FileLock.TryTake(System.IO.Path.Combine(RuntimeDir, "project.lock"), exclusive: false)
-            ?? throw new PenException("a pen sign or pen reset is running in this project: try again once it's done");
+        using var locks = Sessions.TakeForSession(RuntimeDir, project);
 
         // 2. Sessions whose pen died get their end path now.
         FinishDeadSessions(project.Key, RuntimeDir);
