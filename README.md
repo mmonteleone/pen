@@ -110,6 +110,7 @@ pen ps                          list running sessions, in every project, with th
 pen sign [<base>]               re-sign your unpushed commits with your own key
 pen upgrade [--clean]           update the base image and agents
 pen reset                       wipe this project's sandbox state (logins, caches)
+pen prune                       remove what moved or deleted projects left behind
 ```
 
 pen must run from a repo root. It refuses your home directory, subdirectories of a repo, folders
@@ -265,8 +266,11 @@ or set `docker = true` in `.pen/config.toml`. The session gets its own Docker da
 - `pen upgrade` reinstalls the agents at their latest versions and pulls newer proxy and Docker
   images, without waiting for a pen release (`--clean` skips the build cache). Run it in a project
   with a `.pen/Dockerfile` to rebuild that layer too. Logins and config are kept.
-- `pen reset` wipes a project's sandbox state. Moved or deleted projects leave volumes behind; list
-  them with `docker volume ls -q | grep '^pen-'` and remove with `docker volume rm`.
+- `pen reset` wipes a project's sandbox state.
+- `pen prune` finds the volumes, project layers and state of projects you've moved or deleted, and
+  removes them after asking. Each pen command records its project's directory; a project pen hasn't
+  run in since it began doing that is listed with the commands to remove it by hand, never removed.
+  A directory on a volume that isn't mounted looks deleted, so mount it first.
 
 ## Differences from running on the host
 

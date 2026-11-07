@@ -62,19 +62,25 @@ if command -v sha256sum >/dev/null; then sha() { sha256sum; }; else sha() { shas
 HASH=$(printf %s "$PROJECT_DIR" | sha | cut -c1-8)
 KEY= RUNTIME=
 EXTRA_DIRS=() # other fixture projects: removed on exit, with their keys' state
+EXTRA_KEYS=() # project keys whose dirs a section deleted: their state is removed on exit
 
-# forget <dir>: remove the state of any project key made for <dir>.
+# forget_key <key>: remove a project key's containers, networks, volumes, images
+# and runtime dirs (under the real and the throwaway HOME).
+forget_key() {
+  local k=$1
+  docker ps -aq --filter "name=^$k-" | xargs docker rm -f >/dev/null 2>&1 || true
+  docker network ls -q --filter "name=^$k-" | xargs docker network rm >/dev/null 2>&1 || true
+  docker volume rm "${k}_home" "${k}_nuget" "${k}_dind" >/dev/null 2>&1 || true
+  docker image ls -q --filter "reference=$k*" | xargs docker image rm -f >/dev/null 2>&1 || true
+  rm -rf "$REAL_HOME/.local/state/pen/$k" "$FAKE_HOME/.local/state/pen/$k"
+}
+# forget <dir>: remove the state of any project key made for <dir>, by pen
+# with either HOME.
 forget() {
   local h k
   h=$(printf %s "$(cd "$1" && pwd -P)" | sha | cut -c1-8)
-  for k in "$REAL_HOME"/.local/state/pen/pen-*-"$h"; do
-    [ -d "$k" ] || continue
-    k=$(basename "$k")
-    docker ps -aq --filter "name=^$k-" | xargs docker rm -f >/dev/null 2>&1 || true
-    docker network ls -q --filter "name=^$k-" | xargs docker network rm >/dev/null 2>&1 || true
-    docker volume rm "${k}_home" "${k}_nuget" "${k}_dind" >/dev/null 2>&1 || true
-    docker image ls -q --filter "reference=$k*" | xargs docker image rm -f >/dev/null 2>&1 || true
-    rm -rf "$REAL_HOME/.local/state/pen/$k"
+  for k in "$REAL_HOME"/.local/state/pen/pen-*-"$h" "$FAKE_HOME"/.local/state/pen/pen-*-"$h"; do
+    if [ -d "$k" ]; then forget_key "$(basename "$k")"; fi
   done
 }
 
@@ -89,6 +95,7 @@ cleanup() {
   fi
   local d
   for d in ${EXTRA_DIRS[@]+"${EXTRA_DIRS[@]}"}; do [ -d "$d" ] && forget "$d"; rm -rf "$d"; done
+  for d in ${EXTRA_KEYS[@]+"${EXTRA_KEYS[@]}"}; do forget_key "$d"; done
   rm -rf "$PROJECT_DIR" "$SCRATCH"
 }
 trap cleanup EXIT
@@ -1358,6 +1365,54 @@ docker ps --format '{{.Names}}' | grep -E "^$KEY-.*-agent$" | xargs docker rm -f
 wait "$p" 2>/dev/null || true
 rm -rf .pen
 check "nothing is left running" test "$(containers)" = 0
+fi
+
+if want 23; then
+# ==============================================================================
+section "23. pen prune (prune D2)"
+
+# Under the throwaway HOME, whose state holds only smoke fixtures: your own
+# projects' volumes show up there as unknown, which pen prune never removes.
+fake_config "# none"
+fake_prune() { HOME=$FAKE_HOME DOCKER_CONFIG=${DOCKER_CONFIG:-$REAL_HOME/.docker} "$PEN" prune; }
+FSTATE=$FAKE_HOME/.local/state/pen
+GONE=$(cd "$(mktemp -d "$HOME/.pen-smoke-gone.XXXXXX")" && pwd -P)
+LIVE=$(cd "$(mktemp -d "$HOME/.pen-smoke-live.XXXXXX")" && pwd -P)
+EXTRA_DIRS+=("$GONE" "$LIVE")
+git -C "$GONE" init -q
+git -C "$LIVE" init -q
+mkdir -p "$GONE/.pen"
+echo 'FROM pen:latest' >"$GONE/.pen/Dockerfile"
+(cd "$GONE" && fake_pen run true) >/dev/null 2>&1 || fail "a session in the project to delete failed"
+(cd "$LIVE" && fake_pen run true) >/dev/null 2>&1 || fail "a session in the live project failed"
+gkey=$(basename "$(ls -d "$FSTATE"/pen-*-"$(printf %s "$GONE" | sha | cut -c1-8)")")
+lkey=$(basename "$(ls -d "$FSTATE"/pen-*-"$(printf %s "$LIVE" | sha | cut -c1-8)")")
+EXTRA_KEYS+=("$gkey" "$lkey")
+check "both projects have volumes, and the one to delete a project layer" \
+  bash -c 'docker volume inspect "${1}_home" "${2}_home" >/dev/null && docker image inspect "$1:latest" >/dev/null' _ "$gkey" "$lkey"
+others=$(docker volume ls -q | grep -v "^${gkey}_" | sort)
+rm -rf "$GONE"
+
+out=$(echo n | fake_prune 2>&1 || true)
+check "pen prune lists the deleted project as missing, with its volumes and layer" \
+  has_all "$out" "to remove, missing" "  $GONE  ($gkey)" "${gkey}_home, ${gkey}_nuget; $gkey:latest"
+check "...noting it may be on a volume that isn't mounted" contains "isn't mounted" "$out"
+check "...and the live one as kept" bash -c 'grep -q "^kept, in use:" <<<"$1" && grep -qF "  $2  ($3)" <<<"$1"' _ "$out" "$LIVE" "$lkey"
+check "...asking first" contains "pen: remove it? [y/N] n" "$out"
+check "answering no removes nothing" bash -c 'grep -q "nothing removed" <<<"$1" && docker volume inspect "${2}_home" >/dev/null && [ -d "$3/$2" ]' _ "$out" "$gkey" "$FSTATE"
+
+r=$(holding "$FSTATE/$gkey/project.lock" shared bash -c 'echo y | "$@"' _ env HOME="$FAKE_HOME" DOCKER_CONFIG="${DOCKER_CONFIG:-$REAL_HOME/.docker}" "$PEN" prune)
+check "a key whose project.lock a session holds is skipped" \
+  bash -c 'grep -q "skipping $2" <<<"$1" && [ "${1%% *}" = 1 ] && docker volume inspect "${2}_home" >/dev/null && [ -d "$3/$2" ]' _ "$r" "$gkey" "$FSTATE"
+
+out=$(echo y | fake_prune 2>&1)
+check "answering yes removes the deleted project's volumes" bash -c 'grep -q "removed $2" <<<"$1" && ! docker volume inspect "${2}_home" >/dev/null 2>&1 && ! docker volume inspect "${2}_nuget" >/dev/null 2>&1' _ "$out" "$gkey"
+check "...its project layer" bash -c '! docker image inspect "$1:latest" >/dev/null 2>&1' _ "$gkey"
+check "...and its runtime dir" test ! -e "$FSTATE/$gkey"
+check "the live project keeps its volumes and runtime dir" bash -c 'docker volume inspect "${1}_home" >/dev/null && [ -s "$2/$1/project-dir" ]' _ "$lkey" "$FSTATE"
+check "...as does every other volume (unknown to this HOME, so never removed)" test "$(docker volume ls -q | grep -v "^${gkey}_" | sort)" = "$others"
+out=$(echo n | fake_prune 2>&1)
+check "run again, it finds nothing to prune" bash -c 'grep -q "pen: nothing to prune" <<<"$1" && ! grep -q "$2" <<<"$1"' _ "$out" "$gkey"
 fi
 
 section "All checks passed."

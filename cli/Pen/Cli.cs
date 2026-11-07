@@ -1,6 +1,6 @@
 namespace Pen;
 
-internal enum CommandKind { Run, Upgrade, Allow, Sign, Reset, Ps, Help, Version }
+internal enum CommandKind { Run, Upgrade, Allow, Sign, Reset, Ps, Prune, Help, Version }
 
 /// <summary>
 /// A parsed command line. For Run, Args is the command to run in the sandbox
@@ -32,6 +32,7 @@ internal static class Cli
           pen ps                    list running sessions, in every project
           pen sign [<base>]         on the host: re-sign unpushed commits with your key
           pen reset                 wipe this project's volumes (asks first)
+          pen prune                 remove what moved or deleted projects left behind (asks first)
           pen <subcommand> --help   more about one of them
         """;
 
@@ -109,6 +110,16 @@ internal static class Cli
             The project's files and ~/.config/pen are untouched. Not while a session is
             open in this project.
             """,
+        ["prune"] = """
+            usage: pen prune
+
+            Finds the volumes, project-layer images and state that projects you have moved
+            or deleted left behind, lists them with the projects still in use, and removes
+            them after asking. A project whose directory is gone may be on a volume that
+            isn't mounted: mount it first. Projects pen hasn't run in since it began
+            recording their directories are listed with the commands to remove them by
+            hand, never removed. Not while a session is open in the project.
+            """,
     };
 
     private static bool IsHelp(string a) => a is "-h" or "--help";
@@ -121,6 +132,7 @@ internal static class Cli
         ["sign"] = CommandKind.Sign,
         ["reset"] = CommandKind.Reset,
         ["ps"] = CommandKind.Ps,
+        ["prune"] = CommandKind.Prune,
     };
 
     /// <summary>
@@ -204,6 +216,9 @@ internal static class Cli
                 case CommandKind.Ps:
                     if (rest.Count > 0) throw Error($"pen ps: unexpected argument \"{rest[0]}\"");
                     return new(CommandKind.Ps, []);
+                case CommandKind.Prune:
+                    if (rest.Count > 0) throw Error($"pen prune: unexpected argument \"{rest[0]}\"");
+                    return new(CommandKind.Prune, []);
                 case CommandKind.Allow:
                     var global = false;
                     var domains = new List<string>();
