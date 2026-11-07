@@ -417,6 +417,7 @@ s=$(last_session)
 check "an ended session keeps only its proxy.log" test "$(ls -A "$s")" = proxy.log
 check "runtime and session dirs are 700" bash -c "[ $(mode_of "$RUNTIME") = 700 ] && [ $(mode_of "$s") = 700 ] && [ $(mode_of "$RUNTIME/sessions") = 700 ]"
 check "proxy.log is 666" test "$(mode_of "${s}proxy.log")" = 666
+check "the runtime dir records the project's real path in project-dir (prune D1)" test "$(cat "$RUNTIME/project-dir")" = "$PROJECT_DIR"
 check "the project's volumes are named by its key" bash -c 'docker volume inspect "$1" "$2" >/dev/null' _ "${KEY}_home" "${KEY}_nuget"
 check "pen:latest carries its image hash" test -n "$(docker image inspect --format '{{ index .Config.Labels "pen.image-hash" }}' "$IMAGE")"
 fi
@@ -981,6 +982,7 @@ docker rm -f "$name" >/dev/null
 wait "$p" 2>/dev/null || true
 check "after docker rm -f, that session's pen finishes its end path" test "$(containers)" = 0
 out=$(echo n | "$PEN" reset 2>&1 || true)
+check "pen reset asks before removing, echoing the answer read without a terminal" contains "pen: remove them? [y/N] n" "$out"
 check "answering no removes nothing" bash -c 'grep -q "nothing removed" <<<"$1" && docker volume inspect "$2" >/dev/null' _ "$out" "${KEY}_home"
 out=$(echo y | "$PEN" reset 2>&1)
 check "answering yes removes the project's volumes" bash -c 'grep -q "removed ${2}_home, ${2}_nuget" <<<"$1" && ! docker volume inspect "${2}_home" >/dev/null 2>&1' _ "$out" "$KEY"
@@ -1200,6 +1202,7 @@ check "...and read-only inside" has "fail: pen"
 check "the worktree shares the main checkout's key: no state of its own" \
   bash -c "! ls -d '$REAL_HOME'/.local/state/pen/pen-*-'$WT_HASH' >/dev/null 2>&1 && ! docker volume inspect pen-wt21-'$WT_HASH'_home >/dev/null 2>&1"
 check "...and its session ran under the main checkout's runtime dir, with its own worktree lock" test -e "$RUNTIME/worktree-$WT_HASH.lock"
+check "...whose project-dir still names the main checkout (prune D1)" test "$(cat "$RUNTIME/project-dir")" = "$PROJECT_DIR"
 git -C "$WT" branch -q -D smoke-wt2
 
 out=$(cd "$WT" && in_sandbox "touch '$G/commondir'" 2>&1 || true)

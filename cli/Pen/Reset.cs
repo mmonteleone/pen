@@ -7,7 +7,7 @@ internal static class Reset
 
     public static int Run(HostEnv host, Project project, TextReader input)
     {
-        Session.EnsureRuntimeDir(host, project.Key);
+        Session.EnsureRuntimeDir(host, project);
         using var projectLock = Sessions.TakeForReset(host, project);
         Session.FinishDeadSessions(project.Key, host.RuntimeDir(project.Key));
 
@@ -24,12 +24,7 @@ internal static class Reset
         Out.Raw("  the project's sandbox home (agent logins and config, shell history), its NuGet cache"
                 + (volumes.Any(v => v.EndsWith("_dind", StringComparison.Ordinal)) ? " and its Docker images" : "")
                 + ".\n  The project's files and your ~/.config/pen are untouched.");
-        Out.Prompt("pen: remove them? [y/N] ");
-        string? answer;
-        try { answer = input.ReadLine(); }
-        catch (IOException) { answer = null; }
-        if (!Native.IsATty(0)) Out.Raw(answer ?? "");
-        if (answer?.Trim().ToLowerInvariant() is not ("y" or "yes"))
+        if (!Out.Confirm("remove them?", input))
         {
             Out.Line("nothing removed");
             return 1;

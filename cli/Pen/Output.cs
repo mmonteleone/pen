@@ -24,6 +24,23 @@ internal static class Out
         catch (UnauthorizedAccessException) { }
     }
 
+    /// <summary>
+    /// Asks "pen: question [y/N]" and reads the answer from <paramref name="input"/>:
+    /// true only for y or yes. Without a terminal the answer is echoed, so the
+    /// transcript reads like an interactive one.
+    /// </summary>
+    public static bool Confirm(string question, TextReader input)
+    {
+        Prompt($"pen: {question} [y/N] ");
+        string? answer;
+        try { answer = input.ReadLine(); }
+        catch (IOException) { answer = null; }
+        if (!Native.IsATty(0)) Raw(answer ?? "");
+        return IsYes(answer);
+    }
+
+    internal static bool IsYes(string? answer) => answer?.Trim().ToLowerInvariant() is "y" or "yes";
+
     private static void Write(string text)
     {
         try { Console.Error.WriteLine(text); }

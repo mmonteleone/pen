@@ -59,7 +59,7 @@ internal static class AllowCommand
         catch (PenException) when (global) { } // --global works from anywhere
         if (project != null)
         {
-            Session.EnsureRuntimeDir(host, project.Key);
+            Session.EnsureRuntimeDir(host, project);
             Session.FinishDeadSessions(project.Key, host.RuntimeDir(project.Key));
         }
 
@@ -178,7 +178,7 @@ internal static class AllowCommand
     public static int List(HostEnv host, Project project, Config user, Config projectConfig)
     {
         var runtimeDir = host.RuntimeDir(project.Key);
-        Session.EnsureRuntimeDir(host, project.Key);
+        Session.EnsureRuntimeDir(host, project);
         Session.FinishDeadSessions(project.Key, runtimeDir);
 
         var logs = Directory.EnumerateDirectories(Path.Combine(runtimeDir, "sessions"))

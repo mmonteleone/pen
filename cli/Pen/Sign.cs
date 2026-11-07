@@ -202,7 +202,7 @@ internal static class Sign
     public static int Run(HostEnv host, Project project, string? baseArg)
     {
         if (!project.IsRepo) throw new PenException($"{project.Dir} isn't a git repo");
-        Session.EnsureRuntimeDir(host, project.Key);
+        Session.EnsureRuntimeDir(host, project);
         using var locks = Sessions.TakeForSign(host, project);
         Session.FinishDeadSessions(project.Key, host.RuntimeDir(project.Key));
 

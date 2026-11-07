@@ -112,7 +112,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
     {
         // 1. Every session holds project.lock and its dir's worktree lock
         // shared; pen reset holds the first exclusive, pen sign the second.
-        EnsureRuntimeDir(host, project.Key);
+        EnsureRuntimeDir(host, project);
         using var locks = Sessions.TakeForSession(RuntimeDir, project);
 
         // 2. Sessions whose pen died get their end path now.
@@ -240,11 +240,33 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
             psi.Environment.Remove(name);
     }
 
-    internal static void EnsureRuntimeDir(HostEnv host, string projectKey)
+    /// <summary>
+    /// Creates the project's runtime dir and records the main checkout's real
+    /// path in its project-dir file, so pen prune can tell which keys belong to
+    /// projects that were moved or deleted. Every command that resolves a
+    /// project calls this, so active projects fill it in over time.
+    /// </summary>
+    internal static void EnsureRuntimeDir(HostEnv host, Project project)
     {
+        var runtimeDir = host.RuntimeDir(project.Key);
         Directory.CreateDirectory(host.StateRoot, Dir700);
-        Directory.CreateDirectory(host.RuntimeDir(projectKey), Dir700);
-        Directory.CreateDirectory(System.IO.Path.Combine(host.RuntimeDir(projectKey), "sessions"), Dir700);
+        Directory.CreateDirectory(runtimeDir, Dir700);
+        Directory.CreateDirectory(System.IO.Path.Combine(runtimeDir, "sessions"), Dir700);
+        WriteProjectDir(runtimeDir, project.RepoDir);
+    }
+
+    internal const string ProjectDirFile = "project-dir";
+
+    /// <summary>Writes <paramref name="repoDir"/> to project-dir unless it's already there, via temp file + rename.</summary>
+    internal static void WriteProjectDir(string runtimeDir, string repoDir)
+    {
+        var path = System.IO.Path.Combine(runtimeDir, ProjectDirFile);
+        var content = repoDir + "\n";
+        try { if (File.ReadAllText(path) == content) return; }
+        catch (FileNotFoundException) { }
+        var tmp = path + "." + Environment.ProcessId + ".tmp";
+        File.WriteAllText(tmp, content);
+        File.Move(tmp, path, overwrite: true);
     }
 
     private SessionDir CreateSessionDir()
