@@ -753,12 +753,13 @@ quarantine_case() { # <what the agent runs> <path> <quarantined path>
   check "...with how to put it back" contains "mv '$PROJECT_DIR/$3' '$PROJECT_DIR/$2'" "$out"
 }
 quarantine_case 'touch .git/commondir' .git/commondir .git/commondir.pen-quarantine
-quarantine_case 'mkdir .git/modules' .git/modules .git/modules.pen-quarantine
+quarantine_case 'git init -q --bare .git/modules/x' .git/modules/x .git/modules/x.pen-quarantine
+rm -rf .git/modules # the project itself can't have submodule repos at start yet
 quarantine_case 'git init -q sub' sub/.git sub/.git.pen-quarantine
 check "...and the moved .git no longer looks like a repo (its HEAD moved too)" test -e sub/.git.pen-quarantine/HEAD.pen-quarantine
 quarantine_case 'git init -q --bare sub2' sub2/HEAD sub2/HEAD.pen-quarantine
 check "the next session starts normally" pen_run true
-rm -rf .git/commondir.pen-quarantine .git/modules.pen-quarantine sub sub2
+rm -rf .git/commondir.pen-quarantine sub sub2
 
 out=$(in_sandbox 'git worktree add -q .claude/worktrees/y' 2>&1)
 check "no warning for a git worktree add worktree" not contains "WARNING" "$out"
@@ -1463,6 +1464,58 @@ check "a symlinked submodule repo is refused at start" refuse "$PROJECT_DIR" "mo
 rm "$PROJECT_DIR/.git/worktrees/sm/modules/evil"
 
 check "nothing is left running" test "$(containers)" = 0
+git worktree remove --force "$SMWT"
+rm -rf .claude
+fi
+
+if want 25; then
+# ==============================================================================
+section "25. Submodule checkouts, and quarantining only new module repos (submodules E2)"
+
+# As in section 24, but with the worktree's submodule checked out: its .git
+# file points at the module repo, whose core.worktree points back, so pen
+# starts. At the end, only module repos made during the session (and .git
+# files not matching a known one) are quarantined.
+SMLIB=$SCRATCH/smlib
+[ -d "$SMLIB/.git" ] || { git init -q "$SMLIB"
+  git -C "$SMLIB" -c user.name=smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m lib; }
+git worktree add -q .claude/worktrees/sm 2>/dev/null
+SMWT=$PROJECT_DIR/.claude/worktrees/sm
+git -C "$SMWT" -c protocol.file.allow=always submodule add -q "$SMLIB" libs/x 2>/dev/null
+MODS=$PROJECT_DIR/.git/worktrees/sm/modules
+M=$MODS/libs/x
+check "the worktree's submodule is checked out" test -f "$SMWT/libs/x/.git"
+
+out=$(in_sandbox "
+  t() { if eval \"\$1\" >/dev/null 2>&1; then echo \"ok: \$2\"; else echo \"fail: \$2\"; fi; }
+  t 'git -C \"$SMWT/libs/x\" update-ref refs/heads/smoke HEAD' ref
+  t 'echo x >> \"$M/config\"' configwrite
+  t 'mv \"$MODS/libs\" \"$MODS/libs.2\"' mvlevel
+  t 'mv \"$MODS\" \"$MODS.2\"' mvmodules
+  t 'git init -q --bare \"$MODS/new\"' newrepo
+  t 'mkdir -p \"$SMWT/forged\" && echo \"gitdir: $M\" > \"$SMWT/forged/.git\"' forged
+" 2>&1)
+has() { grep -qxF -- "$1" <<<"$out"; }
+check "pen starts with a submodule checked out in a worktree" has "ok: ref"
+check "git in the submodule checkout works in the sandbox" \
+  bash -c "git -C '$SMWT/libs/x' rev-parse -q --verify refs/heads/smoke >/dev/null"
+check "writing the submodule repo's config still fails" has "fail: configwrite"
+check "mv of a level above the submodule repo fails" has "fail: mvlevel"
+check "mv of modules/ fails" has "fail: mvmodules"
+check "the sandbox could make a new module repo and a .git file" bash -c "grep -qxF 'ok: newrepo' <<<\"\$1\" && grep -qxF 'ok: forged' <<<\"\$1\"" _ "$out"
+check "the session warned" contains "WARNING" "$out"
+check "...about the new module repo" contains "worktrees/sm/modules/new → " "$out"
+check "...and the forged .git file" contains "forged/.git → " "$out"
+check "...and nothing about the submodule that was there" not contains "libs/x" "$out"
+check "the new module repo was quarantined" \
+  bash -c "[ ! -e '$MODS/new' ] && [ -d '$MODS/new.pen-quarantine' ] && [ -f '$SMWT/forged/.git.pen-quarantine' ]"
+check "the existing module repo and its checkout's .git file are untouched" \
+  bash -c "[ -f '$M/HEAD' ] && [ -f '$SMWT/libs/x/.git' ] && git -C '$SMWT/libs/x' status --porcelain >/dev/null"
+out=$(in_sandbox true 2>&1)
+check "a second session ends without a warning" not contains "WARNING" "$out"
+
+check "nothing is left running" test "$(containers)" = 0
+git -C "$SMWT" submodule deinit -q -f libs/x
 git worktree remove --force "$SMWT"
 rm -rf .claude
 fi

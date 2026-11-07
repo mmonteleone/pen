@@ -6,7 +6,7 @@ internal enum NestedKind
 {
     /// <summary>A .git directory: a repo with its own config and hooks.</summary>
     GitDir,
-    /// <summary>A .git file (gitfile) that isn't one of the project's own worktrees.</summary>
+    /// <summary>A .git file (gitfile) that isn't one of the project's own worktrees or submodule checkouts.</summary>
     GitFile,
     /// <summary>A .git symlink.</summary>
     GitLink,
@@ -45,10 +45,13 @@ internal static class RepoScan
     /// the Mac's file system .GIT is .git. <paramref name="commonGitDir"/> is
     /// the project's common git dir (default root/.git; for a linked worktree,
     /// the main checkout's): worktrees of it below the root are the project's own.
+    /// So are the checkouts of <paramref name="moduleRepos"/> (default: the
+    /// module repos in the common git dir now; see <see cref="ResolveModuleCheckout"/>).
     /// </summary>
-    public static List<NestedRepo> FindNested(string root, string? commonGitDir = null)
+    public static List<NestedRepo> FindNested(string root, string? commonGitDir = null, IReadOnlyCollection<string>? moduleRepos = null)
     {
         commonGitDir ??= Path.Combine(root, ".git");
+        var modules = new HashSet<string>(moduleRepos ?? FindModuleRepos(commonGitDir).Where(r => !IsLinkPath(r)), StringComparer.Ordinal);
         var found = new List<NestedRepo>();
         var pending = new Stack<string>();
         pending.Push(root);
@@ -73,7 +76,8 @@ internal static class RepoScan
                     if (dir == root) continue; // the project's own; never descended into
                     if (e.IsLink) found.Add(new(path, NestedKind.GitLink));
                     else if (e.IsDir) found.Add(new(path, NestedKind.GitDir));
-                    else if (ResolveWorktree(path) != commonGitDir) found.Add(new(path, NestedKind.GitFile));
+                    else if (ResolveWorktree(path) != commonGitDir && ResolveModuleCheckout(path, modules) == null)
+                        found.Add(new(path, NestedKind.GitFile));
                     continue; // a .git's contents belong to that repo
                 }
                 if (Is(e.Name, "HEAD")) head |= !e.IsDir;
@@ -146,6 +150,44 @@ internal static class RepoScan
     }
 
     /// <summary>
+    /// The module repo (one of <paramref name="moduleRepos"/>) whose checkout
+    /// has <paramref name="gitFile"/> as its .git file, or null unless it has
+    /// the layout `git submodule` makes:
+    /// <list type="bullet">
+    /// <item>the file says "gitdir: &lt;repo&gt;", with no symlink anywhere along that path, and &lt;repo&gt; is one of <paramref name="moduleRepos"/>;</item>
+    /// <item>&lt;repo&gt;/config's core.worktree resolves back to the .git file's dir.</item>
+    /// </list>
+    /// The repo's config and hooks are protected (and its list is the one taken
+    /// at the session's start), so host git there runs nothing the sandbox wrote.
+    /// Reads the files directly; never runs git.
+    /// </summary>
+    internal static string? ResolveModuleCheckout(string gitFile, IReadOnlySet<string> moduleRepos)
+    {
+        try
+        {
+            if (moduleRepos.Count == 0 || IsLinkPath(gitFile)) return null;
+            var gitdir = ReadPathFile(gitFile, "gitdir: ");
+            if (gitdir == null) return null;
+            var checkout = Path.GetDirectoryName(gitFile)!;
+            if (!Path.IsPathRooted(gitdir)) gitdir = Path.Combine(checkout, gitdir);
+            var full = Path.GetFullPath(gitdir).TrimEnd('/');
+            var real = Native.RealPath(full);
+            if (real == null || real != full || !moduleRepos.Contains(real)) return null;
+
+            var config = Path.Combine(real, "config");
+            if (IsLinkPath(config)) return null;
+            var worktree = GitConfigFile.ParseFile(config)
+                .Where(e => e.Section == "core" && e.Subsection == null && e.Key == "worktree").Select(e => e.Value).LastOrDefault();
+            if (string.IsNullOrEmpty(worktree)) return null;
+            if (!Path.IsPathRooted(worktree)) worktree = Path.Combine(real, worktree); // git resolves it from the git dir
+            var worktreeReal = Native.RealPath(Path.GetFullPath(worktree));
+            return worktreeReal != null && worktreeReal == Native.RealPath(checkout) ? real : null;
+        }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
+    }
+
+    /// <summary>
     /// The submodule repos git keeps in <paramref name="gitDir"/>: every git
     /// dir under modules/ (a submodule's name may contain "/", so they can sit
     /// at any depth) and under worktrees/*/modules/ (a linked worktree's own
@@ -153,7 +195,9 @@ internal static class RepoScan
     /// submodules). A git dir is a directory with HEAD plus objects/ and refs/,
     /// or HEAD plus commondir (which callers refuse). Any symlink met along the
     /// way is listed as is and not followed: git would follow it to a repo
-    /// elsewhere, so callers refuse it too. Parents come before their nested
+    /// elsewhere, so callers refuse it too. A directory pen quarantined
+    /// (named …<see cref="GitCheck.Suffix"/>…) isn't walked: repos nested in a
+    /// quarantined one are no submodule's. Parents come before their nested
     /// repos; siblings in ordinal order. Reads directories only; never runs git.
     /// </summary>
     internal static List<string> FindModuleRepos(string gitDir)
@@ -180,6 +224,7 @@ internal static class RepoScan
         {
             if (IsLinkPath(entry)) found.Add(entry);
             else if (!Directory.Exists(entry)) continue; // git keeps only directories here
+            else if (Path.GetFileName(entry).Contains(GitCheck.Suffix, StringComparison.Ordinal)) continue;
             else if (IsGitDirLayout(entry))
             {
                 found.Add(entry);

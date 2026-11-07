@@ -27,6 +27,11 @@ internal sealed class SessionDir(string projectKey, string path)
     public string EnvFile => File("session.env");
     /// <summary>Present when the session started in a repo; holds its common git dir (empty from older pens: PROJECT_DIR/.git).</summary>
     public string StartedWithGit => File("started-with-git");
+    /// <summary>
+    /// The submodule repos in the common git dir at the start, each path
+    /// NUL-terminated: the session-end check quarantines any others.
+    /// </summary>
+    public string ModulesFile => File("modules");
     /// <summary>The command run in the sandbox, each argument NUL-terminated (empty: a shell), for pen ps.</summary>
     public string CommandFile => File("command");
     /// <summary>When the session started, in UTC, for pen ps.</summary>
@@ -59,6 +64,13 @@ internal sealed class SessionDir(string projectKey, string path)
     /// <summary>The command, or null for a session started by a pen that didn't record it.</summary>
     public string[]? ReadCommand() =>
         System.IO.File.Exists(CommandFile) ? System.IO.File.ReadAllText(CommandFile).Split('\0')[..^1] : null;
+
+    public void WriteModules(IEnumerable<string> repos) =>
+        System.IO.File.WriteAllText(ModulesFile, string.Concat(repos.Select(r => r + "\0")));
+
+    /// <summary>The module repos at the start, or null for a session started by a pen that didn't record them.</summary>
+    public string[]? ReadModules() =>
+        System.IO.File.Exists(ModulesFile) ? System.IO.File.ReadAllText(ModulesFile).Split('\0')[..^1] : null;
 
     public void WriteStarted(DateTime utc) =>
         System.IO.File.WriteAllText(StartedFile, utc.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture));
@@ -123,6 +135,8 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         // a session exists.
         RepoGuard.CheckAtStart(project.Dir);
         var mounts = RepoGuard.PrepareMounts(project.Dir, host.Home);
+        // What the session-end check takes as the submodules' own (PrepareMounts protects them).
+        var modules = project.IsRepo ? RepoScan.FindModuleRepos(project.CommonGitDir!) : [];
         Image.EnsureCurrent();
         var image = Image.EnsureProjectLayer(project) ?? Image.Name;
         // Under rootless Docker, the host user is container root: the agent
@@ -167,7 +181,11 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
             ["PEN_SEED"] = host.SeedDir,
         };
         File.WriteAllLines(session.EnvFile, env.Select(kv => $"{kv.Key}={kv.Value}"));
-        if (project.IsRepo) File.WriteAllText(session.StartedWithGit, project.CommonGitDir + "\n");
+        if (project.IsRepo)
+        {
+            File.WriteAllText(session.StartedWithGit, project.CommonGitDir + "\n");
+            session.WriteModules(modules);
+        }
         if (docker) File.WriteAllText(session.DockerMarker, "");
         session.WritePorts(forwarded);
         session.WriteCommand(command);
@@ -303,7 +321,8 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         if (env.TryGetValue("PROJECT_DIR", out var projectDir))
         {
             var (startedWithGit, commonGitDir) = session.ReadGit();
-            var moved = GitCheck.Run(projectDir, startedWithGit, commonGitDir);
+            // A session from a pen that didn't record its module repos keeps none.
+            var moved = GitCheck.Run(projectDir, startedWithGit, commonGitDir, session.ReadModules() ?? []);
             if (moved.Count > 0) Out.Raw(GitCheck.Warning(projectDir, moved));
             else reminder = Sign.Reminder(projectDir);
         }

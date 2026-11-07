@@ -1,6 +1,9 @@
 namespace Pen.Tests;
 
-/// <summary>Finding and protecting the submodule repos kept in a git dir (submodules E1).</summary>
+/// <summary>
+/// Finding and protecting the submodule repos kept in a git dir (submodules
+/// E1); accepting their checkouts and quarantining only new ones (E2).
+/// </summary>
 public class ModuleRepoTests
 {
     private static readonly string[] AllowFile = ["-c", "protocol.file.allow=always"];
@@ -178,5 +181,183 @@ public class ModuleRepoTests
         using var t = new TempDir();
         var super = Super(t);
         Assert.Contains("submodules", Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(super)).Message);
+    }
+
+    // --- E2: submodule checkouts in the tree, and the session-end check ---
+
+    private static List<string> Nested(string repo, IReadOnlyCollection<string>? modules = null) =>
+        RepoScan.FindNested(repo, moduleRepos: modules).Select(n => RepoGuard.Rel(repo, n.Path)).ToList();
+
+    private static void SetWorktree(string super, string module, string value) =>
+        Git.Run(super, "config", "-f", Path.Combine(super, ".git", "modules", module, "config"), "core.worktree", value);
+
+    [Fact]
+    public void SubmoduleCheckoutsAreTheProjectsOwn()
+    {
+        using var t = new TempDir();
+        var super = Super(t);
+        Assert.True(File.Exists(Path.Combine(super, "libs", "mid", ".git")));
+        Assert.True(File.Exists(Path.Combine(super, "libs", "mid", "deps", "leaf", ".git")));
+        Assert.Empty(Nested(super));
+        // Known only by the list given: with none, both checkouts are flagged.
+        Assert.Equal(["libs/mid/.git", "libs/mid/deps/leaf/.git"], Nested(super, []));
+    }
+
+    [Fact]
+    public void A_ForgedCoreWorktreeIsFlagged()
+    {
+        using var t = new TempDir();
+        var super = Super(t);
+        SetWorktree(super, "libs/mid", Path.Combine(super, "elsewhere"));
+        Directory.CreateDirectory(Path.Combine(super, "elsewhere"));
+        Assert.Equal(["libs/mid/.git"], Nested(super));
+
+        // One that doesn't resolve, or is missing, is flagged too.
+        SetWorktree(super, "libs/mid", "../../../nonexistent");
+        Assert.Equal(["libs/mid/.git"], Nested(super));
+        Git.Run(super, "config", "-f", Path.Combine(super, ".git", "modules", "libs", "mid", "config"), "--unset", "core.worktree");
+        Assert.Equal(["libs/mid/.git"], Nested(super));
+    }
+
+    [Fact]
+    public void A_GitFilePointingAtAnotherModuleOrNotAtOneIsFlagged()
+    {
+        using var t = new TempDir();
+        var super = Super(t);
+        // The leaf's checkout pointed at mid's repo: mid's core.worktree isn't the leaf's dir.
+        var leafGit = Path.Combine(super, "libs", "mid", "deps", "leaf", ".git");
+        File.WriteAllText(leafGit, $"gitdir: {Path.Combine(super, ".git", "modules", "libs", "mid")}\n");
+        Assert.Equal(["libs/mid/deps/leaf/.git"], Nested(super));
+
+        // A copy of mid's .git file elsewhere: right repo, wrong dir.
+        using var t2 = new TempDir();
+        var super2 = Super(t2);
+        var copy = Directory.CreateDirectory(Path.Combine(super2, "copy")).FullName;
+        File.WriteAllText(Path.Combine(copy, ".git"), $"gitdir: {Path.Combine(super2, ".git", "modules", "libs", "mid")}\n");
+        Assert.Equal(["copy/.git"], Nested(super2));
+
+        // A repo in modules/ that's a quarantined one's nested repo isn't a module repo.
+        using var t3 = new TempDir();
+        var super3 = Super(t3);
+        var mid3 = Path.Combine(super3, ".git", "modules", "libs", "mid");
+        Directory.Move(mid3, mid3 + GitCheck.Suffix);
+        Assert.Empty(Found(super3));
+    }
+
+    [Fact]
+    public void A_GitFileReachingTheModuleRepoThroughASymlinkIsFlagged()
+    {
+        using var t = new TempDir();
+        var super = Super(t);
+        Directory.CreateSymbolicLink(Path.Combine(super, ".git", "mods"), Path.Combine(super, ".git", "modules"));
+        File.WriteAllText(Path.Combine(super, "libs", "mid", ".git"), "gitdir: ../../.git/mods/libs/mid\n");
+        Assert.Equal(["libs/mid/.git"], Nested(super));
+    }
+
+    [Fact]
+    public void StartAcceptsAnInitializedSubmoduleInAnInternalWorktree()
+    {
+        using var t = new TempDir();
+        var lib = Git.Repo(t.Sub("lib"));
+        var repo = Git.Repo(t.Sub("repo"));
+        Git.Run(repo, "worktree", "add", "-q", "-b", "feat", ".claude/worktrees/w");
+        var w = Path.Combine(repo, ".claude", "worktrees", "w");
+        Sub(w, "add", "-q", lib, "libs/x");
+        Git.Run(w, "commit", "-q", "-m", "x");
+        Assert.True(File.Exists(Path.Combine(w, "libs", "x", ".git")));
+        RepoGuard.CheckAtStart(repo); // no .gitmodules in the main checkout, so only the checkout's .git file is in question
+    }
+
+    [Fact]
+    public void MountPointsBetweenTheGitDirAndEachModuleRepo()
+    {
+        using var t = new TempDir();
+        var super = Super(t);
+        Git.Run(super, "worktree", "add", "-q", ".claude/worktrees/in");
+        Sub(Path.Combine(super, ".claude", "worktrees", "in"), "update", "-q", "--init");
+        var m = Mounts(super);
+        foreach (var p in new[]
+        {
+            ".git/modules", ".git/modules/libs",
+            ".git/modules/libs/mid/modules", ".git/modules/libs/mid/modules/deps",
+            ".git/worktrees/in", ".git/worktrees/in/modules", ".git/worktrees/in/modules/libs",
+        })
+            Assert.Contains((p, false), m);
+        Assert.Contains((".git/worktrees/in/commondir", true), m);
+        Assert.DoesNotContain(m, x => x == (".git/modules", true) || x == (".git/worktrees/in", true));
+    }
+
+    [Fact]
+    public void EndQuarantinesOnlyModuleReposMadeDuringTheSession()
+    {
+        using var t = new TempDir();
+        var super = Super(t);
+        var atStart = RepoScan.FindModuleRepos(Path.Combine(super, ".git"));
+
+        // During the session: a new submodule, and one nested in an existing one.
+        var other = Git.Repo(t.Sub("other"));
+        Sub(super, "add", "-q", other, "libs/new");
+        Sub(Path.Combine(super, "libs", "mid"), "add", "-q", other, "deps/new");
+
+        var moved = GitCheck.Run(super, startedWithGit: true, modulesAtStart: atStart);
+        Assert.Equal(
+            [".git/modules/libs/mid/modules/deps/new", ".git/modules/libs/new", "libs/mid/deps/new/.git", "libs/new/.git"],
+            moved.Select(q => RepoGuard.Rel(super, q.From)).Order(StringComparer.Ordinal));
+        Assert.All(moved, q => Assert.NotEqual("", q.To));
+        Assert.Equal(atStart, RepoScan.FindModuleRepos(Path.Combine(super, ".git")));
+        Assert.True(File.Exists(Path.Combine(super, "libs", "mid", ".git")));
+        Assert.Empty(GitCheck.Run(super, startedWithGit: true, modulesAtStart: atStart));
+    }
+
+    [Fact]
+    public void EndQuarantinesANewRepoWithItsNestedOnes()
+    {
+        using var t = new TempDir();
+        var super = Super(t);
+        var mid = Path.Combine(super, ".git", "modules", "libs", "mid");
+        var moved = GitCheck.Run(super, startedWithGit: true, modulesAtStart: []);
+        // mid goes, and leaf with it: only one move for the pair, then both checkouts.
+        Assert.Equal([".git/modules/libs/mid", "libs/mid/.git", "libs/mid/deps/leaf/.git"],
+            moved.Select(q => RepoGuard.Rel(super, q.From)).Order(StringComparer.Ordinal));
+        Assert.False(Directory.Exists(mid));
+        Assert.Empty(RepoScan.FindModuleRepos(Path.Combine(super, ".git")));
+    }
+
+    [Fact]
+    public void EndQuarantinesACommondirInAKnownModuleRepo_AndAModuleSymlink()
+    {
+        using var t = new TempDir();
+        var super = Super(t);
+        var git = Path.Combine(super, ".git");
+        var atStart = RepoScan.FindModuleRepos(git);
+        File.WriteAllText(Path.Combine(git, "modules", "libs", "mid", "commondir"), "/elsewhere\n");
+        var other = Git.Repo(t.Sub("other"));
+        Directory.CreateSymbolicLink(Path.Combine(git, "modules", "evil"), Path.Combine(other, ".git"));
+
+        var moved = GitCheck.Run(super, startedWithGit: true, modulesAtStart: atStart);
+        Assert.Equal([".git/modules/evil", ".git/modules/libs/mid/commondir"],
+            moved.Select(q => RepoGuard.Rel(super, q.From)).Order(StringComparer.Ordinal));
+        // With the commondir gone, mid's checkout is still the project's own.
+        Assert.True(File.Exists(Path.Combine(super, "libs", "mid", ".git")));
+    }
+
+    [Fact]
+    public void SignKeepsTheModuleReposThereNow()
+    {
+        using var t = new TempDir();
+        var super = Super(t);
+        Assert.Empty(GitCheck.Run(super, startedWithGit: true));
+    }
+
+    [Fact]
+    public void SessionDirSavesTheModuleRepos()
+    {
+        using var t = new TempDir();
+        var s = new SessionDir("pen-x-00000000", t.Sub("s"));
+        Assert.Null(s.ReadModules());
+        s.WriteModules([]);
+        Assert.Equal([], s.ReadModules()!);
+        s.WriteModules(["/r/.git/modules/a", "/r/.git/modules/b\nc"]);
+        Assert.Equal(["/r/.git/modules/a", "/r/.git/modules/b\nc"], s.ReadModules()!);
     }
 }

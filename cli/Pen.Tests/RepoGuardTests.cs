@@ -145,7 +145,7 @@ public class RepoGuardTests
         var repo = Git.Repo(t.Sub("repo"));
         Git.Run(repo, "worktree", "add", "-q", "wt");
         File.WriteAllText(Path.Combine(repo, ".git", "worktrees", "wt", "commondir"), "/tmp/evil\n");
-        Assert.Contains("wt (a .git file that isn't one of this repo's worktrees)", Refusal(repo));
+        Assert.Contains("wt (a .git file that isn't one of this repo's worktrees or submodules)", Refusal(repo));
     }
 
     [Fact]

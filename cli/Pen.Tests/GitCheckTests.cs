@@ -46,12 +46,19 @@ public class GitCheckTests
     }
 
     [Fact]
-    public void QuarantinesModules()
+    public void QuarantinesAModuleRepoMadeDuringTheSession()
     {
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
-        Directory.CreateDirectory(Path.Combine(repo, ".git", "modules", "x"));
-        Assert.Equal([(".git/modules", ".git/modules.pen-quarantine")], Check(repo));
+        var x = t.Sub("repo", ".git", "modules", "x");
+        Git.Run(x, "init", "-q", "--bare");
+        var moved = GitCheck.Run(repo, startedWithGit: true, modulesAtStart: []);
+        Assert.Equal([(".git/modules/x", ".git/modules/x.pen-quarantine")], moved.Select(q => (RepoGuard.Rel(repo, q.From), RepoGuard.Rel(repo, q.To))));
+        Assert.Equal((".git/modules/x.pen-quarantine/HEAD", ".git/modules/x.pen-quarantine/HEAD.pen-quarantine"),
+            (RepoGuard.Rel(repo, moved[0].Inner!.Value.From), RepoGuard.Rel(repo, moved[0].Inner!.Value.To)));
+        // An empty directory in modules/ isn't a repo, and isn't flagged.
+        Directory.CreateDirectory(Path.Combine(repo, ".git", "modules", "empty"));
+        Assert.Empty(GitCheck.Run(repo, startedWithGit: true, modulesAtStart: []));
     }
 
     [Fact]

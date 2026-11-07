@@ -21,13 +21,18 @@ internal static class GitCheck
     /// <paramref name="commonGitDir"/> is the git dir it started with (default
     /// dir/.git; for a linked worktree, the main checkout's): the .git-level
     /// checks run on it, and worktrees of it in the tree are the project's own.
+    /// <paramref name="modulesAtStart"/> are the submodule repos in that git
+    /// dir when the session started: any other is quarantined, and the
+    /// checkouts of those left are the project's own. Null (pen sign, which
+    /// doesn't end a session) takes the ones there now.
     /// </summary>
-    public static List<Quarantined> Run(string dir, bool startedWithGit, string? commonGitDir = null)
+    public static List<Quarantined> Run(string dir, bool startedWithGit, string? commonGitDir = null, IReadOnlyCollection<string>? modulesAtStart = null)
     {
         var moved = new List<Quarantined>();
         if (!Directory.Exists(dir)) return moved;
 
         var git = Path.Combine(dir, ".git");
+        HashSet<string> known = [];
         if (!startedWithGit)
         {
             if (RepoGuard.Exists(git))
@@ -39,23 +44,57 @@ internal static class GitCheck
             var commondir = Path.Combine(git, "commondir");
             if (RepoGuard.Exists(commondir))
                 Move(commondir, "a normal repo never has one: it makes git read config and hooks from another directory", moved);
-            var modules = Path.Combine(git, "modules");
-            if (RepoGuard.Exists(modules))
-                Move(modules, "submodule repos, made during the session: their config and hooks were writable from the sandbox", moved);
+            known = CheckModuleRepos(git, modulesAtStart, moved);
         }
 
-        foreach (var n in RepoScan.FindNested(dir, startedWithGit ? commonGitDir : null))
+        foreach (var n in RepoScan.FindNested(dir, startedWithGit ? commonGitDir : null, known))
         {
             var why = n.Kind switch
             {
                 NestedKind.Bare => "a bare repo: git takes this directory as one, with config and hooks from the sandbox",
-                NestedKind.GitFile => "a .git file that isn't one of this repo's worktrees: it points git at another directory",
+                NestedKind.GitFile => "a .git file that isn't one of this repo's worktrees or submodules: it points git at another directory",
                 NestedKind.GitLink => "a .git symlink: it points git at another directory",
                 _ => "a nested repo: its config and hooks were writable from the sandbox",
             };
             Move(n.Path, why, moved, breakLayout: n.Kind == NestedKind.GitDir);
         }
         return moved;
+    }
+
+    /// <summary>
+    /// Quarantines the submodule repos in <paramref name="gitDir"/> that
+    /// weren't there at the start (<paramref name="modulesAtStart"/>; null: all
+    /// are kept), any symlink where git keeps them, and a commondir in one that
+    /// stays. Repos nested in a quarantined one go with it. Returns the repos
+    /// left, whose checkouts in the tree are the project's own.
+    /// </summary>
+    private static HashSet<string> CheckModuleRepos(string gitDir, IReadOnlyCollection<string>? modulesAtStart, List<Quarantined> moved)
+    {
+        var listed = modulesAtStart == null ? null : new HashSet<string>(modulesAtStart, StringComparer.Ordinal);
+        var known = new HashSet<string>(StringComparer.Ordinal);
+        var gone = new List<string>();
+        foreach (var repo in RepoScan.FindModuleRepos(gitDir))
+        {
+            if (gone.Any(g => RepoGuard.IsInside(g, repo))) continue;
+            if (RepoGuard.IsLink(repo))
+            {
+                Move(repo, "a symlink where git keeps a submodule's repo: it points git at config and hooks in another directory", moved);
+                gone.Add(repo);
+            }
+            else if (listed != null && !listed.Contains(repo))
+            {
+                Move(repo, "a submodule repo made during the session: its config and hooks were writable from the sandbox", moved, breakLayout: true);
+                gone.Add(repo);
+            }
+            else
+            {
+                var commondir = Path.Combine(repo, "commondir");
+                if (RepoGuard.Exists(commondir))
+                    Move(commondir, "a submodule's repo never has one: it makes git read config and hooks from another directory", moved);
+                if (!RepoGuard.Exists(commondir)) known.Add(repo);
+            }
+        }
+        return known;
     }
 
     /// <summary>

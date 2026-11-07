@@ -89,7 +89,7 @@ internal static class RepoGuard
     private static string Describe(NestedKind kind) => kind switch
     {
         NestedKind.Bare => " (a bare repo)",
-        NestedKind.GitFile => " (a .git file that isn't one of this repo's worktrees)",
+        NestedKind.GitFile => " (a .git file that isn't one of this repo's worktrees or submodules)",
         NestedKind.GitLink => " (a .git symlink)",
         _ => "",
     };
@@ -211,6 +211,13 @@ internal static class RepoGuard
     /// and a writable mount of its own would undo that. A module repo that's a
     /// symlink or has a commondir is refused, since either makes git read
     /// config and hooks from another directory.
+    /// <para>
+    /// Each directory between <paramref name="gitDir"/> and a module repo
+    /// (modules/, the levels of a name with "/" in it, a worktree's entry) is a
+    /// mount point too, like the repo itself: otherwise one could be moved
+    /// aside, taking the repo's mounts with it, and a forged repo made at the
+    /// path the session-end check knows as a submodule's.
+    /// </para>
     /// </summary>
     private static void ProtectModuleRepos(string gitDir, string dir, string hostHome, List<Mount> mounts)
     {
@@ -222,6 +229,10 @@ internal static class RepoGuard
             if (Exists(commondir))
                 throw new PenException($"{Rel(dir, commondir)} exists, which a submodule's repo never has: it makes git read config and hooks from another directory. Inspect it and remove it, then rerun");
             if (mounts.Any(m => m.ReadOnly && IsInside(m.Path, repo))) continue;
+            var between = new Stack<string>();
+            for (var p = Path.GetDirectoryName(repo); p != null && p != gitDir && IsInside(gitDir, p); p = Path.GetDirectoryName(p))
+                between.Push(p);
+            foreach (var p in between) mounts.Add(new(p, ReadOnly: false));
             ProtectGitDir(repo, dir, hostHome, mounts);
         }
     }

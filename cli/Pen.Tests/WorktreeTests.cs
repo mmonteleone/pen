@@ -390,10 +390,11 @@ public class WorktreeTests
         var (repo, wt, _) = RepoWithWorktree(t);
         var common = Path.Combine(repo, ".git");
         File.WriteAllText(Path.Combine(common, "commondir"), "x\n");
-        Directory.CreateDirectory(Path.Combine(common, "modules"));
+        var m = Directory.CreateDirectory(Path.Combine(common, "modules", "m")).FullName;
+        Git.Run(m, "init", "-q", "--bare");
         Git.Run(wt, "init", "-q", "sub");
-        var moved = GitCheck.Run(wt, startedWithGit: true, common).Select(q => q.From).ToList();
-        Assert.Equal([Path.Combine(common, "commondir"), Path.Combine(common, "modules"), Path.Combine(wt, "sub", ".git")], moved);
+        var moved = GitCheck.Run(wt, startedWithGit: true, common, modulesAtStart: []).Select(q => q.From).ToList();
+        Assert.Equal([Path.Combine(common, "commondir"), Path.Combine(common, "modules", "m"), Path.Combine(wt, "sub", ".git")], moved);
         Assert.True(File.Exists(Path.Combine(wt, ".git")));
     }
 
