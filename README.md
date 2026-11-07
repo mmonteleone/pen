@@ -246,7 +246,9 @@ or set `docker = true` in `.pen/config.toml`. The session gets its own Docker da
 - Servers the agent starts aren't reachable from the host.
 - `.git/config` and `.git/hooks` are read-only, so `git config`, `git remote add`, setting
   upstreams, deleting branches and hook installers (husky) must be run on the host. Everyday git
-  (commit, branch, merge, rebase, fetch, worktrees) works.
+  (commit, branch, merge, rebase, fetch, worktrees) works. Worktrees outside the project aren't
+  visible in the sandbox and their `.git/worktrees/` entries are read-only, so `git worktree
+  prune` and `remove` for them must be run on the host.
 - Run `git init` on the host for new projects.
 
 ## Limitations

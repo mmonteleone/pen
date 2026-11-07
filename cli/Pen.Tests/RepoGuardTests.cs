@@ -195,12 +195,87 @@ public class RepoGuardTests
         Directory.Delete(Path.Combine(repo, ".git", "hooks"), recursive: true);
         Git.Run(repo, "worktree", "add", "-q", Path.Combine(t.Path, "wt"));
         Assert.Equal(
-            [(".git", false), (".git/config", true), (".git/hooks", true), (".git/worktrees/wt/commondir", true), (".pen", true)],
+            [(".git", false), (".git/config", true), (".git/hooks", true), (".git/worktrees", false), (".git/worktrees/wt", true), (".pen", true)],
             Mounts(repo));
         Assert.True(Directory.Exists(Path.Combine(repo, ".git", "hooks")), ".git/hooks is created");
         Assert.True(Directory.Exists(Path.Combine(repo, ".pen")), ".pen is created");
         Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(repo, ".pen")));
         Assert.Equal("", Git.Run(repo, "status", "--porcelain")); // an empty .pen/ doesn't show up
+    }
+
+    [Fact]
+    public void AnExternalWorktreesEntryIsReadOnlyAndAnInternalOnesStaysWritable()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Git.Run(repo, "worktree", "add", "-q", Path.Combine(t.Path, "sibling"));
+        Git.Run(repo, "worktree", "add", "-q", "--relative-paths", Path.Combine(t.Path, "relsibling"));
+        Git.Run(repo, "worktree", "add", "-q", ".claude/worktrees/inside");
+        Git.Run(repo, "worktree", "add", "-q", "--relative-paths", ".claude/worktrees/relinside");
+        var m = Mounts(repo);
+        Assert.Contains((".git/worktrees", false), m);
+        Assert.Contains((".git/worktrees/sibling", true), m);
+        Assert.Contains((".git/worktrees/relsibling", true), m);
+        // Inside the sandbox those are dangling; the commondir in them needs no mount of its own.
+        Assert.DoesNotContain(m, x => x.Item1.StartsWith(".git/worktrees/sibling/", StringComparison.Ordinal));
+        // Visible in the sandbox: the entry stays writable (git updates its HEAD and index), its commondir doesn't.
+        Assert.DoesNotContain(m, x => x.Item1 is ".git/worktrees/inside" or ".git/worktrees/relinside");
+        Assert.Contains((".git/worktrees/inside/commondir", true), m);
+        Assert.Contains((".git/worktrees/relinside/commondir", true), m);
+        // Parents come before what's mounted inside them.
+        Assert.True(m.IndexOf((".git/worktrees", false)) < m.IndexOf((".git/worktrees/sibling", true)));
+    }
+
+    [Fact]
+    public void A_WorktreesEntryWithAMissingOrOddGitdirFileIsReadOnly()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Git.Run(repo, "worktree", "add", "-q", "a");
+        Git.Run(repo, "worktree", "add", "-q", "b");
+        Git.Run(repo, "worktree", "add", "-q", "c");
+        var entries = Path.Combine(repo, ".git", "worktrees");
+        File.Delete(Path.Combine(entries, "a", "gitdir"));
+        File.WriteAllText(Path.Combine(entries, "b", "gitdir"), "");
+        // A symlinked gitdir file can't be trusted to say where the worktree is.
+        var real = Path.Combine(t.Path, "c-gitdir");
+        File.Move(Path.Combine(entries, "c", "gitdir"), real);
+        File.CreateSymbolicLink(Path.Combine(entries, "c", "gitdir"), real);
+        var m = Mounts(repo);
+        Assert.Contains((".git/worktrees/a", true), m);
+        Assert.Contains((".git/worktrees/b", true), m);
+        Assert.Contains((".git/worktrees/c", true), m);
+    }
+
+    [Fact]
+    public void A_WorktreeInsideTheProjectThroughASymlinkedPathCountsAsInside()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Git.Run(repo, "worktree", "add", "-q", "wt");
+        // The gitdir file names the worktree by a path through a symlink to the project.
+        var link = Path.Combine(t.Path, "link");
+        Directory.CreateSymbolicLink(link, repo);
+        File.WriteAllText(Path.Combine(repo, ".git", "worktrees", "wt", "gitdir"), Path.Combine(link, "wt", ".git") + "\n");
+        Assert.True(RepoGuard.IsWorktreeInside(repo, Path.Combine(repo, ".git", "worktrees", "wt")));
+        // And a symlink inside the project leading out of it counts as outside.
+        Git.Run(repo, "worktree", "add", "-q", Path.Combine(t.Path, "out"));
+        Directory.CreateSymbolicLink(Path.Combine(repo, "to-out"), Path.Combine(t.Path, "out"));
+        File.WriteAllText(Path.Combine(repo, ".git", "worktrees", "out", "gitdir"), Path.Combine(repo, "to-out", ".git") + "\n");
+        Assert.False(RepoGuard.IsWorktreeInside(repo, Path.Combine(repo, ".git", "worktrees", "out")));
+    }
+
+    [Fact]
+    public void A_SymlinkedCommondirIsRefusedInAnyEntry()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Git.Run(repo, "worktree", "add", "-q", Path.Combine(t.Path, "sibling"));
+        var commondir = Path.Combine(repo, ".git", "worktrees", "sibling", "commondir");
+        File.Delete(commondir);
+        File.WriteAllText(Path.Combine(repo, "cd"), "../..\n");
+        File.CreateSymbolicLink(commondir, Path.Combine(repo, "cd"));
+        Assert.Contains("commondir is a symlink", Assert.Throws<PenException>(() => Mounts(repo)).Message);
     }
 
     [Fact]
@@ -232,13 +307,17 @@ public class RepoGuardTests
     {
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
-        Git.Run(repo, "worktree", "add", "-q", Path.Combine(t.Path, "wt"));
+        Git.Run(repo, "worktree", "add", "-q", ".claude/worktrees/wt");
+        Git.Run(repo, "worktree", "add", "-q", Path.Combine(t.Path, "sibling"));
         Assert.DoesNotContain((".git/config.worktree", true), Mounts(repo));
         Git.Run(repo, "config", "extensions.worktreeConfig", "true");
         var m = Mounts(repo);
         Assert.Contains((".git/config.worktree", true), m);
         Assert.Contains((".git/worktrees/wt/config.worktree", true), m);
         Assert.True(File.Exists(Path.Combine(repo, ".git", "config.worktree")));
+        // The sibling's entry is read-only as a whole, so nothing is created in it.
+        Assert.Contains((".git/worktrees/sibling", true), m);
+        Assert.False(File.Exists(Path.Combine(repo, ".git", "worktrees", "sibling", "config.worktree")));
     }
 
     [Fact]

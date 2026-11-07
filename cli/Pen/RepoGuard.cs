@@ -59,50 +59,93 @@ internal static class RepoGuard
     {
         var mounts = new List<Mount>();
         var git = Path.Combine(dir, ".git");
-        if (Directory.Exists(git))
-        {
-            // .git itself becomes a mount point, so it can't be renamed away and replaced.
-            mounts.Add(new(git, ReadOnly: false));
-
-            var config = Path.Combine(git, "config");
-            EnsureFile(dir, config);
-            mounts.Add(new(config, ReadOnly: true));
-
-            var hooks = Path.Combine(git, "hooks");
-            EnsureDirectory(dir, hooks);
-            mounts.Add(new(hooks, ReadOnly: true));
-
-            var entries = GitConfigFile.ParseFile(config);
-            // With extensions.worktreeConfig, git also reads config.worktree
-            // files, which the agent could otherwise create.
-            bool worktreeConfig = entries.Any(e => e.Section == "extensions" && e.Key == "worktreeconfig" && GitConfigFile.IsTrue(e.Value));
-            AddWorktreeConfig(dir, Path.Combine(git, "config.worktree"), worktreeConfig, mounts);
-
-            // Each linked worktree: host git in it reads config and hooks from
-            // wherever its commondir points.
-            var worktrees = Path.Combine(git, "worktrees");
-            if (IsLink(worktrees))
-                throw new PenException(".git/worktrees is a symlink, which pen doesn't support");
-            if (Directory.Exists(worktrees))
-            {
-                foreach (var wt in Directory.EnumerateDirectories(worktrees).Order(StringComparer.Ordinal))
-                {
-                    if (IsLink(wt))
-                        throw new PenException($"{Rel(dir, wt)} is a symlink, which pen doesn't support");
-                    var commondir = Path.Combine(wt, "commondir");
-                    if (Exists(commondir)) { RequireNotLink(dir, commondir); mounts.Add(new(commondir, ReadOnly: true)); }
-                    AddWorktreeConfig(dir, Path.Combine(wt, "config.worktree"), worktreeConfig, mounts);
-                }
-            }
-
-            AddIncludes(dir, config, hostHome, mounts, depth: 0);
-        }
+        if (Directory.Exists(git)) ProtectGitDir(git, dir, hostHome, mounts);
 
         // .pen/ sets the next session's policy, so the agent must not change or create it.
         EnsureDirectory(dir, Path.Combine(dir, ".pen"));
         mounts.Add(new(Path.Combine(dir, ".pen"), ReadOnly: true));
 
         return mounts.DistinctBy(m => m.Path).ToList();
+    }
+
+    /// <summary>
+    /// The mounts over a git dir (the project's .git, or the common dir of the
+    /// worktree it is) that keep the agent from changing what host git reads
+    /// as config or runs as hooks, for this checkout and every other worktree
+    /// sharing the dir. <paramref name="dir"/> is the project dir: messages
+    /// are relative to it, and the worktrees it doesn't contain aren't visible
+    /// in the sandbox, so their entries are read-only as a whole.
+    /// </summary>
+    private static void ProtectGitDir(string gitDir, string dir, string hostHome, List<Mount> mounts)
+    {
+        // The git dir itself becomes a mount point, so it can't be renamed away and replaced.
+        mounts.Add(new(gitDir, ReadOnly: false));
+
+        var config = Path.Combine(gitDir, "config");
+        EnsureFile(dir, config);
+        mounts.Add(new(config, ReadOnly: true));
+
+        var hooks = Path.Combine(gitDir, "hooks");
+        EnsureDirectory(dir, hooks);
+        mounts.Add(new(hooks, ReadOnly: true));
+
+        var entries = GitConfigFile.ParseFile(config);
+        // With extensions.worktreeConfig, git also reads config.worktree
+        // files, which the agent could otherwise create.
+        bool worktreeConfig = entries.Any(e => e.Section == "extensions" && e.Key == "worktreeconfig" && GitConfigFile.IsTrue(e.Value));
+        AddWorktreeConfig(dir, Path.Combine(gitDir, "config.worktree"), worktreeConfig, mounts);
+
+        // Each linked worktree: host git in it reads config and hooks from
+        // wherever its commondir points.
+        var worktrees = Path.Combine(gitDir, "worktrees");
+        if (IsLink(worktrees))
+            throw new PenException($"{Rel(dir, worktrees)} is a symlink, which pen doesn't support");
+        if (Directory.Exists(worktrees))
+        {
+            // A mount point too, so the entries mounted below can't be moved
+            // aside together and replaced with forged ones.
+            mounts.Add(new(worktrees, ReadOnly: false));
+            foreach (var wt in Directory.EnumerateDirectories(worktrees).Order(StringComparer.Ordinal))
+            {
+                if (IsLink(wt))
+                    throw new PenException($"{Rel(dir, wt)} is a symlink, which pen doesn't support");
+                var commondir = Path.Combine(wt, "commondir");
+                if (Exists(commondir)) RequireNotLink(dir, commondir);
+                if (!IsWorktreeInside(dir, wt))
+                {
+                    // The worktree isn't visible in the sandbox, so its entry
+                    // looks dangling there: `git worktree prune` would delete
+                    // it. Read-only keeps it, and its HEAD, index and commondir.
+                    mounts.Add(new(wt, ReadOnly: true));
+                    continue;
+                }
+                if (Exists(commondir)) mounts.Add(new(commondir, ReadOnly: true));
+                AddWorktreeConfig(dir, Path.Combine(wt, "config.worktree"), worktreeConfig, mounts);
+            }
+        }
+
+        AddIncludes(dir, gitDir, config, hostHome, mounts, depth: 0);
+    }
+
+    /// <summary>
+    /// Whether the worktree whose entry is <paramref name="entry"/> (a
+    /// &lt;git dir&gt;/worktrees/&lt;name&gt;) is inside <paramref name="dir"/>, by the
+    /// path its gitdir file names. An entry without a usable one counts as
+    /// outside.
+    /// </summary>
+    internal static bool IsWorktreeInside(string dir, string entry)
+    {
+        var gitdirFile = Path.Combine(entry, "gitdir");
+        try
+        {
+            if (!File.Exists(gitdirFile) || IsLink(gitdirFile)) return false;
+            var text = File.ReadAllText(gitdirFile).TrimEnd('\n', '\r');
+            if (text.Length == 0 || text.Contains('\n') || text.Contains('\0')) return false;
+            if (!Path.IsPathRooted(text)) text = Path.Combine(entry, text);
+            return IsInside(dir, ResolveExisting(Path.GetFullPath(text)));
+        }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
     }
 
     private static void AddWorktreeConfig(string dir, string path, bool enabled, List<Mount> mounts)
@@ -113,13 +156,13 @@ internal static class RepoGuard
     }
 
     /// <summary>
-    /// include.path and includeIf.*.path files inside the project. The agent
-    /// could write one of those and host git would read it as config, so each
-    /// is mounted read-only too. A missing one inside .git is created empty; a
-    /// missing one in the working tree is refused, since creating it would
-    /// add a file to the project.
+    /// include.path and includeIf.*.path files inside the project or the git
+    /// dir. The agent could write one of those and host git would read it as
+    /// config, so each is mounted read-only too. A missing one inside the git
+    /// dir is created empty; a missing one in the working tree is refused,
+    /// since creating it would add a file to the project.
     /// </summary>
-    private static void AddIncludes(string dir, string configFile, string hostHome, List<Mount> mounts, int depth)
+    private static void AddIncludes(string dir, string gitDir, string configFile, string hostHome, List<Mount> mounts, int depth)
     {
         if (depth > 10) return; // git's own limit
         foreach (var e in GitConfigFile.ParseFile(configFile))
@@ -132,18 +175,18 @@ internal static class RepoGuard
             p = Path.GetFullPath(p);
 
             var real = ResolveExisting(p);
-            if (!IsInside(dir, real)) continue;
+            if (!IsInside(dir, real) && !IsInside(gitDir, real)) continue;
             if (Directory.Exists(real)) continue; // git ignores a directory
             if (!File.Exists(real))
             {
-                if (!IsInside(Path.Combine(dir, ".git"), real))
+                if (!IsInside(gitDir, real))
                     throw new PenException($"{Rel(dir, configFile)} includes {Rel(dir, real)}, which doesn't exist: the agent could create it, and git on this machine would read it as config. Create it (it can be empty) or remove the include, then rerun");
                 Directory.CreateDirectory(Path.GetDirectoryName(real)!);
                 File.WriteAllText(real, "");
             }
             RequireNotLink(dir, real);
             mounts.Add(new(real, ReadOnly: true));
-            AddIncludes(dir, real, hostHome, mounts, depth + 1);
+            AddIncludes(dir, gitDir, real, hostHome, mounts, depth + 1);
         }
     }
 

@@ -588,7 +588,7 @@ if want 12; then
 # ==============================================================================
 section "12. Repo refusals at start (step 4)"
 
-git worktree add -q "$SCRATCH/wt" 2>/dev/null # kept until section 13 (its commondir is mounted read-only)
+git worktree add -q "$SCRATCH/wt" 2>/dev/null # kept until section 13 (its .git/worktrees entry is mounted read-only)
 check "refuses a linked worktree, pointing at the main checkout" refuse "$SCRATCH/wt" "run pen from the main checkout"
 forget "$SCRATCH/wt"
 touch .gitmodules
@@ -639,7 +639,7 @@ if want 13; then
 # ==============================================================================
 section "13. Read-only .git and .pen, session-end check and quarantine (step 4)"
 
-# Section 12 leaves this worktree for the commondir checks below.
+# Section 12 leaves this worktree for the worktree-entry checks below.
 [ -e "$SCRATCH/wt" ] || git worktree add -q "$SCRATCH/wt" 2>/dev/null
 
 rm -rf .git/hooks .pen
@@ -653,6 +653,10 @@ out=$(in_sandbox '
   t "echo x >> .git/config" configwrite
   t "mv .git .git2" mvgit
   t "echo x > .git/worktrees/wt/commondir" wtcommondir
+  t "echo 0000000000000000000000000000000000000000 > .git/worktrees/wt/HEAD" wthead
+  t "git worktree prune && test ! -e .git/worktrees/wt" wtprune
+  t "test -d .git/worktrees/wt" wtkept
+  t "mv .git/worktrees .git/worktrees2" mvworktrees
   t "touch .pen/config.toml" pencreate
   t "mv .pen .pen2" mvpen
 ' 2>&1)
@@ -667,6 +671,12 @@ check "appending to .git/config fails" has "fail: configwrite"
 check "...and .git/config is unchanged on the host" test "$(cksum <.git/config)" = "$cfg_sum"
 check "mv .git .git2 fails" has "fail: mvgit"
 check "a host worktree's commondir is read-only" has "fail: wtcommondir"
+check "...as is the rest of its entry (its HEAD)" has "fail: wthead"
+check "git worktree prune doesn't delete the entry of a worktree outside the project" has "fail: wtprune"
+check "...which is still there afterward" has "ok: wtkept"
+check "mv .git/worktrees fails" has "fail: mvworktrees"
+check "...and the worktree still works on the host" bash -c "git -C '$SCRATCH/wt' status --porcelain >/dev/null && git -C '$SCRATCH/wt' -c user.name=s -c user.email=s@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m host-side"
+check "...and git worktree list on the host doesn't call it prunable" not contains prunable "$(git worktree list --porcelain)"
 check ".pen/ is created empty when missing" bash -c '[ -d .pen ] && [ -z "$(ls -A .pen)" ]'
 check "...touch .pen/config.toml fails inside" has "fail: pencreate"
 check "...mv .pen fails" has "fail: mvpen"
@@ -705,6 +715,9 @@ rm -rf .git/commondir.pen-quarantine .git/modules.pen-quarantine sub sub2
 out=$(in_sandbox 'git worktree add -q .claude/worktrees/y' 2>&1)
 check "no warning for a git worktree add worktree" not contains "WARNING" "$out"
 check "...and the next session starts normally" pen_run true
+check "...and can commit in it (its entry is writable, being inside the project)" \
+  in_sandbox 'git -C .claude/worktrees/y -c user.name=a -c user.email=a@example.invalid commit -q --allow-empty -m in-y'
+check "...but not write its commondir" in_sandbox '! echo x 2>/dev/null > .git/worktrees/y/commondir'
 git worktree remove --force .claude/worktrees/y && rm -rf .claude
 
 "$PEN" run bash -c 'touch .git/commondir; sleep 120' </dev/null >/dev/null 2>&1 &
