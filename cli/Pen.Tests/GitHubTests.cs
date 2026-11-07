@@ -62,7 +62,7 @@ public class GitHubTests
         var git = Path.Combine(dir, ".git");
         Directory.CreateDirectory(git);
         File.WriteAllText(Path.Combine(git, "config"), url == null ? "[core]\n" : $"[remote \"origin\"]\n\turl = {url}\n");
-        return new Project(dir, "pen-repo-00000000");
+        return new Project(dir, "pen-repo-00000000", git, dir);
     }
 
     [Fact]

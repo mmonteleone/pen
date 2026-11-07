@@ -6,11 +6,19 @@ namespace Pen;
 /// <summary>
 /// The project pen runs in: the current directory, by its real path. Its key,
 /// pen-&lt;dir&gt;-&lt;hash&gt;, names the project's volumes, image and runtime dir.
+/// <para>
+/// The repo is modeled apart from the dir: <see cref="CommonGitDir"/> is the
+/// git dir holding config, hooks and objects (the dir's own .git, or for a
+/// linked worktree the main checkout's), and <see cref="RepoDir"/> is the main
+/// checkout. For a plain directory both describe the dir itself.
+/// </para>
 /// </summary>
-internal sealed record Project(string Dir, string Key)
+internal sealed record Project(string Dir, string Key, string? CommonGitDir, string RepoDir)
 {
     public string GitDir => Path.Combine(Dir, ".git");
-    public bool HasGitDir => Directory.Exists(GitDir);
+    public bool IsRepo => CommonGitDir != null;
+    /// <summary>A linked worktree: its .git is a file naming another repo's git dir.</summary>
+    public bool IsWorktree => CommonGitDir != null && CommonGitDir != GitDir;
     public string PenDir => Path.Combine(Dir, ".pen");
     public string ProjectConfigPath => Path.Combine(PenDir, Config.FileName);
 
@@ -19,7 +27,24 @@ internal sealed record Project(string Dir, string Key)
     {
         var dir = Native.RealPath(cwd) ?? throw new PenException($"can't resolve the current directory {cwd}");
         CheckAllowed(dir, host);
-        return new Project(dir, KeyFor(dir));
+        var (common, repoDir) = FindRepo(dir);
+        return new Project(dir, KeyFor(dir), common, repoDir);
+    }
+
+    /// <summary>
+    /// The common git dir and main checkout of <paramref name="dir"/> (a real
+    /// path): its .git directory, or a linked worktree's validated common dir
+    /// (<see cref="RepoScan.ResolveWorktree"/>). Reads files; never runs git.
+    /// </summary>
+    internal static (string? CommonGitDir, string RepoDir) FindRepo(string dir)
+    {
+        var git = Path.Combine(dir, ".git");
+        if (Directory.Exists(git)) return (git, dir);
+        if (!File.Exists(git)) return (null, dir);
+        var common = RepoScan.ResolveWorktree(git);
+        if (common == null) return (null, dir);
+        // A bare repo's worktree has no main checkout; the dir stands in for it.
+        return (common, Path.GetFileName(common) == ".git" ? Path.GetDirectoryName(common)! : dir);
     }
 
     public static string KeyFor(string realDir) => $"pen-{CleanName(realDir)}-{Hash(realDir)}";

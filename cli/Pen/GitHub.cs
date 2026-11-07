@@ -26,7 +26,8 @@ internal static partial class GitHub
     public static string? ProjectOwner(Project project, Config projectConfig)
     {
         if (projectConfig.GitHubOwner != null) return projectConfig.GitHubOwner;
-        var gitConfig = Path.Combine(project.GitDir, "config");
+        if (project.CommonGitDir == null) return null;
+        var gitConfig = Path.Combine(project.CommonGitDir, "config");
         if (!File.Exists(gitConfig)) return null;
         var url = OriginUrl(File.ReadAllText(gitConfig));
         return url == null ? null : OwnerFromUrl(url);

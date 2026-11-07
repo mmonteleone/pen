@@ -100,7 +100,7 @@ public class ProjectTests
         var repo = t.Sub("repo");
         Directory.CreateDirectory(Path.Combine(repo, ".git"));
         var p = Project.Resolve(repo, t.Host());
-        Assert.True(p.HasGitDir);
-        Assert.False(Project.Resolve(t.Sub("plain"), t.Host()).HasGitDir);
+        Assert.True(p.IsRepo);
+        Assert.False(Project.Resolve(t.Sub("plain"), t.Host()).IsRepo);
     }
 }

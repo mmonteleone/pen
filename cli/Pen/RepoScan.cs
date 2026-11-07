@@ -92,29 +92,65 @@ internal static class RepoScan
 
     /// <summary>
     /// A worktree of the project itself, made by `git worktree add` inside the
-    /// project (Claude Code puts these in .claude/worktrees/). Its .git file
-    /// says "gitdir: &lt;project&gt;/.git/worktrees/&lt;name&gt;", and that
-    /// directory's commondir is "../..", which is what git writes. Anything
-    /// else could point host git at config and hooks the agent controls.
+    /// project (Claude Code puts these in .claude/worktrees/): one whose common
+    /// git dir is the project's own .git. Anything else could point host git at
+    /// config and hooks the agent controls.
     /// </summary>
-    internal static bool IsProjectWorktree(string root, string gitFile)
+    internal static bool IsProjectWorktree(string root, string gitFile) =>
+        ResolveWorktree(gitFile) == Path.Combine(root, ".git");
+
+    /// <summary>
+    /// The common git dir (the main checkout's .git, or a bare repo) of the
+    /// linked worktree whose .git file is <paramref name="gitFile"/>, or null
+    /// unless it has exactly the layout `git worktree add` makes:
+    /// <list type="bullet">
+    /// <item>the file says "gitdir: &lt;common&gt;/worktrees/&lt;name&gt;", with no symlink anywhere along that path;</item>
+    /// <item>&lt;name&gt;/commondir is "../..";</item>
+    /// <item>&lt;name&gt;/gitdir points back to this .git file.</item>
+    /// </list>
+    /// Reads the files directly; never runs git.
+    /// </summary>
+    internal static string? ResolveWorktree(string gitFile)
     {
         try
         {
-            var text = File.ReadAllText(gitFile);
-            const string prefix = "gitdir: ";
-            if (!text.StartsWith(prefix, StringComparison.Ordinal)) return false;
-            var gitdir = text[prefix.Length..].TrimEnd('\n', '\r');
-            if (gitdir.Length == 0 || gitdir.Contains('\n')) return false;
+            if (IsLinkPath(gitFile)) return null;
+            var gitdir = ReadPathFile(gitFile, "gitdir: ");
+            if (gitdir == null) return null;
             if (!Path.IsPathRooted(gitdir)) gitdir = Path.Combine(Path.GetDirectoryName(gitFile)!, gitdir);
 
-            // git resolves the gitdir with realpath, so compare the real path:
-            // a symlink anywhere along it would otherwise lead elsewhere.
-            var real = Native.RealPath(gitdir);
-            if (real == null || Path.GetDirectoryName(real) != Path.Combine(root, ".git", "worktrees")) return false;
-            return File.ReadAllText(Path.Combine(real, "commondir")).TrimEnd('\n', '\r') == "../..";
+            // git resolves the gitdir with realpath, so a symlink anywhere along
+            // it would lead elsewhere than it reads: require it to be real already.
+            var full = Path.GetFullPath(gitdir).TrimEnd('/');
+            var real = Native.RealPath(full);
+            if (real == null || real != full) return null;
+            var worktrees = Path.GetDirectoryName(real);
+            if (worktrees == null || Path.GetFileName(worktrees) != "worktrees") return null;
+            var common = Path.GetDirectoryName(worktrees);
+            if (common == null || common == "/") return null;
+
+            if (ReadPathFile(Path.Combine(real, "commondir"), "") != "../..") return null;
+
+            var back = ReadPathFile(Path.Combine(real, "gitdir"), "");
+            if (back == null) return null;
+            if (!Path.IsPathRooted(back)) back = Path.Combine(real, back);
+            var backReal = Native.RealPath(back);
+            if (backReal == null || backReal != Native.RealPath(gitFile)) return null;
+            return common;
         }
-        catch (IOException) { return false; }
-        catch (UnauthorizedAccessException) { return false; }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
     }
+
+    /// <summary>A one-line file's value after <paramref name="prefix"/>, or null if it doesn't have that shape.</summary>
+    private static string? ReadPathFile(string path, string prefix)
+    {
+        if (!File.Exists(path) || IsLinkPath(path)) return null;
+        var text = File.ReadAllText(path);
+        if (!text.StartsWith(prefix, StringComparison.Ordinal)) return null;
+        var value = text[prefix.Length..].TrimEnd('\n', '\r');
+        return value.Length == 0 || value.Contains('\n') || value.Contains('\0') ? null : value;
+    }
+
+    private static bool IsLinkPath(string path) => new FileInfo(path).LinkTarget != null;
 }

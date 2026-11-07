@@ -140,7 +140,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
             ["PEN_SEED"] = host.SeedDir,
         };
         File.WriteAllLines(session.EnvFile, env.Select(kv => $"{kv.Key}={kv.Value}"));
-        if (project.HasGitDir) File.WriteAllText(session.StartedWithGit, "");
+        if (project.IsRepo) File.WriteAllText(session.StartedWithGit, "");
         if (docker) File.WriteAllText(session.DockerMarker, "");
         session.WriteCommand(command);
         session.WriteStarted(DateTime.UtcNow);

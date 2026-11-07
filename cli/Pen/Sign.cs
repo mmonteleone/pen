@@ -201,7 +201,8 @@ internal static class Sign
     /// <summary>The whole pen sign command, run in the project dir on the host.</summary>
     public static int Run(HostEnv host, Project project, string? baseArg)
     {
-        if (!project.HasGitDir) throw new PenException($"{project.Dir} isn't a git repo");
+        if (!project.IsRepo) throw new PenException($"{project.Dir} isn't a git repo");
+        if (project.IsWorktree) throw new PenException("this is a linked worktree, which pen sign doesn't support yet: run it from the main checkout");
         Session.EnsureRuntimeDir(host, project.Key);
         using var projectLock = Sessions.TakeExclusive(host, project, "sign");
         Session.FinishDeadSessions(project.Key, host.RuntimeDir(project.Key));
