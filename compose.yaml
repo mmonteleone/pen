@@ -10,9 +10,11 @@
 #   PEN_IMAGE       image to run (default pen:latest; the project layer when there is one)
 #   PEN_SEED        host home seed (~/.config/pen/home), mounted read-only at /etc/pen/seed
 #
-# The CLI also writes a per-session override (mounts.yaml): the read-only
-# overlays on the project mount and, in docker sessions (--profile docker),
-# dind's container name and the agent's DOCKER_HOST and depends_on dind.
+# The CLI also writes a per-session override (session.yaml): the read-only
+# overlays on the project mount; in docker sessions (--profile docker), dind's
+# container name and the agent's DOCKER_HOST and depends_on dind; and with
+# forwarded ports, a socat "ports" service on sandbox and a non-internal
+# "ports" network, publishing them on the host's 127.0.0.1.
 
 x-proxy-env: &proxy-env
   HTTP_PROXY: http://proxy:3128

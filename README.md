@@ -99,12 +99,14 @@ lists any blocked domains; missing tools show up as build errors. Fix them with 
 ### Commands
 
 ```
-pen [--docker] [<cmd…>]         shell or command in this project's sandbox (--docker: see below)
-pen [--docker] run <cmd…>       same, for a command that clashes with a subcommand name
+pen [--docker] [--port <n>]… [<cmd…>]
+                                shell or command in this project's sandbox (--docker, --port: see below)
+pen [--docker] [--port <n>]… run <cmd…>
+                                same, for a command that clashes with a subcommand name
 pen allow <domain…> [--global]  allow domains for this project (or all projects)
 pen allow                       list recently blocked domains
 pen allow --defaults            list the domains pen allows out of the box
-pen ps                          list running sessions, in every project
+pen ps                          list running sessions, in every project, with their forwarded ports
 pen sign [<base>]               re-sign your unpushed commits with your own key
 pen upgrade [--clean]           update the base image and agents
 pen reset                       wipe this project's sandbox state (logins, caches)
@@ -147,6 +149,7 @@ allow = [
 ]
 github_owner = "my-org"
 docker = true
+ports = [5173]
 ```
 
 Each key belongs to one file, except `allow`: a project's list adds to yours, which adds to pen's
@@ -207,7 +210,8 @@ Agents run in skip-permissions mode by default; the container is the boundary. E
 
 Optional, in the project's `.pen/` directory (read-only inside the sandbox):
 
-- **`.pen/config.toml`:** `allow = [...]`, `github_owner = "<owner>"`, `docker = true`. Secrets
+- **`.pen/config.toml`:** `allow = [...]`, `github_owner = "<owner>"`, `docker = true`,
+  `ports = [<n>, …]` (see [Dev servers](#dev-servers)). Secrets
   (`[github]`, `[env]`) aren't allowed here.
 - **`.pen/Dockerfile`:** extra SDKs or tools on top of the base image (which pen keeps tagged
   locally as `pen:latest`):
@@ -227,6 +231,22 @@ to touch commits that are already pushed.
 
 Turning on "Require signed commits" on GitHub catches a forgotten `pen sign` at push time.
 
+## Dev servers
+
+To open a server running in the sandbox (`npm run dev`, `dotnet watch`) from a browser on the host,
+forward its port: `pen --port 5173 claude`, or `ports = [5173]` in `.pen/config.toml` for every
+session. `localhost:5173` on the host then reaches port 5173 in the sandbox; the port number is the
+same on both sides, and only the host's `127.0.0.1` listens.
+
+- The server must listen on `0.0.0.0`, not only `localhost`: e.g. `vite --host`,
+  `ASPNETCORE_URLS=http://0.0.0.0:5000`.
+- A port that's already in use on the host isn't remapped: a `--port` is an error, and a port from
+  `.pen/config.toml` is skipped with a warning, so a second session of the same project still
+  starts (the first keeps the port). `pen ps` shows which session forwards what.
+- Forwarding goes from the host into the sandbox only; it gives the sandbox no way out.
+- In a `--docker` session, containers' published ports are at `dind:<port>`, which only the
+  sandbox can reach.
+
 ## Docker-in-Docker
 
 For projects that need Docker (Testcontainers, compose, image builds), run `pen --docker claude`
@@ -234,7 +254,7 @@ or set `docker = true` in `.pen/config.toml`. The session gets its own Docker da
 `DOCKER_HOST=tcp://dind:2375`, with traffic going through the same allowlist.
 
 - One `--docker` session per project at a time.
-- Published ports are at `dind:<port>`, not `localhost`.
+- Published ports are at `dind:<port>`, not `localhost`, and only the sandbox reaches them.
 - Containers get proxy env vars; add service names (e.g. `api`) to `NO_PROXY` in compose files.
 - On rootful Linux, files containers write to the project are owned by root; pass `--user`.
 - The daemon runs privileged, so isolation is weaker while it's on.
@@ -251,7 +271,8 @@ or set `docker = true` in `.pen/config.toml`. The session gets its own Docker da
 ## Differences from running on the host
 
 - Pasting images into the agent doesn't work; save the image to the project and pass its path.
-- Servers the agent starts aren't reachable from the host.
+- Servers the agent starts are reachable from the host only on [forwarded ports](#dev-servers),
+  and must listen on `0.0.0.0`.
 - `.git/config` and `.git/hooks` are read-only, so `git config`, `git remote add`, setting
   upstreams, deleting branches and hook installers (husky) must be run on the host. Everyday git
   (commit, branch, merge, rebase, fetch, worktrees) works. Worktrees outside the project aren't

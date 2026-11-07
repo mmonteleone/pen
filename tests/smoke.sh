@@ -1270,4 +1270,91 @@ git branch -q -D smoke-wt
 note "manual: git worktree add ../x -b feat && cd ../x && pen claude"
 fi
 
+if want 22; then
+# ==============================================================================
+section "22. Port forwarding (ports C2)"
+
+P=8765
+# sid_of <agent container>: its session id; other_agent <name>: another running agent.
+sid_of() { local n=${1#"$KEY"-}; echo "${n%-agent}"; }
+DISP="~${PROJECT_DIR#"$HOME"}" # how pen ps shows the project
+port_open() { python3 -c 'import socket, sys; s = socket.socket(); s.settimeout(2); sys.exit(s.connect_ex(("127.0.0.1", int(sys.argv[1]))))' "$1"; }
+port_open "$P" && fail "port $P is already in use on this machine: free it to run this section"
+rm -rf .pen
+
+# One session serves on $P and checks the network from inside, then waits.
+"$PEN" --port "$P" run bash -c "
+  mkdir -p /tmp/srv && echo served-from-sandbox >/tmp/srv/hello.txt
+  python3 -m http.server $P --bind 0.0.0.0 --directory /tmp/srv >/dev/null 2>&1 &
+  for i in \$(seq 100); do curl -s --noproxy '*' -o /dev/null localhost:$P && break; sleep 0.1; done
+  t() { if eval \"\$1\" >/dev/null 2>&1; then echo \"ok: \$2\"; else echo \"fail: \$2\"; fi; }
+  t \"curl -s -m 5 --noproxy '*' https://github.com\" direct
+  t \"curl -s -m 5 --noproxy '*' http://ports:$P/hello.txt | grep -q served-from-sandbox\" loopback
+  t \"curl -s -m 5 -x http://ports:$P https://github.com\" viaports
+  t \"curl -s -m 5 --noproxy '*' http://ports:80/\" otherport
+  echo ready
+  sleep 120
+" </dev/null >"$SCRATCH/ports.out" 2>&1 &
+p=$!
+for i in $(seq 600); do grep -q '^ready$' "$SCRATCH/ports.out" && break; kill -0 "$p" 2>/dev/null || break; sleep 0.1; done
+grep -q '^ready$' "$SCRATCH/ports.out" || { cat "$SCRATCH/ports.out" >&2; fail "the port-forwarding session didn't get ready"; }
+out=$(cat "$SCRATCH/ports.out")
+has() { grep -qxF -- "$1" <<<"$out"; }
+agent=$(docker ps --format '{{.Names}}' | grep -E "^$KEY-.*-agent$" | head -1)
+s=$RUNTIME/sessions/$(sid_of "$agent")/
+fwd=${agent%-agent}-ports
+
+check "pen --port $P: the host reaches a server in the sandbox at 127.0.0.1:$P" \
+  contains served-from-sandbox "$(curl -s -m 5 "http://127.0.0.1:$P/hello.txt")"
+check "...and at localhost:$P" contains served-from-sandbox "$(curl -s -m 5 "http://localhost:$P/hello.txt")"
+check "...published on the host's 127.0.0.1 only" \
+  test "$(docker inspect --format '{{range $k, $v := .HostConfig.PortBindings}}{{$k}}={{range $v}}{{.HostIp}}:{{.HostPort}}{{end}} {{end}}' "$fwd")" = "$P/tcp=127.0.0.1:$P "
+check "the forwarder runs as nobody, with no capabilities, on a read-only root" \
+  test "$(docker inspect --format '{{.Config.User}} {{.HostConfig.CapDrop}} {{.HostConfig.ReadonlyRootfs}} {{.HostConfig.SecurityOpt}}' "$fwd")" = "nobody [ALL] true [no-new-privileges:true]"
+check "the agent is still on the sandbox network alone" \
+  bash -c 'docker inspect --format "{{range \$k, \$v := .NetworkSettings.Networks}}{{\$k}} {{end}}" "$1" | grep -qxE "[^ ]+_sandbox "' _ "$agent"
+check "the agent still can't reach the internet directly" has "fail: direct"
+check "...nor through the forwarder: ports:$P leads back to the agent itself" has "ok: loopback"
+check "...so using it as a proxy fails" has "fail: viaports"
+check "...and the forwarder listens on no other port" has "fail: otherport"
+check "the session's ports file lists $P" test "$(cat "${s}ports")" = "$P"
+out=$("$PEN" ps)
+check "pen ps shows the forwarded port" grep -qE "^$DISP +$(sid_of "$agent") +$P +[0-9]+[smhd]" <<<"$out"
+
+rc=0; out=$("$PEN" --port "$P" run true </dev/null 2>&1) || rc=$?
+check "the same --port in a second session is an error" \
+  bash -c '[ "$1" = 1 ] && grep -qF "pen: --port $3: port $3 is already in use on this machine" <<<"$2"' _ "$rc" "$out" "$P"
+check "...and leaves no session behind" test "$(docker ps --format '{{.Names}}' | grep -cE "^$KEY-.*-agent$")" = 1
+other_agent() { docker ps --format '{{.Names}}' | grep -E "^$KEY-.*-agent$" | grep -vxF "$1" | head -1; }
+mkdir -p .pen && printf 'ports = [%s]\n' "$P" >.pen/config.toml
+"$PEN" run bash -c 'echo started; sleep 120' </dev/null >"$SCRATCH/ports2.out" 2>&1 &
+p2=$!
+for i in $(seq 600); do grep -q '^started$' "$SCRATCH/ports2.out" && break; kill -0 "$p2" 2>/dev/null || break; sleep 0.1; done
+out=$(cat "$SCRATCH/ports2.out")
+check "the same port from .pen/config.toml: a second session starts" grep -qx started <<<"$out"
+check "...with a warning" contains "pen: not forwarding port $P (from .pen/config.toml): it's already in use" "$out"
+second=$(other_agent "$agent")
+s2=$RUNTIME/sessions/$(sid_of "$second")
+check "...forwarding nothing: an empty ports file, no ports service or forwarder" \
+  bash -c '[ -e "$1/ports" ] && [ ! -s "$1/ports" ] && ! grep -q "\"ports\":" "$1/session.yaml" && ! docker inspect "${2%-agent}-ports" >/dev/null 2>&1' _ "$s2" "$second"
+check "...and pen ps shows no ports for it" grep -qE "^$DISP +$(sid_of "$second") +[0-9]+[smhd] " <<<"$("$PEN" ps)"
+check "the first session still forwards $P" contains served-from-sandbox "$(curl -s -m 5 "http://127.0.0.1:$P/hello.txt")"
+
+docker rm -f "$agent" "$second" >/dev/null
+wait "$p" "$p2" 2>/dev/null || true
+check "the forwarder goes with its session" bash -c '! docker inspect "$1" >/dev/null 2>&1' _ "$fwd"
+check "...as does its network" test -z "$(docker network ls -q --filter "name=^$KEY-")"
+check "...and the port is free again" not port_open "$P"
+
+"$PEN" run bash -c "echo config-port >/tmp/hello.txt; cd /tmp && python3 -m http.server $P --bind 0.0.0.0 >/dev/null 2>&1 & sleep 120" </dev/null >/dev/null 2>&1 &
+p=$!
+ok=
+for i in $(seq 300); do contains config-port "$(curl -s -m 2 "http://127.0.0.1:$P/hello.txt")" && { ok=1; break; }; sleep 0.1; done
+check "ports = [$P] in .pen/config.toml alone forwards it" test -n "$ok"
+docker ps --format '{{.Names}}' | grep -E "^$KEY-.*-agent$" | xargs docker rm -f >/dev/null
+wait "$p" 2>/dev/null || true
+rm -rf .pen
+check "nothing is left running" test "$(containers)" = 0
+fi
+
 section "All checks passed."

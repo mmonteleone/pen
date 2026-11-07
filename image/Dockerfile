@@ -26,7 +26,7 @@ RUN in_range() { awk -F: '$3 >= 1000 && $3 <= 60000 { print $1 }' "$1"; }; \
 RUN apt-get update; \
     apt-get install -y --no-install-recommends \
       ca-certificates curl gnupg git less vim unzip jq ripgrep fd-find \
-      build-essential python3 python3-venv tini libcap2-bin bash-completion; \
+      build-essential python3 python3-venv tini libcap2-bin bash-completion socat; \
     ln -s /usr/bin/fdfind /usr/local/bin/fd; \
     rm -rf /var/lib/apt/lists/*
 

@@ -51,4 +51,61 @@ public class DockerTests
         Assert.Equal("/p/.git>/p/.git:False;/p/.git/config>/p/.git/config:True;/p/.pen>/p/.pen:True", Mounts(dind));
         Assert.Equal(Mounts(agent), Mounts(dind));
     }
+
+    [Fact]
+    public void WithoutPortsThereIsNoPortsServiceOrNetwork()
+    {
+        foreach (var ports in new PortForward?[] { null, new([], "p-ports", "p-agent") })
+        {
+            var root = System.Text.Json.JsonDocument.Parse(RepoGuard.ComposeOverride([new("/p/.pen", true)], ports: ports)).RootElement;
+            Assert.False(root.GetProperty("services").TryGetProperty("ports", out _));
+            Assert.False(root.TryGetProperty("networks", out _));
+            Assert.False(root.GetProperty("services").GetProperty("agent").TryGetProperty("depends_on", out _));
+        }
+    }
+
+    [Fact]
+    public void PortsAddAHardenedForwarderOnTheSandboxAndANonInternalNetwork()
+    {
+        var json = RepoGuard.ComposeOverride([new("/p/.pen", true)],
+            ports: new([8765, 3000], "pen-p-1234abcd-0011aabb-ports", "pen-p-1234abcd-0011aabb-agent"));
+        var root = System.Text.Json.JsonDocument.Parse(json).RootElement;
+
+        // A non-internal network of its own: Docker publishes no ports on an internal one.
+        var networks = root.GetProperty("networks");
+        Assert.Equal(System.Text.Json.JsonValueKind.Object, networks.GetProperty("ports").ValueKind);
+        Assert.False(networks.GetProperty("ports").TryGetProperty("internal", out _));
+
+        var ports = root.GetProperty("services").GetProperty("ports");
+        Assert.Equal("pen:latest", ports.GetProperty("image").GetString());
+        Assert.Equal("pen-p-1234abcd-0011aabb-ports", ports.GetProperty("container_name").GetString());
+        Assert.Equal(0, ports.GetProperty("entrypoint").GetArrayLength());
+        Assert.Equal("nobody", ports.GetProperty("user").GetString());
+        Assert.Equal(["ALL"], ports.GetProperty("cap_drop").EnumerateArray().Select(e => e.GetString()));
+        Assert.Equal(["no-new-privileges:true"], ports.GetProperty("security_opt").EnumerateArray().Select(e => e.GetString()));
+        Assert.True(ports.GetProperty("read_only").GetBoolean());
+        Assert.True(ports.GetProperty("init").GetBoolean());
+        Assert.Equal(["127.0.0.1:8765:8765", "127.0.0.1:3000:3000"], ports.GetProperty("ports").EnumerateArray().Select(e => e.GetString()));
+        Assert.Equal(["sandbox", "ports"], ports.GetProperty("networks").EnumerateArray().Select(e => e.GetString()));
+        Assert.Equal(
+            ["sh", "-c",
+             "socat TCP-LISTEN:8765,fork,reuseaddr TCP:pen-p-1234abcd-0011aabb-agent:8765 & "
+             + "socat TCP-LISTEN:3000,fork,reuseaddr TCP:pen-p-1234abcd-0011aabb-agent:3000 & wait"],
+            ports.GetProperty("command").EnumerateArray().Select(e => e.GetString()));
+
+        // compose run starts only the agent's dependencies; the agent stays on the sandbox alone.
+        var agent = root.GetProperty("services").GetProperty("agent");
+        Assert.Equal("service_started", agent.GetProperty("depends_on").GetProperty("ports").GetProperty("condition").GetString());
+        Assert.False(agent.TryGetProperty("networks", out _));
+    }
+
+    [Fact]
+    public void ADockerSessionWithPortsWaitsForBoth()
+    {
+        var agent = Services(RepoGuard.ComposeOverride([], dindContainer: "x-dind", ports: new([80], "x-ports", "x-agent"))).GetProperty("agent");
+        var deps = agent.GetProperty("depends_on");
+        Assert.Equal("service_healthy", deps.GetProperty("dind").GetProperty("condition").GetString());
+        Assert.Equal("service_started", deps.GetProperty("ports").GetProperty("condition").GetString());
+        Assert.Equal("tcp://dind:2375", agent.GetProperty("environment").GetProperty("DOCKER_HOST").GetString());
+    }
 }

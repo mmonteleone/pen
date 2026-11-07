@@ -17,9 +17,11 @@ internal sealed class SessionDir(string projectKey, string path)
     public string ComposeProject => $"{projectKey}-{Id}";
     public string Container => $"{ComposeProject}-agent";
     public string DindContainer => $"{ComposeProject}-dind";
+    public string PortsContainer => $"{ComposeProject}-ports";
 
     public string ComposeFile => File("compose.yaml");
-    public string MountsFile => File("mounts.yaml");
+    /// <summary>The compose override: mounts over the project mount, dind's and the ports service's settings.</summary>
+    public string OverrideFile => File("session.yaml");
     public string ProxyLog => File("proxy.log");
     public string LockFile => File("session.lock");
     public string EnvFile => File("session.env");
@@ -29,6 +31,8 @@ internal sealed class SessionDir(string projectKey, string path)
     public string CommandFile => File("command");
     /// <summary>When the session started, in UTC, for pen ps.</summary>
     public string StartedFile => File("started");
+    /// <summary>The ports forwarded from the host's 127.0.0.1, one per line, for pen ps.</summary>
+    public string PortsFile => File("ports");
     /// <summary>Marks a docker session: its compose calls all pass --profile docker.</summary>
     public string DockerMarker => File("docker");
 
@@ -43,7 +47,7 @@ internal sealed class SessionDir(string projectKey, string path)
         var a = new List<string> { "compose", "--progress", "quiet" };
         if (System.IO.File.Exists(DockerMarker)) a.AddRange(["--profile", "docker"]);
         a.AddRange(["-f", ComposeFile]);
-        if (System.IO.File.Exists(MountsFile)) a.AddRange(["-f", MountsFile]);
+        if (System.IO.File.Exists(OverrideFile)) a.AddRange(["-f", OverrideFile]);
         a.AddRange(["-p", ComposeProject]);
         a.AddRange(args);
         return [.. a];
@@ -58,6 +62,15 @@ internal sealed class SessionDir(string projectKey, string path)
 
     public void WriteStarted(DateTime utc) =>
         System.IO.File.WriteAllText(StartedFile, utc.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture));
+
+    public void WritePorts(IReadOnlyList<int> ports) =>
+        System.IO.File.WriteAllText(PortsFile, string.Concat(ports.Select(p => p.ToString(CultureInfo.InvariantCulture) + "\n")));
+
+    /// <summary>The forwarded ports; none for a session started by a pen that didn't record them.</summary>
+    public List<int> ReadPorts() =>
+        System.IO.File.Exists(PortsFile)
+            ? System.IO.File.ReadAllLines(PortsFile).Select(l => int.TryParse(l, CultureInfo.InvariantCulture, out var p) ? p : 0).Where(p => p > 0).ToList()
+            : [];
 
     /// <summary>The common git dir the session started with, or null when it didn't start in a repo.</summary>
     public (bool StartedWithGit, string? CommonGitDir) ReadGit()
@@ -94,7 +107,8 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
     private string RuntimeDir => host.RuntimeDir(project.Key);
 
     /// <param name="docker">with Docker-in-Docker (pen --docker, or docker = true in .pen/config.toml)</param>
-    public int Run(IReadOnlyList<string> command, bool docker = false)
+    /// <param name="ports">to forward from the host (pen --port and ports in .pen/config.toml, merged)</param>
+    public int Run(IReadOnlyList<string> command, bool docker = false, IReadOnlyList<Port>? ports = null)
     {
         // 1. Every session holds project.lock and its dir's worktree lock
         // shared; pen reset holds the first exclusive, pen sign the second.
@@ -122,6 +136,10 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         // volume. A dind still using it (an earlier session's teardown failed)
         // would be corrupted by a second, so that's refused too.
         using var dindLock = docker ? TakeDindLock() : null;
+
+        // Ports already in use on the host: a --port is refused, a config
+        // port skipped. (One taken between here and compose run fails it.)
+        var forwarded = Port.Choose(ports ?? [], Port.IsTakenOnHost, Out.Line);
 
         foreach (var volume in docker ? ["home", "nuget", "dind"] : new[] { "home", "nuget" })
         {
@@ -151,11 +169,14 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         File.WriteAllLines(session.EnvFile, env.Select(kv => $"{kv.Key}={kv.Value}"));
         if (project.IsRepo) File.WriteAllText(session.StartedWithGit, project.CommonGitDir + "\n");
         if (docker) File.WriteAllText(session.DockerMarker, "");
+        session.WritePorts(forwarded);
         session.WriteCommand(command);
         session.WriteStarted(DateTime.UtcNow);
         File.WriteAllText(session.File("squid.conf"), Embedded.Text("proxy/squid.conf"));
         File.WriteAllText(session.File("allowlist.txt"), Allowlist.Render(allowlist));
-        File.WriteAllText(session.MountsFile, RepoGuard.ComposeOverride(mounts, readOnlyRoot: rootless, dindContainer: docker ? session.DindContainer : null));
+        File.WriteAllText(session.OverrideFile, RepoGuard.ComposeOverride(mounts, readOnlyRoot: rootless,
+            dindContainer: docker ? session.DindContainer : null,
+            ports: new PortForward(forwarded, session.PortsContainer, session.Container)));
         File.WriteAllText(session.ProxyLog, "");
         // Squid's own user writes the log on Linux; the session dir itself is 700.
         File.SetUnixFileMode(session.ProxyLog, (UnixFileMode)0b110_110_110);

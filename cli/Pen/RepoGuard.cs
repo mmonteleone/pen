@@ -8,6 +8,14 @@ namespace Pen;
 internal sealed record Mount(string Path, bool ReadOnly);
 
 /// <summary>
+/// Ports forwarded from the host's 127.0.0.1 by the session's ports service
+/// (named <paramref name="Container"/>) to the same ports on the agent
+/// container (<paramref name="AgentContainer"/>: compose run gives the agent
+/// no service-name alias, so it's reached by container name).
+/// </summary>
+internal sealed record PortForward(IReadOnlyList<int> Ports, string Container, string AgentContainer);
+
+/// <summary>
 /// The start-of-session repo refusals and the mounts that keep the agent from
 /// changing what host git runs (see "Protecting the host" in PLAN.md).
 /// Everything here reads files directly and never runs git.
@@ -268,7 +276,7 @@ internal static class RepoGuard
     }
 
     /// <summary>
-    /// The compose override that adds <paramref name="mounts"/> to the agent
+    /// The session's compose override (session.yaml): it adds <paramref name="mounts"/> to the agent
     /// service. It's JSON, which YAML reads as is, so any path is quoted
     /// correctly; $ is doubled, since compose interpolates it.
     /// <paramref name="readOnlyRoot"/> also makes the agent's root filesystem
@@ -278,14 +286,21 @@ internal static class RepoGuard
     /// container, gives dind the same mounts (so containers the agent starts
     /// with -v $PWD:… can't write what the agent can't), and points the agent
     /// at dind once it's healthy.
+    /// <paramref name="ports"/>, when it has any, adds the ports service: the
+    /// agent's network is internal, and Docker publishes no ports there, so a
+    /// socat per port on both the sandbox network and a non-internal ports
+    /// network relays 127.0.0.1:&lt;p&gt; on the host to &lt;p&gt; on the agent. It
+    /// runs pen:latest as nobody with no capabilities on a read-only root; the
+    /// agent can reach it, but only to be relayed back to itself.
     /// </summary>
-    public static string ComposeOverride(IReadOnlyList<Mount> mounts, bool readOnlyRoot = false, string? dindContainer = null)
+    public static string ComposeOverride(IReadOnlyList<Mount> mounts, bool readOnlyRoot = false, string? dindContainer = null, PortForward? ports = null)
     {
+        if (ports is { Ports.Count: 0 }) ports = null;
         using var ms = new MemoryStream();
         using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
         {
             w.WriteStartObject();
-            w.WriteString("x-pen", "mounts over the project mount, written by pen for this session");
+            w.WriteString("x-pen", "this session's mounts over the project mount and its services, written by pen");
             w.WriteStartObject("services");
             w.WriteStartObject("agent");
             if (readOnlyRoot) w.WriteBoolean("read_only", true);
@@ -295,10 +310,23 @@ internal static class RepoGuard
                 w.WriteString("DOCKER_HOST", "tcp://dind:2375");
                 w.WriteString("PEN_DOCKER", "1");
                 w.WriteEndObject();
+            }
+            if (dindContainer != null || ports != null)
+            {
+                // compose run starts only the agent's dependencies.
                 w.WriteStartObject("depends_on");
-                w.WriteStartObject("dind");
-                w.WriteString("condition", "service_healthy");
-                w.WriteEndObject();
+                if (dindContainer != null)
+                {
+                    w.WriteStartObject("dind");
+                    w.WriteString("condition", "service_healthy");
+                    w.WriteEndObject();
+                }
+                if (ports != null)
+                {
+                    w.WriteStartObject("ports");
+                    w.WriteString("condition", "service_started");
+                    w.WriteEndObject();
+                }
                 w.WriteEndObject();
             }
             WriteMounts(w, mounts);
@@ -310,10 +338,52 @@ internal static class RepoGuard
                 WriteMounts(w, mounts);
                 w.WriteEndObject();
             }
+            if (ports != null) WritePortsService(w, ports);
             w.WriteEndObject();
+            if (ports != null)
+            {
+                w.WriteStartObject("networks");
+                w.WriteStartObject("ports");
+                w.WriteEndObject();
+                w.WriteEndObject();
+            }
             w.WriteEndObject();
         }
         return Encoding.UTF8.GetString(ms.ToArray()) + "\n";
+    }
+
+    private static void WritePortsService(Utf8JsonWriter w, PortForward ports)
+    {
+        w.WriteStartObject("ports");
+        w.WriteString("image", Image.Name);
+        w.WriteString("container_name", ports.Container);
+        w.WriteStartArray("entrypoint");
+        w.WriteEndArray();
+        // A socat per port; tini (init) as PID 1 stops them all at once.
+        var script = string.Concat(ports.Ports.Select(p => $"socat TCP-LISTEN:{p},fork,reuseaddr TCP:{ports.AgentContainer}:{p} & ")) + "wait";
+        w.WriteStartArray("command");
+        w.WriteStringValue("sh");
+        w.WriteStringValue("-c");
+        w.WriteStringValue(script.Replace("$", "$$", StringComparison.Ordinal));
+        w.WriteEndArray();
+        w.WriteBoolean("init", true);
+        w.WriteString("user", "nobody");
+        w.WriteStartArray("cap_drop");
+        w.WriteStringValue("ALL");
+        w.WriteEndArray();
+        w.WriteStartArray("security_opt");
+        w.WriteStringValue("no-new-privileges:true");
+        w.WriteEndArray();
+        w.WriteBoolean("read_only", true);
+        w.WriteNumber("pids_limit", 1024);
+        w.WriteStartArray("ports");
+        foreach (var p in ports.Ports) w.WriteStringValue($"127.0.0.1:{p}:{p}");
+        w.WriteEndArray();
+        w.WriteStartArray("networks");
+        w.WriteStringValue("sandbox");
+        w.WriteStringValue("ports");
+        w.WriteEndArray();
+        w.WriteEndObject();
     }
 
     private static void WriteMounts(Utf8JsonWriter w, IReadOnlyList<Mount> mounts)

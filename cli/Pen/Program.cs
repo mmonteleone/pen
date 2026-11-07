@@ -59,6 +59,8 @@ internal static class Program
 
     // --docker turns Docker-in-Docker on for one session; docker = true in
     // .pen/config.toml for every session. Nothing turns it off per session.
+    // --port adds to ports in .pen/config.toml.
     private static int RunSession(HostEnv host, Project project, Config user, Config projectConfig, Command command) =>
-        new Session(host, project, user, projectConfig).Run(command.Args, docker: command.Docker || projectConfig.Docker == true);
+        new Session(host, project, user, projectConfig).Run(command.Args, docker: command.Docker || projectConfig.Docker == true,
+            ports: Port.Merge(projectConfig.Ports, command.Ports));
 }
