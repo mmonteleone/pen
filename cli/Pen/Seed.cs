@@ -5,7 +5,7 @@ namespace Pen;
 /// <summary>
 /// The home seed, ~/.config/pen/home/: sandbox-wide agent config laid out like
 /// $HOME, mounted read-only at /etc/pen/seed and copied into each project's
-/// home by sync-seed.sh. See README.md's agent config section for ownership.
+/// home by sync-seed.sh. See docs/usage.md's agent config section for ownership.
 /// </summary>
 internal static class Seed
 {

@@ -126,7 +126,7 @@ RUN echo "refresh ${PEN_REFRESH}"; \
       "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
       "@openai/codex@${CODEX_VERSION}" \
       "opencode-ai@${OPENCODE_VERSION}" \
-      "@earendil-works/pi-coding-agent@${PI_VERSION}" \
+      "@earendil-works/pi-programming-agent@${PI_VERSION}" \
       "@colbymchenry/codegraph@${CODEGRAPH_VERSION}"; \
     npm cache clean --force; \
     rm -rf /root/.npm /root/.cache

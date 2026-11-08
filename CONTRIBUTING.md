@@ -1,128 +1,117 @@
 # Contributing to pen
 
-This covers building, testing and releasing pen itself. For using pen, see [README.md](README.md).
+The usual loop is: change the code, build and run unit tests, reinstall pen, then run the relevant
+smoke tests. Smoke tests use the installed binary, so skipping the reinstall tests old code.
 
-## Prerequisites
+For installation and everyday use, start with the [README](README.md#get-started).
+Commands below run from the repo root unless shown otherwise.
 
-- Docker with Compose v2, as in the [README](README.md#install).
-- **macOS:** the .NET 11 SDK (version pinned in `cli/global.json`; prereleases allowed) and the
-  Xcode command-line tools (`xcode-select --install`).
-- **Linux:** nothing else. `cli/install.sh` builds inside a .NET SDK container. The default
-  build image is Azure Linux 3.0, whose binary runs on glibc 2.34+ (Ubuntu 22.04+, Debian 12+).
-  Set `PEN_BUILD_IMAGE` to override it. Install a host .NET 11 SDK only if you want to run
-  `dotnet build`/`dotnet test` outside a container.
+## Development setup
 
-## Repo layout
+You need Docker with Compose v2 and the .NET 11 SDK pinned in
+[`cli/global.json`](cli/global.json). On macOS, also install Xcode command-line tools
+(`xcode-select --install`).
 
-| Path | What it is |
-|---|---|
-| `cli/Pen/` | The host CLI: .NET 11, Native AOT |
-| `cli/Pen.Tests/` | Unit tests (xunit v3 on Microsoft.Testing.Platform) |
-| `compose.yaml` | The session's containers: agent, proxy, optional Docker-in-Docker |
-| `image/` | The base image: Dockerfile, entrypoint, codex managed config |
-| `proxy/` | squid config and the default domain allowlist |
-| `templates/` | What the first run copies into `~/.config/pen/` (config, home seed) |
-| `tests/` | Container-level smoke tests and helpers |
+On Linux, the installer can build without a host SDK, but the `dotnet` commands below need one.
+The default installer image is Azure Linux 3.0; its binary runs on glibc 2.34+ (Ubuntu 22.04+,
+Debian 12+). Set `PEN_BUILD_IMAGE` to use a different build image.
 
-`compose.yaml`, `image/`, `proxy/` and `templates/` are **embedded in the CLI binary**. The
-installed pen never reads this repo, so changes to those files take effect only after you
-rebuild and reinstall the CLI.
-
-## Making a change
-
-1. `cd cli && dotnet build && dotnet test`
-2. `cli/install.sh` — the smoke tests run against the *installed* pen, so reinstall first.
-3. `SMOKE_ONLY="<n> …" tests/smoke.sh` for the sections your change touches.
-4. Before finishing a larger piece of work, the full `tests/smoke.sh`.
-
-## Build and unit tests
-
-All `dotnet` commands run from `cli/`:
-
-```
+```sh
 cd cli
-dotnet build                                    # warnings are errors
-dotnet test                                     # unit tests
-dotnet test --filter-class Pen.Tests.CliTests   # one class
-dotnet test --filter-method "*Name*"            # matching methods
-dotnet run --project Pen/Pen.csproj -- <args>   # run the CLI without installing
+dotnet build      # warnings are errors
+dotnet test
+cd ..
+cli/install.sh    # install the dev build to ~/.local/bin/pen
 ```
 
-Code must stay AOT/trim-safe: no reflection-based JSON serialization and so on. Native calls
-belong in `Native.cs`. Tests reach internals via `InternalsVisibleTo`. Use the `TempDir` and
-`Git` helpers in `Pen.Tests`.
+Check `command -v pen` and `pen --version` to confirm you're using the binary you just installed.
 
-## Running a dev build
+## Test a change
 
-```
-cli/install.sh                 # AOT-publish and install ~/.local/bin/pen
-cli/install.sh --out DIR       # build only, leaving the binary in DIR
-cli/install.sh --container     # build in a .NET SDK container even on macOS (Linux binary; use with --out)
-```
+After building, running unit tests and reinstalling:
 
-If you also have pen from Homebrew, whichever comes first on your `PATH` wins. Check with
-`command -v pen` and `pen --version`.
-
-A source build makes its own base image. It builds `pen:latest` from the embedded `image/`
-files, labelled with their hash, instead of pulling from ghcr.io. When you change anything under
-`image/` and reinstall, the next session notices the hash mismatch and rebuilds
-(`Image.EnsureCurrent`). `pen upgrade` forces a rebuild with fresh agents.
-
-## Standing in for a release
-
-Until releases are published ([see below](#releasing-planned)), a source build is how you get
-pen:
-
-1. **Install** (instead of `brew install`): `cli/install.sh`, then make sure `~/.local/bin` is on
-   your `PATH` and check `pen --version`. For another machine, build there with
-   `cli/install.sh --out DIR`, or on a Mac with `cli/install.sh --container --out DIR` for a Linux
-   machine of the same architecture, and copy the binary to `~/.local/bin/pen`.
-2. **The base image** (instead of the ghcr.io pull): the first session builds it, which takes a
-   few minutes. Run `pen upgrade` from any directory to do it ahead of time.
-3. **Update** (instead of `brew upgrade`): `git pull && cli/install.sh`. If `image/` changed, the
-   next session rebuilds the base image.
-
-When the tap goes live, delete `~/.local/bin/pen` (or put Homebrew's bin earlier on your
-`PATH`) and run `brew install mmonteleone/tap/pen`. Your config, logins and project volumes
-don't depend on how pen was installed.
-
-## Smoke tests
-
-`tests/smoke.sh` runs end-to-end checks against the **installed** pen (or the binary named in
-`PEN=…`). It needs Docker, and it uses throwaway projects and a throwaway `HOME` for any check
-that depends on config, so your own `~/.config/pen` is never changed.
-
-```
-tests/smoke.sh                     # all checks
-SMOKE_ONLY="7 13" tests/smoke.sh   # only those sections (the fixture setup always runs)
-SMOKE_SLOW=1 tests/smoke.sh        # also runs pen upgrade (~1 min)
+```sh
+SMOKE_ONLY="7 13" tests/smoke.sh  # sections your change touches
+tests/smoke.sh                    # full suite before finishing a larger change
 ```
 
-Section numbers are in `tests/smoke.sh`. Optional credentials enable the agent-prompt checks:
-`CLAUDE_CODE_OAUTH_TOKEN` and `OPENAI_API_KEY`. They are written only to a throwaway config file
-(mode 600) and removed on exit.
+Section numbers are in [`tests/smoke.sh`](tests/smoke.sh). The fixture setup always runs.
+The suite needs Docker and uses throwaway projects and a throwaway `HOME` for config checks;
+it doesn't change your `~/.config/pen`. Set `PEN=/path/to/pen` to test a different binary.
 
-Before merging, run the suite on macOS (arm64; OrbStack so far) and on Linux Docker (amd64), both
-rootful and rootless. Runs on other macOS engines, such as Docker Desktop and Colima, are
-welcome.
+To narrow unit tests or run the CLI without installing (from `cli/`):
 
-`tests/pty-run.py` runs a command on a real pseudo-terminal, for signal and hangup checks (see its
-header for options).
+```sh
+dotnet test --filter-class Pen.Tests.CliTests
+dotnet test --filter-method "*Name*"
+dotnet run --project Pen/Pen.csproj -- <args>
+```
 
-## Architecture
+Optional smoke checks:
 
-[AGENTS.md](AGENTS.md) describes the internals: the command flow, sessions and locking,
-network isolation, how pen protects the host's git, GitHub tokens and config. Read it before
-changing `Session`, `RepoGuard` or anything that touches the host repo.
+- `SMOKE_SLOW=1 tests/smoke.sh` also tests `pen upgrade`.
+- `CLAUDE_CODE_OAUTH_TOKEN` and `OPENAI_API_KEY` enable agent-prompt checks. The suite writes them
+  only to a throwaway config file (mode 600) and removes it on exit.
+- [`tests/pty-run.py`](tests/pty-run.py) runs commands on a real pseudo-terminal for signal and
+  hangup checks; see its header for options.
 
-## Releasing (planned)
+Before merging, run the suite on macOS arm64 and Linux amd64, with both rootful and rootless
+Docker on Linux. macOS testing so far uses OrbStack; results from other engines are welcome.
 
-None of this is automated yet. Meanwhile, see
-[Standing in for a release](#standing-in-for-a-release). The intended flow:
+## Where to make changes
+
+| Path | Purpose |
+|---|---|
+| `cli/Pen/` | Host CLI (.NET 11, Native AOT) |
+| `cli/Pen.Tests/` | Unit tests (xunit v3 on Microsoft.Testing.Platform) |
+| `compose.yaml` | Agent, proxy and optional Docker-in-Docker services |
+| `image/` | Base image, entrypoint and managed agent config |
+| `proxy/` | Squid proxy config and default domain allowlist |
+| `templates/` | Initial user config and agent home seed |
+| `tests/` | Container smoke tests and helpers |
+
+**Container files and templates are embedded in the CLI.** The installed pen never reads this
+checkout. Reinstall after changing `compose.yaml`, `image/`, `proxy/` or `templates/`, just as
+you would after a CLI change. Changes under `image/` trigger an image rebuild on the next session.
+
+[AGENTS.md](AGENTS.md) explains command flow, sessions, locking and git protection. Read it
+before changing session handling or anything that touches the host repo.
+
+Keep code AOT/trim-safe: use source-generated serialization rather than reflection-based APIs.
+Native calls belong in `Native.cs`. Tests access internals through `InternalsVisibleTo`; use
+the existing `TempDir` and `Git` helpers.
+
+## Build and update options
+
+```sh
+cli/install.sh                   # build and install for this machine
+cli/install.sh --out DIR         # build only; leave the binary in DIR
+cli/install.sh --container --out DIR  # build a Linux binary in a container, even on macOS
+```
+
+Container builds target the host machine's architecture. To install on another machine, build
+there or copy a binary built for the same OS and architecture to its `~/.local/bin/pen`.
+
+pen builds `pen:latest` from its embedded image files. Run `pen upgrade` to build it ahead of the
+first session or to rebuild with fresh agents. Logins and config persist across image rebuilds.
+
+To update a source installation, pull this repo and reinstall:
+
+```sh
+git pull
+cli/install.sh
+```
+
+## Release plan
+
+Releases aren't published or automated yet. The intended process is:
 
 1. Bump `<Version>` in `cli/Pen/Pen.csproj` and tag `vX.Y.Z`.
-2. CI publishes AOT binaries for `osx-arm64`, `osx-x64`, `linux-x64` and `linux-arm64` to
-   GitHub Releases.
-3. CI builds the base image from `image/` and pushes `ghcr.io/mmonteleone/pen:X.Y.Z`
-   (multi-arch). Release binaries pull the tag that matches their version.
-4. CI updates the formula in [`mmonteleone/homebrew-tap`](https://github.com/mmonteleone/homebrew-tap).
+2. Publish AOT binaries for `osx-arm64`, `osx-x64`, `linux-x64` and `linux-arm64` to GitHub Releases.
+3. Publish a matching multi-architecture image at `ghcr.io/mmonteleone/pen:X.Y.Z` and have release
+   binaries pull that version instead of building locally.
+4. Update the formula in [`mmonteleone/homebrew-tap`](https://github.com/mmonteleone/homebrew-tap).
+
+When Homebrew distribution is available, remove `~/.local/bin/pen` or put Homebrew earlier on
+your `PATH` before installing it. User config, logins and project volumes don't depend on the
+installation method.
