@@ -6,7 +6,7 @@ namespace Pen;
 internal sealed record Quarantined(string From, string To, string Why, (string From, string To)? Inner = null);
 
 /// <summary>
-/// The session-end .git check (see "Session-end check" in PLAN.md). It reads
+/// The session-end .git check. It reads
 /// files directly and never runs git, and it renames whatever would make host
 /// git read config or hooks the agent could write, before the shell prompt
 /// or an IDE runs git there. It runs before pen's own git calls.

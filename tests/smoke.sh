@@ -579,7 +579,7 @@ out=$(HOME=$FAKE_HOME DOCKER_CONFIG=${DOCKER_CONFIG:-$REAL_HOME/.docker} $PTY --
 check "a private fetch with no token fails with an error instead of prompting" \
   bash -c 'grep -qE "rc=[1-9]" <<<"$1" && grep -q "EXIT 0" <<<"$1"' _ "$out"
 git remote remove origin
-note "real-token checks (gh repo view, clone, push 403, per-owner tokens) are manual: see PLAN.md Verification step 3"
+note "real-token checks (gh repo view, clone, push 403, per-owner tokens) are manual; use a read-only PAT as described in README.md"
 fi
 
 if want 10; then
@@ -744,6 +744,16 @@ git config include.path ../.gitinc
 out=$(in_sandbox 'echo "[core] fsmonitor = x" >> .gitinc && echo wrote; true' 2>&1)
 check "a config file .git/config includes from the project is read-only" bash -c '! grep -qx wrote <<<"$1" && [ ! -s .gitinc ]' _ "$out"
 git config --unset include.path; rm .gitinc
+
+printf '[extensions]\nworktreeConfig = true\n' >.git/extension.inc
+git config include.path extension.inc
+printf '[include]\npath = ../.gitinc\n' >.git/config.worktree
+printf '[include]\npath = .gitinc-nested\n' >.gitinc
+: >.gitinc-nested
+out=$(in_sandbox 'for f in .git/config.worktree .gitinc .gitinc-nested; do echo x >> "$f" && echo "wrote $f"; done; true' 2>&1)
+check "included worktreeConfig settings and recursive worktree includes are protected" bash -c '! grep -q "^wrote " <<<"$1"' _ "$out"
+git config --unset include.path
+rm .git/extension.inc .git/config.worktree .gitinc .gitinc-nested
 
 quarantine_case() { # <what the agent runs> <path> <quarantined path>
   local out
@@ -920,9 +930,12 @@ out=$(seed_pen '
   git commit -q --allow-empty -m "sandbox commit" && echo committed
   mkdir -p .codegraph && touch .codegraph/db && echo "status=[$(git status --porcelain)]"
   echo "local edit" >>~/.claude/CLAUDE.md
+  touch -d "next year" ~/.claude/CLAUDE.md
+  printf "%s" "project login" >~/.codex/auth.json
+  printf "%s" "claude login" >~/.claude/.credentials.json
   jq ".oauthAccount = {\"smoke\": true}" ~/.claude.json >/tmp/j && cat /tmp/j >~/.claude.json
   claude mcp add -s user from-sandbox -- true >/dev/null 2>&1; true
-')
+') || { printf '%s\n' "$out" >&2; fail "the first seeded session failed"; }
 has() { grep -qxF -- "$1" <<<"$out"; }
 check "a new project's first session has the seeded CLAUDE.md and AGENTS.md" bash -c 'grep -qx claude-note <<<"$1" && grep -qx codex-note <<<"$1"' _ "$out"
 check "...and the seeded CodeGraph mcpServers entry" has 'mcp=["codegraph"]'
@@ -936,16 +949,16 @@ check "a sandbox commit has the seeded author" \
 check "...and no co-author trailer" not grep -qi co-authored-by <<<"$(git -C "$SEEDP" log -1 --format=%B)"
 check "git status in the sandbox doesn't list .codegraph/" has "status=[]"
 
-out=$(seed_pen 'tail -1 ~/.claude/CLAUDE.md; echo "mcp=$(jq -c ".mcpServers | keys" ~/.claude.json)"')
-check "an edit to a seeded file persists for that project" has "local edit"
+out=$(seed_pen 'tail -1 ~/.claude/CLAUDE.md; echo "mcp=$(jq -c ".mcpServers | keys" ~/.claude.json)"; cat ~/.codex/auth.json; echo; cat ~/.claude/.credentials.json; echo')
+check "seed settings overwrite sandbox edits even with a future mtime" not has "local edit"
 check "...without changing the seed" not grep -q "local edit" "$seed/.claude/CLAUDE.md"
 check "...or another project" not contains "local edit" "$(fake_pen run tail -1 /home/agent/.claude/CLAUDE.md 2>/dev/null)"
-check "a server added with claude mcp add in the sandbox is there" has 'mcp=["codegraph","from-sandbox"]'
+check "the seed owns Claude's whole MCP map" has 'mcp=["codegraph"]'
+check "Codex credentials survive synchronization" has 'project login'
+check "Claude credentials survive synchronization" has 'claude login'
 
-# The seed edits must be newer than the project's copies. They replace each
-# file by rename, as editors save: on OrbStack, a host file rewritten in place
+# Replace files by rename, as editors save: on OrbStack, a host file rewritten in place
 # can look unchanged to a new container for several seconds.
-sleep 1.1
 echo "added later" >"$seed/.added-later"
 { cat "$seed/.claude/CLAUDE.md"; echo "seed v2"; } >"$seed/.claude/CLAUDE.md.new" && mv "$seed/.claude/CLAUDE.md.new" "$seed/.claude/CLAUDE.md"
 python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); d["mcpServers"]["seeded-later"] = {"type": "stdio", "command": "true"}; json.dump(d, open(sys.argv[1] + ".new", "w"))' "$seed/.claude.json" \
@@ -953,8 +966,9 @@ python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); d["mcpServers"][
 out=$(seed_pen 'cat ~/.added-later; tail -1 ~/.claude/CLAUDE.md; echo "mcp=$(jq -c ".mcpServers | keys" ~/.claude.json)"; echo "login=$(jq -c .oauthAccount ~/.claude.json)"')
 check "a file added to the seed later reaches the project's next session" has "added later"
 check "editing a seed file replaces the project's copy" has "seed v2"
-check "an MCP server added to the seed reaches an existing project, keeping the sandbox's" has 'mcp=["codegraph","from-sandbox","seeded-later"]'
+check "an MCP server added to the seed reaches an existing project" has 'mcp=["codegraph","seeded-later"]'
 check "...and the project stays logged in (the rest of .claude.json is kept)" has 'login={"smoke":true}'
+seed_pen 'rm ~/.codex/auth.json ~/.claude/.credentials.json' >/dev/null
 
 if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
   fake_config "[env]" "CLAUDE_CODE_OAUTH_TOKEN = \"$CLAUDE_CODE_OAUTH_TOKEN\""

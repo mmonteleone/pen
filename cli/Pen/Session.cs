@@ -1,116 +1,9 @@
 using System.Diagnostics;
-using System.Globalization;
-using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 
 namespace Pen;
 
-/// <summary>
-/// One session's directory under the project's runtime dir: its lock, the
-/// generated compose.yaml/squid.conf/allowlist, the env compose needs, and the
-/// proxy log, which outlives the session.
-/// </summary>
-internal sealed class SessionDir(string projectKey, string path)
-{
-    public string Path { get; } = path;
-    public string Id { get; } = System.IO.Path.GetFileName(path);
-    public string ComposeProject => $"{projectKey}-{Id}";
-    public string Container => $"{ComposeProject}-agent";
-    public string DindContainer => $"{ComposeProject}-dind";
-    public string PortsContainer => $"{ComposeProject}-ports";
-
-    public string ComposeFile => File("compose.yaml");
-    /// <summary>The compose override: mounts over the project mount, dind's and the ports service's settings.</summary>
-    public string OverrideFile => File("session.yaml");
-    public string ProxyLog => File("proxy.log");
-    public string LockFile => File("session.lock");
-    public string EnvFile => File("session.env");
-    /// <summary>Present when the session started in a repo; holds its common git dir (empty from older pens: PROJECT_DIR/.git).</summary>
-    public string StartedWithGit => File("started-with-git");
-    /// <summary>
-    /// The submodule repos in the common git dir at the start, each path
-    /// NUL-terminated: the session-end check quarantines any others.
-    /// </summary>
-    public string ModulesFile => File("modules");
-    /// <summary>The command run in the sandbox, each argument NUL-terminated (empty: a shell), for pen ps.</summary>
-    public string CommandFile => File("command");
-    /// <summary>When the session started, in UTC, for pen ps.</summary>
-    public string StartedFile => File("started");
-    /// <summary>The ports forwarded from the host's 127.0.0.1, one per line, for pen ps.</summary>
-    public string PortsFile => File("ports");
-    /// <summary>Marks a docker session: its compose calls all pass --profile docker.</summary>
-    public string DockerMarker => File("docker");
-
-    public string File(string name) => System.IO.Path.Combine(Path, name);
-
-    /// <summary>A session whose files are still there has a stack that may be up.</summary>
-    public bool IsOpen => System.IO.File.Exists(ComposeFile);
-
-    /// <summary>docker compose for this session's stack, with the env it was started with.</summary>
-    public string[] ComposeArgs(params string[] args)
-    {
-        var a = new List<string> { "compose", "--progress", "quiet" };
-        if (System.IO.File.Exists(DockerMarker)) a.AddRange(["--profile", "docker"]);
-        a.AddRange(["-f", ComposeFile]);
-        if (System.IO.File.Exists(OverrideFile)) a.AddRange(["-f", OverrideFile]);
-        a.AddRange(["-p", ComposeProject]);
-        a.AddRange(args);
-        return [.. a];
-    }
-
-    public void WriteCommand(IReadOnlyList<string> command) =>
-        System.IO.File.WriteAllText(CommandFile, string.Concat(command.Select(a => a + "\0")));
-
-    /// <summary>The command, or null for a session started by a pen that didn't record it.</summary>
-    public string[]? ReadCommand() =>
-        System.IO.File.Exists(CommandFile) ? System.IO.File.ReadAllText(CommandFile).Split('\0')[..^1] : null;
-
-    public void WriteModules(IEnumerable<string> repos) =>
-        System.IO.File.WriteAllText(ModulesFile, string.Concat(repos.Select(r => r + "\0")));
-
-    /// <summary>The module repos at the start, or null for a session started by a pen that didn't record them.</summary>
-    public string[]? ReadModules() =>
-        System.IO.File.Exists(ModulesFile) ? System.IO.File.ReadAllText(ModulesFile).Split('\0')[..^1] : null;
-
-    public void WriteStarted(DateTime utc) =>
-        System.IO.File.WriteAllText(StartedFile, utc.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture));
-
-    public void WritePorts(IReadOnlyList<int> ports) =>
-        System.IO.File.WriteAllText(PortsFile, string.Concat(ports.Select(p => p.ToString(CultureInfo.InvariantCulture) + "\n")));
-
-    /// <summary>The forwarded ports; none for a session started by a pen that didn't record them.</summary>
-    public List<int> ReadPorts() =>
-        System.IO.File.Exists(PortsFile)
-            ? System.IO.File.ReadAllLines(PortsFile).Select(l => int.TryParse(l, CultureInfo.InvariantCulture, out var p) ? p : 0).Where(p => p > 0).ToList()
-            : [];
-
-    /// <summary>The common git dir the session started with, or null when it didn't start in a repo.</summary>
-    public (bool StartedWithGit, string? CommonGitDir) ReadGit()
-    {
-        if (!System.IO.File.Exists(StartedWithGit)) return (false, null);
-        var common = System.IO.File.ReadAllText(StartedWithGit).TrimEnd('\n');
-        return (true, common.Length == 0 ? null : common);
-    }
-
-    public DateTime? ReadStarted() =>
-        System.IO.File.Exists(StartedFile)
-        && DateTime.TryParse(System.IO.File.ReadAllText(StartedFile).Trim(), CultureInfo.InvariantCulture,
-            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var t) ? t : null;
-
-    public Dictionary<string, string> ReadEnv()
-    {
-        var env = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (!System.IO.File.Exists(EnvFile)) return env;
-        foreach (var line in System.IO.File.ReadAllLines(EnvFile))
-        {
-            int eq = line.IndexOf('=');
-            if (eq > 0) env[line[..eq]] = line[(eq + 1)..];
-        }
-        return env;
-    }
-}
-
-/// <summary>Session start, run and end (see "CLI" in PLAN.md).</summary>
+/// <summary>Session lifecycle: prepare protections, run the agent, stop writers and check Git.</summary>
 internal sealed class Session(HostEnv host, Project project, Config user, Config projectConfig)
 {
     private const UnixFileMode Dir700 = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
@@ -122,17 +15,13 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
     /// <param name="ports">to forward from the host (pen --port and ports in .pen/config.toml, merged)</param>
     public int Run(IReadOnlyList<string> command, bool docker = false, IReadOnlyList<Port>? ports = null)
     {
-        // 1. Every session holds project.lock and its dir's worktree lock
+        // Every session holds project.lock and its dir's worktree lock
         // shared; pen reset holds the first exclusive, pen sign the second.
         EnsureRuntimeDir(host, project);
         using var locks = Sessions.TakeForSession(RuntimeDir, project);
 
-        // 2. Sessions whose pen died get their end path now.
         FinishDeadSessions(project.Key, RuntimeDir);
 
-        // 3. The repo refusals, the mounts (creating .pen/ and .git/hooks if
-        // missing), images current, then everything else that can fail before
-        // a session exists.
         RepoGuard.CheckAtStart(project.Dir);
         var mounts = RepoGuard.PrepareMounts(project.Dir, host.Home);
         // What the session-end check takes as the submodules' own (PrepareMounts protects them).
@@ -165,7 +54,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         // From here on Ctrl-C belongs to the agent, and a hangup still ends the session cleanly.
         using var signals = new SessionSignals();
 
-        // 4. The session's dir and lock, then its files. compose.yaml goes last:
+        // compose.yaml goes last:
         // its presence is what marks a session as open.
         var session = CreateSessionDir();
         using var sessionLock = FileLock.TryTake(session.LockFile, exclusive: true)
@@ -192,7 +81,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         session.WriteStarted(DateTime.UtcNow);
         File.WriteAllText(session.File("squid.conf"), Embedded.Text("proxy/squid.conf"));
         File.WriteAllText(session.File("allowlist.txt"), Allowlist.Render(allowlist));
-        File.WriteAllText(session.OverrideFile, RepoGuard.ComposeOverride(mounts, readOnlyRoot: rootless,
+        File.WriteAllText(session.OverrideFile, SessionCompose.Override(mounts, readOnlyRoot: rootless,
             dindContainer: docker ? session.DindContainer : null,
             ports: new PortForward(forwarded, session.PortsContainer, session.Container)));
         File.WriteAllText(session.ProxyLog, "");
@@ -200,7 +89,6 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         File.SetUnixFileMode(session.ProxyLog, (UnixFileMode)0b110_110_110);
         File.WriteAllText(session.ComposeFile, Embedded.Text("compose.yaml"));
 
-        // 5. compose run as a child, so pen gets control back when it ends.
         var secrets = new Dictionary<string, string>(StringComparer.Ordinal);
         if (token != null) secrets["GH_TOKEN"] = token;
         foreach (var (k, v) in user.Env) secrets[k] = v;
@@ -310,9 +198,15 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
     internal static void End(SessionDir session)
     {
         var env = session.ReadEnv();
-        Proc.Capture("docker", File.Exists(session.DockerMarker)
-            ? ["rm", "-f", session.Container, session.DindContainer]
-            : ["rm", "-f", session.Container]);
+        var failures = new List<string>();
+        foreach (var container in File.Exists(session.DockerMarker)
+                     ? new[] { session.Container, session.DindContainer } : [session.Container])
+        {
+            try { Docker.RemoveWriter(container); }
+            catch (PenException e) { failures.Add(e.Message); }
+        }
+        if (failures.Count > 0)
+            throw new PenException($"{string.Join("\n", failures)}\nsession {session.Id} is retained for retry by the next pen command here; Git has not been checked");
 
         // The .git check, now that the agent is gone and before anything runs
         // git. pen's own git call (the unsigned-commit count) only runs when
@@ -404,63 +298,5 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         var log = System.IO.Path.Combine(dir, "proxy.log");
         if (File.Exists(log)) { var lt = File.GetLastWriteTimeUtc(log); if (lt > t) t = lt; }
         return t;
-    }
-}
-
-/// <summary>
-/// While a session runs: SIGINT and SIGQUIT are ignored (the terminal delivers
-/// them to the agent). SIGHUP and SIGTERM don't stop pen either: the child is
-/// stopped, and pen then runs the normal end path.
-/// </summary>
-internal sealed class SessionSignals : IDisposable
-{
-    private readonly PosixSignalRegistration[] _registrations;
-    private volatile Process? _child;
-    private volatile string? _container;
-    private int _stopping;
-
-    public Process? Child { set => _child = value; }
-    public string? Container { set => _container = value; }
-    public bool Stopping => _stopping == 1;
-
-    public SessionSignals()
-    {
-        _registrations =
-        [
-            PosixSignalRegistration.Create(PosixSignal.SIGINT, c => c.Cancel = true),
-            PosixSignalRegistration.Create(PosixSignal.SIGQUIT, c => c.Cancel = true),
-            PosixSignalRegistration.Create(PosixSignal.SIGHUP, Stop),
-            PosixSignalRegistration.Create(PosixSignal.SIGTERM, Stop),
-        ];
-    }
-
-    private void Stop(PosixSignalContext c)
-    {
-        c.Cancel = true;
-        if (Interlocked.Exchange(ref _stopping, 1) == 1) return;
-        var child = _child;
-        if (child == null) return; // not started yet or already done: the end path runs anyway
-        var container = _container;
-        _ = Task.Run(() =>
-        {
-            try
-            {
-                // With a TTY, compose forwards neither signal and keeps waiting
-                // on the container, so the container goes first (as in the end
-                // path), and compose then exits on its own.
-                if (container != null) Proc.Capture("docker", ["rm", "-f", container]);
-                if (!child.WaitForExit(TimeSpan.FromSeconds(5)))
-                {
-                    child.Signal(PosixSignal.SIGTERM);
-                    if (!child.WaitForExit(TimeSpan.FromSeconds(5))) child.Kill();
-                }
-            }
-            catch (InvalidOperationException) { } // already exited
-        });
-    }
-
-    public void Dispose()
-    {
-        foreach (var r in _registrations) r.Dispose();
     }
 }

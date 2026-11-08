@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 
 namespace Pen;
 
-/// <summary>Picks the read-only GitHub token for a project, by the owner of its origin.</summary>
+/// <summary>Picks the supplied GitHub token for a project, by the owner of its origin.</summary>
 internal static partial class GitHub
 {
     /// <summary>The origin URL from a .git/config, read directly (never by running git).</summary>

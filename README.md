@@ -5,7 +5,7 @@ them in a container instead of directly on your machine. Inside, the agent:
 
 - sees only the project directory you run `pen` in;
 - reaches only an allowlist of domains;
-- can read from GitHub but never push.
+- can read from GitHub with the read-only credentials you supply.
 
 Logins and config persist across sessions and image rebuilds. Projects need no pen-specific files.
 
@@ -27,8 +27,8 @@ around what can still go wrong once the agent is in a container:
 - **Your git, on the host.** An agent that can write to the project can also write `.git/config`
   or `.git/hooks`, which run the next time *you* use git. pen mounts both read-only, refuses repo
   layouts it can't protect (nested repos), and checks `.git` before running any git on the host.
-- **GitHub without push.** The agent gets a read-only token per owner. It can clone and fetch but
-  never push: you review, then push.
+- **GitHub credentials per owner.** Supply read-only tokens so the agent can clone and fetch;
+  you review, then push.
 - **Signed commits without a key in the sandbox.** `pen sign` re-creates the agent's unpushed
   commits with your own signature.
 - **An allowlist you can adjust mid-session.** All traffic goes through a proxy. `pen allow`
@@ -146,6 +146,8 @@ The default allowlist covers AI providers, GitHub, common package registries, de
 container registries (`pen allow --defaults` shows it). `.example.com` matches the domain and all
 its subdomains. `pen allow <domain>` adds to the project's `allow` (`--global`: to yours), leaving
 the rest of the file as you wrote it.
+Repeating the command reapplies the current configuration to running sessions, even if the
+domains are already saved, so a failed live update can be retried with the same command.
 
 The defaults are sites an agent without credentials can only read from. A domain that accepts
 anonymous writes (a wiki, a pastebin) could be used to send your code out, so think twice before
@@ -153,8 +155,10 @@ allowing one.
 
 ### GitHub
 
-git and `gh` inside the sandbox use a read-only token, so the agent can clone and fetch but not
-push. Public repos need no token. For private repos, create a fine-grained token per owner
+Read-only GitHub access depends on supplying read-only credentials. pen passes your token to
+git and `gh`; it does not validate or reduce its permissions. A write-capable token or a login
+you add inside the sandbox can allow pushes and other writes to GitHub. Public repos need no
+token. For private repos, create a fine-grained token per owner
 (GitHub → Settings → Developer settings → Fine-grained tokens):
 
 - **Resource owner:** your account or the org.
@@ -178,7 +182,23 @@ Claude's per-project login, run `claude setup-token` and add the result as
 
 `~/.config/pen/home/` is laid out like `$HOME` and is copied into every project's sandbox home at
 session start. Put agent instructions, settings, MCP servers and shell config there (never
-secrets). Edits in the seed overwrite the sandbox copy on the next session.
+secrets).
+
+Seed files overwrite matching files on every start, regardless of modification times. Files
+absent from the seed are left alone: deleting a seed file stops managing it but leaves its last
+sandbox copy. Delete that copy inside the sandbox too if you want it removed.
+
+Instructions, settings, shell config and `.gitconfig` belong in the seed. Logins, credentials,
+history and session state belong in each project's home volume. Credential files
+(`.claude/.credentials.json`, `.codex/auth.json`, `.local/share/opencode/auth.json` and
+`.pi/agent/auth.json`) and `.docker/` are excluded from seed copying. Docker sessions set the
+proxy in the project's Docker client config separately, preserving its other fields.
+
+Claude's `.claude.json` mixes MCP settings with login state. Only its `mcpServers` map comes
+from the seed, replacing that map completely while keeping all other sandbox fields. Remove a
+server from that map in the seed to remove it from subsequent sessions. To keep sandbox-added
+servers instead, remove `.claude.json` from the seed. Only the current project's
+`.claude/projects/<slug>/` seed directory is copied; other projects' memory is excluded.
 
 | Agent | Instructions | MCP servers |
 |---|---|---|
@@ -212,8 +232,10 @@ Everyday git works inside: commit, branch, merge, rebase, fetch, worktrees. `.gi
 - `git init` for a new project;
 - `git config`, `git remote add`, setting upstreams, deleting branches, hook installers (husky);
 - `git submodule add`, `update --init` and `sync`;
-- `git worktree prune` and `remove` for worktrees outside the project;
-- pushing.
+- `git worktree prune` and `remove` for worktrees outside the project.
+
+Push reviewed commits from the host using your own credentials. The sandbox's read-only GitHub
+credentials cannot push; pen itself does not block pushes made with write-capable credentials.
 
 ### Worktrees
 

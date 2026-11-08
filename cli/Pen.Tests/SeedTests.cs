@@ -62,7 +62,7 @@ public class SeedTests
     }
 
     [Fact]
-    public void TheJsonTemplatesParse_AndCarryTheSettingsThePlanNames()
+    public void TheJsonTemplatesParse_AndCarryTheDefaultAgentSettings()
     {
         using var settings = JsonDocument.Parse(Embedded.Text("templates/home/.claude/settings.json"));
         var root = settings.RootElement;

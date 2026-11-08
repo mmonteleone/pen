@@ -350,7 +350,7 @@ public class WorktreeTests
     {
         using var t = new TempDir();
         var (repo, wt, _) = RepoWithWorktree(t);
-        var yaml = RepoGuard.ComposeOverride(RepoGuard.PrepareMounts(wt, "/nonexistent-home"), dindContainer: "x-dind");
+        var yaml = SessionCompose.Override(RepoGuard.PrepareMounts(wt, "/nonexistent-home"), dindContainer: "x-dind");
         var dind = yaml[yaml.IndexOf("\"dind\"", StringComparison.Ordinal)..];
         Assert.Contains($"\"source\": \"{Path.Combine(repo, ".git")}\"", dind);
         Assert.Contains($"\"source\": \"{Path.Combine(wt, ".git")}\"", dind);

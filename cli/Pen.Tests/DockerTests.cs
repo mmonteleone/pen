@@ -14,8 +14,8 @@ public class DockerTests
     [Fact]
     public void TheOverrideMakesTheRootFilesystemReadOnlyOnlyWhenAsked()
     {
-        Assert.Contains("\"read_only\": true,\n      \"volumes\"", RepoGuard.ComposeOverride([], readOnlyRoot: true));
-        Assert.DoesNotContain("\"read_only\": true,\n      \"volumes\"", RepoGuard.ComposeOverride([]));
+        Assert.Contains("\"read_only\": true,\n      \"volumes\"", SessionCompose.Override([], readOnlyRoot: true));
+        Assert.DoesNotContain("\"read_only\": true,\n      \"volumes\"", SessionCompose.Override([]));
     }
 
     private static System.Text.Json.JsonElement Services(string json) =>
@@ -24,7 +24,7 @@ public class DockerTests
     [Fact]
     public void APlainSessionsOverrideLeavesDindAlone()
     {
-        var s = Services(RepoGuard.ComposeOverride([new("/p/.git", false), new("/p/.pen", true)]));
+        var s = Services(SessionCompose.Override([new("/p/.git", false), new("/p/.pen", true)]));
         Assert.False(s.TryGetProperty("dind", out _));
         var agent = s.GetProperty("agent");
         Assert.False(agent.TryGetProperty("environment", out _));
@@ -35,7 +35,7 @@ public class DockerTests
     public void ADockerSessionsOverrideGivesDindTheAgentsMountsAndWaitsForIt()
     {
         Mount[] mounts = [new("/p/.git", false), new("/p/.git/config", true), new("/p/.pen", true)];
-        var s = Services(RepoGuard.ComposeOverride(mounts, readOnlyRoot: true, dindContainer: "pen-p-1234abcd-0011aabb-dind"));
+        var s = Services(SessionCompose.Override(mounts, readOnlyRoot: true, dindContainer: "pen-p-1234abcd-0011aabb-dind"));
 
         var agent = s.GetProperty("agent");
         Assert.Equal("tcp://dind:2375", agent.GetProperty("environment").GetProperty("DOCKER_HOST").GetString());
@@ -57,7 +57,7 @@ public class DockerTests
     {
         foreach (var ports in new PortForward?[] { null, new([], "p-ports", "p-agent") })
         {
-            var root = System.Text.Json.JsonDocument.Parse(RepoGuard.ComposeOverride([new("/p/.pen", true)], ports: ports)).RootElement;
+            var root = System.Text.Json.JsonDocument.Parse(SessionCompose.Override([new("/p/.pen", true)], ports: ports)).RootElement;
             Assert.False(root.GetProperty("services").TryGetProperty("ports", out _));
             Assert.False(root.TryGetProperty("networks", out _));
             Assert.False(root.GetProperty("services").GetProperty("agent").TryGetProperty("depends_on", out _));
@@ -67,7 +67,7 @@ public class DockerTests
     [Fact]
     public void PortsAddAHardenedForwarderOnTheSandboxAndANonInternalNetwork()
     {
-        var json = RepoGuard.ComposeOverride([new("/p/.pen", true)],
+        var json = SessionCompose.Override([new("/p/.pen", true)],
             ports: new([8765, 3000], "pen-p-1234abcd-0011aabb-ports", "pen-p-1234abcd-0011aabb-agent"));
         var root = System.Text.Json.JsonDocument.Parse(json).RootElement;
 
@@ -102,7 +102,7 @@ public class DockerTests
     [Fact]
     public void ADockerSessionWithPortsWaitsForBoth()
     {
-        var agent = Services(RepoGuard.ComposeOverride([], dindContainer: "x-dind", ports: new([80], "x-ports", "x-agent"))).GetProperty("agent");
+        var agent = Services(SessionCompose.Override([], dindContainer: "x-dind", ports: new([80], "x-ports", "x-agent"))).GetProperty("agent");
         var deps = agent.GetProperty("depends_on");
         Assert.Equal("service_healthy", deps.GetProperty("dind").GetProperty("condition").GetString());
         Assert.Equal("service_started", deps.GetProperty("ports").GetProperty("condition").GetString());

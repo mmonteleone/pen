@@ -349,10 +349,97 @@ public class RepoGuardTests
         Assert.Contains("includes shared.gitconfig, which doesn't exist", msg);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WorktreeConfigsFollowRecursiveIncludes(bool linked)
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Git.Run(repo, "worktree", "add", "-q", "wt");
+        Git.Run(repo, "config", "extensions.worktreeConfig", "true");
+        var root = linked ? Path.Combine(repo, ".git", "worktrees", "wt") : Path.Combine(repo, ".git");
+        File.WriteAllText(Path.Combine(root, "config.worktree"), "[include]\npath = first.inc\n");
+        File.WriteAllText(Path.Combine(root, "first.inc"), "[includeIf \"onbranch:other\"]\npath = last.inc\n");
+        File.WriteAllText(Path.Combine(root, "last.inc"), "");
+        var mounts = RepoGuard.PrepareMounts(linked ? Path.Combine(repo, "wt") : repo, "/nonexistent-home");
+        Assert.Contains(mounts, x => x.Path == Path.Combine(root, "first.inc") && x.ReadOnly);
+        Assert.Contains(mounts, x => x.Path == Path.Combine(root, "last.inc") && x.ReadOnly);
+    }
+
+    [Fact]
+    public void HostOnlyIncludesCanEnableWorktreeConfigAndIncludeWritableFiles()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Git.Run(repo, "worktree", "add", "-q", "wt");
+        var outside = Path.Combine(t.Path, "host.inc");
+        File.WriteAllText(outside, $"[extensions]\nworktreeConfig = true\n[include]\npath = {repo}/inside.inc\n");
+        File.WriteAllText(Path.Combine(repo, "inside.inc"), "");
+        Git.Run(repo, "config", "include.path", outside);
+        var m = Mounts(repo);
+        Assert.Contains((".git/config.worktree", true), m);
+        Assert.Contains((".git/worktrees/wt/config.worktree", true), m);
+        Assert.Contains(("inside.inc", true), m);
+        Assert.DoesNotContain(m, x => x.Item1 == outside);
+    }
+
+    [Fact]
+    public void AnExternalWorktreeConfigCanIncludeAWritableProjectFile()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Git.Run(repo, "worktree", "add", "-q", Path.Combine(t.Path, "outside"));
+        File.WriteAllText(Path.Combine(repo, "shared.inc"), "");
+        File.WriteAllText(Path.Combine(repo, ".git", "worktrees", "outside", "config.worktree"),
+            $"[include]\npath = {repo}/shared.inc\n");
+        Assert.Contains(("shared.inc", true), Mounts(repo));
+    }
+
+    [Fact]
+    public void AnExternalWorktreeConfigCannotBeASymlinkToWritableConfig()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Git.Run(repo, "worktree", "add", "-q", Path.Combine(t.Path, "outside"));
+        var target = Path.Combine(repo, "writable.inc");
+        File.WriteAllText(target, "");
+        File.CreateSymbolicLink(Path.Combine(repo, ".git", "worktrees", "outside", "config.worktree"), target);
+        Assert.Contains("config.worktree is a symlink", Assert.Throws<PenException>(() => Mounts(repo)).Message);
+    }
+
+    [Fact]
+    public void AMissingWorktreeIncludeIsRefusedAndIncludeCyclesAreBounded()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        File.WriteAllText(Path.Combine(repo, ".git", "config.worktree"), "[include]\npath = ../missing.inc\n");
+        Assert.Contains("which doesn't exist", Assert.Throws<PenException>(() => Mounts(repo)).Message);
+        File.WriteAllText(Path.Combine(repo, "missing.inc"), "[include]\npath = .git/config.worktree\n");
+        Assert.Contains(("missing.inc", true), Mounts(repo));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void IncludedConfigCannotBeRedirectedThroughAWritableSymlink(bool parentLink)
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        var target = Path.Combine(t.Sub("config"), "actual.inc");
+        File.WriteAllText(target, "");
+        var link = Path.Combine(repo, "link");
+        if (parentLink) Directory.CreateSymbolicLink(link, Path.GetDirectoryName(target)!);
+        else File.CreateSymbolicLink(link, target);
+        File.WriteAllText(Path.Combine(repo, ".git", "config.worktree"),
+            $"[include]\npath = ../link{(parentLink ? "/actual.inc" : "")}\n");
+        Assert.Contains("through a symlink", Assert.Throws<PenException>(() => Mounts(repo)).Message);
+    }
+
     [Fact]
     public void ComposeOverrideQuotesPathsAndEscapesDollars()
     {
-        var yaml = RepoGuard.ComposeOverride([new("/p/a \"b\" $HOME é/.git", false), new("/p/.pen", true)]);
+        var yaml = SessionCompose.Override([new("/p/a \"b\" $HOME é/.git", false), new("/p/.pen", true)]);
         Assert.Contains("\"source\": \"/p/a \\\"b\\\" $$HOME é/.git\"", yaml);
         Assert.Contains("\"read_only\": true", yaml);
         Assert.Contains("\"create_host_path\": false", yaml);

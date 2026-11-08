@@ -4,10 +4,24 @@ namespace Pen;
 internal static class Docker
 {
     /// <summary>
+    /// Removes a writer before the Git check. A failed rm is safe only when
+    /// a successful daemon query establishes that the container is absent.
+    /// Never infer absence from an inspect error (the daemon may be down).
+    /// </summary>
+    public static void RemoveWriter(string container)
+    {
+        var removed = Proc.Capture("docker", ["rm", "-f", container]);
+        if (removed.ExitStatus.ExitCode == 0) return;
+        var remaining = Proc.Capture("docker", ["ps", "-a", "--filter", $"name=^/{container}$", "--format", "{{.Names}}"]);
+        if (remaining.ExitStatus.ExitCode == 0 && string.IsNullOrWhiteSpace(remaining.StandardOutput)) return;
+        throw new PenException($"can't establish that {container} has stopped: {removed.StandardError.Trim()} {remaining.StandardError.Trim()}".Trim());
+    }
+
+    /// <summary>
     /// Whether the daemon is rootless Docker, from <c>docker info</c>'s
     /// security options. There, the host user is root (UID 0) inside
     /// containers, and container UIDs above 0 are unprivileged sub-UIDs that
-    /// can't touch the user's files (see "Rootless Docker" in PLAN.md).
+    /// can't touch the user's files.
     /// </summary>
     public static bool IsRootless()
     {

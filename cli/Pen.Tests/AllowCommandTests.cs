@@ -1,7 +1,33 @@
 namespace Pen.Tests;
 
+[Collection(nameof(LockAndProcessTests))]
 public class AllowCommandTests
 {
+    [Fact]
+    public void RepeatingSavedDomainsRetriesAFailedLiveUpdateWithoutEditingConfig()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        var project = Project.Resolve(t.Sub("repo"), host);
+        Session.EnsureRuntimeDir(host, project);
+        var s = new SessionDir(project.Key, t.Sub("home", ".local", "state", "pen", project.Key, "sessions", "12345678"));
+        File.WriteAllText(s.ComposeFile, "");
+        File.WriteAllText(s.EnvFile, $"PROJECT_DIR={project.Dir}\n");
+        File.WriteAllText(s.File("allowlist.txt"), "");
+        using var sessionLock = FileLock.TryTake(s.LockFile, exclusive: true);
+        using var fake = new FakeDocker(t, "if [ ! -f retry ]; then exit 1; fi\n");
+        Assert.Equal(1, AllowCommand.Add(host, ["retry.example"], global: true));
+        var config = File.ReadAllText(host.UserConfigPath);
+        var written = File.GetLastWriteTimeUtc(host.UserConfigPath);
+        File.WriteAllText(Path.Combine(t.Path, "retry"), "");
+        Assert.Equal(0, AllowCommand.Add(host, ["retry.example"], global: true));
+        Assert.Equal(config, File.ReadAllText(host.UserConfigPath));
+        Assert.Equal(written, File.GetLastWriteTimeUtc(host.UserConfigPath));
+        Assert.Contains("retry.example", File.ReadAllText(s.File("allowlist.txt")));
+        Assert.Equal(2, File.ReadAllLines(Path.Combine(t.Path, "calls")).Length);
+    }
+
     private static string Add(string text, params string[] domains) =>
         ConfigEdit.AddAllowed(text, "x.toml", ConfigKind.User, domains, out _);
 

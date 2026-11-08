@@ -19,6 +19,7 @@ allow = [
 # Contents and Metadata read (optionally Issues and Pull requests read). Pick
 # "Only select repositories" if you can. The owner comes from the project's
 # origin URL, or from github_owner in its .pen/config.toml.
+# pen passes the token through; read-only access depends on its permissions.
 
 [github]
 # my-user = "github_pat_…"

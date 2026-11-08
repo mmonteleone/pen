@@ -12,8 +12,8 @@ internal sealed record GitResult(int ExitCode, byte[] Stdout, string Stderr)
 }
 
 /// <summary>
-/// Every git call pen makes on the host goes through here (see "Every host git
-/// call" in PLAN.md). Each one gets command-line overrides, which beat repo
+/// Every git call pen makes on the host goes through here.
+/// Each one gets command-line overrides, which beat repo
 /// config, so nothing in the repo's config runs a program on the host: no
 /// hooks (update-ref runs reference-transaction), no fsmonitor, no pager.
 /// </summary>

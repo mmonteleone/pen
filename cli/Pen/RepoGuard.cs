@@ -1,6 +1,4 @@
 using System.Text;
-using System.Text.Encodings.Web;
-using System.Text.Json;
 
 namespace Pen;
 
@@ -8,16 +6,8 @@ namespace Pen;
 internal sealed record Mount(string Path, bool ReadOnly);
 
 /// <summary>
-/// Ports forwarded from the host's 127.0.0.1 by the session's ports service
-/// (named <paramref name="Container"/>) to the same ports on the agent
-/// container (<paramref name="AgentContainer"/>: compose run gives the agent
-/// no service-name alias, so it's reached by container name).
-/// </summary>
-internal sealed record PortForward(IReadOnlyList<int> Ports, string Container, string AgentContainer);
-
-/// <summary>
 /// The start-of-session repo refusals and the mounts that keep the agent from
-/// changing what host git runs (see "Protecting the host" in PLAN.md).
+/// changing what host git runs. See AGENTS.md's Git protection architecture.
 /// Everything here reads files directly and never runs git.
 /// </summary>
 internal static class RepoGuard
@@ -194,11 +184,13 @@ internal static class RepoGuard
         EnsureDirectory(dir, hooks);
         mounts.Add(new(hooks, ReadOnly: true));
 
-        var entries = GitConfigFile.ParseFile(config);
+        var entries = AddIncludes(dir, gitDir, config, hostHome, mounts, depth: 0);
         // With extensions.worktreeConfig, git also reads config.worktree
         // files, which the agent could otherwise create.
+        // Any true value is enough: includeIf conditions may differ in a
+        // different worktree or branch sharing this git dir.
         bool worktreeConfig = entries.Any(e => e.Section == "extensions" && e.Key == "worktreeconfig" && GitConfigFile.IsTrue(e.Value));
-        AddWorktreeConfig(dir, Path.Combine(gitDir, "config.worktree"), worktreeConfig, mounts);
+        AddWorktreeConfig(dir, gitDir, Path.Combine(gitDir, "config.worktree"), worktreeConfig, hostHome, mounts);
 
         // Each linked worktree: host git in it reads config and hooks from
         // wherever its commondir points.
@@ -222,14 +214,16 @@ internal static class RepoGuard
                     // looks dangling there: `git worktree prune` would delete
                     // it. Read-only keeps it, and its HEAD, index and commondir.
                     mounts.Add(new(wt, ReadOnly: true));
+                    // Its config can include a file in the writable project.
+                    var worktreeFile = Path.Combine(wt, "config.worktree");
+                    RequireNotLink(dir, worktreeFile);
+                    AddIncludes(dir, gitDir, worktreeFile, hostHome, mounts, depth: 0);
                     continue;
                 }
                 if (Exists(commondir)) mounts.Add(new(commondir, ReadOnly: true));
-                AddWorktreeConfig(dir, Path.Combine(wt, "config.worktree"), worktreeConfig, mounts);
+                AddWorktreeConfig(dir, gitDir, Path.Combine(wt, "config.worktree"), worktreeConfig, hostHome, mounts);
             }
         }
-
-        AddIncludes(dir, gitDir, config, hostHome, mounts, depth: 0);
     }
 
     /// <summary>
@@ -288,11 +282,12 @@ internal static class RepoGuard
         catch (UnauthorizedAccessException) { return false; }
     }
 
-    private static void AddWorktreeConfig(string dir, string path, bool enabled, List<Mount> mounts)
+    private static void AddWorktreeConfig(string dir, string gitDir, string path, bool enabled, string hostHome, List<Mount> mounts)
     {
         if (!enabled && !Exists(path)) return;
         EnsureFile(dir, path);
         mounts.Add(new(path, ReadOnly: true));
+        AddIncludes(dir, gitDir, path, hostHome, mounts, depth: 0);
     }
 
     /// <summary>
@@ -302,11 +297,13 @@ internal static class RepoGuard
     /// dir is created empty; a missing one in the working tree is refused,
     /// since creating it would add a file to the project.
     /// </summary>
-    private static void AddIncludes(string dir, string gitDir, string configFile, string hostHome, List<Mount> mounts, int depth)
+    private static List<GitConfigFile.Entry> AddIncludes(string dir, string gitDir, string configFile, string hostHome, List<Mount> mounts, int depth)
     {
-        if (depth > 10) return; // git's own limit
+        var entries = new List<GitConfigFile.Entry>();
+        if (depth > 10) return entries; // git's own limit
         foreach (var e in GitConfigFile.ParseFile(configFile))
         {
+            entries.Add(e);
             if (e.Section is not ("include" or "includeif") || e.Key != "path" || e.Value.Length == 0) continue;
             var p = e.Value;
             if (p == "~" || p.StartsWith("~/", StringComparison.Ordinal)) p = hostHome + p[1..];
@@ -315,19 +312,28 @@ internal static class RepoGuard
             p = Path.GetFullPath(p);
 
             var real = ResolveExisting(p);
-            if (!IsInside(dir, real) && !IsInside(gitDir, real)) continue;
+            if (p != real && (IsInside(dir, p) || IsInside(gitDir, p)))
+                throw new PenException($"{Rel(dir, configFile)} includes {Rel(dir, p)} through a symlink, which pen doesn't support: the agent could redirect the include");
             if (Directory.Exists(real)) continue; // git ignores a directory
-            if (!File.Exists(real))
+            bool writable = IsInside(dir, real) || IsInside(gitDir, real);
+            if (writable && !File.Exists(real))
             {
                 if (!IsInside(gitDir, real))
                     throw new PenException($"{Rel(dir, configFile)} includes {Rel(dir, real)}, which doesn't exist: the agent could create it, and git on this machine would read it as config. Create it (it can be empty) or remove the include, then rerun");
                 Directory.CreateDirectory(Path.GetDirectoryName(real)!);
                 File.WriteAllText(real, "");
             }
-            RequireNotLink(dir, real);
-            mounts.Add(new(real, ReadOnly: true));
-            AddIncludes(dir, gitDir, real, hostHome, mounts, depth + 1);
+            if (writable)
+            {
+                RequireNotLink(dir, real);
+                mounts.Add(new(real, ReadOnly: true));
+            }
+            // Even host-only includes can enable worktreeConfig or include
+            // another file that the sandbox can write. Conditional includes
+            // are followed conservatively for every worktree and branch.
+            entries.AddRange(AddIncludes(dir, gitDir, p, hostHome, mounts, depth + 1));
         }
+        return entries;
     }
 
     /// <summary>The real path of <paramref name="path"/>, or of its deepest existing ancestor plus the rest.</summary>
@@ -344,137 +350,6 @@ internal static class RepoGuard
             rest.Push(Path.GetFileName(p));
             p = parent;
         }
-    }
-
-    /// <summary>
-    /// The session's compose override (session.yaml): it adds <paramref name="mounts"/> to the agent
-    /// service. It's JSON, which YAML reads as is, so any path is quoted
-    /// correctly; $ is doubled, since compose interpolates it.
-    /// <paramref name="readOnlyRoot"/> also makes the agent's root filesystem
-    /// read-only (rootless Docker, where the agent is container root and would
-    /// otherwise own the image's files).
-    /// <paramref name="dindContainer"/>, in docker sessions, names the dind
-    /// container, gives dind the same mounts (so containers the agent starts
-    /// with -v $PWD:… can't write what the agent can't), and points the agent
-    /// at dind once it's healthy.
-    /// <paramref name="ports"/>, when it has any, adds the ports service: the
-    /// agent's network is internal, and Docker publishes no ports there, so a
-    /// socat per port on both the sandbox network and a non-internal ports
-    /// network relays 127.0.0.1:&lt;p&gt; on the host to &lt;p&gt; on the agent. It
-    /// runs pen:latest as nobody with no capabilities on a read-only root; the
-    /// agent can reach it, but only to be relayed back to itself.
-    /// </summary>
-    public static string ComposeOverride(IReadOnlyList<Mount> mounts, bool readOnlyRoot = false, string? dindContainer = null, PortForward? ports = null)
-    {
-        if (ports is { Ports.Count: 0 }) ports = null;
-        using var ms = new MemoryStream();
-        using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
-        {
-            w.WriteStartObject();
-            w.WriteString("x-pen", "this session's mounts over the project mount and its services, written by pen");
-            w.WriteStartObject("services");
-            w.WriteStartObject("agent");
-            if (readOnlyRoot) w.WriteBoolean("read_only", true);
-            if (dindContainer != null)
-            {
-                w.WriteStartObject("environment");
-                w.WriteString("DOCKER_HOST", "tcp://dind:2375");
-                w.WriteString("PEN_DOCKER", "1");
-                w.WriteEndObject();
-            }
-            if (dindContainer != null || ports != null)
-            {
-                // compose run starts only the agent's dependencies.
-                w.WriteStartObject("depends_on");
-                if (dindContainer != null)
-                {
-                    w.WriteStartObject("dind");
-                    w.WriteString("condition", "service_healthy");
-                    w.WriteEndObject();
-                }
-                if (ports != null)
-                {
-                    w.WriteStartObject("ports");
-                    w.WriteString("condition", "service_started");
-                    w.WriteEndObject();
-                }
-                w.WriteEndObject();
-            }
-            WriteMounts(w, mounts);
-            w.WriteEndObject();
-            if (dindContainer != null)
-            {
-                w.WriteStartObject("dind");
-                w.WriteString("container_name", dindContainer);
-                WriteMounts(w, mounts);
-                w.WriteEndObject();
-            }
-            if (ports != null) WritePortsService(w, ports);
-            w.WriteEndObject();
-            if (ports != null)
-            {
-                w.WriteStartObject("networks");
-                w.WriteStartObject("ports");
-                w.WriteEndObject();
-                w.WriteEndObject();
-            }
-            w.WriteEndObject();
-        }
-        return Encoding.UTF8.GetString(ms.ToArray()) + "\n";
-    }
-
-    private static void WritePortsService(Utf8JsonWriter w, PortForward ports)
-    {
-        w.WriteStartObject("ports");
-        w.WriteString("image", Image.Name);
-        w.WriteString("container_name", ports.Container);
-        w.WriteStartArray("entrypoint");
-        w.WriteEndArray();
-        // A socat per port; tini (init) as PID 1 stops them all at once.
-        var script = string.Concat(ports.Ports.Select(p => $"socat TCP-LISTEN:{p},fork,reuseaddr TCP:{ports.AgentContainer}:{p} & ")) + "wait";
-        w.WriteStartArray("command");
-        w.WriteStringValue("sh");
-        w.WriteStringValue("-c");
-        w.WriteStringValue(script.Replace("$", "$$", StringComparison.Ordinal));
-        w.WriteEndArray();
-        w.WriteBoolean("init", true);
-        w.WriteString("user", "nobody");
-        w.WriteStartArray("cap_drop");
-        w.WriteStringValue("ALL");
-        w.WriteEndArray();
-        w.WriteStartArray("security_opt");
-        w.WriteStringValue("no-new-privileges:true");
-        w.WriteEndArray();
-        w.WriteBoolean("read_only", true);
-        w.WriteNumber("pids_limit", 1024);
-        w.WriteStartArray("ports");
-        foreach (var p in ports.Ports) w.WriteStringValue($"127.0.0.1:{p}:{p}");
-        w.WriteEndArray();
-        w.WriteStartArray("networks");
-        w.WriteStringValue("sandbox");
-        w.WriteStringValue("ports");
-        w.WriteEndArray();
-        w.WriteEndObject();
-    }
-
-    private static void WriteMounts(Utf8JsonWriter w, IReadOnlyList<Mount> mounts)
-    {
-        w.WriteStartArray("volumes");
-        foreach (var m in mounts)
-        {
-            var path = m.Path.Replace("$", "$$", StringComparison.Ordinal);
-            w.WriteStartObject();
-            w.WriteString("type", "bind");
-            w.WriteString("source", path);
-            w.WriteString("target", path);
-            w.WriteBoolean("read_only", m.ReadOnly);
-            // A missing source is an error, never created (as root, on Linux).
-            w.WriteStartObject("bind");
-            w.WriteBoolean("create_host_path", false);
-            w.WriteEndObject();
-            w.WriteEndObject();
-        }
-        w.WriteEndArray();
     }
 
     internal static void EnsureDirectory(string dir, string path)

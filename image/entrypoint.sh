@@ -68,94 +68,9 @@ if [ "$(id -u)" = 0 ] && [ "${PEN_PHASE:-}" != agent ]; then
 fi
 
 # Agent phase.
-warn() { echo "pen-entrypoint: $*" >&2; }
-
-# The home seed (~/.config/pen/home on the host, read-only here). cp
-# --update=older copies what $HOME lacks or has an older copy of, and stamps
-# copies with the current time, so the newest edit wins: a seed edit reaches
-# every project's next session, and an agent's edit survives until the seed's
-# copy is edited again. Skipped: .claude.json (it holds the login; merged
-# below) and other projects' .claude/projects/<slug>/ (Claude's per-project
-# memory), so one project never sees another's.
-seed=/etc/pen/seed
-copy_entries() { # copy_entries <from dir> <to dir> <names to skip…>
-  local from=$1 to=$2 e name skip; shift 2
-  for e in "$from"/*; do
-    name=${e##*/}
-    for skip; do [ "$name" = "$skip" ] && continue 2; done
-    cp -r --update=older -- "$e" "$to/" || warn "couldn't copy ${e#"$seed"/} from the home seed"
-  done
-}
-if [ -d "$seed" ]; then
-  shopt -s dotglob nullglob
-  copy_entries "$seed" "$HOME" .claude.json .claude
-  if [ -d "$seed/.claude" ]; then
-    mkdir -p "$HOME/.claude"
-    copy_entries "$seed/.claude" "$HOME/.claude" projects
-    # Claude names a project's folder by its path, with every character that
-    # isn't alphanumeric replaced by '-'.
-    slug=$(LC_ALL=C sed 's/[^A-Za-z0-9]/-/g' <<<"$PROJECT_DIR")
-    if [ -d "$seed/.claude/projects/$slug" ]; then
-      mkdir -p "$HOME/.claude/projects"
-      cp -r --update=older -- "$seed/.claude/projects/$slug" "$HOME/.claude/projects/" \
-        || warn "couldn't copy .claude/projects/$slug from the home seed"
-    fi
-  fi
-  shopt -u dotglob nullglob
-
-  # ~/.claude.json: copied only when missing (before any login). After that,
-  # the seed's mcpServers are merged in (seed entries win, servers added in
-  # the sandbox stay), rewriting the file only when that changes something.
-  if [ -f "$seed/.claude.json" ]; then
-    if [ ! -e "$HOME/.claude.json" ]; then
-      cp -- "$seed/.claude.json" "$HOME/.claude.json" && chmod 600 "$HOME/.claude.json" \
-        || warn "couldn't copy .claude.json from the home seed"
-    elif ! jq -e 'type == "object"' "$seed/.claude.json" >/dev/null 2>&1; then
-      warn "the home seed's .claude.json isn't a JSON object: not merging its mcpServers"
-    elif ! jq -e --slurpfile s "$seed/.claude.json" \
-        '(.mcpServers // {}) == ((.mcpServers // {}) + ($s[0].mcpServers // {}))' \
-        "$HOME/.claude.json" >/dev/null 2>&1; then
-      # mktemp makes it 600, like the file it replaces.
-      if tmp=$(mktemp "$HOME/.claude.json.pen.XXXXXX") \
-          && jq --slurpfile s "$seed/.claude.json" \
-            '.mcpServers = ((.mcpServers // {}) + ($s[0].mcpServers // {}))' \
-            "$HOME/.claude.json" >"$tmp" \
-          && mv -f -- "$tmp" "$HOME/.claude.json"; then
-        :
-      else
-        rm -f -- "${tmp:-}"
-        warn "couldn't merge the home seed's mcpServers into ~/.claude.json"
-      fi
-    fi
-  fi
-fi
-
-# Docker sessions only (PEN_DOCKER=1, set by the session's compose override):
-# containers and build steps inside dind can't resolve "proxy", but reach its
-# IP through dind's NAT. The docker client passes config.json's proxies into
-# every container and build. Other sessions never write it: each session's
-# proxy has its own IP, and only one docker session runs at a time.
-if [ "${PEN_DOCKER:-}" = 1 ]; then
-  cfg=$HOME/.docker/config.json
-  ip=$(getent ahostsv4 proxy | awk 'NR == 1 { print $1 }') || ip=
-  if [ -z "$ip" ]; then
-    warn "couldn't resolve the proxy: containers inside Docker won't reach the network"
-  elif [ -e "$cfg" ] && ! jq -e 'type == "object"' "$cfg" >/dev/null 2>&1; then
-    warn "~/.docker/config.json isn't a JSON object: not setting the proxy for containers inside Docker"
-  else
-    url="http://$ip:3128"
-    mkdir -p "$HOME/.docker"
-    if tmp=$(mktemp "$cfg.pen.XXXXXX") \
-        && { [ -e "$cfg" ] && cat -- "$cfg" || echo '{}'; } \
-          | jq --arg u "$url" '.proxies.default = {httpProxy: $u, httpsProxy: $u, noProxy: "localhost,127.0.0.1"}' >"$tmp" \
-        && mv -f -- "$tmp" "$cfg"; then
-      :
-    else
-      rm -f -- "${tmp:-}"
-      warn "couldn't write the proxy into ~/.docker/config.json: containers inside Docker won't reach the network"
-    fi
-  fi
-fi
+# Seed policy and Docker runtime settings have separate ownership.
+/usr/local/lib/pen/sync-seed.sh /etc/pen/seed "$HOME" "$PROJECT_DIR"
+/usr/local/lib/pen/docker-proxy.sh
 
 [ "$#" -gt 0 ] || set -- bash -l
 exec "$@"

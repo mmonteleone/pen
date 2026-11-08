@@ -98,6 +98,7 @@ ENV NODE_USE_ENV_PROXY=1 \
     GH_NO_UPDATE_NOTIFIER=1
 
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/pen-entrypoint
+COPY --chmod=0755 sync-seed.sh docker-proxy.sh /usr/local/lib/pen/
 
 # ---------------------------------------------------------------------------
 # Agents and CodeGraph: always the last layers. `pen upgrade` sets PEN_REFRESH

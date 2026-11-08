@@ -61,8 +61,8 @@ internal sealed record CommitObject(
 }
 
 /// <summary>
-/// pen sign: re-creates unpushed commits with the same trees, signed (see
-/// "Commit signing" in PLAN.md). No rebase: each commit keeps its exact tree,
+/// pen sign: re-creates unpushed commits with the same trees, signed.
+/// Each commit keeps its exact tree,
 /// merges included, and parents outside the range stay as they are.
 /// </summary>
 internal static class Sign

@@ -6,8 +6,7 @@ namespace Pen;
 
 /// <summary>
 /// pen allow &lt;domain…&gt; [--global]: adds to allow in config.toml and applies them to
-/// running sessions; pen allow: lists recently blocked domains (see "Network
-/// egress" in PLAN.md).
+/// running sessions; pen allow: lists recently blocked domains.
 /// </summary>
 internal static class AllowCommand
 {
@@ -82,7 +81,6 @@ internal static class AllowCommand
         if (added.Count > 0) Out.Line($"added to {where}: {string.Join(' ', added)}");
         if (skipped.Count > 0) Out.Line($"already in {where}: {string.Join(' ', skipped)}");
 
-        if (added.Count == 0) return 0;
         int applied = 0, failed = 0;
         foreach (var s in Targets(host, project, global))
         {
