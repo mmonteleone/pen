@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to agents when working with code in this repository.
 
 ## What this is
 
@@ -20,7 +20,7 @@ SMOKE_ONLY="7 13" tests/smoke.sh   # only those sections (the fixture setup alwa
 
 ## Architecture
 
-**Embedded resources.** `Pen.csproj` embeds `compose.yaml`, `image/**`, `proxy/**`, `templates/**` under their repo-relative paths (`Embedded.cs`). The installed binary never reads this repo, so **changes to any of those files only take effect after rebuilding/reinstalling the CLI**. `Embedded.ImageHash()` hashes `image/`; `Image.EnsureCurrent()` rebuilds `pen:latest` when the label doesn't match, so editing `image/` triggers a rebuild on next session. (Planned: release builds will pull a version-pinned `ghcr.io/mmonteleone/pen` image instead and tag it `pen:latest`, with `pen upgrade` reinstalling agents in a local layer; source builds keep building locally; README.md "Get started" covers source installation.)
+**Embedded resources.** `Pen.csproj` embeds `compose.yaml`, `image/**`, `proxy/**`, `templates/**` under their repo-relative paths (`Embedded.cs`). The installed binary never reads this repo, so **changes to any of those files only take effect after rebuilding/reinstalling the CLI**. Every installation, including planned Homebrew packages and release binaries, builds `pen:latest` locally from the embedded Dockerfile and supporting files; pen does not publish its own container image. `Embedded.ImageHash()` hashes `image/`; `Image.EnsureCurrent()` rebuilds `pen:latest` when the label doesn't match, so editing `image/` triggers a rebuild on next session. `pen upgrade` rebuilds locally with fresh agents.
 
 **Flow** (`Program.cs`): `Cli.Parse` → `Config.EnsureUserConfig` (creates `~/.config/pen/` from `templates/`) → `Project.Resolve` (cwd real path; key `pen-<dir>-<hash>` of the main checkout (`RepoDir`) names volumes, project image and runtime dir, so a repo's linked worktrees share it while `Dir`/`PROJECT_DIR` stays the worktree) → command (`Session`, `AllowCommand`, `Sign`, `Reset`; `Ps` and `Prune` run before `Config`/`Project`: `Ps` lists `Sessions.RunningEverywhere`, `Prune` classifies every key with volumes or a runtime dir by its `project-dir` as live, moved, missing or unknown and removes moved/missing ones under `project.lock` exclusive). User-facing errors are `PenException` (message + exit code).
 

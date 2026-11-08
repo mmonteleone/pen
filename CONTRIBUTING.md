@@ -1,7 +1,7 @@
 # Contributing to pen
 
-The usual loop is: change the code, build and run unit tests, reinstall pen, then run the relevant
-smoke tests. Smoke tests use the installed binary, so skipping the reinstall tests old code.
+Build, run unit tests, reinstall pen, then run the relevant smoke tests. Smoke tests use the
+installed binary, so reinstall before testing a change.
 
 For installation and everyday use, start with the [README](README.md#get-started).
 Commands below run from the repo root unless shown otherwise.
@@ -92,8 +92,9 @@ cli/install.sh --container --out DIR  # build a Linux binary in a container, eve
 Container builds target the host machine's architecture. To install on another machine, build
 there or copy a binary built for the same OS and architecture to its `~/.local/bin/pen`.
 
-pen builds `pen:latest` from its embedded image files. Run `pen upgrade` to build it ahead of the
-first session or to rebuild with fresh agents. Logins and config persist across image rebuilds.
+Every installation builds `pen:latest` locally from the embedded Dockerfile and supporting files.
+Run `pen upgrade` to build it before the first session or to rebuild with fresh agents. Logins
+and config persist across image rebuilds.
 
 To update a source installation, pull this repo and reinstall:
 
@@ -108,10 +109,11 @@ Releases aren't published or automated yet. The intended process is:
 
 1. Bump `<Version>` in `cli/Pen/Pen.csproj` and tag `vX.Y.Z`.
 2. Publish AOT binaries for `osx-arm64`, `osx-x64`, `linux-x64` and `linux-arm64` to GitHub Releases.
-3. Publish a matching multi-architecture image at `ghcr.io/mmonteleone/pen:X.Y.Z` and have release
-   binaries pull that version instead of building locally.
-4. Update the formula in [`mmonteleone/homebrew-tap`](https://github.com/mmonteleone/homebrew-tap).
+3. Update the formula in [`mmonteleone/homebrew-tap`](https://github.com/mmonteleone/homebrew-tap).
 
-When Homebrew distribution is available, remove `~/.local/bin/pen` or put Homebrew earlier on
-your `PATH` before installing it. User config, logins and project volumes don't depend on the
-installation method.
+Releases distribute the CLI only. Each binary embeds the Dockerfile and supporting files;
+Docker builds the base image on the user's machine.
+
+The planned user workflow is in the [README](README.md#once-published-planned). When switching
+to Homebrew, remove `~/.local/bin/pen` or put Homebrew earlier on your `PATH`. Config, logins and
+project volumes don't depend on the installation method.

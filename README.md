@@ -1,8 +1,8 @@
 # pen
 
-Run AI programming agents unattended, with access to your project instead of your whole machine.
-`pen` runs Claude Code, Codex, OpenCode and Pi in Docker and limits their network access to
-allowed domains.
+Run AI programming agents unattended, with access to your project instead of your whole
+machine. `pen` runs Claude Code, Codex, OpenCode and Pi in Docker, with network access
+limited to allowed domains.
 
 > Wait, is this just Docker, a proxy, and some strong opinions as code?
 
@@ -11,7 +11,6 @@ It's not *not* that.
 ```sh
 cd ~/source/repos/myproject
 pen claude
-# or: pen codex, pen opencode, pen pi
 ```
 
 Agents run with permission prompts off. You review their work on the host, then push it yourself.
@@ -19,14 +18,14 @@ Logins and caches persist per project. No `pen`-specific files are required in y
 
 ## Features
 
-- **Project isolation:** agents run with permission prompts off inside a container, with access
-  to your project rather than the rest of your host files.
+- **Project isolation:** agents can edit your project, while the rest of your host files stay outside
+  the container.
 - **Network control:** outbound traffic goes through a domain allowlist. Add domains with `pen allow`
   without restarting the session.
 - **Host git protection:** repo config and hooks are read-only. `pen` checks git metadata before
   running host git, protecting against commands planted there by an agent.
-- **Scoped credentials and host signing:** supply a read-only GitHub token for the project's owner.
-  Review and push on the host; `pen sign` signs commits without sharing your signing key.
+- **Credentials and signing:** supply a read-only GitHub token for the project's owner.
+  `pen sign` signs commits on the host without sharing your signing key.
 - **Persistent setup:** each project keeps its logins, settings and caches across sessions and
   image rebuilds. Share agent instructions and settings through one
   [configuration directory](docs/usage.md#agent-config-the-home-seed).
@@ -35,20 +34,22 @@ Logins and caches persist per project. No `pen`-specific files are required in y
   [`.pen/Dockerfile`](docs/usage.md#project-settings),
   forward dev-server ports, or enable Docker-in-Docker when needed.
 
-Read-only GitHub access depends on your token's permissions; pen doesn't reduce them.
-The agent can still delete project files or send data to allowed domains. [See the limits below.](#limits)
+Read-only GitHub access depends on your token's permissions. pen doesn't reduce them.
+The agent can still delete project files or send data to allowed domains.
+[See the limitations below.](#limitations)
 
 ## How it compares
 
-`pen` can be thought of as a close cousin to a [dev container](https://containers.dev/overview), intended to be more transparent and with (hopefully in most cases) less intrusion on the project and its normal dev workflow.
+Like a [dev container](https://containers.dev/overview), `pen` gives your project a dedicated
+environment. It focuses on terminal agents and requires no project configuration.
 
 | Approach | When it fits |
 |---|---|
 | Agent on the host | You want direct access to your installed tools, files and credentials. |
 | Agent's built-in sandbox | You're happy with that agent's isolation and permission controls. |
-| Dev Container tooling | You want an environment defined by `devcontainer.json`, with integrations for editors and other tools that support it. |
-| **pen** | You want a transparent development container managed from your terminal, with agent setup, a network allowlist and protections for host git included with little or no setup or config. |
-| VM | You need a separate kernel as an isolation boundary. `pen` uses containers. |
+| Dev Container tooling | You want a `devcontainer.json` environment with editor integrations. |
+| **pen** | You want agents, a network allowlist and host git protections in a container managed from your terminal. |
+| VM | You want a separate kernel as an isolation boundary. `pen` uses containers. |
 
 If your current sandbox or devcontainer already does what you need, you're probably all set.
 
@@ -57,7 +58,7 @@ before pushing. For macOS and Linux.
 
 ## How it works
 
-1. pen starts a container with your project mounted read-write and a persistent home directory
+1. `pen` starts a container with your project mounted read-write and a persistent home directory
    for that project's agent logins and settings.
 2. The agent has no direct internet access. A separate proxy allows requests only to listed domains.
 3. Repo config, hooks and `.pen/` settings are mounted read-only. `pen` refuses repo layouts it
@@ -68,16 +69,15 @@ Your project is a live mount: edits appear on the host immediately, with no copy
 
 ## Get started
 
-**Install from source for now.** Homebrew packages, release binaries and the prebuilt `pen` image
-aren't published yet.
+### For now...
 
-You need Docker with Compose v2, plus:
+Install from source. Homebrew packages and release binaries aren't published yet.
+
+You need Docker (or OrbStack, colima, etc) with Compose v2, plus:
 
 - **macOS:** the .NET 11 SDK (see [`cli/global.json`](cli/global.json)) and Xcode command-line
-  tools (`xcode-select --install`). The Docker VM must share your project and `~/.config/pen`
-  read-write at their real paths. Projects outside your home directory may need an extra share.
-- **Linux:** glibc 2.34+ and rootful or rootless Docker. The installer builds in a container;
-  no host .NET SDK is needed.
+  tools (`xcode-select --install`).
+- **Linux:** glibc 2.34+ and rootful _or_ rootless Docker. The installer builds in a container, so no .NET SDK is needed.
 
 ```sh
 git clone https://github.com/mmonteleone/pen.git
@@ -85,18 +85,41 @@ cd pen
 cli/install.sh
 ```
 
-This installs `~/.local/bin/pen`; make sure `~/.local/bin` is on your `PATH`.
+This installs `~/.local/bin/pen` so make sure `~/.local/bin` is on your `PATH`.
 
-Then open a session in your project:
+### Once published (planned)
+
+With Docker and Compose v2 installed, the Homebrew path will be:
 
 ```sh
+brew install mmonteleone/tap/pen
 cd ~/source/repos/myproject
 pen claude
 ```
 
-The first session builds the image, which takes a few minutes, and creates `~/.config/pen/`.
-Log in to your agent inside the sandbox; each project keeps its own login. For private GitHub
-access, [add a read-only token](docs/usage.md#github).
+Standalone binaries will also be available from GitHub Releases for macOS and Linux, on
+arm64 and x64. Neither installation method will need a host .NET SDK.
+`brew upgrade pen` will update the CLI. `pen upgrade` will update the agents between releases.
+
+### Start a session
+
+On macOS, the Docker VM must share your project and `~/.config/pen` read-write at their real
+paths. Projects outside your home directory may need an extra share.
+
+From your project root, choose an agent:
+
+```sh
+cd ~/source/repos/myproject
+pen claude  # or: pen codex, pen opencode, pen pi
+```
+
+Every installation builds `pen:latest` locally from the Dockerfile bundled in the CLI.
+The first session may take a few minutes to build it, but later sessions reuse it until the bundled
+image files change or you run `pen upgrade`.
+
+The first run also creates `~/.config/pen/`. Log in to your agent inside the sandbox. Each
+project keeps its own login. Put shared agent settings and instructions in
+`~/.config/pen/home/`, using their usual home-directory paths. See [agent config](docs/usage.md#agent-config-the-home-seed) for details. For private GitHub access, [add a read-only token](docs/usage.md#github).
 
 When the agent exits, review its changes and commits on the host. If you sign commits, run
 `pen sign`, then push as usual. Run git setup commands such as `git remote add` on the host too.
@@ -116,12 +139,12 @@ pen upgrade                 # rebuild the image with current agents
 ```
 
 Options go before the agent name. Dev servers must listen on `0.0.0.0` inside the sandbox.
-Several sessions can run at once; linked worktrees share the repo's logins and caches.
+Several sessions can run at once. Linked worktrees share the repo's logins and caches.
 
-For a new project, try its restore or build through `pen` first. Missing domains appear on exit;
-add them with `pen allow`. Missing tools go in a [`.pen/Dockerfile`](docs/usage.md#project-settings).
+For a new project, try its restore or build through `pen` first. Missing domains appear on exit.
+Add them with `pen allow`. Missing tools go in a [`.pen/Dockerfile`](docs/usage.md#project-settings).
 
-## Limits
+## Limitations
 
 `pen` limits the damage from mistakes and prompt injection. It doesn't protect against a
 deliberate container escape.
