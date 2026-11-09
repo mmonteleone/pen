@@ -12,7 +12,9 @@ internal readonly partial record struct ToolSpec(string Name, string Version)
     public override string ToString() => $"{Name}:{Version}";
 
     /// <summary>
-    /// Parses "name" (the recipe's default version) or "name:version". The spec may
+    /// Parses "name" (the recipe's default version) or "name:version". A version stays as
+    /// written, since 24.04 and 24.4 are different versions, and a recipe's regex rejects
+    /// the forms it doesn't want. The spec may
     /// come from .pen/, which an agent can write, and the version ends up as an argument
     /// to a root script. So whatever a recipe's regex says, it's held to
     /// <see cref="IsVersionSyntax"/>: no shell syntax, slash, whitespace or leading dash.
@@ -31,15 +33,14 @@ internal readonly partial record struct ToolSpec(string Name, string Version)
             return null;
         }
         var given = spec[(colon + 1)..];
-        var version = IsVersionSyntax(given) ? NormalizeVersion(given) : null;
-        if (version == null || !recipe.AcceptsVersion(version))
+        if (!IsVersionSyntax(given) || !recipe.AcceptsVersion(given))
             return $"\"{Out.Field(given)}\" isn't a valid version of {name}";
-        tool = new(name, version);
+        tool = new(name, given);
         return null;
     }
 
     /// <summary>
-    /// The canonical list: no duplicates, sorted ordinally. Returns what's wrong
+    /// The canonical list: no exact duplicates, sorted ordinally. Returns what's wrong
     /// if it holds two versions of a tool whose recipe doesn't allow that, or null.
     /// </summary>
     public static string? TryCanonicalize(IEnumerable<ToolSpec> tools, RecipeCatalog catalog, out IReadOnlyList<ToolSpec> canonical)
@@ -64,15 +65,6 @@ internal readonly partial record struct ToolSpec(string Name, string Version)
 
     /// <summary>The characters any version may use, whatever its recipe allows.</summary>
     internal static bool IsVersionSyntax(string version) => VersionSyntaxRegex().IsMatch(version);
-
-    /// <summary>
-    /// A version's one spelling: leading zeros go from its all-digit dot-separated
-    /// parts, so dotnet:010 and dotnet:10 are the same tool. Takes a version
-    /// that passed <see cref="IsVersionSyntax"/>.
-    /// </summary>
-    internal static string NormalizeVersion(string version) =>
-        string.Join('.', version.Split('.').Select(part =>
-            part.Length > 1 && part.All(char.IsAsciiDigit) && part.TrimStart('0') is var digits ? (digits.Length > 0 ? digits : "0") : part));
 
     [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}\z")]
     private static partial Regex VersionSyntaxRegex();

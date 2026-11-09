@@ -1,0 +1,5 @@
+# A second test recipe for pen's checks, whose versions can coexist. Hidden, like pen-test.
+hidden = true
+default = "1"
+version = '^[1-9]\d*$'
+multiple = true

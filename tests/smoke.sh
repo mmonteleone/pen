@@ -63,6 +63,7 @@ HASH=$(printf %s "$PROJECT_DIR" | sha | cut -c1-8)
 KEY= RUNTIME=
 EXTRA_DIRS=() # other fixture projects: removed on exit, with their keys' state
 EXTRA_KEYS=() # project keys whose dirs a section deleted: their state is removed on exit
+TOOL_IMAGES=() # pen-tools images a section built: removed on exit
 
 # forget_key <key>: remove a project key's containers, networks, volumes, images
 # and runtime dirs (under the real and the throwaway HOME).
@@ -96,6 +97,7 @@ cleanup() {
   local d
   for d in ${EXTRA_DIRS[@]+"${EXTRA_DIRS[@]}"}; do [ -d "$d" ] && forget "$d"; rm -rf "$d"; done
   for d in ${EXTRA_KEYS[@]+"${EXTRA_KEYS[@]}"}; do forget_key "$d"; done
+  for d in ${TOOL_IMAGES[@]+"${TOOL_IMAGES[@]}"}; do docker image rm -f "$d" >/dev/null 2>&1 || true; done
   rm -rf "$PROJECT_DIR" "$SCRATCH"
 }
 trap cleanup EXIT
@@ -591,8 +593,10 @@ check "tools in ~/.config/pen/config.toml is accepted" fake_pen run true
 check "...and a version --tool can't coexist with is refused" contains "pen-test:1 and pen-test:2 can't be used together" "$(fake_pen --tool pen-test:2 run true 2>&1 || true)"
 printf 'tools = ["pen-test:2"]\n' >.pen/config.toml
 check "...as is one from .pen/config.toml" contains "pen-test:1 and pen-test:2 can't be used together" "$(fake_pen run true 2>&1 || true)"
+printf 'tools = ["pen-test:1"]\n' >.pen/config.toml
+check "...but the same version is fine" fake_pen --tool pen-test run true
 printf 'tools = ["pen-test:01"]\n' >.pen/config.toml
-check "...but the same version, however spelled, is fine" fake_pen --tool pen-test run true
+check "a version form the recipe doesn't want is refused, not rewritten" contains '.pen/config.toml: tools: "01" isn'"'"'t a valid version of pen-test' "$(pen_run true 2>&1 || true)"
 printf 'tools = ["nope"]\n' >.pen/config.toml
 check "an unknown tool in .pen/config.toml is refused, naming the file" contains '.pen/config.toml: tools: unknown tool "nope"' "$(pen_run true 2>&1 || true)"
 printf 'tools = ["pen-test:1;id"]\n' >.pen/config.toml
@@ -1961,6 +1965,53 @@ check ".pen is unchanged on the host" test "$(ls -A .pen)" = "$pen_list"
 check "nothing is left running" test "$(containers)" = 0
 cp -p "$CFG_COPY" .git/config
 rm -f ".git/$MARKER" ".git/hooks/$MARKER" ".pen/$MARKER" .git/.smoke27-plain .git/.smoke27-alias smoke27-project
+fi
+
+if want 28; then
+# ==============================================================================
+section "28. Tools image"
+
+# A docker that records each build, so "no rebuild" is seen rather than guessed from
+# timing. Versions are unique to this run, so no earlier image or build cache can stand in.
+TOOLS_SHIM=$SCRATCH/tools-shim; mkdir -p "$TOOLS_SHIM"
+cat >"$TOOLS_SHIM/docker" <<EOF
+#!/bin/sh
+if [ "\$1" = build ]; then echo build >>"$TOOLS_SHIM/builds"; fi
+exec "$(command -v docker)" "\$@"
+EOF
+chmod +x "$TOOLS_SHIM/docker"; : >"$TOOLS_SHIM/builds"
+tools_image() { PATH="$TOOLS_SHIM:$PATH" "$PEN" "$@" --build-tools-image </dev/null 2>/dev/null || fail "pen $* --build-tools-image"; }
+builds() { wc -l <"$TOOLS_SHIM/builds" | tr -d ' '; }
+in_image() { docker run --rm --entrypoint sh "$1" -c "$2"; }
+
+V=$(date +%s)
+A=pen-test:$V B=pen-test-b:$V
+tag=$(tools_image --tool "$A" --tool "$B"); TOOL_IMAGES+=("$tag")
+check "two tools build one image, tagged pen-tools:<hash>" bash -c '[[ $1 =~ ^pen-tools:[0-9a-f]{16}$ ]] && [ "$2" = 1 ]' _ "$tag" "$(builds)"
+check "...labeled with the base image's ID" test \
+  "$(docker image inspect --format '{{ index .Config.Labels "pen.base-id" }}' "$tag")" = "$(docker image inspect --format '{{.Id}}' "$IMAGE")"
+id=$(docker image inspect --format '{{.Id}}' "$tag")
+out=$(in_image "$tag" "ls /opt/pen-test /opt/pen-test-b; stat -c 'owner=%u' /opt/pen-test; [ -e /pen-recipe ] && echo script-left; true")
+check "...which installed each at its version, as root" has_all "$out" "$V" "owner=0"
+check "...and kept no recipe scripts" not contains script-left "$out"
+
+check "swapping the flags gives the same tag" test "$(tools_image --tool "$B" --tool "$A")" = "$tag"
+check "...without a rebuild" test "$(builds)" = 1
+check "...and the image is untouched" test "$(docker image inspect --format '{{.Id}}' "$tag")" = "$id"
+
+OTHER_TOOLS=$SCRATCH/tools-other; mkdir -p "$OTHER_TOOLS"; git -C "$OTHER_TOOLS" init -q
+check "another project gets the same tag" test "$(cd "$OTHER_TOOLS" && tools_image --tool "$A" --tool "$B")" = "$tag"
+check "...also without a rebuild" test "$(builds)" = 1
+
+many=$(tools_image --tool "$B" --tool "pen-test-b:$((V + 1))"); TOOL_IMAGES+=("$many")
+check "another set of tools is another image" bash -c '[ "$1" != "$2" ] && [ "$3" = 2 ]' _ "$many" "$tag" "$(builds)"
+check "...and versions of one tool reach its script as separate arguments" \
+  test "$(in_image "$many" 'ls /opt/pen-test-b | wc -l' | tr -d ' ')" = 2
+
+check "a session doesn't use the tools image yet" contains "[no tool]" \
+  "$("$PEN" --tool "$A" --tool "$B" run sh -c 'test -e /opt/pen-test || echo "[no tool]"' </dev/null 2>/dev/null)"
+rc=0; out=$("$PEN" --tool "$A" --build-tools-image true 2>&1 </dev/null) || rc=$?
+check "the build option takes nothing but --tool" bash -c '[ "$1" = 2 ] && grep -qF "takes only --tool" <<<"$2"' _ "$rc" "$out"
 fi
 
 section "All checks passed."

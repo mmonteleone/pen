@@ -68,6 +68,12 @@ internal static class Program
         StartDir.Leave(host);
         if (command.Kind == CommandKind.Ps) return Ps.Run(host);
         if (command.Kind == CommandKind.Prune) return Prune.Run(host, Console.In);
+        if (command.Kind == CommandKind.BuildToolsImage)
+        {
+            Image.EnsureCurrent();
+            Out.Stdout(ToolsImage.Ensure(command.Tools, RecipeCatalog.Embedded) + "\n");
+            return 0;
+        }
         Config.EnsureUserConfig(host);
         var user = Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User);
 

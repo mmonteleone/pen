@@ -22,6 +22,10 @@ internal sealed class Recipe
     /// <summary>Environment for sessions with the tool, in file order.</summary>
     public List<KeyValuePair<string, string>> Env { get; } = [];
     public string InstallPath => $"{RecipeCatalog.Root}{Name}/{RecipeCatalog.InstallFile}";
+    /// <summary>The text of tool.toml, as loaded.</summary>
+    public required string Settings { get; init; }
+    /// <summary>The text of install.sh, as loaded.</summary>
+    public required string Script { get; init; }
 
     private Regex versionRegex = null!;
 
@@ -36,7 +40,7 @@ internal sealed class Recipe
     }
 
     /// <summary>Parses a tool.toml, the way <see cref="Config.Parse"/> does a config.toml.</summary>
-    public static Recipe Parse(string name, string text)
+    public static Recipe Parse(string name, string text, string script)
     {
         var display = $"{RecipeCatalog.Root}{name}/{RecipeCatalog.SettingsFile}";
         PenException Error(string message) => new($"{display}: {Out.Field(message)}");
@@ -67,10 +71,12 @@ internal sealed class Recipe
             Default = Config.String(Required("default"), "default", Error),
             Multiple = Flag("multiple"),
             Hidden = Flag("hidden"),
+            Settings = text,
+            Script = script,
             versionRegex = regex,
         };
-        if (!ToolSpec.IsVersionSyntax(recipe.Default) || ToolSpec.NormalizeVersion(recipe.Default) != recipe.Default || !recipe.AcceptsVersion(recipe.Default))
-            throw Error($"default \"{recipe.Default}\" isn't a valid version in normal form");
+        if (!ToolSpec.IsVersionSyntax(recipe.Default) || !recipe.AcceptsVersion(recipe.Default))
+            throw Error($"default \"{recipe.Default}\" isn't a valid version");
 
         if (table.TryGetValue("allow", out var allow))
         {
@@ -139,7 +145,7 @@ internal sealed partial class RecipeCatalog
         {
             if (!scripts.TryGetValue(name, out var script)) throw new PenException($"{Root}{name}/{InstallFile} is missing");
             if (!script.StartsWith("#!", StringComparison.Ordinal)) throw new PenException($"{Root}{name}/{InstallFile} must start with #!");
-            catalog.recipes[name] = Recipe.Parse(name, text);
+            catalog.recipes[name] = Recipe.Parse(name, text, script);
         }
         foreach (var name in scripts.Keys)
         {

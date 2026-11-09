@@ -74,7 +74,7 @@ public class RecipeTests
     [InlineData("default = \"10\"\nversion = 1", "version must be")]
     [InlineData("default = \"10\"\nversion = '('", "isn't a valid regular expression")]
     [InlineData("default = \"ten\"\nversion = '^\\d+$'", "default \"ten\"")]
-    [InlineData("default = \"010\"\nversion = '^\\d+$'", "default \"010\"")]
+    [InlineData("default = \"010\"\nversion = '^[1-9]\\d*$'", "default \"010\"")]
     [InlineData("default = \"1;id\"\nversion = '.*'", "default \"1;id\"")]
     [InlineData("default = \"10\"\nversion = '^\\d+$'\nmultiple = \"yes\"", "multiple must be")]
     [InlineData("default = \"10\"\nversion = '^\\d+$'\nhidden = 1", "hidden must be")]

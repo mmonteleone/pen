@@ -35,20 +35,33 @@ public class ToolsTests
     }
 
     [Theory]
-    [InlineData("dotnet:010", "dotnet:10")]
-    [InlineData("dotnet:0", "dotnet:0")]
-    [InlineData("dotnet:000", "dotnet:0")]
-    [InlineData("go:01.022", "go:1.22")]
-    [InlineData("go:1.0.003", "go:1.0.3")]
-    public void VersionsHaveOneSpelling(string spec, string normal) =>
-        Assert.Equal(normal, Tool(spec).ToString());
+    [InlineData("go:24.04")]
+    [InlineData("go:1.01")]
+    [InlineData("go:01.022")]
+    [InlineData("dotnet:010")]
+    [InlineData("dotnet:000")]
+    public void AVersionStaysAsWritten(string spec) =>
+        Assert.Equal(spec, Tool(spec).ToString());
 
-    [Theory]
-    [InlineData("8.0.100-rc.01", "8.0.100-rc.1")]
-    [InlineData("1.0-02", "1.0-02")]
-    [InlineData("v01", "v01")]
-    public void OnlyAllDigitPartsLoseTheirZeros(string version, string normal) =>
-        Assert.Equal(normal, ToolSpec.NormalizeVersion(version));
+    [Fact]
+    public void VersionsThatDifferOnlyInZerosAreDifferentVersions()
+    {
+        Assert.Equal(["dotnet:010", "dotnet:10"], Canonical("dotnet:10", "dotnet:010", "dotnet:10"));
+        Assert.Contains("go:1.01 and go:1.1 can't be used together",
+            ToolSpec.TryCanonicalize([Tool("go:1.1"), Tool("go:1.01")], Catalog, out _));
+    }
+
+    [Fact]
+    public void ARecipesPatternDecidesWhetherALeadingZeroIsAllowed()
+    {
+        var catalog = RecipeCatalog.FromFiles(new Dictionary<string, string>
+        {
+            ["tools/x/tool.toml"] = "default = \"8\"\nversion = '^[1-9]\\d*$'\n",
+            ["tools/x/install.sh"] = "#!/bin/sh\n",
+        });
+        Assert.Null(ToolSpec.TryParse("x:8", catalog, out _));
+        Assert.Contains("\"08\" isn't a valid version of x", ToolSpec.TryParse("x:08", catalog, out _));
+    }
 
     [Fact]
     public void PermutationsAndDuplicatesGiveTheSameList()
@@ -56,7 +69,7 @@ public class ToolsTests
         string[] expected = ["dotnet:10", "dotnet:8", "go:1.24"];
         Assert.Equal(expected, Canonical("dotnet:8", "go", "dotnet"));
         Assert.Equal(expected, Canonical("go", "dotnet", "dotnet:8"));
-        Assert.Equal(expected, Canonical("dotnet", "dotnet:10", "go:1.24", "go", "dotnet:08", "dotnet:8"));
+        Assert.Equal(expected, Canonical("dotnet", "dotnet:10", "go:1.24", "go", "dotnet:8"));
     }
 
     [Fact]
@@ -169,11 +182,12 @@ public class ToolsTests
     public void ToolsAreValidInBothConfigFiles(bool user)
     {
         var kind = user ? ConfigKind.User : ConfigKind.Project;
-        var c = Config.Parse("tools = [\"pen-test\", \"pen-test:01\"]\n", "f.toml", kind);
+        var c = Config.Parse("tools = [\"pen-test\", \"pen-test:1\"]\n", "f.toml", kind);
         Assert.Equal([new ToolSpec("pen-test", "1")], c.Tools);
         Assert.Empty(Config.Parse("", "f.toml", kind).Tools);
 
         Assert.StartsWith("f.toml: tools: unknown tool \"nope\"", ConfigError("tools = [\"nope\"]", kind).Message);
+        Assert.Equal("f.toml: tools: \"01\" isn't a valid version of pen-test", ConfigError("tools = [\"pen-test:01\"]", kind).Message);
         Assert.Equal("f.toml: tools: \"1;id\" isn't a valid version of pen-test", ConfigError("tools = [\"pen-test:1;id\"]", kind).Message);
         Assert.Contains("can't be used together", ConfigError("tools = [\"pen-test:1\", \"pen-test:2\"]", kind).Message);
         Assert.StartsWith("f.toml: tools must be a list", ConfigError("tools = \"pen-test\"", kind).Message);
@@ -187,7 +201,7 @@ public class ToolsTests
     [Fact]
     public void TheFlagAcceptsWhatTheConfigDoes()
     {
-        var c = Cli.Parse(["--tool", "pen-test:01", "--tool=pen-test", "--docker", "--port", "80", "claude", "--tool", "x"]);
+        var c = Cli.Parse(["--tool", "pen-test:1", "--tool=pen-test", "--docker", "--port", "80", "claude", "--tool", "x"]);
         Assert.Equal(CommandKind.Run, c.Kind);
         Assert.Equal([new ToolSpec("pen-test", "1")], c.Tools);
         Assert.True(c.Docker);

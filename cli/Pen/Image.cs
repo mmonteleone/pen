@@ -60,7 +60,7 @@ internal static class Image
     /// as its context as <see cref="ProjectLayerName"/>. Built on every launch; the
     /// cache makes that near-instant, and a rebuilt pen:latest invalidates it.
     /// Returns the image to run, or null when the project has no layer.
-    /// Output stays hidden unless the build is slow or fails.
+    /// Output is shown as <see cref="RunBuild"/> does.
     /// <para>
     /// Docker only ever reads a private copy, whose hash has to be the approved
     /// one: a session in the main checkout can write to an in-tree worktree's .pen/
@@ -81,8 +81,21 @@ internal static class Image
         var args = new List<string> { "build", "--progress", "plain", "-t", name, "--label", $"pen.project={project.Key}" };
         if (noCache) args.Add("--no-cache");
         args.AddRange(["-f", Path.Combine(context.Dir, "Dockerfile"), context.Dir]);
+        RunBuild(args, context: null, $"building the project layer {name} from .pen/Dockerfile", "building the project layer from .pen/Dockerfile failed");
+        return name;
+    }
+
+    /// <summary>
+    /// Runs docker build with <paramref name="args"/>, with its output hidden unless
+    /// the build is slow, when <paramref name="announce"/> and the output are shown,
+    /// or fails, when the end of the output and <paramref name="failure"/> are.
+    /// <paramref name="context"/>, if given, writes the tar context to its stdin.
+    /// </summary>
+    internal static void RunBuild(IReadOnlyList<string> args, Action<Stream>? context, string announce, string failure)
+    {
         var psi = Proc.Info("docker", args);
         psi.RedirectStandardOutput = psi.RedirectStandardError = true;
+        psi.RedirectStandardInput = context != null;
 
         var gate = new object();
         var buffered = new List<string>();
@@ -101,11 +114,23 @@ internal static class Image
         p.ErrorDataReceived += (_, e) => OnLine(e.Data);
         p.BeginOutputReadLine();
         p.BeginErrorReadLine();
+        if (context != null)
+        {
+            try
+            {
+                using var stdin = p.StandardInput.BaseStream;
+                context(stdin);
+            }
+            catch (IOException)
+            {
+                // docker exited before reading the whole context; its exit code says why.
+            }
+        }
         if (!p.WaitForExit(TimeSpan.FromSeconds(1.5)))
         {
             lock (gate)
             {
-                Out.Line($"building the project layer {name} from .pen/Dockerfile");
+                Out.Line(announce);
                 foreach (var l in buffered) Out.Raw(l);
                 buffered.Clear();
                 live = true;
@@ -118,9 +143,8 @@ internal static class Image
             {
                 foreach (var l in buffered.TakeLast(40)) Out.Raw(l);
             }
-            throw new PenException($"building the project layer from .pen/Dockerfile failed (docker build exited {p.ExitCode})");
+            throw new PenException($"{failure} (docker build exited {p.ExitCode})");
         }
-        return name;
     }
 
     /// <summary>

@@ -1,5 +1,5 @@
 # pen's own test recipe. Hidden, so listings and error messages don't offer it to users.
 hidden = true
 default = "1"
-version = '^\d+$'
+version = '^[1-9]\d*$'
 multiple = false
