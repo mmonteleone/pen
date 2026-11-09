@@ -508,4 +508,159 @@ public class TrustTests
         Assert.True(Prune.Remove(host, Assert.Single(Prune.Find(host, [], []), e => e.Key == project.Key)));
         Assert.False(File.Exists(path));
     }
+
+    // Tools
+
+    private static readonly ToolSpec Tool1 = new("pen-test", "1");
+
+    [Fact]
+    public void AProjectToolAsksUntilApproved_AndAddingOneOrChangingAVersionAsksAgain()
+    {
+        using var f = new Fixture();
+        const string toml = "tools = [\"pen-test:1\"]\n";
+        var r = f.Requested(toml);
+        Assert.False(r.IsEmpty);
+        Assert.Equal(Tool1, Assert.Single(r.Tools).Tool);
+
+        f.Store.Approve(r);
+        Assert.True(f.Store.CoversTool(Tool1));
+        Assert.True(f.Requested(toml).IsEmpty);
+        Assert.True(f.Requested("tools = [\"pen-test\"]\n").IsEmpty); // its default is the same version
+
+        Assert.Equal(new ToolSpec("pen-test", "2"), Assert.Single(f.Requested("tools = [\"pen-test:2\"]\n").Tools).Tool);
+        Assert.Equal(new ToolSpec("pen-test-b", "1"), Assert.Single(f.Requested("tools = [\"pen-test:1\", \"pen-test-b\"]\n").Tools).Tool);
+    }
+
+    [Fact]
+    public void ApprovingAToolDoesntApproveItsDomainsForAllow()
+    {
+        using var f = new Fixture();
+        f.Store.Approve(f.Requested("tools = [\"pen-test:1\"]\n"));
+        Assert.Equal(["example.org"], f.Requested("allow = [\"example.org\"]\n").Domains);
+    }
+
+    [Fact]
+    public void ToolsFromTheUserOrAFlagDontAsk_AndDontApproveTheEntryInTheProject()
+    {
+        using var f = new Fixture();
+        const string toml = "tools = [\"pen-test:1\"]\n";
+        Assert.True(f.Requested(toml, toml).IsEmpty);
+        Assert.True(f.Requested("", toml).IsEmpty);
+        var project = Config.Parse(toml, "p", ConfigKind.Project);
+        Assert.True(Trust.Requested(f.Project, Config.Empty, project, f.Store, [Tool1]).IsEmpty);
+
+        Assert.False(f.Store.CoversTool(Tool1));
+        Assert.Equal(Tool1, Assert.Single(f.Requested(toml).Tools).Tool);
+    }
+
+    [Fact]
+    public void ThePromptShowsTheToolAndTheDomainsItBrings()
+    {
+        var text = string.Join('\n', new TrustRequest([], false, null, null, null) { Tools = [new(Tool1, true, ["example.org"]), new(new("pen-test-b", "1"), true, [])] }.Lines());
+        Assert.Contains("tool pen-test:1: sessions run with it installed, and the sandbox can reach example.org", text);
+        Assert.Contains("tool pen-test-b:1: sessions run with it installed\n", text + "\n");
+    }
+
+    [Fact]
+    public void ALongListOfToolsCantHideTheDomains()
+    {
+        var tools = Enumerable.Range(1, 500).Select(i => new ToolRequest(new("pen-test-b", i.ToString(System.Globalization.CultureInfo.InvariantCulture)), true, [])).ToList();
+        var r = new TrustRequest(["a.example"], true, null, null, null) { Tools = tools };
+        var lines = r.Lines().ToList();
+        Assert.Equal(1 + TrustRequest.MaxListedTools + 1 + 1, lines.Count);
+        Assert.Contains("480 more tools", lines[^2]);
+        Assert.Contains("allow a.example", lines[^1]);
+        Assert.Contains("480 tools not listed", r.Question);
+        Assert.Equal(502, r.AllLines().Count());
+    }
+
+    [Theory]
+    [InlineData("tool pen-test")]
+    [InlineData("tool :1")]
+    [InlineData("tool pen-test:1;id")]
+    [InlineData("tool PEN:1")]
+    [InlineData("tool")]
+    [InlineData("tool-allow pen-test:1")]
+    [InlineData("tool-allow pen-test:1 example.org extra")]
+    [InlineData("tool-allow pen-test:1 not_a_domain")]
+    [InlineData("tool-allow pen-test example.org")]
+    [InlineData("tool-allow  pen-test:1 example.org")]
+    public void AToolLineThatIsntOneMakesTheStoreCorrupt(string line)
+    {
+        using var f = new Fixture();
+        f.Store.ApproveDomains(["fine.example"]);
+        File.AppendAllText(f.StorePath, line + "\n");
+        Assert.False(f.Store.CoversDomain("fine.example"));
+        Assert.False(f.Store.CoversTool(Tool1));
+    }
+
+    [Fact]
+    public void AnApprovedToolIsStoredAsWritten_AndAHostileOneIsRefused()
+    {
+        using var f = new Fixture();
+        f.Store.Approve(new TrustRequest([], false, null, null, null) { Tools = [new(Tool1, true, ["example.org"])] });
+        Assert.Contains("tool pen-test:1\n", File.ReadAllText(f.StorePath));
+        Assert.Contains("tool-allow pen-test:1 example.org\n", File.ReadAllText(f.StorePath));
+        Assert.Throws<PenException>(() => f.Store.Approve(new TrustRequest([], false, null, null, null) { Tools = [new(new("pen-test", "1\ndocker"), true, [])] }));
+        Assert.Throws<PenException>(() => f.Store.Approve(new TrustRequest([], false, null, null, null) { Tools = [new(Tool1, true, ["evil.example\ndocker"])] }));
+        Assert.False(f.Store.Docker);
+        Assert.False(f.Store.CoversToolDomain(Tool1, "evil.example"));
+    }
+
+    /// <summary>The embedded pen-test tool, as a pen whose recipe brings these domains would have it.</summary>
+    private static RecipeCatalog Bringing(params string[] domains) => RecipeCatalog.FromFiles(new Dictionary<string, string>
+    {
+        ["tools/pen-test/tool.toml"] = $"default = \"1\"\nversion = '^\\d+$'\nallow = [{string.Join(", ", domains.Select(d => $"\"{d}\""))}]\n",
+        ["tools/pen-test/install.sh"] = "#!/bin/sh\n",
+    });
+
+    private TrustRequest RequestedWith(Fixture f, string projectToml, RecipeCatalog catalog) =>
+        Trust.Requested(f.Project, Config.Empty, Config.Parse(projectToml, "p", ConfigKind.Project), f.Store, catalog: catalog);
+
+    private const string ToolToml = "tools = [\"pen-test:1\"]\n";
+
+    [Fact]
+    public void ARecipeThatAddsADomainAsksForOnlyThatOne()
+    {
+        using var f = new Fixture();
+        f.Store.Approve(RequestedWith(f, ToolToml, Bringing("example.org")));
+        Assert.True(RequestedWith(f, ToolToml, Bringing("example.org")).IsEmpty);
+
+        var r = RequestedWith(f, ToolToml, Bringing("example.org", "example.net"));
+        var tool = Assert.Single(r.Tools);
+        Assert.False(tool.IsNew);
+        Assert.Equal(["example.net"], tool.Domains);
+        Assert.Contains(r.Lines(), l => l.Contains("pen-test:1 now brings more domains") && l.Contains("example.net") && !l.Contains("example.org"));
+        Assert.Contains(r.AllLines(), l => l.Contains("example.net"));
+
+        f.Store.Approve(r);
+        Assert.True(RequestedWith(f, ToolToml, Bringing("example.org", "example.net")).IsEmpty);
+    }
+
+    [Fact]
+    public void ARecipeThatDropsADomainDoesntAsk()
+    {
+        using var f = new Fixture();
+        f.Store.Approve(RequestedWith(f, ToolToml, Bringing("example.org", "example.net")));
+        Assert.True(RequestedWith(f, ToolToml, Bringing("example.org")).IsEmpty);
+    }
+
+    [Fact]
+    public void AnApprovedAllowDomainDoesntApproveItForATool()
+    {
+        using var f = new Fixture();
+        f.Store.Approve(RequestedWith(f, ToolToml, Bringing("example.org")));
+        f.Store.ApproveDomains(["example.net", ".wild.example"]);
+        Assert.Equal(["example.net", "a.wild.example"], Assert.Single(RequestedWith(f, ToolToml, Bringing("example.org", "example.net", "a.wild.example")).Tools).Domains);
+    }
+
+    [Fact]
+    public void AToolsApprovedDomainDoesntApproveItForAllow_OrForAnotherVersion()
+    {
+        using var f = new Fixture();
+        f.Store.Approve(RequestedWith(f, ToolToml, Bringing("example.net")));
+        Assert.False(f.Store.CoversDomain("example.net"));
+        Assert.Equal(["example.net"], RequestedWith(f, "allow = [\"example.net\"]\n", Bringing("example.net")).Domains);
+        Assert.False(f.Store.CoversToolDomain(new("pen-test", "2"), "example.net"));
+    }
 }

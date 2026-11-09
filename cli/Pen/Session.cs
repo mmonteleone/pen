@@ -20,8 +20,11 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
     /// <param name="docker">with Docker-in-Docker (pen --docker, or docker = true in .pen/config.toml)</param>
     /// <param name="ports">to forward from the host (pen --port and ports in .pen/config.toml, merged)</param>
     /// <param name="answers">where approvals of .pen/ come from (default: this process's stdin)</param>
-    public int Run(IReadOnlyList<string> command, bool docker = false, IReadOnlyList<Port>? ports = null, Answers? answers = null)
+    /// <param name="flagTools">from pen --tool, which need no approval</param>
+    /// <param name="recipes">where tools come from (default: the embedded recipes)</param>
+    public int Run(IReadOnlyList<string> command, bool docker = false, IReadOnlyList<Port>? ports = null, Answers? answers = null, IReadOnlyList<ToolSpec>? flagTools = null, RecipeCatalog? recipes = null)
     {
+        var catalog = recipes ?? RecipeCatalog.Embedded;
         // Every session holds project.lock and its dir's worktree lock
         // shared; pen reset holds the first exclusive, pen sign the second.
         EnsureRuntimeDir(host, project);
@@ -34,19 +37,23 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
             throw new PenException("not starting: deal with the warning above first");
 
         RepoGuard.CheckAtStart(project.Dir);
+        // Tools that can't go together stop the session, whatever's approved.
+        var tools = ToolSpec.Merge(catalog, user.Tools, projectConfig.Tools, flagTools ?? []);
         // Before anything below uses a setting from .pen/.
-        Trust.RequireForSession(host, project, user, projectConfig, answers ?? Answers.FromProcess());
+        Trust.RequireForSession(host, project, user, projectConfig, answers ?? Answers.FromProcess(), flagTools, catalog);
         var mounts = RepoGuard.PrepareMounts(project.Dir, host.Home);
         // What the session-end check takes as the submodules' own (PrepareMounts protects them).
         var modules = project.IsRepo ? RepoScan.FindModuleRepos(project.CommonGitDir!) : [];
         Image.EnsureCurrent();
-        var image = Image.EnsureProjectLayer(host, project) ?? Image.Name;
+        var toolsImage = ToolsImage.Ensure(tools, catalog);
+        var image = Image.EnsureProjectLayer(host, project, baseImage: toolsImage) ?? toolsImage;
         // Under rootless Docker, the host user is container root: the agent
         // runs as UID 0 (with no capabilities) on a read-only root filesystem.
         var rootless = Docker.IsRootless();
         var owner = GitHub.ProjectOwner(project, projectConfig);
         var token = GitHub.TokenFor(owner, user, RuntimeDir, host);
-        var allowlist = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow, projectConfig.Allow);
+        var toolDomains = ToolSpec.DomainsOf(tools, catalog);
+        var allowlist = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow, projectConfig.Allow, toolDomains);
 
         // One docker session per project: two daemons can't share the dind
         // volume. A dind still using it (an earlier session's teardown failed)
@@ -96,6 +103,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         }
         if (docker) File.WriteAllText(session.DockerMarker, "");
         session.WritePorts(forwarded);
+        session.WriteTools(tools, toolDomains);
         session.WriteCommand(command);
         session.WriteStarted(DateTime.UtcNow);
         File.WriteAllText(session.File("squid.conf"), Embedded.Text("proxy/squid.conf"));

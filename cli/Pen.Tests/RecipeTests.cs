@@ -86,6 +86,7 @@ public class RecipeTests
     [InlineData("default = \"10\"\nversion = '^\\d+$'\n[env]\nHTTP_PROXY = \"x\"", "is set by pen")]
     [InlineData("default = \"10\"\nversion = '^\\d+$'\n[env]\nPEN_X = \"x\"", "is set by pen")]
     [InlineData("default = \"10\"\nversion = '^\\d+$'\n[env]\nX = 1", "env.X must be")]
+    [InlineData("default = \"10\"\nversion = '^\\d+$'\n[env]\nX = \"a\\nRUN evil\"", "line break")]
     [InlineData("default = \"10\"\nversion = '^\\d+$'\ndefaults = \"1\"", "unknown key")]
     [InlineData("default = \"10\"\ndefault = \"11\"\nversion = '^\\d+$'", "tools/x/tool.toml:2:")]
     [InlineData("default = ", "tools/x/tool.toml:1:")]

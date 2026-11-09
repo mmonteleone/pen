@@ -41,6 +41,14 @@ internal sealed class SessionDir(string projectKey, string path)
     public string StartedFile => File("started");
     /// <summary>The ports forwarded from the host's 127.0.0.1, one per line, for pen ps.</summary>
     public string PortsFile => File("ports");
+    /// <summary>The session's tools, as name:version, one per line, for pen ps.</summary>
+    public string ToolsFile => File("tools");
+    /// <summary>
+    /// The domains its tools brought, one per line, so rewriting its allowlist keeps them,
+    /// whether they came from a flag no later command knows about or from a recipe a later
+    /// pen has changed. Only what the session started with, never read again from .pen/.
+    /// </summary>
+    public string ToolDomainsFile => File("tool-domains");
     /// <summary>Marks a docker session: its compose calls all pass --profile docker.</summary>
     public string DockerMarker => File("docker");
 
@@ -86,6 +94,18 @@ internal sealed class SessionDir(string projectKey, string path)
         System.IO.File.Exists(PortsFile)
             ? System.IO.File.ReadAllLines(PortsFile).Select(l => int.TryParse(l, CultureInfo.InvariantCulture, out var p) ? p : 0).Where(p => p > 0).ToList()
             : [];
+
+    public void WriteTools(IEnumerable<ToolSpec> tools, IEnumerable<string> domains)
+    {
+        System.IO.File.WriteAllText(ToolsFile, string.Concat(tools.Select(t => t + "\n")));
+        System.IO.File.WriteAllText(ToolDomainsFile, string.Concat(domains.Select(d => d + "\n")));
+    }
+
+    /// <summary>The tools; none for a session started by a pen that didn't record them.</summary>
+    public string[] ReadTools() => System.IO.File.Exists(ToolsFile) ? System.IO.File.ReadAllLines(ToolsFile) : [];
+
+    /// <summary>The domains its tools brought; none for a session started by a pen that didn't record them.</summary>
+    public string[] ReadToolDomains() => System.IO.File.Exists(ToolDomainsFile) ? System.IO.File.ReadAllLines(ToolDomainsFile) : [];
 
     /// <summary>The common git dir the session started with, or null when it didn't start in a repo.</summary>
     public (bool StartedWithGit, string? CommonGitDir) ReadGit()

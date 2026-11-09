@@ -261,4 +261,65 @@ public class PruneTests
         Assert.True(Directory.Exists(host.RuntimeDir(key)));
         Assert.True(Prune.Remove(host, e));
     }
+
+    private const string CurrentBase = "sha256:current", OldBase = "sha256:old";
+    private const string OldTools = "pen-tools:0123456789abcdef", CurrentTools = "pen-tools:fedcba9876543210";
+
+    [Fact]
+    public void OnlyToolsImagesOnAnotherBaseAreStale()
+    {
+        // A stacked layer inherits its tools image's label, so every image here has the old one.
+        string[] images =
+        [
+            OldTools,
+            "pen-foo-0123abcd:0123456789abcdef",
+            "pen-foo-0123abcd-89abcdef:0123456789abcdef",
+            "pen-tools-0123abcd:0123456789abcdef", // a project named tools
+            "pen-tools-0123abcd:latest",
+            "pen-tools:latest", // not a name pen gives
+            "other/pen-tools:0123456789abcdef",
+        ];
+        Assert.Equal([OldTools], Prune.StaleToolsImages(images, CurrentBase, _ => OldBase));
+    }
+
+    [Fact]
+    public void AToolsImageOnTheCurrentBaseStays() =>
+        Assert.Equal([OldTools], Prune.StaleToolsImages([CurrentTools, OldTools], CurrentBase, i => i == OldTools ? OldBase : CurrentBase));
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("<no value>")]
+    public void AToolsImageWithoutAReadableLabelStays(string? label) =>
+        Assert.Empty(Prune.StaleToolsImages([OldTools], CurrentBase, _ => label));
+
+    [Fact]
+    public void WithoutACurrentBaseNothingIsStale() =>
+        Assert.Empty(Prune.StaleToolsImages([OldTools], null, _ => OldBase));
+
+    /// <summary>A docker with images on each base, and a stacked layer that inherited the old label.</summary>
+    private const string ImagesDocker = """
+        case "$*" in
+          "image ls"*) printf '%s\n' pen-tools:0123456789abcdef pen-tools:fedcba9876543210 pen-foo-0123abcd:0123456789abcdef ;;
+          "image inspect --format {{.Id}} pen:latest") echo sha256:current ;;
+          "image inspect"*fedcba9876543210) echo sha256:current ;;
+          "image inspect"*) echo sha256:old ;;
+        esac
+        exit 0
+
+        """;
+
+    [Fact]
+    public void RunAsksFirst_AndThenRemovesOnlyTheStaleToolsImage()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        using var fake = new FakeDocker(t, ImagesDocker);
+        string[] Removed() => File.ReadAllLines(Path.Combine(t.Path, "calls")).Where(c => c.StartsWith("image rm", StringComparison.Ordinal)).ToArray();
+
+        Assert.Equal(1, Prune.Run(host, new StringReader("n\n")));
+        Assert.Empty(Removed());
+        Assert.Equal(0, Prune.Run(host, new StringReader("y\n")));
+        Assert.Equal($"image rm {OldTools}", Assert.Single(Removed()));
+    }
 }

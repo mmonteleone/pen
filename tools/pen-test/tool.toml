@@ -3,3 +3,8 @@ hidden = true
 default = "1"
 version = '^[1-9]\d*$'
 multiple = false
+allow = ["example.org"]
+
+[env]
+# Quotes, a dollar and a backslash, which have to reach the session literally.
+TOOL_TEST_ENV = 'from "pen-test" $HOME \ here'

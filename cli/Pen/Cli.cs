@@ -1,6 +1,6 @@
 namespace Pen;
 
-internal enum CommandKind { Run, Upgrade, Allow, Trust, Sign, Reset, Ps, Prune, Help, Version, ToolList, BuildToolsImage }
+internal enum CommandKind { Run, Upgrade, Allow, Trust, Sign, Reset, Ps, Prune, Help, Version, ToolList }
 
 /// <summary>
 /// A parsed command line. For Run, Args is the command to run in the sandbox
@@ -17,14 +17,6 @@ internal sealed record Command(CommandKind Kind, IReadOnlyList<string> Args, boo
 
 internal static class Cli
 {
-    /// <summary>
-    /// With --tool only: builds those tools' image if it's missing, then the current
-    /// directory's project layer on it if there's one, and prints the name of the last.
-    /// Undocumented, for the smoke checks, since sessions don't run tools images.
-    /// It reads no config and never asks: a .pen/ that isn't approved is refused.
-    /// </summary>
-    private const string BuildToolsImageOption = "--build-tools-image";
-
     public const string Usage = """
         usage:
           pen [<options>]           interactive shell in this project's sandbox
@@ -35,8 +27,7 @@ internal static class Cli
                                     --port <n>: forward localhost:<n> to the sandbox (repeatable;
                                     or ports = [<n>, …] in .pen/config.toml)
                                     --tool <spec>: a tool, as name or name:version (repeatable;
-                                    or tools = […] in either config.toml). Checked only:
-                                    sessions don't install tools yet
+                                    or tools = […] in either config.toml)
           pen --tool list           list the tools pen can install
           pen upgrade [--clean]     newer base image and agents; --clean skips the cache
           pen allow <domain…> [--global]
@@ -75,15 +66,16 @@ internal static class Cli
               --tool <spec>
                          a tool, as name or name:version (repeatable); tools = […] in
                          either config.toml adds to these, and pen --tool list shows what's
-                         available. Checked only: sessions don't install tools yet
+                         available. The session runs with them installed, and can reach the
+                         domains they need
             """,
         ["upgrade"] = """
             usage: pen upgrade [--clean]
 
             Updates the base image and reinstalls the agents at their latest versions,
-            then pulls newer proxy and Docker-in-Docker images. Run in a project with an
-            approved .pen/Dockerfile (see pen trust), it rebuilds that layer too. Logins
-            and config are kept.
+            then pulls newer proxy and Docker-in-Docker images. It rebuilds the tools in your
+            config, and run in a project, the approved tools and .pen/Dockerfile there (see
+            pen trust). Logins and config are kept.
 
               --clean    rebuild without the build cache
             """,
@@ -107,8 +99,9 @@ internal static class Cli
             usage: pen trust [--yes | --list]
 
             .pen/ can be written by an agent, so what it asks for needs your approval first:
-            allow domains not already allowed, docker = true, a github_owner that differs
-            from origin's, and a .pen/Dockerfile with the rest of .pen/ it builds from.
+            allow domains not already allowed, tools with the domains they bring, docker = true,
+            a github_owner that differs from origin's, and a .pen/Dockerfile with the rest of
+            .pen/ it builds from.
             pen trust lists what's new in this directory and asks, as a session would.
             Approved values aren't asked about again; a changed .pen/Dockerfile or other
             file there is. Approvals are per directory, so a new worktree starts with none.
@@ -121,7 +114,8 @@ internal static class Cli
 
             Lists the running sessions of every project: the project's directory, the
             session's id (its containers are named pen-<dir>-<hash>-<id>-…), docker for
-            a session with Docker-in-Docker, how long it has been running, and its command.
+            a session with Docker-in-Docker, its ports and tools, how long it has been running,
+            and its command.
             """,
         ["sign"] = """
             usage: pen sign [<base>]
@@ -147,8 +141,9 @@ internal static class Cli
             usage: pen prune
 
             Finds the volumes, project-layer images and state that projects you have moved
-            or deleted left behind, lists them with the projects still in use, and removes
-            them after asking. A project whose directory is gone may be on a volume that
+            or deleted left behind, and tools images built on an old base image. Lists them
+            with the projects still in use, and removes them after asking. A project whose
+            directory is gone may be on a volume that
             isn't mounted: mount it first. Projects pen hasn't run in since it began
             recording their directories are listed with the commands to remove them by
             hand, never removed. Not while a session is open in the project.
@@ -181,7 +176,6 @@ internal static class Cli
         var docker = false;
         var ports = new List<int>();
         var tools = new List<ToolSpec>();
-        var buildToolsImage = false;
         var i = 0;
         while (i < args.Count)
         {
@@ -213,11 +207,6 @@ internal static class Cli
                 tools.Add(tool);
                 i += a == "--tool" ? 2 : 1;
             }
-            else if (a == BuildToolsImageOption)
-            {
-                buildToolsImage = true;
-                i++;
-            }
             else break;
             runOption ??= a.StartsWith("--port", StringComparison.Ordinal) ? "--port"
                 : a.StartsWith("--tool", StringComparison.Ordinal) ? "--tool"
@@ -226,19 +215,14 @@ internal static class Cli
         if (runOption != null)
         {
             var after = args.Skip(i).ToList();
-            IReadOnlyList<ToolSpec> Canonical() =>
-                ToolSpec.TryCanonicalize(tools, RecipeCatalog.Embedded, out var canonical) is { } conflict ? throw Error($"--tool: {conflict}") : canonical;
-            if (buildToolsImage)
-            {
-                if (docker || ports.Count > 0 || after.Count > 0) throw Error($"{BuildToolsImageOption} takes only --tool");
-                return new(CommandKind.BuildToolsImage, []) { Tools = Canonical() };
-            }
             var c = Parse(after);
             if (c.Kind != CommandKind.Run)
                 throw Error(after.Count > 0 && Subcommands.ContainsKey(after[0])
                     ? $"{runOption} goes only with a command to run, not pen {after[0]}"
                     : $"{runOption} goes only with a command to run");
-            return c with { Docker = docker, Ports = ports, Tools = Canonical() };
+            if (ToolSpec.TryCanonicalize(tools, RecipeCatalog.Embedded, out var canonical) is { } conflict)
+                throw Error($"--tool: {conflict}");
+            return c with { Docker = docker, Ports = ports, Tools = canonical };
         }
         if (args.Count == 0) return new(CommandKind.Run, []);
         var first = args[0];

@@ -310,16 +310,13 @@ public class CliTests
     }
 
     [Fact]
-    public void TheToolsImageBuildOptionIsHiddenAndTakesOnlyTools()
+    public void TheHelpNoLongerSaysSessionsDontInstallTools()
     {
-        var c = Cli.Parse(["--tool", "pen-test:2", "--tool", "pen-test-b", "--build-tools-image"]);
-        Assert.Equal(CommandKind.BuildToolsImage, c.Kind);
-        Assert.Equal([new ToolSpec("pen-test-b", "1"), new ToolSpec("pen-test", "2")], c.Tools);
-        Assert.Equal(c.Tools, Cli.Parse(["--build-tools-image", "--tool", "pen-test-b", "--tool", "pen-test:2"]).Tools);
-
-        Assert.Equal(2, Assert.Throws<PenException>(() => Cli.Parse(["--build-tools-image", "true"])).ExitCode);
-        Assert.Throws<PenException>(() => Cli.Parse(["--build-tools-image", "--docker"]));
-        Assert.Throws<PenException>(() => Cli.Parse(["--build-tools-image", "--port", "8000"]));
-        Assert.DoesNotContain("build-tools-image", Cli.Usage);
+        Assert.DoesNotContain("don't install tools", Cli.Usage);
+        Assert.DoesNotContain("don't install tools", Cli.SubcommandHelp["run"]);
     }
+
+    [Fact]
+    public void TheToolsImageBuildOptionIsGone() =>
+        Assert.Equal(2, Assert.Throws<PenException>(() => Cli.Parse(["--tool", "pen-test", "--build-tools-image"])).ExitCode);
 }

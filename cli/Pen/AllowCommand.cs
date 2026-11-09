@@ -104,8 +104,10 @@ internal static class AllowCommand
 
     /// <summary>
     /// Regenerates one running session's allowlist from the current config
-    /// files, of its project's only the approved domains, and has its Squid
-    /// reload it. Reports a failure, naming the session.
+    /// files, of its project's only the approved domains, plus the domains of the
+    /// tools it started with, and has its Squid reload it. A tools entry added to
+    /// .pen/ since isn't in that record, so it adds nothing. Reports a failure, naming
+    /// the session.
     /// </summary>
     internal static bool Apply(HostEnv host, SessionDir s)
     {
@@ -117,7 +119,7 @@ internal static class AllowCommand
             var user = Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User);
             var projectConfig = Config.Load(Path.Combine(projectDir, ".pen"), Out.Field(Path.Combine(projectDir, ".pen")), ConfigKind.Project);
             var approved = TrustStore.Load(host.RuntimeDir(s.ProjectKey), projectDir).ApprovedOf(projectConfig.Allow);
-            var merged = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow, approved);
+            var merged = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow, approved, s.ReadToolDomains());
             // Truncate and write, never rename: the proxy's single-file bind
             // mount pins the inode.
             using (var f = new FileStream(s.File("allowlist.txt"), FileMode.Truncate, FileAccess.Write))
@@ -188,8 +190,10 @@ internal static class AllowCommand
             .Where(File.Exists)
             .Select(p => File.ReadLines(p));
         // What a session would get: an unapproved domain in .pen/ stays listed.
-        var approved = TrustStore.For(host, project).ApprovedOf(projectConfig.Allow);
-        var allowed = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow, approved).ToHashSet(StringComparer.Ordinal);
+        var store = TrustStore.For(host, project);
+        var approved = store.ApprovedOf(projectConfig.Allow);
+        var toolDomains = ToolSpec.DomainsOf(user.Tools.Concat(store.ApprovedToolsOf(projectConfig.Tools, RecipeCatalog.Embedded)), RecipeCatalog.Embedded);
+        var allowed = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow, approved, toolDomains).ToHashSet(StringComparer.Ordinal);
         var blocked = BlockedAcross(logs).Where(b => !Allowlist.IsAllowed(allowed, b.Host)).ToList();
         if (blocked.Count == 0)
         {

@@ -164,8 +164,35 @@ internal static class Image
         return project.Dir == project.RepoDir ? $"{project.Key}:{tag}" : $"{project.Key}-{Project.Hash(project.Dir)}:{tag}";
     }
 
-    /// <summary>Rebuilds the project's layer, if it has one and it's approved; pen upgrade doesn't ask.</summary>
-    internal static void UpgradeProjectLayer(HostEnv host, Project project, bool clean)
+    /// <summary>
+    /// The tools pen upgrade rebuilds: what a session started here with no --tool would have,
+    /// less what isn't approved, as pen upgrade doesn't ask. Outside a project, the user's alone.
+    /// A problem with the project's only costs its tools, with a note.
+    /// </summary>
+    internal static IReadOnlyList<ToolSpec> UpgradeTools(HostEnv host, Project? project, Config user, RecipeCatalog? recipes = null)
+    {
+        var catalog = recipes ?? RecipeCatalog.Embedded;
+        if (project == null) return user.Tools;
+        Config projectConfig;
+        try { projectConfig = Config.Load(project.PenDir, ".pen", ConfigKind.Project); }
+        catch (PenException e)
+        {
+            Out.Line($"skipping this project's tools: {e.Message}");
+            return user.Tools;
+        }
+        var unapproved = Trust.UnapprovedTools(projectConfig, user.Tools, TrustStore.For(host, project), catalog).Select(r => r.Tool).ToList();
+        if (unapproved.Count > 0)
+            Out.Line($"skipping tools that .pen/ asks for and aren't approved (pen trust reviews them): {string.Join(' ', unapproved.Select(t => Out.Field(t.ToString())))}");
+        if (ToolSpec.TryCanonicalize(user.Tools.Concat(projectConfig.Tools.Except(unapproved)), catalog, out var tools) is { } conflict)
+        {
+            Out.Line($"skipping this project's tools: {conflict}");
+            return user.Tools;
+        }
+        return tools;
+    }
+
+    /// <summary>Rebuilds the project's layer on <paramref name="baseImage"/>, if it has one and it's approved; pen upgrade doesn't ask.</summary>
+    internal static void UpgradeProjectLayer(HostEnv host, Project project, bool clean, string baseImage = Name)
     {
         if (!Trust.HasDockerfile(project)) return;
         if (Trust.UnapprovedLayer(project, TrustStore.For(host, project)) != null)
@@ -173,25 +200,26 @@ internal static class Image
             Out.Line("skipping the project layer: .pen/ isn't approved (pen trust reviews it)");
             return;
         }
-        Out.Line($"rebuilding the project layer {ProjectLayerName(project)}");
-        EnsureProjectLayer(host, project, noCache: clean);
+        Out.Line($"rebuilding the project layer {ProjectLayerName(project, baseImage)}");
+        EnsureProjectLayer(host, project, noCache: clean, baseImage: baseImage);
     }
 
     /// <summary>
     /// pen upgrade: a newer base image, the agents reinstalled (PEN_REFRESH
-    /// busts their cached layers), and newer sidecar images.
+    /// busts their cached layers), the tools from config on it (a new base means a new
+    /// tools image), and newer sidecar images.
     /// </summary>
-    public static void Upgrade(bool clean)
+    public static void Upgrade(HostEnv host, Config user, bool clean)
     {
         Out.Line($"upgrading {Name}{(clean ? " from scratch (--clean)" : "")}");
         Build(Embedded.ImageHash(), refresh: DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(), pull: true, noCache: clean);
 
         // The project layer too, when run in a project that has one.
-        var host = HostEnv.FromProcess();
         Project? project = null;
         try { project = Project.Resolve(StartDir.Get(), host); }
         catch (PenException) { }
-        if (project != null) UpgradeProjectLayer(host, project, clean);
+        var tools = ToolsImage.Ensure(UpgradeTools(host, project, user), RecipeCatalog.Embedded, noCache: clean);
+        if (project != null) UpgradeProjectLayer(host, project, clean, tools);
 
         Out.Line("pulling sidecar images");
         // compose reads the embedded compose.yaml from stdin. Its required

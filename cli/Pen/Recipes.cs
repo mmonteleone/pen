@@ -19,7 +19,7 @@ internal sealed class Recipe
     public bool Hidden { get; init; }
     /// <summary>Domains the tool needs, in file order.</summary>
     public List<string> Allow { get; } = [];
-    /// <summary>Environment for sessions with the tool, in file order.</summary>
+    /// <summary>Environment for sessions with the tool, in file order: set in its image (<see cref="ToolsImage"/>).</summary>
     public List<KeyValuePair<string, string>> Env { get; } = [];
     public string InstallPath => $"{RecipeCatalog.Root}{Name}/{RecipeCatalog.InstallFile}";
     /// <summary>The text of tool.toml, as loaded.</summary>
@@ -94,7 +94,9 @@ internal sealed class Recipe
             {
                 if (!Config.EnvNameRegex().IsMatch(variable)) throw Error($"env.{variable} isn't a valid environment variable name");
                 if (Config.IsReservedEnv(variable)) throw Error($"env.{variable} is set by pen");
-                recipe.Env.Add(new(variable, Config.String(value, $"env.{variable}", Error)));
+                var setting = Config.String(value, $"env.{variable}", Error);
+                if (setting.Any(char.IsControl)) throw Error($"env.{variable} can't hold a line break or control character");
+                recipe.Env.Add(new(variable, setting));
             }
         }
         return recipe;
@@ -153,6 +155,9 @@ internal sealed partial class RecipeCatalog
         }
         return catalog;
     }
+
+    /// <summary>Whether <paramref name="name"/> is the form a recipe's name has.</summary>
+    internal static bool IsName(string name) => NameRegex().IsMatch(name);
 
     private IEnumerable<Recipe> Offered => Recipes.Where(r => !r.Hidden);
 

@@ -47,16 +47,24 @@ internal static class ToolsImage
     /// one JSON string and so one argument, and Dockerfile variables aren't expanded in it.
     /// Only that recipe's directory is mounted, read-only, so a script can't see another's
     /// and none stays in the image. pen:latest has no USER, but this states the root the
-    /// scripts rely on.
+    /// scripts rely on. Each recipe's [env] is ENV after all the RUNs, so installs don't
+    /// depend on each other, sessions and a .pen/Dockerfile's RUNs get it, and that
+    /// Dockerfile or the user's [env] can still override it. A value is literal.
     /// </summary>
     private static string Dockerfile(List<Install> plan)
     {
         static string Quoted(string s) => $"\"{JsonEncodedText.Encode(s, JavaScriptEncoder.UnsafeRelaxedJsonEscaping)}\"";
+        static string EnvValue(string s) => $"\"{s.Replace(@"\", @"\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal).Replace("$", @"\$", StringComparison.Ordinal)}\"";
         var text = new StringBuilder($"FROM {Image.Name}\nUSER root\n");
         foreach (var (recipe, versions) in plan)
         {
             var argv = string.Join(',', versions.Prepend($"{MountPoint}/{RecipeCatalog.InstallFile}").Select(Quoted));
             text.Append($"RUN --mount=type=bind,source={RecipeCatalog.Root}{recipe.Name},target={MountPoint} [{argv}]\n");
+        }
+        foreach (var (recipe, _) in plan)
+        {
+            foreach (var (name, value) in recipe.Env)
+                text.Append($"ENV {name}={EnvValue(value)}\n");
         }
         return text.ToString();
     }
@@ -105,23 +113,32 @@ internal static class ToolsImage
             Write(recipe.InstallPath, recipe.Script, (UnixFileMode)0b111_101_101);
     }
 
+    /// <summary>pen:latest's image ID, or null if it can't be read.</summary>
+    internal static string? CurrentBaseId()
+    {
+        var ids = Proc.Capture("docker", ["image", "inspect", "--format", "{{.Id}}", Image.Name]);
+        var id = ids.StandardOutput.Trim();
+        return ids.ExitStatus.ExitCode != 0 || id.Length == 0 ? null : id;
+    }
+
     /// <summary>
-    /// The image to run for these tools, built if its tag doesn't exist. pen:latest with
+    /// The image to run for these tools, built if its tag doesn't exist, or always without
+    /// the build cache with <paramref name="noCache"/> (pen upgrade --clean). pen:latest with
     /// no tools. pen:latest has to be up to date already (<see cref="Image.EnsureCurrent"/>).
     /// </summary>
-    public static string Ensure(IReadOnlyList<ToolSpec> tools, RecipeCatalog catalog)
+    public static string Ensure(IReadOnlyList<ToolSpec> tools, RecipeCatalog catalog, bool noCache = false)
     {
         if (tools.Count == 0) return Image.Name;
-        var ids = Proc.Capture("docker", ["image", "inspect", "--format", "{{.Id}}", Image.Name]);
-        var baseId = ids.StandardOutput.Trim();
-        if (ids.ExitStatus.ExitCode != 0 || baseId.Length == 0)
-            throw new PenException($"can't read the ID of {Image.Name}: is Docker running?");
+        var baseId = CurrentBaseId() ?? throw new PenException($"can't read the ID of {Image.Name}: is Docker running?");
 
         var name = Tag(baseId, tools, catalog);
-        if (Proc.Capture("docker", ["image", "inspect", "--format", "{{.Id}}", name]).ExitStatus.ExitCode == 0)
+        if (!noCache && Proc.Capture("docker", ["image", "inspect", "--format", "{{.Id}}", name]).ExitStatus.ExitCode == 0)
             return name;
+        var args = new List<string> { "build", "--progress", "plain", "-t", name, "--label", $"{BaseIdLabel}={baseId}" };
+        if (noCache) args.Add("--no-cache");
+        args.Add("-");
         Image.RunBuild(
-            ["build", "--progress", "plain", "-t", name, "--label", $"{BaseIdLabel}={baseId}", "-"],
+            args,
             stdin => WriteContext(stdin, tools, catalog),
             $"building the tools image {name} for {string.Join(' ', ToolSpec.Merge(catalog, tools))}",
             "building the tools image failed");

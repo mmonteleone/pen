@@ -27,7 +27,7 @@ pen allow <domain…> [--global]  allow domains for this project (or all project
 pen allow                       list recently blocked domains
 pen allow --defaults            list the domains pen allows out of the box
 pen trust [--yes | --list]      review and approve what this project's .pen/ asks for
-pen ps                          list running sessions, in every project, with their forwarded ports
+pen ps                          list running sessions, in every project, with their forwarded ports and tools
 pen sign [<base>]               re-sign your unpushed commits with your own key
 pen upgrade [--clean]           update the base image and agents
 pen reset                       wipe this project's sandbox state (logins, caches)
@@ -161,6 +161,9 @@ inside the project, say), so a session asks before using what's new there, and d
 decline:
 
 - `allow` domains not already allowed;
+- `tools`, each at its version, with the domains it brings, and any domain its recipe brings after
+  that (a dropped one doesn't ask). These approvals are separate from `allow`'s. One you also name with
+  `--tool` or in `~/.config/pen/config.toml` doesn't ask, and isn't approved by that;
 - `docker = true`;
 - a `github_owner` that differs from `origin`'s owner;
 - a `.pen/Dockerfile`, by a hash of everything in `.pen/` except `config.toml`, so any change there
@@ -170,9 +173,9 @@ decline:
 
 `ports` isn't asked about: it only publishes to the host's loopback. Without a terminal a session
 refuses instead. `pen trust` reviews and approves the same list, `pen trust --yes` without asking.
-A long list of domains is cut short; `pen trust --list` shows everything.
+A long list of domains or tools is cut short; `pen trust --list` shows everything.
 Domains you add with `pen allow <domain>` count as approved, and unapproved ones never reach a
-running session's allowlist. `pen upgrade` skips a `.pen/Dockerfile` that isn't approved. Approvals are
+running session's allowlist. `pen upgrade` skips tools and a `.pen/Dockerfile` that aren't approved. Approvals are
 per directory, kept in pen's state directory, so a new worktree starts with none.
 
 ## Git in the sandbox
@@ -264,10 +267,11 @@ or set `docker = true` in `.pen/config.toml`. The session gets its own Docker da
   embedded image files changed, the next session rebuilds the base image.
 - `pen upgrade` reinstalls the agents at their latest versions and pulls newer proxy and Docker
   images, without waiting for a pen release (`--clean` skips the build cache). Run it in a project
-  with an approved `.pen/Dockerfile` to rebuild that layer too. Logins and config are kept.
+  with approved `tools` or an approved `.pen/Dockerfile` to rebuild those too; `tools` in your own config
+  are always rebuilt. Logins and config are kept.
 - `pen reset` wipes a project's sandbox state.
 - `pen prune` finds the volumes, project layers and state of projects you've moved or deleted, and
-  removes them after asking. Ones it can't place are listed with the commands to remove them by
+  tools images on an old base image, and removes them after asking. Ones it can't place are listed with the commands to remove them by
   hand. A directory on a volume that isn't mounted looks deleted, so mount it first.
 
 Once releases are published, Homebrew installs will use `brew upgrade pen` for CLI updates;

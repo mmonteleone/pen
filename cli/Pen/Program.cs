@@ -68,20 +68,13 @@ internal static class Program
         StartDir.Leave(host);
         if (command.Kind == CommandKind.Ps) return Ps.Run(host);
         if (command.Kind == CommandKind.Prune) return Prune.Run(host, Console.In);
-        if (command.Kind == CommandKind.BuildToolsImage)
-        {
-            Image.EnsureCurrent();
-            var tools = ToolsImage.Ensure(command.Tools, RecipeCatalog.Embedded);
-            Out.Stdout((Image.EnsureProjectLayer(host, Project.Resolve(StartDir.Get(), host), baseImage: tools) ?? tools) + "\n");
-            return 0;
-        }
         Config.EnsureUserConfig(host);
         var user = Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User);
 
         switch (command.Kind)
         {
             case CommandKind.Upgrade:
-                Image.Upgrade(command.Clean);
+                Image.Upgrade(host, user, command.Clean);
                 return 0;
             case CommandKind.Allow when command.Args.Count > 0:
                 return AllowCommand.Add(host, command.Args, command.Global);
@@ -103,11 +96,8 @@ internal static class Program
     // --docker turns Docker-in-Docker on for one session; docker = true in
     // .pen/config.toml for every session. Nothing turns it off per session.
     // --port adds to ports in .pen/config.toml.
-    // tools from both config files and --tool have to go together, but nothing else uses them: the session is unchanged.
-    private static int RunSession(HostEnv host, Project project, Config user, Config projectConfig, Command command)
-    {
-        ToolSpec.Merge(RecipeCatalog.Embedded, user.Tools, projectConfig.Tools, command.Tools);
-        return new Session(host, project, user, projectConfig).Run(command.Args, docker: command.Docker || projectConfig.Docker == true,
-            ports: Port.Merge(projectConfig.Ports, command.Ports));
-    }
+    // --tool adds to tools in both config files.
+    private static int RunSession(HostEnv host, Project project, Config user, Config projectConfig, Command command) =>
+        new Session(host, project, user, projectConfig).Run(command.Args, docker: command.Docker || projectConfig.Docker == true,
+            ports: Port.Merge(projectConfig.Ports, command.Ports), flagTools: command.Tools);
 }

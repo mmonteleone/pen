@@ -63,6 +63,19 @@ internal readonly partial record struct ToolSpec(string Name, string Version)
         return canonical;
     }
 
+    /// <summary>The domains the tools' recipes bring, in order. A tool with no recipe (not one that's parsed) brings none.</summary>
+    public static List<string> DomainsOf(IEnumerable<ToolSpec> tools, RecipeCatalog catalog) =>
+        tools.Select(t => t.Name).Distinct(StringComparer.Ordinal)
+            .SelectMany(name => catalog.TryGet(name, out var recipe) ? recipe.Allow : [])
+            .ToList();
+
+    /// <summary>Whether <paramref name="text"/> has the form of a parsed tool, name:version.</summary>
+    internal static bool IsCanonicalText(string text)
+    {
+        var colon = text.IndexOf(':');
+        return colon > 0 && RecipeCatalog.IsName(text[..colon]) && IsVersionSyntax(text[(colon + 1)..]);
+    }
+
     /// <summary>The characters any version may use, whatever its recipe allows.</summary>
     internal static bool IsVersionSyntax(string version) => VersionSyntaxRegex().IsMatch(version);
 

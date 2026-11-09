@@ -65,8 +65,8 @@ public class TrustGateTests
         public string Seen(string name) => File.ReadAllText(Path.Combine(T.Path, name));
         public bool HasSeen(string name) => File.Exists(Path.Combine(T.Path, name));
 
-        public int Run(Answers answers) =>
-            new Session(Host, Project, User, ProjectConfig).Run(["true"], docker: ProjectConfig.Docker == true, answers: answers);
+        public int Run(Answers answers, IReadOnlyList<ToolSpec>? flagTools = null, RecipeCatalog? recipes = null) =>
+            new Session(Host, Project, User, ProjectConfig).Run(["true"], docker: ProjectConfig.Docker == true, answers: answers, flagTools: flagTools, recipes: recipes);
 
         public void AssertNothingReached()
         {
@@ -730,5 +730,310 @@ public class TrustGateTests
         finally { Console.SetOut(stdout); }
         Assert.Contains("evil.example", captured.ToString());
         Assert.DoesNotContain("ok.example", captured.ToString());
+    }
+
+    // Tools
+
+    /// <summary>
+    /// As <see cref="RecordingDocker"/>, with a base image to read the ID of, tools images
+    /// that exist only once built, and what compose run was told to run.
+    /// </summary>
+    private const string ToolsDocker = """
+        case "$*" in
+          "image inspect --format {{.Id}} pen:latest") echo sha256:base; exit 0 ;;
+          "image inspect --format {{.Id}} pen-tools:"*) [ -f tools-built ] || exit 1; exit 0 ;;
+          "build --progress plain -t pen-tools:"*) : >tools-built; echo "$*" >>tools-builds ;;
+        esac
+        case " $* " in
+          *" run --rm "*) printf '%s' "$PEN_IMAGE" >image-seen; find home -name tool-domains -exec cp {} tool-domains-seen \; ;;
+        esac
+
+        """ + RecordingDocker;
+
+    private const string ProjectTool = "tools = [\"pen-test:1\"]\n";
+    private static readonly ToolSpec PenTest = new("pen-test", "1");
+
+    private static Fixture ToolsFixture(string projectToml = ProjectTool, string dockerfile = "") =>
+        new(projectToml: projectToml, dockerfile: dockerfile, dockerBody: ToolsDocker);
+
+    [Fact]
+    public void AnUnapprovedProjectToolDoesNothingWithoutATerminal_AndTheMessageShowsItsDomains()
+    {
+        using var f = ToolsFixture();
+        var e = Assert.Throws<PenException>(() => f.Run(NoTerminal));
+        Assert.Contains("tool pen-test:1", e.Message);
+        Assert.Contains("example.org", e.Message);
+        Assert.Contains("pen trust", e.Message);
+        f.AssertNothingReached();
+    }
+
+    [Fact]
+    public void DecliningAProjectToolDoesNothing()
+    {
+        using var f = ToolsFixture();
+        Assert.Throws<PenException>(() => f.Run(Saying("n")));
+        f.AssertNothingReached();
+        Assert.False(TrustStore.For(f.Host, f.Project).CoversTool(PenTest));
+    }
+
+    [Fact]
+    public void AnApprovedProjectToolBuildsRunsAndAddsItsDomains_AndDoesntAskAgain()
+    {
+        using var f = ToolsFixture();
+        Assert.Equal(0, f.Run(Saying("y")));
+        Assert.Matches("^pen-tools:[0-9a-f]{16}$", f.Seen("image-seen"));
+        Assert.Contains("example.org", f.Seen("allowlist-seen").Split('\n'));
+        Assert.Equal(0, f.Run(NoTerminal));
+    }
+
+    [Fact]
+    public void ChangingAnApprovedToolsVersionAsksAgain_AndBuildsNothing()
+    {
+        using var f = ToolsFixture();
+        Assert.Equal(0, f.Run(Saying("y")));
+        File.Delete(f.CallsFile);
+        File.WriteAllText(f.Project.ProjectConfigPath, "tools = [\"pen-test:2\"]\n");
+        Assert.Throws<PenException>(() => f.Run(NoTerminal));
+        Assert.Empty(f.Calls);
+    }
+
+    [Fact]
+    public void AToolFromAFlagDoesntAsk_AddsItsDomains_AndDoesntApproveTheProjectsEntry()
+    {
+        using var f = ToolsFixture();
+        Assert.Equal(0, f.Run(NoTerminal, flagTools: [PenTest]));
+        Assert.Matches("^pen-tools:[0-9a-f]{16}$", f.Seen("image-seen"));
+        Assert.Contains("example.org", f.Seen("allowlist-seen").Split('\n'));
+        Assert.False(TrustStore.For(f.Host, f.Project).CoversTool(PenTest));
+
+        File.Delete(f.CallsFile);
+        Assert.Throws<PenException>(() => f.Run(NoTerminal));
+        Assert.Empty(f.Calls);
+    }
+
+    [Fact]
+    public void AToolFromUserConfigDoesntAsk_AndDoesntApproveTheProjectsEntry()
+    {
+        using var f = ToolsFixture();
+        var user = Config.Parse(ProjectTool, "u", ConfigKind.User);
+        Assert.Equal(0, new Session(f.Host, f.Project, user, f.ProjectConfig).Run(["true"], answers: NoTerminal));
+        Assert.Contains("example.org", f.Seen("allowlist-seen").Split('\n'));
+        Assert.False(TrustStore.For(f.Host, f.Project).CoversTool(PenTest));
+    }
+
+    [Fact]
+    public void AnUnapprovedToolDoesntSlipInBesideAFlag()
+    {
+        using var f = ToolsFixture(projectToml: "tools = [\"pen-test-b:1\"]\n");
+        var e = Assert.Throws<PenException>(() => f.Run(NoTerminal, flagTools: [PenTest]));
+        Assert.Contains("tool pen-test-b:1", e.Message);
+        f.AssertNothingReached();
+    }
+
+    [Fact]
+    public void ToolsThatCantGoTogetherStopTheSessionBeforeDocker()
+    {
+        using var f = ToolsFixture();
+        var e = Assert.Throws<PenException>(() => f.Run(Saying("y"), flagTools: [new("pen-test", "2")]));
+        Assert.Contains("can't be used together", e.Message);
+        f.AssertNothingReached();
+    }
+
+    [Fact]
+    public void AProjectLayerStacksOnTheSessionsTools_AndTheSessionRunsIt()
+    {
+        using var f = ToolsFixture(dockerfile: "FROM pen:latest\n");
+        Assert.Equal(0, f.Run(Saying("y")));
+        var tools = Assert.Single(File.ReadAllLines(Path.Combine(f.T.Path, "tools-builds")));
+        var tag = tools.Split(' ')[4]["pen-tools:".Length..];
+        Assert.Equal($"{f.Project.Key}:{tag}", f.Seen("image-seen"));
+        Assert.Contains(f.Calls, c => c.Contains($"--build-context pen:latest=docker-image://pen-tools:{tag}"));
+    }
+
+    [Fact]
+    public void TheToolsAndTheirDomainsAreRecordedInTheSession()
+    {
+        using var f = ToolsFixture();
+        Assert.Equal(0, f.Run(NoTerminal, flagTools: [PenTest]));
+        Assert.Equal("example.org\n", f.Seen("tool-domains-seen"));
+    }
+
+    [Fact]
+    public void ALiveUpdateKeepsARecordedToolsDomains()
+    {
+        using var f = new Fixture(projectToml: "", dockerfile: "");
+        var (s, l) = RunningSession(f);
+        using var _ = l;
+        s.WriteTools([PenTest], ["example.org"]);
+        Assert.Equal(0, AllowCommand.Add(f.Host, ["typed.example"], global: true));
+        var list = File.ReadAllText(s.File("allowlist.txt")).Split('\n');
+        Assert.Contains("typed.example", list);
+        Assert.Contains("example.org", list);
+    }
+
+    [Fact]
+    public void ALiveUpdateAddsNoDomainsFromAToolPlantedInTheProject_EvenAnApprovedOne()
+    {
+        using var f = ToolsFixture();
+        var (s, l) = RunningSession(f);
+        using var _ = l;
+        Assert.True(AllowCommand.Apply(f.Host, s));
+        Assert.DoesNotContain("example.org", File.ReadAllText(s.File("allowlist.txt")));
+
+        // Approved after this session started: it's for sessions that start with the tool.
+        Trust.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal);
+        Assert.True(AllowCommand.Apply(f.Host, s));
+        Assert.DoesNotContain("example.org", File.ReadAllText(s.File("allowlist.txt")));
+    }
+
+    [Fact]
+    public void TrustYesApprovesAToolAndTrustListDoesnt()
+    {
+        using var f = ToolsFixture();
+        Assert.Equal(0, Trust.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: false, NoTerminal, list: true));
+        Assert.False(TrustStore.For(f.Host, f.Project).CoversTool(PenTest));
+        Assert.Equal(1, Trust.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: false, Saying("n")));
+        Assert.False(TrustStore.For(f.Host, f.Project).CoversTool(PenTest));
+        Assert.Equal(0, Trust.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal));
+        Assert.True(TrustStore.For(f.Host, f.Project).CoversTool(PenTest));
+    }
+
+    [Fact]
+    public void AllowListingCountsToolsOnlyWhenApproved()
+    {
+        using var f = ToolsFixture();
+        var (s, l) = RunningSession(f);
+        using var _ = l;
+        File.WriteAllText(s.ProxyLog, "2026-11-01T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT example.org:443 -\n");
+        string Listed()
+        {
+            var stdout = Console.Out;
+            var captured = new StringWriter();
+            Console.SetOut(captured);
+            try { AllowCommand.List(f.Host, f.Project, Config.Empty, f.ProjectConfig); }
+            finally { Console.SetOut(stdout); }
+            return captured.ToString();
+        }
+        Assert.Contains("example.org", Listed());
+        Trust.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal);
+        Assert.DoesNotContain("example.org", Listed());
+    }
+
+    // pen upgrade's tools
+
+    [Fact]
+    public void UpgradeTakesTheUsersAndApprovedProjectTools_AndSkipsTheRest()
+    {
+        using var f = ToolsFixture();
+        Session.EnsureRuntimeDir(f.Host, f.Project);
+        var user = Config.Parse("tools = [\"pen-test-b:1\"]\n", "u", ConfigKind.User);
+        ToolSpec userTool = new("pen-test-b", "1");
+        Assert.Equal([userTool], Image.UpgradeTools(f.Host, f.Project, user));
+        Assert.Equal([userTool], Image.UpgradeTools(f.Host, null, user));
+
+        TrustStore.For(f.Host, f.Project).Approve(new TrustRequest([], false, null, null, null) { Tools = [new(PenTest, true, ["example.org"])] });
+        Assert.Equal([userTool, PenTest], Image.UpgradeTools(f.Host, f.Project, user));
+        Assert.Empty(f.Calls); // nothing's built from an unapproved entry on the way
+    }
+
+    [Fact]
+    public void UpgradeStillRunsWhenTheProjectsToolsCantBeUsed()
+    {
+        using var f = ToolsFixture();
+        Session.EnsureRuntimeDir(f.Host, f.Project);
+        var user = Config.Parse("tools = [\"pen-test:2\"]\n", "u", ConfigKind.User);
+        TrustStore.For(f.Host, f.Project).Approve(new TrustRequest([], false, null, null, null) { Tools = [new(PenTest, true, ["example.org"])] });
+        Assert.Equal([new ToolSpec("pen-test", "2")], Image.UpgradeTools(f.Host, f.Project, user));
+
+        File.WriteAllText(f.Project.ProjectConfigPath, "nonsense = 1\n");
+        Assert.Equal([new ToolSpec("pen-test", "2")], Image.UpgradeTools(f.Host, f.Project, user));
+    }
+
+    [Fact]
+    public void UpgradeStacksAnApprovedLayerOnTheToolsItBuilt()
+    {
+        using var f = ToolsFixture(projectToml: "", dockerfile: "FROM pen:latest\n");
+        Approve(f);
+        Image.UpgradeProjectLayer(f.Host, f.Project, clean: true, baseImage: "pen-tools:0123456789abcdef");
+        var build = Assert.Single(f.Calls, c => c.StartsWith("build ", StringComparison.Ordinal));
+        Assert.Contains($"-t {f.Project.Key}:0123456789abcdef", build);
+        Assert.Contains("--no-cache", build);
+        Assert.Contains("--build-context pen:latest=docker-image://pen-tools:0123456789abcdef", build);
+    }
+
+    /// <summary>pen-test as a later pen's recipe might have it.</summary>
+    private static RecipeCatalog Recipe(params string[] domains) => RecipeCatalog.FromFiles(new Dictionary<string, string>
+    {
+        ["tools/pen-test/tool.toml"] = $"default = \"1\"\nversion = '^\\d+$'\nallow = [{string.Join(", ", domains.Select(d => $"\"{d}\""))}]\n",
+        ["tools/pen-test/install.sh"] = "#!/bin/sh\n",
+    });
+
+    // Approve a tool, then a pen whose recipe brings one more domain, with no terminal to ask on.
+    [Fact]
+    public void ADomainARecipeAddsAfterApprovalIsRefusedWithoutATerminal_AndNothingOfTheEntryTakesEffect()
+    {
+        using var f = ToolsFixture(projectToml: "tools = [\"pen-test:77\"]\n");
+        Assert.Equal(0, Trust.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal, catalog: Recipe("example.org")));
+        Assert.Equal(0, f.Run(NoTerminal, recipes: Recipe("example.org")));
+        Assert.DoesNotContain("example.net", f.Seen("allowlist-seen"));
+
+        File.Delete(f.CallsFile);
+        File.Delete(Path.Combine(f.T.Path, "allowlist-seen"));
+        File.Delete(Path.Combine(f.T.Path, "tools-built"));
+        var later = Recipe("example.org", "example.net");
+        var e = Assert.Throws<PenException>(() => f.Run(NoTerminal, recipes: later));
+        Assert.Contains("pen-test:77 now brings more domains", e.Message);
+        Assert.Contains("example.net", e.Message);
+        Assert.Empty(f.Calls);
+        Assert.False(f.HasSeen("allowlist-seen"));
+
+        Assert.Throws<PenException>(() => f.Run(Saying("n"), recipes: later));
+        Assert.Empty(f.Calls);
+
+        Assert.Equal(0, f.Run(Saying("y"), recipes: later));
+        Assert.Contains("example.net", f.Seen("allowlist-seen").Split('\n'));
+        Assert.Equal(0, f.Run(NoTerminal, recipes: later));
+    }
+
+    [Fact]
+    public void AnAllowDomainPlantedInTheProjectDoesntApproveTheToolsNewDomain()
+    {
+        using var f = ToolsFixture(projectToml: "tools = [\"pen-test:77\"]\n");
+        Trust.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal, catalog: Recipe("example.org"));
+        TrustStore.For(f.Host, f.Project).ApproveDomains(["example.net"]);
+        File.WriteAllText(f.Project.ProjectConfigPath, "tools = [\"pen-test:77\"]\nallow = [\"example.net\"]\n");
+        Assert.Contains("now brings more domains", Assert.Throws<PenException>(() => f.Run(NoTerminal, recipes: Recipe("example.org", "example.net"))).Message);
+    }
+
+    [Fact]
+    public void ADroppedDomainDoesntAsk_AndLeavesTheAllowlist()
+    {
+        using var f = ToolsFixture(projectToml: "tools = [\"pen-test:77\"]\n");
+        Trust.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal, catalog: Recipe("example.org", "example.net"));
+        Assert.Equal(0, f.Run(NoTerminal, recipes: Recipe("example.org")));
+        Assert.DoesNotContain("example.net", f.Seen("allowlist-seen"));
+    }
+
+    [Fact]
+    public void AFlagForTheToolStillDoesntAskOrApprove_EvenWithANewDomain()
+    {
+        using var f = ToolsFixture(projectToml: "tools = [\"pen-test:77\"]\n");
+        Trust.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal, catalog: Recipe("example.org"));
+        var later = Recipe("example.org", "example.net");
+        Assert.Equal(0, f.Run(NoTerminal, flagTools: [new("pen-test", "77")], recipes: later));
+        Assert.False(TrustStore.For(f.Host, f.Project).CoversToolDomain(new("pen-test", "77"), "example.net"));
+        Assert.Throws<PenException>(() => f.Run(NoTerminal, recipes: later));
+    }
+
+    [Fact]
+    public void UpgradeAndTheAllowListingSkipAToolWithAnUnapprovedDomain()
+    {
+        using var f = ToolsFixture(projectToml: "tools = [\"pen-test:77\"]\n");
+        Trust.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal, catalog: Recipe("example.org"));
+        ToolSpec tool = new("pen-test", "77");
+        Assert.Equal([tool], Image.UpgradeTools(f.Host, f.Project, Config.Empty, Recipe("example.org")));
+        Assert.Empty(Image.UpgradeTools(f.Host, f.Project, Config.Empty, Recipe("example.org", "example.net")));
+        Assert.Equal([tool], TrustStore.For(f.Host, f.Project).ApprovedToolsOf([tool], Recipe("example.org")));
+        Assert.Empty(TrustStore.For(f.Host, f.Project).ApprovedToolsOf([tool], Recipe("example.org", "example.net")));
     }
 }

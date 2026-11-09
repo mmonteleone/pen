@@ -63,7 +63,9 @@ HASH=$(printf %s "$PROJECT_DIR" | sha | cut -c1-8)
 KEY= RUNTIME=
 EXTRA_DIRS=() # other fixture projects: removed on exit, with their keys' state
 EXTRA_KEYS=() # project keys whose dirs a section deleted: their state is removed on exit
-TOOL_IMAGES=() # pen-tools images a section built: removed on exit
+TOOL_IMAGES=() # other images a section made up: removed on exit
+# Sessions build pen-tools images: any not here at the start go on exit.
+TOOLS_BEFORE=$(docker image ls --format '{{.Repository}}:{{.Tag}}' --filter reference=pen-tools | sort)
 
 # forget_key <key>: remove a project key's containers, networks, volumes, images
 # and runtime dirs (under the real and the throwaway HOME).
@@ -98,6 +100,8 @@ cleanup() {
   for d in ${EXTRA_DIRS[@]+"${EXTRA_DIRS[@]}"}; do [ -d "$d" ] && forget "$d"; rm -rf "$d"; done
   for d in ${EXTRA_KEYS[@]+"${EXTRA_KEYS[@]}"}; do forget_key "$d"; done
   for d in ${TOOL_IMAGES[@]+"${TOOL_IMAGES[@]}"}; do docker image rm -f "$d" >/dev/null 2>&1 || true; done
+  docker image ls --format '{{.Repository}}:{{.Tag}}' --filter reference=pen-tools | sort | comm -13 <(printf '%s\n' "$TOOLS_BEFORE") - |
+    xargs docker image rm -f >/dev/null 2>&1 || true
   rm -rf "$PROJECT_DIR" "$SCRATCH"
 }
 trap cleanup EXIT
@@ -163,6 +167,22 @@ refuse() { # refuse <dir> <expected message part>
   [ "$rc" != 0 ] && contains "$2" "$out"
 }
 now() { python3 -c 'import time; print(time.time())'; }
+# A docker that records each image build, and the image each session runs, so "no rebuild"
+# is seen rather than guessed from timing.
+TOOLS_SHIM=$SCRATCH/tools-shim; mkdir -p "$TOOLS_SHIM"; : >"$TOOLS_SHIM/builds"
+cat >"$TOOLS_SHIM/docker" <<EOF
+#!/bin/sh
+if [ "\$1" = build ]; then echo build >>"$TOOLS_SHIM/builds"; fi
+case " \$* " in *" run --rm "*) printf '%s\n' "\$PEN_IMAGE" >"$TOOLS_SHIM/image" ;; esac
+exec "$(command -v docker)" "\$@"
+EOF
+chmod +x "$TOOLS_SHIM/docker"
+# session_image <pen options…>: starts a session with them, and prints the image it ran.
+session_image() {
+  PATH="$TOOLS_SHIM:$PATH" "$PEN" "$@" run true </dev/null >/dev/null 2>&1 || fail "pen $* run true"
+  cat "$TOOLS_SHIM/image"
+}
+builds() { wc -l <"$TOOLS_SHIM/builds" | tr -d ' '; }
 # The throwaway HOME's seed (section 8 checks its creation; section 17 adds to it).
 seed=$FAKE_HOME/.config/pen/home
 
@@ -403,7 +423,7 @@ rc=0; out=$("$PEN" --tool 'pen-test:$(touch /tmp/x)' 2>&1 </dev/null) || rc=$?
 check "a shell-like tool version is refused by the recipe's regex in the AOT build" bash -c '[ "$1" = 2 ] && grep -qF "isn'"'"'t a valid version of pen-test" <<<"$2"' _ "$rc" "$out"
 rc=0; out=$("$PEN" --tool pen-test:1 allow 2>&1 </dev/null) || rc=$?
 check "--tool with a subcommand is a usage error" bash -c '[ "$1" = 2 ] && grep -qF -- "--tool goes only with a command to run, not pen allow" <<<"$2"' _ "$rc" "$out"
-check "pen --tool leaves the session as it was: nothing is installed" contains "[no tool]" "$("$PEN" --tool pen-test run sh -c 'test -e /opt/pen-test || echo "[no tool]"' </dev/null 2>/dev/null)"
+check "pen --tool runs the session with the tool installed" test "$("$PEN" --tool pen-test run pen-test </dev/null 2>/dev/null)" = 1
 
 check "refuses \$HOME" refuse "$HOME" "home directory"
 check "refuses /" refuse / "refusing to run in /"
@@ -656,6 +676,12 @@ echo 'allow = ["example.com"]' >.pen/config.toml
 check "a domain in .pen/config.toml's allow becomes reachable" \
   test "$(in_sandbox 'curl -s -o /dev/null -w %{http_code} -I https://example.com' 2>/dev/null)" = 200
 rm -rf .pen
+tool_probe='curl -s -o /dev/null -w %{http_code} -I https://example.org'
+check "a domain no one allowed stays blocked" not contains 200 "$(in_sandbox "$tool_probe" 2>/dev/null)"
+check "...and a --tool's recipe adds its domains to the session's allowlist" \
+  test "$("$PEN" --tool pen-test run bash -c "$tool_probe" </dev/null 2>/dev/null)" = 200
+fake_config 'tools = ["pen-test"]'
+check "...as does one in ~/.config/pen/config.toml" test "$(fake_pen run bash -c "$tool_probe" 2>/dev/null)" = 200
 fake_config 'allow = [".github.com"]'
 fake_pen run bash -c 'sleep 5; curl -s -o /dev/null -w "%{http_code}" -I https://api.github.com' >"$SCRATCH/wild.out" 2>/dev/null &
 p=$!
@@ -1044,6 +1070,16 @@ out=$("$PEN" allow example.com 2>&1)
 check "running it again adds nothing" bash -c 'grep -q "already in .pen/config.toml" <<<"$1" && [ "$(grep -c "example.com" .pen/config.toml)" = 1 ]' _ "$out"
 check "a non-domain is refused" not "$PEN" allow 'http://x.io' 2>/dev/null
 check "a domain added with pen allow doesn't ask next session" pen_run true
+
+# A --tool's domains: only the session knows about the flag, so its record has to keep them.
+keep='for i in $(seq 60); do [ "$(curl -s -o /dev/null -w %{http_code} -I https://example.net)" = 200 ] && break; sleep 0.5; done; curl -s -o /dev/null -w "tool-domain-%{http_code}\n" -I https://example.org'
+"$PEN" --tool pen-test run bash -c "$keep" </dev/null >"$SCRATCH/allow3.out" 2>&1 &
+a3=$!
+wait_count "^$KEY-.*-agent$" 1 || fail "the session with a tool didn't start"
+out=$("$PEN" allow example.net 2>&1)
+wait "$a3" || true
+check "pen allow applies to a session with a tool" contains "applied to 1 running session" "$out"
+check "...which keeps the domains its tool brought" contains tool-domain-200 "$(cat "$SCRATCH/allow3.out")"
 
 OTHER=$(cd "$(mktemp -d "$HOME/.pen-smoke-other.XXXXXX")" && pwd -P)
 EXTRA_DIRS+=("$OTHER")
@@ -1694,8 +1730,8 @@ git -C "$LIVE" init -q
 mkdir -p "$GONE/.pen"
 echo 'FROM pen:latest' >"$GONE/.pen/Dockerfile"
 (cd "$GONE" && fake_pen trust --yes && fake_pen run true) >/dev/null 2>&1 || fail "a session in the project to delete failed"
-ghash=$(cd "$GONE" && fake_pen --tool "pen-test:$(date +%s)" --build-tools-image 2>/dev/null) || fail "a layer on a tools image in the project to delete failed"
-ghash=${ghash##*:}; TOOL_IMAGES+=("pen-tools:$ghash")
+ghash=$(cd "$GONE" && HOME=$FAKE_HOME DOCKER_CONFIG=${DOCKER_CONFIG:-$REAL_HOME/.docker} session_image --tool "pen-test:$(date +%s)")
+ghash=${ghash##*:}
 (cd "$LIVE" && fake_pen run true) >/dev/null 2>&1 || fail "a session in the live project failed"
 gkey=$(basename "$(ls -d "$FSTATE"/pen-*-"$(printf %s "$GONE" | sha | cut -c1-8)")")
 lkey=$(basename "$(ls -d "$FSTATE"/pen-*-"$(printf %s "$LIVE" | sha | cut -c1-8)")")
@@ -1705,22 +1741,38 @@ check "both projects have volumes, and the one to delete a project layer" \
 others=$(docker volume ls -q | grep -v "^${gkey}_" | sort)
 rm -rf "$GONE"
 
+# Tools images: one on an old base, and what must stay though it has the same label or a
+# like name: a layer stacked on it, which inherits its label, and a project named tools.
+STALE=pen-tools:$(printf %s "stale$$" | sha | cut -c1-16)
+STACKED=$lkey:$(printf %s "stacked$$" | sha | cut -c1-16)
+NAMED=pen-tools-0123abcd:$(printf %s "named$$" | sha | cut -c1-16)
+TOOL_IMAGES+=("$STALE" "$NAMED")
+printf 'FROM %s\nLABEL pen.base-id=sha256:smoke-old-base\n' "$IMAGE" | docker build -q -t "$STALE" - >/dev/null || fail "building an image on an old base failed"
+printf 'FROM %s\n' "$STALE" | docker build -q -t "$STACKED" -t "$NAMED" - >/dev/null || fail "building a layer on it failed"
+check "a stacked layer does inherit the label" test \
+  "$(docker image inspect --format '{{ index .Config.Labels "pen.base-id" }}' "$STACKED")" = sha256:smoke-old-base
+
 out=$(echo n | fake_prune 2>&1 || true)
 check "pen prune lists the deleted project as missing, with its volumes and layer" \
   has_all "$out" "to remove, missing" "  $GONE  ($gkey)" "${gkey}_home, ${gkey}_nuget; $gkey:$ghash, $gkey:latest"
 check "...noting it may be on a volume that isn't mounted" contains "isn't mounted" "$out"
 check "...and the live one as kept" bash -c 'grep -q "^kept, in use:" <<<"$1" && grep -qF "  $2  ($3)" <<<"$1"' _ "$out" "$LIVE" "$lkey"
-check "...asking first" contains "pen: remove it? [y/N] n" "$out"
+check "...and the tools image on an old base" bash -c 'grep -q "tools images on an old base" <<<"$1" && grep -qF "  $2" <<<"$1"' _ "$out" "$STALE"
+check "...asking first" contains "[y/N] n" "$out"
+check "...leaving the image there for a no" bash -c 'docker image inspect "$1" >/dev/null' _ "$STALE"
 check "answering no removes nothing" bash -c 'grep -q "nothing removed" <<<"$1" && docker volume inspect "${2}_home" >/dev/null && [ -d "$3/$2" ]' _ "$out" "$gkey" "$FSTATE"
 
 r=$(holding "$FSTATE/$gkey/project.lock" shared bash -c 'echo y | "$@"' _ env HOME="$FAKE_HOME" DOCKER_CONFIG="${DOCKER_CONFIG:-$REAL_HOME/.docker}" "$PEN" prune)
 check "a key whose project.lock a session holds is skipped" \
   bash -c 'grep -q "skipping $2" <<<"$1" && [ "${1%% *}" = 1 ] && docker volume inspect "${2}_home" >/dev/null && [ -d "$3/$2" ]' _ "$r" "$gkey" "$FSTATE"
 
-out=$(echo y | fake_prune 2>&1)
+out=$(echo y | fake_prune 2>&1 || true)
 check "answering yes removes the deleted project's volumes" bash -c 'grep -q "removed $2" <<<"$1" && ! docker volume inspect "${2}_home" >/dev/null 2>&1 && ! docker volume inspect "${2}_nuget" >/dev/null 2>&1' _ "$out" "$gkey"
 check "...its project layers" bash -c '! docker image inspect "$1:latest" >/dev/null 2>&1 && ! docker image inspect "$1:$2" >/dev/null 2>&1' _ "$gkey" "$ghash"
 check "...but not the shared tools image they were built on" bash -c 'docker image inspect "$1" >/dev/null' _ "pen-tools:$ghash"
+check "...and the tools image on an old base goes" not docker image inspect "$STALE"
+check "...but not a layer stacked on it, with the same label" docker image inspect "$STACKED"
+check "...or a project named tools, by repository" docker image inspect "$NAMED"
 check "...and its runtime dir" test ! -e "$FSTATE/$gkey"
 check "the live project keeps its volumes and runtime dir" bash -c 'docker volume inspect "${1}_home" >/dev/null && [ -s "$2/$1/project-dir" ]' _ "$lkey" "$FSTATE"
 check "...as does every other volume (unknown to this HOME, so never removed)" test "$(docker volume ls -q | grep -v "^${gkey}_" | sort)" = "$others"
@@ -1974,91 +2026,119 @@ if want 28; then
 # ==============================================================================
 section "28. Tools image"
 
-# A docker that records each build, so "no rebuild" is seen rather than guessed from
-# timing. Versions are unique to this run, so no earlier image or build cache can stand in.
-TOOLS_SHIM=$SCRATCH/tools-shim; mkdir -p "$TOOLS_SHIM"
-cat >"$TOOLS_SHIM/docker" <<EOF
-#!/bin/sh
-if [ "\$1" = build ]; then echo build >>"$TOOLS_SHIM/builds"; fi
-exec "$(command -v docker)" "\$@"
-EOF
-chmod +x "$TOOLS_SHIM/docker"; : >"$TOOLS_SHIM/builds"
-tools_image() { PATH="$TOOLS_SHIM:$PATH" "$PEN" "$@" --build-tools-image </dev/null 2>/dev/null || fail "pen $* --build-tools-image"; }
-builds() { wc -l <"$TOOLS_SHIM/builds" | tr -d ' '; }
+# Versions are unique to this run, so no earlier image or build cache can stand in.
+: >"$TOOLS_SHIM/builds"
 in_image() { docker run --rm --entrypoint sh "$1" -c "$2"; }
 
 V=$(date +%s)
 A=pen-test:$V B=pen-test-b:$V
-tag=$(tools_image --tool "$A" --tool "$B"); TOOL_IMAGES+=("$tag")
-check "two tools build one image, tagged pen-tools:<hash>" bash -c '[[ $1 =~ ^pen-tools:[0-9a-f]{16}$ ]] && [ "$2" = 1 ]' _ "$tag" "$(builds)"
+tag=$(session_image --tool "$A" --tool "$B")
+check "a session with two tools runs one image, tagged pen-tools:<hash>" bash -c '[[ $1 =~ ^pen-tools:[0-9a-f]{16}$ ]] && [ "$2" = 1 ]' _ "$tag" "$(builds)"
 check "...labeled with the base image's ID" test \
   "$(docker image inspect --format '{{ index .Config.Labels "pen.base-id" }}' "$tag")" = "$(docker image inspect --format '{{.Id}}' "$IMAGE")"
 id=$(docker image inspect --format '{{.Id}}' "$tag")
 out=$(in_image "$tag" "ls /opt/pen-test /opt/pen-test-b; stat -c 'owner=%u' /opt/pen-test; [ -e /pen-recipe ] && echo script-left; true")
 check "...which installed each at its version, as root" has_all "$out" "$V" "owner=0"
 check "...and kept no recipe scripts" not contains script-left "$out"
+out=$("$PEN" --tool "$A" --tool "$B" run pen-test </dev/null 2>/dev/null)
+check "the session can run the tool" test "$out" = "$V"
+out=$("$PEN" --tool "$A" --tool "$B" run printenv TOOL_TEST_ENV </dev/null 2>/dev/null)
+check "...and has its recipe's env, literally" test "$out" = 'from "pen-test" $HOME \ here'
 
-check "swapping the flags gives the same tag" test "$(tools_image --tool "$B" --tool "$A")" = "$tag"
+check "swapping the flags runs the same image" test "$(session_image --tool "$B" --tool "$A")" = "$tag"
 check "...without a rebuild" test "$(builds)" = 1
 check "...and the image is untouched" test "$(docker image inspect --format '{{.Id}}' "$tag")" = "$id"
 
-OTHER_TOOLS=$SCRATCH/tools-other; mkdir -p "$OTHER_TOOLS"; git -C "$OTHER_TOOLS" init -q
-check "another project gets the same tag" test "$(cd "$OTHER_TOOLS" && tools_image --tool "$A" --tool "$B")" = "$tag"
+OTHER_TOOLS=$(cd "$(mktemp -d "$HOME/.pen-smoke-tools.XXXXXX")" && pwd -P); EXTRA_DIRS+=("$OTHER_TOOLS"); git -C "$OTHER_TOOLS" init -q
+check "a session in another project shares that one image" test "$(cd "$OTHER_TOOLS" && session_image --tool "$A" --tool "$B")" = "$tag"
 check "...also without a rebuild" test "$(builds)" = 1
+check "...and runs the tool from it" test "$(cd "$OTHER_TOOLS" && "$PEN" --tool "$A" --tool "$B" run pen-test </dev/null 2>/dev/null)" = "$V"
 
-many=$(tools_image --tool "$B" --tool "pen-test-b:$((V + 1))"); TOOL_IMAGES+=("$many")
+many=$(session_image --tool "$B" --tool "pen-test-b:$((V + 1))")
 check "another set of tools is another image" bash -c '[ "$1" != "$2" ] && [ "$3" = 2 ]' _ "$many" "$tag" "$(builds)"
 check "...and versions of one tool reach its script as separate arguments" \
   test "$(in_image "$many" 'ls /opt/pen-test-b | wc -l' | tr -d ' ')" = 2
 
-# A project layer on tools images: the Dockerfile says FROM pen:latest and runs the tool.
-A1=pen-test:$V A2=pen-test:$((V + 1))
+"$PEN" --tool "$A" run sleep 20 </dev/null >/dev/null 2>&1 &
+ps_session=$!
+wait_for "^$KEY-.*-agent$" || fail "the session for pen ps didn't start"
+out=$("$PEN" ps)
+check "pen ps shows a session's tools" bash -c 'grep -q "TOOLS" <<<"$1" && grep -qF "$2" <<<"$1"' _ "$out" "$A"
+docker rm -f "$(docker ps --format '{{.Names}}' | grep -E "^$KEY-.*-agent$" | head -1)" >/dev/null 2>&1 || true
+wait "$ps_session" || true
+
+# tools in .pen/config.toml: nothing happens until they're approved.
+A1=pen-test:$V A2=pen-test:$((V + 1)) U=$((V + 2))
 rm -rf .pen && mkdir .pen
-printf 'FROM pen:latest\nRUN pen-test >/etc/pen-smoke-tool\n' >.pen/Dockerfile
-rc=0; out=$("$PEN" --tool "$A1" --build-tools-image 2>&1 </dev/null) || rc=$?
-check "an unapproved .pen/ isn't stacked on tools" bash -c '[ "$1" = 1 ] && grep -qF "isn'"'"'t what was approved" <<<"$2"' _ "$rc" "$out"
+printf 'tools = ["pen-test:%s"]\n' "$U" >.pen/config.toml
+before=$(builds)
+rc=0; out=$(PATH="$TOOLS_SHIM:$PATH" "$PEN" run true 2>&1 </dev/null) || rc=$?
+check "an unapproved tool in .pen/ refuses a session without a terminal, showing its domains" \
+  bash -c '[ "$1" != 0 ] && grep -qF "tool pen-test:$3: sessions run with it installed, and the sandbox can reach example.org" <<<"$2" && grep -qF "pen trust" <<<"$2"' _ "$rc" "$out" "$U"
+check "...and builds nothing" test "$(builds)" = "$before"
+out=$("$PEN" trust --list </dev/null 2>/dev/null)
+check "pen trust --list shows it" contains "tool pen-test:$U" "$out"
+check "...and approves nothing" not pen_run true
+check "a --tool for the same entry doesn't ask" test "$("$PEN" --tool "pen-test:$U" run pen-test </dev/null 2>/dev/null)" = "$U"
+check "...and doesn't approve the entry" not pen_run true
 "$PEN" trust --yes </dev/null >/dev/null 2>&1
-layer1=$(tools_image --tool "$A1"); TOOL_IMAGES+=("pen-tools:${layer1##*:}")
+check "once approved, a session runs with it" test "$(pen_run pen-test 2>/dev/null)" = "$U"
+check "...and reaches its domain" test "$(pen_run curl -s -o /dev/null -w '%{http_code}' -I https://example.org 2>/dev/null)" = 200
+grep -v '^tool-allow ' "$RUNTIME/trust-$HASH" >"$SCRATCH/trust-less"; cp "$RUNTIME/trust-$HASH" "$SCRATCH/trust-full"
+cat "$SCRATCH/trust-less" >"$RUNTIME/trust-$HASH"
+rc=0; out=$("$PEN" run true 2>&1 </dev/null) || rc=$?
+check "a domain the approval doesn't record asks again" bash -c '[ "$1" != 0 ] && grep -qF "tool pen-test:$3 now brings more domains: the sandbox can reach example.org" <<<"$2"' _ "$rc" "$out" "$U"
+out=$("$PEN" trust --list </dev/null 2>/dev/null)
+check "...and pen trust --list shows it" contains "now brings more domains" "$out"
+cat "$SCRATCH/trust-full" >"$RUNTIME/trust-$HASH"
+printf 'tools = ["pen-test:%s"]\n' "$((U + 1))" >.pen/config.toml
+rc=0; out=$("$PEN" run true 2>&1 </dev/null) || rc=$?
+check "changing the version asks again" bash -c '[ "$1" != 0 ] && grep -qF "tool pen-test:$3" <<<"$2"' _ "$rc" "$out" "$((U + 1))"
+rm -rf .pen
+
+# A project layer on tools images: the Dockerfile says FROM pen:latest and runs the tool.
+mkdir .pen
+printf 'FROM pen:latest\nRUN pen-test >/etc/pen-smoke-tool\n' >.pen/Dockerfile
+rc=0; out=$("$PEN" --tool "$A1" run true 2>&1 </dev/null) || rc=$?
+check "an unapproved .pen/ isn't stacked on tools" bash -c '[ "$1" != 0 ] && grep -qF ".pen/ asks for things you haven'"'"'t approved" <<<"$2"' _ "$rc" "$out"
+"$PEN" trust --yes </dev/null >/dev/null 2>&1
+layer1=$(session_image --tool "$A1")
 check "a project layer on tools is <key>:<hash of the tools image>" \
   bash -c '[[ $1 == "$2":* ]] && [[ ${1##*:} =~ ^[0-9a-f]{16}$ ]] && docker image inspect "pen-tools:${1##*:}" >/dev/null' _ "$layer1" "$KEY"
 check "...and its Dockerfile can RUN the tool" test "$(in_image "$layer1" 'cat /etc/pen-smoke-tool')" = "$V"
-layer2=$(tools_image --tool "$A2"); TOOL_IMAGES+=("pen-tools:${layer2##*:}")
+layer2=$(session_image --tool "$A2")
 check "another tool set in the project is another image" bash -c '[ "$1" != "$2" ] && [[ $2 == "$3":* ]]' _ "$layer1" "$layer2" "$KEY"
 check "...with that set's tool" test "$(in_image "$layer2" 'cat /etc/pen-smoke-tool')" = "$((V + 1))"
 check "...leaving the first as it was" test "$(in_image "$layer1" 'cat /etc/pen-smoke-tool')" = "$V"
 id1=$(docker image inspect --format '{{.Id}}' "$layer1")
 check "building the first again gives the same image" \
-  test "$(docker image inspect --format '{{.Id}}' "$(tools_image --tool "$A1")")" = "$id1"
+  test "$(docker image inspect --format '{{.Id}}' "$(session_image --tool "$A1")")" = "$id1"
 
 printf 'FROM pen:latest\nRUN pen-test >/etc/pen-smoke-tool; echo changed >/etc/pen-smoke-changed\n' >.pen/Dockerfile
-rc=0; out=$("$PEN" --tool "$A1" --build-tools-image 2>&1 </dev/null) || rc=$?
-check "a changed Dockerfile isn't built on tools until approved" bash -c '[ "$1" = 1 ] && grep -qF "isn'"'"'t what was approved" <<<"$2"' _ "$rc" "$out"
+rc=0; out=$("$PEN" --tool "$A1" run true 2>&1 </dev/null) || rc=$?
+check "a changed Dockerfile isn't built on tools until approved" bash -c '[ "$1" != 0 ] && grep -qF ".pen/ asks for things you haven'"'"'t approved" <<<"$2"' _ "$rc" "$out"
 check "...leaving the image as it was" test "$(docker image inspect --format '{{.Id}}' "$layer1")" = "$id1"
 "$PEN" trust --yes </dev/null >/dev/null 2>&1
-check "once approved, it keeps the same tag" test "$(tools_image --tool "$A1")" = "$layer1"
+check "once approved, it keeps the same tag" test "$(session_image --tool "$A1")" = "$layer1"
 check "...which now holds the new layer, not the old one" test "$(in_image "$layer1" 'cat /etc/pen-smoke-changed')" = changed
 
 printf 'FROM pen:latest\nRUN test ! -e /opt/pen-test\n' >.pen/Dockerfile
 "$PEN" trust --yes </dev/null >/dev/null 2>&1
-check "with no tools, a project layer is still <key>:latest, on plain pen:latest" test "$(tools_image)" = "$KEY:latest"
-check "a session doesn't use the stacked image yet" contains "[no tool]" \
-  "$("$PEN" --tool "$A1" run sh -c 'test -e /opt/pen-test || echo "[no tool]"' </dev/null 2>/dev/null)"
+check "with no tools, a project layer is still <key>:latest, on plain pen:latest" test "$(session_image)" = "$KEY:latest"
 rm -rf .pen
 
 git worktree add -q -b smoke-wt28 "$SCRATCH/wt28" 2>/dev/null
 WT28=$(cd "$SCRATCH/wt28" && pwd -P)
 mkdir -p "$WT28/.pen"; printf 'FROM pen:latest\nRUN pen-test >/etc/pen-smoke-tool\n' >"$WT28/.pen/Dockerfile"
 (cd "$WT28" && "$PEN" trust --yes </dev/null >/dev/null 2>&1)
-wt_layer=$(cd "$WT28" && tools_image --tool "$A1")
+wt_layer=$(cd "$WT28" && session_image --tool "$A1")
 check "in a linked worktree it's <key>-<dir hash>:<hash of the tools image>" \
   test "$wt_layer" = "$KEY-$(printf %s "$WT28" | sha | cut -c1-8):${layer1##*:}"
 check "...and can RUN the tool too" test "$(in_image "$wt_layer" 'cat /etc/pen-smoke-tool')" = "$V"
 git worktree remove --force "$WT28"; git branch -qD smoke-wt28
 
-check "a session doesn't use the tools image yet" contains "[no tool]" \
-  "$("$PEN" --tool "$A" --tool "$B" run sh -c 'test -e /opt/pen-test || echo "[no tool]"' </dev/null 2>/dev/null)"
-rc=0; out=$("$PEN" --tool "$A" --build-tools-image true 2>&1 </dev/null) || rc=$?
-check "the build option takes nothing but --tool" bash -c '[ "$1" = 2 ] && grep -qF "takes only --tool" <<<"$2"' _ "$rc" "$out"
+rc=0; out=$("$PEN" --tool "$A" --build-tools-image 2>&1 </dev/null) || rc=$?
+check "there's no build option any more: real sessions build" bash -c '[ "$1" = 2 ] && grep -qF "unknown option" <<<"$2"' _ "$rc" "$out"
 fi
 
 section "All checks passed."

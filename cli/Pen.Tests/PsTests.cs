@@ -7,7 +7,7 @@ public class PsTests
     private static readonly DateTime Now = new(2026, 11, 6, 12, 0, 0, DateTimeKind.Utc);
 
     /// <summary>An open session under <paramref name="key"/>; its lock is held (running) unless dead.</summary>
-    private static FileLock? Session(HostEnv host, string key, string id, string projectDir, string[]? command, DateTime? started, bool docker = false, bool dead = false, int[]? ports = null)
+    private static FileLock? Session(HostEnv host, string key, string id, string projectDir, string[]? command, DateTime? started, bool docker = false, bool dead = false, int[]? ports = null, ToolSpec[]? tools = null)
     {
         var s = new SessionDir(key, Path.Combine(host.RuntimeDir(key), "sessions", id));
         Directory.CreateDirectory(s.Path);
@@ -16,6 +16,7 @@ public class PsTests
         if (started is { } t) s.WriteStarted(t);
         if (docker) File.WriteAllText(s.DockerMarker, "");
         if (ports != null) s.WritePorts(ports);
+        if (tools != null) s.WriteTools(tools, []);
         File.WriteAllText(s.ComposeFile, "");
         return dead ? null : FileLock.TryTake(s.LockFile, exclusive: true);
     }
@@ -43,17 +44,17 @@ public class PsTests
         var host = t.Host();
         var b = Path.Combine(host.Home, "src", "b");
         using var l1 = Session(host, "pen-b-22222222", "aaaa0001", b, ["claude"], Now.AddMinutes(-5));
-        using var l2 = Session(host, "pen-b-22222222", "aaaa0002", b, [], Now.AddHours(-3).AddMinutes(-7), docker: true);
+        using var l2 = Session(host, "pen-b-22222222", "aaaa0002", b, [], Now.AddHours(-3).AddMinutes(-7), docker: true, tools: [new("a", "1"), new("b", "2")]);
         using var l3 = Session(host, "pen-a-11111111", "bbbb0001", "/srv/a", ["npm", "run", "dev server"], Now.AddDays(-2).AddHours(-4), ports: [5173, 3000]);
         using var dead = Session(host, "pen-a-11111111", "bbbb0002", "/srv/a", ["dead"], Now, dead: true);
 
         var sessions = Sessions.RunningEverywhere(host);
         Assert.Equal(3, sessions.Count);
         Assert.Equal("""
-            PROJECT  SESSION   DOCKER  PORTS      AGE    COMMAND
-            /srv/a   bbbb0001          5173,3000  2d04h  npm run 'dev server'
-            ~/src/b  aaaa0002  docker             3h07m  (shell)
-            ~/src/b  aaaa0001                     5m     claude
+            PROJECT  SESSION   DOCKER  PORTS      TOOLS    AGE    COMMAND
+            /srv/a   bbbb0001          5173,3000           2d04h  npm run 'dev server'
+            ~/src/b  aaaa0002  docker             a:1,b:2  3h07m  (shell)
+            ~/src/b  aaaa0001                              5m     claude
 
             """, Ps.Render(host, sessions, Now));
     }
@@ -64,7 +65,7 @@ public class PsTests
         using var t = new TempDir();
         var host = t.Host();
         using var l = Session(host, "pen-a-11111111", "cccc0001", "/srv/a", command: null, started: null);
-        Assert.EndsWith("/srv/a   cccc0001                 ?    ?\n", Ps.Render(host, Sessions.RunningEverywhere(host), Now));
+        Assert.EndsWith("/srv/a   cccc0001                        ?    ?\n", Ps.Render(host, Sessions.RunningEverywhere(host), Now));
     }
 
     [Fact]

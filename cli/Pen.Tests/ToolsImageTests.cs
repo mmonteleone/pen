@@ -140,6 +140,28 @@ public class ToolsImageTests
     }
 
     [Fact]
+    public void ARecipesEnvIsLiteralAndComesAfterEveryInstall()
+    {
+        var catalog = Catalog(settings: "default = \"1\"\nversion = '^\\d+$'\n[env]\nPLAIN = \"1\"\nODD = 'a \"b\" $HOME \\ c'\n");
+        var lines = ToolsImage.Dockerfile([new("a", "1"), new("b", "1")], catalog).TrimEnd('\n').Split('\n');
+        Assert.StartsWith("RUN ", lines[2]);
+        Assert.StartsWith("RUN ", lines[3]);
+        Assert.Equal(["ENV PLAIN=\"1\"", "ENV ODD=\"a \\\"b\\\" \\$HOME \\\\ c\""], lines[4..]);
+    }
+
+    [Fact]
+    public void WithoutTheCacheAnExistingTagIsBuiltAgain()
+    {
+        using var t = new TempDir();
+        using var fake = new FakeDocker(t, "echo sha256:base\n");
+        ToolSpec[] tools = [new("a", "1")];
+        ToolsImage.Ensure(tools, Catalog());
+        Assert.DoesNotContain(File.ReadAllLines(Path.Combine(t.Path, "calls")), c => c.StartsWith("build ", StringComparison.Ordinal));
+        ToolsImage.Ensure(tools, Catalog(), noCache: true);
+        Assert.Contains(File.ReadAllLines(Path.Combine(t.Path, "calls")), c => c.StartsWith("build ", StringComparison.Ordinal) && c.Contains("--no-cache"));
+    }
+
+    [Fact]
     public void NoToolsMeansTheBaseImageAndNoDocker()
     {
         using var t = new TempDir();

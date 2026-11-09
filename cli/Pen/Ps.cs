@@ -36,6 +36,7 @@ internal static partial class Ps
                         Out.Field(s.Id),
                         File.Exists(s.DockerMarker) ? "docker" : "",
                         string.Join(',', s.ReadPorts()),
+                        string.Join(',', s.ReadTools().Select(Out.Field)),
                         started is { } t ? Age(now - t) : "?",
                         Describe(s.ReadCommand()),
                     });
@@ -43,7 +44,7 @@ internal static partial class Ps
             .OrderBy(r => r.Project, StringComparer.Ordinal)
             .ThenBy(r => r.Started ?? DateTime.MaxValue)
             .Select(r => { r.Cells[0] = r.Project; return r.Cells; })
-            .Prepend(["PROJECT", "SESSION", "DOCKER", "PORTS", "AGE", "COMMAND"])
+            .Prepend(["PROJECT", "SESSION", "DOCKER", "PORTS", "TOOLS", "AGE", "COMMAND"])
             .ToList();
 
         var widths = Enumerable.Range(0, rows[0].Length).Select(i => rows.Max(r => r[i].Length)).ToArray();

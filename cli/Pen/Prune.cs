@@ -5,8 +5,8 @@ namespace Pen;
 
 /// <summary>
 /// pen prune: removes what moved or deleted projects left behind (volumes,
-/// project-layer images, the runtime dir), after asking. A key's project is
-/// known from the project-dir file its runtime dir holds
+/// project-layer images, the runtime dir) and tools images on an old base, after
+/// asking. A key's project is known from the project-dir file its runtime dir holds
 /// (<see cref="Session.EnsureRuntimeDir"/>).
 /// </summary>
 internal static partial class Prune
@@ -26,24 +26,29 @@ internal static partial class Prune
 
     public static int Run(HostEnv host, TextReader input)
     {
-        var entries = Find(host, ListVolumes(), ListImages());
-        if (entries.Count == 0)
+        var images = ListImages();
+        var entries = Find(host, ListVolumes(), images);
+        var staleTools = StaleToolsImages(images, ToolsImage.CurrentBaseId(), ReadBaseId);
+        if (entries.Count == 0 && staleTools.Count == 0)
         {
             Out.Line("nothing to prune: no project has volumes or state");
             return 0;
         }
-        Out.Raw(Render(host, entries));
+        if (entries.Count > 0) Out.Raw(Render(host, entries));
 
         var removable = entries.Where(e => e.Removable).ToList();
-        if (removable.Count == 0)
+        if (removable.Count == 0 && staleTools.Count == 0)
         {
             Out.Line("nothing to prune");
             return 0;
         }
-        Out.Raw($"Removing deletes {(removable.Count == 1 ? "that project's" : $"those {removable.Count} projects'")} sandbox homes (agent logins"
-                + " and config, shell history), NuGet caches, Docker-in-Docker images, project layers\n"
-                + "and pen's state for them. No project files are touched.");
-        if (!Out.Confirm(removable.Count == 1 ? "remove it?" : "remove them?", input))
+        if (staleTools.Count > 0)
+            Out.Raw($"to remove, tools images on an old base image:\n  {string.Join("\n  ", staleTools)}");
+        if (removable.Count > 0)
+            Out.Raw($"Removing deletes {(removable.Count == 1 ? "that project's" : $"those {removable.Count} projects'")} sandbox homes (agent logins"
+                    + " and config, shell history), NuGet caches, Docker-in-Docker images, project layers\n"
+                    + "and pen's state for them. No project files are touched.");
+        if (!Out.Confirm(removable.Count + staleTools.Count == 1 ? "remove it?" : "remove them?", input))
         {
             Out.Line("nothing removed");
             return 1;
@@ -52,7 +57,40 @@ internal static partial class Prune
         var failed = 0;
         foreach (var e in removable)
             if (!Remove(host, e)) failed++;
+        foreach (var image in staleTools)
+        {
+            var r = Proc.Capture("docker", ["image", "rm", image]);
+            if (r.ExitStatus.ExitCode != 0)
+            {
+                Out.Line($"can't remove {image}: {r.StandardError.Trim()}");
+                failed++;
+            }
+        }
         return failed == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// The tools images no session can ask for any more, since their name depends on
+    /// the base: <paramref name="images"/> (repository:tag) in the repository pen-tools itself,
+    /// whose label names a base other than <paramref name="currentBase"/>. Going by the
+    /// repository matters: a project layer stacked on a tools image inherits the label, and a
+    /// project named tools has a repository that starts the same way. With no current base
+    /// to compare, or a label that can't be read, nothing is called old.
+    /// </summary>
+    internal static List<string> StaleToolsImages(IEnumerable<string> images, string? currentBase, Func<string, string?> baseIdOf)
+    {
+        if (currentBase == null) return [];
+        return images
+            .Where(i => ToolsTag().IsMatch(i))
+            .Where(i => baseIdOf(i) is { } id && id.StartsWith("sha256:", StringComparison.Ordinal) && id != currentBase)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static string? ReadBaseId(string image)
+    {
+        var r = Proc.Capture("docker", ["image", "inspect", "--format", $"{{{{ index .Config.Labels \"{ToolsImage.BaseIdLabel}\" }}}}", image]);
+        return r.ExitStatus.ExitCode == 0 ? r.StandardOutput.Trim() : null;
     }
 
     /// <summary>
@@ -251,4 +289,7 @@ internal static partial class Prune
 
     [GeneratedRegex("^(-[0-9a-f]{8})?:(latest|[0-9a-f]{16})$")]
     private static partial Regex LayerSuffix();
+
+    [GeneratedRegex(@"^pen-tools:[0-9a-f]{16}\z")]
+    private static partial Regex ToolsTag();
 }
