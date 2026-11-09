@@ -83,6 +83,135 @@ public class RecipeTests
             Assert.DoesNotContain(recipe.Env, e => e.Key == leftOut);
     }
 
+    private static Recipe Get(string name)
+    {
+        Assert.True(RecipeCatalog.Embedded.TryGet(name, out var recipe), name);
+        Assert.False(recipe.Hidden);
+        Assert.Contains(name, RecipeCatalog.Embedded.Available());
+        return recipe;
+    }
+
+    [Fact]
+    public void TheGoRecipeIsOneMinorVersionWithItsModuleProxy()
+    {
+        var recipe = Get("go");
+        Assert.Equal("1.27", recipe.Default);
+        Assert.False(recipe.Multiple);
+        Assert.Equal(["proxy.golang.org", "sum.golang.org", "storage.googleapis.com"], recipe.Allow);
+        Assert.Empty(recipe.Env);
+    }
+
+    [Theory]
+    [InlineData("1.21", true)]
+    [InlineData("1.24", true)]
+    [InlineData("1.27", true)]
+    [InlineData("1.20", false)]
+    [InlineData("1.28", false)]
+    [InlineData("1.2", false)]
+    [InlineData("1.27.3", false)]
+    [InlineData("1.27.0", false)]
+    [InlineData("1.021", false)]
+    [InlineData("go1.27", false)]
+    [InlineData("1", false)]
+    [InlineData("1.27\n", false)]
+    [InlineData("latest", false)]
+    public void TheGoRecipeAcceptsOnlyMinorVersionsThatInstall(string version, bool accepted) =>
+        Assert.Equal(accepted, Get("go").AcceptsVersion(version));
+
+    [Fact]
+    public void TheRustRecipeKeepsRustupInTheImageAndCargoInHome()
+    {
+        var recipe = Get("rust");
+        Assert.Equal("stable", recipe.Default);
+        Assert.True(recipe.Multiple);
+        Assert.Equal(["index.crates.io", "static.crates.io"], recipe.Allow);
+        Assert.Equal([new KeyValuePair<string, string>("RUSTUP_HOME", "/usr/local/rustup")], recipe.Env);
+        Assert.DoesNotContain(recipe.Env, e => e.Key == "CARGO_HOME");
+    }
+
+    [Theory]
+    [InlineData("stable", true)]
+    [InlineData("1.49", true)]
+    [InlineData("1.49.0", true)]
+    [InlineData("1.85", true)]
+    [InlineData("1.85.0", true)]
+    [InlineData("1.85.1", true)]
+    [InlineData("1.68.2", true)]
+    [InlineData("1.77.2", true)]
+    [InlineData("1.99", true)]
+    [InlineData("1.99.1", true)]
+    [InlineData("1.48", false)]
+    [InlineData("1.9", false)]
+    [InlineData("1.100", false)]
+    [InlineData("1.85.2", false)]
+    [InlineData("1.86.1", false)]
+    [InlineData("1.99.2", false)]
+    [InlineData("1.085", false)]
+    [InlineData("beta", false)]
+    [InlineData("nightly", false)]
+    [InlineData("stable\n", false)]
+    [InlineData("1", false)]
+    public void TheRustRecipeAcceptsOnlyReleasesThatInstall(string version, bool accepted) =>
+        Assert.Equal(accepted, Get("rust").AcceptsVersion(version));
+
+    [Fact]
+    public void TheJavaRecipeIsUbuntusJdksWithMavenAndGradle()
+    {
+        var recipe = Get("java");
+        Assert.Equal("21", recipe.Default);
+        Assert.True(recipe.Multiple);
+        Assert.Equal(
+            ["repo.maven.apache.org", "repo1.maven.org", "services.gradle.org", "downloads.gradle.org", "plugins.gradle.org", "plugins-artifacts.gradle.org"],
+            recipe.Allow);
+        Assert.Equal([new KeyValuePair<string, string>("MAVEN_OPTS", "-Daether.connector.http.useSystemProperties=true")], recipe.Env);
+    }
+
+    [Theory]
+    [InlineData("8", true)]
+    [InlineData("11", true)]
+    [InlineData("17", true)]
+    [InlineData("21", true)]
+    [InlineData("25", true)]
+    [InlineData("7", false)]
+    [InlineData("9", false)]
+    [InlineData("22", false)]
+    [InlineData("26", false)]
+    [InlineData("1.8", false)]
+    [InlineData("21.0", false)]
+    [InlineData("021", false)]
+    [InlineData("21\n", false)]
+    [InlineData("latest", false)]
+    public void TheJavaRecipeAcceptsOnlyUbuntusJdks(string version, bool accepted) =>
+        Assert.Equal(accepted, Get("java").AcceptsVersion(version));
+
+    [Fact]
+    public void TheCodegraphRecipeIsOneMajorVersionFromNpm()
+    {
+        var recipe = Get("codegraph");
+        Assert.Equal("1", recipe.Default);
+        Assert.False(recipe.Multiple);
+        Assert.Empty(recipe.Allow);
+        Assert.Equal(
+            [new KeyValuePair<string, string>("CODEGRAPH_TELEMETRY", "0"), new KeyValuePair<string, string>("CODEGRAPH_NO_UPDATE_CHECK", "1")],
+            recipe.Env);
+    }
+
+    [Theory]
+    [InlineData("1", true)]
+    [InlineData("0", false)]
+    [InlineData("2", false)]
+    [InlineData("1.6", false)]
+    [InlineData("1.6.2", false)]
+    [InlineData("01", false)]
+    [InlineData("latest", false)]
+    [InlineData("1\n", false)]
+    public void TheCodegraphRecipeAcceptsOnlyMajorVersionsThatInstall(string version, bool accepted) =>
+        Assert.Equal(accepted, Get("codegraph").AcceptsVersion(version));
+
+    [Fact]
+    public void TheCodegraphIndexIsIgnoredInEverySession() =>
+        Assert.Contains(".codegraph/", Embedded.Text("image/gitignore").Split('\n'));
+
     [Fact]
     public void AllSettingsAreRead()
     {

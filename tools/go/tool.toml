@@ -1,0 +1,15 @@
+# Go from the official tarball, by minor version (go:1.27 is the newest 1.27.x). A module
+# that asks for a newer Go gets it from the module proxy (GOTOOLCHAIN), into the home volume.
+default = "1.27"
+# 1.21 and later: the first release whose go command fetches a newer toolchain when a
+# module needs one. A newer minor version needs this recipe updated.
+version = '^1\.(2[1-7])$'
+multiple = false
+allow = [
+  # The module proxy (GOPROXY), for modules and toolchains, and the checksum database (GOSUMDB)
+  "proxy.golang.org",
+  "sum.golang.org",
+  # Where the module proxy redirects larger module zips and toolchains. This is all of
+  # Google Cloud Storage, so sessions with Go can reach any bucket there.
+  "storage.googleapis.com",
+]

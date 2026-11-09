@@ -1,0 +1,12 @@
+# CodeGraph, the code index for agents, by major version (codegraph:1 is the newest 1.x,
+# refreshed when pen upgrade rebuilds the base). /etc/pen/gitignore ignores .codegraph/.
+default = "1"
+# Major versions that install on Linux from npm. A new major version needs this recipe updated.
+version = '^1$'
+multiple = false
+# From the npm registry, which the default allowlist has.
+
+[env]
+# No usage statistics, and no update check: the image is the only way to upgrade.
+CODEGRAPH_TELEMETRY = "0"
+CODEGRAPH_NO_UPDATE_CHECK = "1"

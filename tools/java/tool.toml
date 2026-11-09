@@ -1,0 +1,21 @@
+# Ubuntu's headless JDK by version (java:21). Several can be installed together; java and
+# javac are the newest one's, and the others are in /usr/lib/jvm. Maven and Gradle aren't
+# installed: projects bring them with their wrappers (mvnw, gradlew).
+default = "21"
+# The JDKs Ubuntu 24.04 packages. 21 is its default JDK.
+version = '^(8|11|17|21|25)$'
+multiple = true
+allow = [
+  # Maven Central
+  "repo.maven.apache.org",
+  "repo1.maven.org",
+  # Gradle distributions (redirected to GitHub, already allowed), plugin portal and its downloads
+  "services.gradle.org",
+  "downloads.gradle.org",
+  "plugins.gradle.org",
+  "plugins-artifacts.gradle.org",
+]
+
+[env]
+# Maven 3.9 doesn't use Java's proxy settings (net.properties) unless told to. Gradle does.
+MAVEN_OPTS = "-Daether.connector.http.useSystemProperties=true"

@@ -2172,6 +2172,58 @@ check "in a linked worktree it's <key>-<dir hash>:<hash of the tools image>" \
 check "...and can RUN the tool too" test "$(in_image "$wt_layer" 'cat /etc/pen-smoke-tool')" = "$V"
 git worktree remove --force "$WT28"; git branch -qD smoke-wt28
 
+# Each built-in recipe builds a small project through the proxy, with nothing blocked.
+# tool_run <tool> <bash script>: a session with that tool, stdout and stderr together.
+tool_run() { "$PEN" --tool "$1" run bash -c "$2" </dev/null 2>&1; }
+
+out=$(tool_run go '
+  mkdir -p gohi && cd gohi && go mod init example.com/hi >/dev/null 2>&1
+  printf "package main\nimport (\"fmt\"; \"github.com/google/uuid\"; \"golang.org/x/text/cases\"; \"golang.org/x/text/language\")\nfunc main() { _ = uuid.New(); fmt.Println(cases.Title(language.English).String(\"hello go\")) }\n" >main.go
+  go mod tidy && go build -o hi . && ./hi && go version' || true)
+check "go: a module with dependencies builds and runs" contains "Hello Go" "$out"
+check "...with the recipe's default, the newest Go 1.27" grep -qE '^go version go1\.27(\.[0-9]+)? linux/' <<<"$out"
+check "...with nothing blocked" not contains "blocked:" "$out"
+rm -rf gohi
+
+out=$(tool_run rust '
+  cargo new --quiet rshi && cd rshi && cargo add --quiet itoa@1 &&
+  printf "fn main() {\n    println!(\"hello rust {}\", itoa::Buffer::new().format(42));\n}\n" >src/main.rs &&
+  cargo run --quiet && cargo clippy --quiet && cargo fmt --check &&
+  echo "RUSTUP_HOME=$RUSTUP_HOME CARGO_HOME=${CARGO_HOME-unset}" && ls ~/.cargo/registry/cache/*/ | grep -c "^itoa-"' || true)
+check "rust: a crate with a dependency builds, runs and passes clippy and rustfmt" contains "hello rust 42" "$out"
+check "...with rustup in the image and cargo's cache in the home volume" \
+  bash -c 'grep -qxF "RUSTUP_HOME=/usr/local/rustup CARGO_HOME=unset" <<<"$1" && grep -v "^pen:" <<<"$1" | tail -1 | grep -qx 1' _ "$out"
+check "...with nothing blocked" not contains "blocked:" "$out"
+rm -rf rshi
+
+# Maven, fetched as a wrapper would, and a dependency from Maven Central, through the
+# proxy the recipe tells Java about.
+mkdir -p jv/src/main/java/hi
+cat >jv/pom.xml <<'EOF'
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>hi</groupId><artifactId>hi</artifactId><version>1</version>
+  <properties><maven.compiler.release>21</maven.compiler.release><project.build.sourceEncoding>UTF-8</project.build.sourceEncoding></properties>
+  <dependencies><dependency><groupId>org.apache.commons</groupId><artifactId>commons-lang3</artifactId><version>3.17.0</version></dependency></dependencies>
+</project>
+EOF
+printf 'package hi;\npublic class Hi { public static void main(String[] a) { System.out.println(org.apache.commons.lang3.StringUtils.capitalize("hello java")); } }\n' >jv/src/main/java/hi/Hi.java
+out=$(tool_run java '
+  mvn=https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.16/apache-maven-3.9.16-bin.tar.gz
+  curl -fsSL "$mvn" | tar -xz -C /tmp && cd jv && /tmp/apache-maven-3.9.16/bin/mvn -B -q package &&
+  java -cp "target/hi-1.jar:$(ls ~/.m2/repository/org/apache/commons/commons-lang3/3.17.0/*.jar)" hi.Hi && java -version' || true)
+check "java: a Maven project with a dependency builds and runs" contains "Hello java" "$out"
+check "...with the recipe's default, JDK 21" grep -qE '^openjdk version "21\.' <<<"$out"
+check "...with nothing blocked" not contains "blocked:" "$out"
+rm -rf jv
+
+mkdir -p cg && printf 'export function greet(name: string) { return helper(name); }\nfunction helper(n: string) { return "hi " + n; }\n' >cg/a.ts
+out=$(tool_run codegraph 'cd cg && codegraph init . >/dev/null 2>&1 && codegraph query greet && git status --porcelain --ignored .' || true)
+check "codegraph: indexes a project and finds a symbol" bash -c 'grep -q "greet" <<<"$1" && grep -q "a.ts:1" <<<"$1"' _ "$out"
+check "...and git ignores its .codegraph/" contains "!! cg/.codegraph/" "$out"
+check "...with nothing blocked" not contains "blocked:" "$out"
+rm -rf cg
+
 rc=0; out=$("$PEN" --tool "$A" --build-tools-image 2>&1 </dev/null) || rc=$?
 check "there's no build option any more: real sessions build" bash -c '[ "$1" = 2 ] && grep -qF "unknown option" <<<"$2"' _ "$rc" "$out"
 fi

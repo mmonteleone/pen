@@ -1,0 +1,17 @@
+# Rust through rustup: stable, or releases by minor (rust:1.85, the newest 1.85.x) or exact
+# version (rust:1.85.1), with clippy and rustfmt. Several can be installed together; the
+# default toolchain is stable if given, otherwise the newest. rust-toolchain.toml picks
+# among them, but can't install another in a session.
+default = "stable"
+# 1.49 and later (the first with aarch64 Linux as a tier 1 host), each x.y.0, and each
+# patch release since. A newer release needs this recipe updated.
+version = '^(stable|1\.(49|[5-9][0-9])(\.0)?|1\.(52|56|58|62|66|67|68|71|72|74|77|80|84|85|91|93|94|96|97|98|99)\.1|1\.(68|77)\.2)$'
+multiple = true
+allow = [
+  # crates.io: the sparse index and crate downloads
+  "index.crates.io",
+  "static.crates.io",
+]
+
+[env]
+RUSTUP_HOME = "/usr/local/rustup"
