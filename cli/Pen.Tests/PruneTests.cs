@@ -1,6 +1,12 @@
 namespace Pen.Tests;
 
-/// <summary>D2: pen prune's classification of project keys, and removal of the ones it may remove.</summary>
+/// <summary>
+/// D2: pen prune's classification of project keys, and removal of the ones it
+/// may remove. Runs alone: these retake a project lock straight after releasing
+/// it, and a process start in a parallel test can hold a shared lock fd until
+/// its exec, so the lock could outlive the release.
+/// </summary>
+[Collection(nameof(LockAndProcessTests))]
 public class PruneTests
 {
     /// <summary>Records <paramref name="dir"/> as a project the way a pen command does, returning its key.</summary>
