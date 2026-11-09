@@ -355,8 +355,15 @@ internal static class RepoGuard
             {
                 if (!IsInside(gitDir, real))
                     throw new PenException($"{Rel(dir, configFile)} includes {Rel(dir, real)}, which doesn't exist: the agent could create it, and git on this machine would read it as config. Create it (it can be empty) or remove the include, then rerun");
-                Directory.CreateDirectory(Path.GetDirectoryName(real)!);
-                File.WriteAllText(real, "");
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(real)!);
+                    File.WriteAllText(real, "");
+                }
+                catch (Exception x) when (x is IOException or UnauthorizedAccessException)
+                {
+                    throw new PenException($"{Rel(dir, configFile)} includes {Rel(dir, real)}, which pen can't create to protect it (a parent is a file, the name is too long, or it's not writable): remove it or the include in it, then rerun");
+                }
             }
             if (writable)
             {

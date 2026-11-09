@@ -404,6 +404,27 @@ public class ScanFailClosedTests
         Assert.Contains("remove it", e.Message);
     }
 
+    [Theory]
+    [InlineData("HEAD/x")] // the parent is a file
+    [InlineData("HEAD/x/y.inc")]
+    [InlineData("LONG")] // the name is over the file system's limit
+    public void AnIncludeInTheGitDirThatCantBeCreatedIsRefused_UntilTheConfigIsRemoved(string include)
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        var file = Path.Combine(repo, ".git", "config.worktree");
+        var path = include == "LONG" ? new string('n', 300) : include;
+        File.WriteAllText(file, Inc(path));
+
+        var e = Assert.Throws<PenException>(() => RepoGuard.PrepareMounts(repo, t.Path));
+        Assert.Contains(".git/config.worktree includes", e.Message);
+        Assert.Contains(path, e.Message);
+        Assert.Contains("remove it", e.Message);
+
+        File.Delete(file);
+        RepoGuard.PrepareMounts(repo, t.Path);
+    }
+
     [Fact]
     public void AnOpenDirectoryWithTheBitsAlreadySetRecordsNoChange()
     {
