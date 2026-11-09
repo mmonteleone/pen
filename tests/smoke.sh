@@ -1634,4 +1634,87 @@ git reset -q --hard "$SMSTART"
 rm -rf libs .git/modules .gitmodules
 fi
 
+if want 27; then
+# ==============================================================================
+section "27. Directory mounts hold under other spellings of the name"
+
+# Where the filesystem ignores case, .GIT and .git are one directory, so the
+# read-only mounts must hold whichever way the path is spelled. Only the session
+# can say: the host folding case doesn't prove the sandbox's view of it does.
+MARKER=.smoke27-marker
+TOKEN=smoke27-$RANDOM$RANDOM
+CFG_COPY=$SCRATCH/smoke27-config
+mkdir -p .git/hooks .pen
+cp -p .git/config "$CFG_COPY"
+printf '# %s %s\n' "$MARKER" "$TOKEN" >>.git/config
+for d in .git .git/hooks .pen; do printf '%s\n' "$TOKEN" >"$d/$MARKER"; done
+cfg_sum=$(cksum <.git/config)
+hooks_list=$(ls -A .git/hooks)
+pen_list=$(ls -A .pen)
+
+out=$(in_sandbox '
+  export LC_ALL=C
+  M=.smoke27-marker
+  seen() { echo "read: $1: $(cat "$1" 2>/dev/null)"; }
+  attempt() {
+    local err
+    if err=$({ echo smoke27 >>"$1"; } 2>&1); then echo "wrote: $1"
+    elif [[ $err == *"Read-only file system"* ]]; then echo "read-only: $1"
+    else echo "refused: $1: $err"; fi
+  }
+  seen ".git/$M"; seen ".git/hooks/$M"; seen ".pen/$M"
+  attempt .git/.smoke27-plain
+  attempt smoke27-project
+  seen ".GIT/$M"; seen ".git/HOOKS/$M"; seen ".PEN/$M"
+  echo "read: .GIT/config: $(grep -F "$M" .GIT/config 2>/dev/null)"
+  attempt .GIT/.smoke27-alias
+  attempt .GIT/config
+  attempt .git/HOOKS/x
+  attempt .PEN/x
+  echo finished
+' 2>&1) || fail "the session failed: $out"
+saw() { grep -qxF -- "$1" <<<"$out" || { printf '%s\n' "$out" >&2; return 1; }; }
+wrote_on_host() { [ "$(cat "$1" 2>/dev/null)" = smoke27 ]; }
+
+# A session that can't see these, or can't write anywhere, proves nothing below.
+check "the session reads what the host put in .git" saw "read: .git/$MARKER: $TOKEN"
+check "...in .git/hooks" saw "read: .git/hooks/$MARKER: $TOKEN"
+check "...and in .pen" saw "read: .pen/$MARKER: $TOKEN"
+check "a normal .git/ path is writable in the session" saw "wrote: .git/.smoke27-plain"
+check "...and reaches the host" wrote_on_host .git/.smoke27-plain
+check "a project file is writable in the session" saw "wrote: smoke27-project"
+check "...and reaches the host" wrote_on_host smoke27-project
+# Output cut short must fail here, not look like a session that doesn't fold case.
+check "the session tried the other spellings and got to the end" saw finished
+
+folds=0
+for p in ".GIT/$MARKER" ".git/HOOKS/$MARKER" ".PEN/$MARKER"; do
+  if grep -qxF -- "read: $p: $TOKEN" <<<"$out"; then folds=$((folds + 1)); fi
+done
+if [ "$folds" = 0 ]; then
+  check "the session wrote through none of the other spellings" \
+    not grep -qE '^wrote: (\.GIT/|\.git/HOOKS/|\.PEN/)' <<<"$out"
+  if [ -e ".GIT/$MARKER" ]; then
+    note "the host ignores case but the session doesn't: only the host's files could be checked"
+  else
+    note "skipped: this filesystem is case-sensitive, so .GIT isn't .git"
+  fi
+else
+  check "the session reads the same files as .GIT, .git/HOOKS and .PEN" test "$folds" = 3
+  check "...and .GIT/config is the host's .git/config" saw "read: .GIT/config: # $MARKER $TOKEN"
+  check "a new file in .GIT is writable in the session" saw "wrote: .GIT/.smoke27-alias"
+  check "...and reaches the host's .git" wrote_on_host .git/.smoke27-alias
+  check "writing .GIT/config hits the read-only mount" saw "read-only: .GIT/config"
+  check "writing .git/HOOKS/x hits the read-only mount" saw "read-only: .git/HOOKS/x"
+  check "writing .PEN/x hits the read-only mount" saw "read-only: .PEN/x"
+fi
+check ".git/config is unchanged on the host" test "$(cksum <.git/config)" = "$cfg_sum"
+check ".git/hooks is unchanged on the host" test "$(ls -A .git/hooks)" = "$hooks_list"
+check ".pen is unchanged on the host" test "$(ls -A .pen)" = "$pen_list"
+
+check "nothing is left running" test "$(containers)" = 0
+cp -p "$CFG_COPY" .git/config
+rm -f ".git/$MARKER" ".git/hooks/$MARKER" ".pen/$MARKER" .git/.smoke27-plain .git/.smoke27-alias smoke27-project
+fi
+
 section "All checks passed."
