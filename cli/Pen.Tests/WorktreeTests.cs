@@ -419,4 +419,20 @@ public class WorktreeTests
         Assert.Equal($"{main.Key}-{Project.Hash(wt)}:latest", Image.ProjectLayerName(w));
         Assert.Equal($"{Project.KeyFor(t.Sub("plain"))}:latest", Image.ProjectLayerName(Project.Resolve(t.Sub("plain"), t.Host())));
     }
+
+    [Fact]
+    public void ProjectLayerNameOnAToolsImage()
+    {
+        using var t = new TempDir();
+        var (repo, wt, _) = RepoWithWorktree(t);
+        var main = Project.Resolve(repo, t.Host());
+        var w = Project.Resolve(wt, t.Host());
+        const string one = "pen-tools:0123456789abcdef", other = "pen-tools:fedcba9876543210";
+        Assert.Equal($"{main.Key}:0123456789abcdef", Image.ProjectLayerName(main, one));
+        Assert.Equal($"{main.Key}-{Project.Hash(wt)}:0123456789abcdef", Image.ProjectLayerName(w, one));
+        Assert.Equal($"{main.Key}:fedcba9876543210", Image.ProjectLayerName(main, other));
+        Assert.Equal($"{main.Key}:latest", Image.ProjectLayerName(main, Image.Name));
+        Assert.True(Prune.IsImageOf(main.Key, Image.ProjectLayerName(main, one)));
+        Assert.True(Prune.IsImageOf(main.Key, Image.ProjectLayerName(w, one)));
+    }
 }

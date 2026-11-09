@@ -161,6 +161,79 @@ public class TrustGateTests
         Assert.Empty(f.Calls);
     }
 
+    private const string SomeTools = "pen-tools:0123456789abcdef", OtherTools = "pen-tools:fedcba9876543210";
+
+    [Fact]
+    public void OnAToolsImage_ItsBuiltFromThePrivateCopy_WithTheToolsInPlaceOfPenLatest()
+    {
+        using var f = new Fixture(projectToml: "");
+        Approve(f);
+        File.WriteAllText(Path.Combine(f.T.Path, "swap-in"), "FROM pen:latest\nRUN worse\n");
+        var callsBefore = f.Calls.Length;
+
+        var name = Image.EnsureProjectLayer(f.Host, f.Project, baseImage: SomeTools);
+
+        Assert.Equal($"{f.Project.Key}:0123456789abcdef", name);
+        var build = Assert.Single(f.Calls.Skip(callsBefore));
+        Assert.Contains($"-t {name} ", build);
+        Assert.Contains("--build-context pen:latest=docker-image://pen-tools:0123456789abcdef ", build);
+        Assert.StartsWith(f.Host.RuntimeDir(f.Project.Key), f.Seen("context-path"));
+        Assert.Equal(Approved, f.Seen("seen-context/Dockerfile")); // not the swap
+    }
+
+    [Fact]
+    public void WithoutToolsNothingStandsInForPenLatest()
+    {
+        using var f = new Fixture(projectToml: "");
+        Approve(f);
+        var callsBefore = f.Calls.Length;
+        Assert.Equal($"{f.Project.Key}:latest", Image.EnsureProjectLayer(f.Host, f.Project));
+        Assert.DoesNotContain("--build-context", Assert.Single(f.Calls.Skip(callsBefore)));
+    }
+
+    [Fact]
+    public void AddingToolsIsNoWayAroundApproval()
+    {
+        using var f = new Fixture(projectToml: "");
+        Assert.Contains("isn't what was approved", Assert.Throws<PenException>(() => Image.EnsureProjectLayer(f.Host, f.Project, baseImage: SomeTools)).Message);
+        Assert.Empty(f.Calls);
+
+        Approve(f);
+        File.WriteAllText(Path.Combine(f.Project.PenDir, "Dockerfile"), "FROM pen:latest\nRUN worse\n");
+        Assert.Contains("isn't what was approved", Assert.Throws<PenException>(() => Image.EnsureProjectLayer(f.Host, f.Project, baseImage: SomeTools)).Message);
+        Assert.Empty(f.Calls);
+    }
+
+    /// <summary>The fake docker says every image exists, so a build skipped because the tag does would show.</summary>
+    [Fact]
+    public void AnExistingTagIsBuiltAgain_SoANewlyApprovedDockerfileReachesIt()
+    {
+        using var f = new Fixture(projectToml: "");
+        Approve(f);
+        Image.EnsureProjectLayer(f.Host, f.Project, baseImage: SomeTools);
+        const string next = "FROM pen:latest\nRUN next\n";
+        File.WriteAllText(Path.Combine(f.Project.PenDir, "Dockerfile"), next);
+        Approve(f);
+        var callsBefore = f.Calls.Length;
+
+        Assert.Equal($"{f.Project.Key}:0123456789abcdef", Image.EnsureProjectLayer(f.Host, f.Project, baseImage: SomeTools));
+
+        Assert.Single(f.Calls.Skip(callsBefore), c => c.StartsWith("build ", StringComparison.Ordinal));
+        Assert.Equal(next, f.Seen("seen-context/Dockerfile"));
+    }
+
+    [Fact]
+    public void TwoToolSetsInOneProjectGetTwoImages()
+    {
+        using var f = new Fixture(projectToml: "");
+        Approve(f);
+        var one = Image.EnsureProjectLayer(f.Host, f.Project, baseImage: SomeTools);
+        var other = Image.EnsureProjectLayer(f.Host, f.Project, baseImage: OtherTools);
+        Assert.NotEqual(one, other);
+        Assert.Contains(f.Calls, c => c.Contains($"-t {one} ", StringComparison.Ordinal) && c.Contains($"docker-image://{SomeTools} ", StringComparison.Ordinal));
+        Assert.Contains(f.Calls, c => c.Contains($"-t {other} ", StringComparison.Ordinal) && c.Contains($"docker-image://{OtherTools} ", StringComparison.Ordinal));
+    }
+
     private static void Approve(Fixture f) =>
         Assert.Equal(0, Trust.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal));
 

@@ -71,7 +71,8 @@ internal static class Program
         if (command.Kind == CommandKind.BuildToolsImage)
         {
             Image.EnsureCurrent();
-            Out.Stdout(ToolsImage.Ensure(command.Tools, RecipeCatalog.Embedded) + "\n");
+            var tools = ToolsImage.Ensure(command.Tools, RecipeCatalog.Embedded);
+            Out.Stdout((Image.EnsureProjectLayer(host, Project.Resolve(StartDir.Get(), host), baseImage: tools) ?? tools) + "\n");
             return 0;
         }
         Config.EnsureUserConfig(host);

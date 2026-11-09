@@ -1694,6 +1694,8 @@ git -C "$LIVE" init -q
 mkdir -p "$GONE/.pen"
 echo 'FROM pen:latest' >"$GONE/.pen/Dockerfile"
 (cd "$GONE" && fake_pen trust --yes && fake_pen run true) >/dev/null 2>&1 || fail "a session in the project to delete failed"
+ghash=$(cd "$GONE" && fake_pen --tool "pen-test:$(date +%s)" --build-tools-image 2>/dev/null) || fail "a layer on a tools image in the project to delete failed"
+ghash=${ghash##*:}; TOOL_IMAGES+=("pen-tools:$ghash")
 (cd "$LIVE" && fake_pen run true) >/dev/null 2>&1 || fail "a session in the live project failed"
 gkey=$(basename "$(ls -d "$FSTATE"/pen-*-"$(printf %s "$GONE" | sha | cut -c1-8)")")
 lkey=$(basename "$(ls -d "$FSTATE"/pen-*-"$(printf %s "$LIVE" | sha | cut -c1-8)")")
@@ -1705,7 +1707,7 @@ rm -rf "$GONE"
 
 out=$(echo n | fake_prune 2>&1 || true)
 check "pen prune lists the deleted project as missing, with its volumes and layer" \
-  has_all "$out" "to remove, missing" "  $GONE  ($gkey)" "${gkey}_home, ${gkey}_nuget; $gkey:latest"
+  has_all "$out" "to remove, missing" "  $GONE  ($gkey)" "${gkey}_home, ${gkey}_nuget; $gkey:$ghash, $gkey:latest"
 check "...noting it may be on a volume that isn't mounted" contains "isn't mounted" "$out"
 check "...and the live one as kept" bash -c 'grep -q "^kept, in use:" <<<"$1" && grep -qF "  $2  ($3)" <<<"$1"' _ "$out" "$LIVE" "$lkey"
 check "...asking first" contains "pen: remove it? [y/N] n" "$out"
@@ -1717,7 +1719,8 @@ check "a key whose project.lock a session holds is skipped" \
 
 out=$(echo y | fake_prune 2>&1)
 check "answering yes removes the deleted project's volumes" bash -c 'grep -q "removed $2" <<<"$1" && ! docker volume inspect "${2}_home" >/dev/null 2>&1 && ! docker volume inspect "${2}_nuget" >/dev/null 2>&1' _ "$out" "$gkey"
-check "...its project layer" bash -c '! docker image inspect "$1:latest" >/dev/null 2>&1' _ "$gkey"
+check "...its project layers" bash -c '! docker image inspect "$1:latest" >/dev/null 2>&1 && ! docker image inspect "$1:$2" >/dev/null 2>&1' _ "$gkey" "$ghash"
+check "...but not the shared tools image they were built on" bash -c 'docker image inspect "$1" >/dev/null' _ "pen-tools:$ghash"
 check "...and its runtime dir" test ! -e "$FSTATE/$gkey"
 check "the live project keeps its volumes and runtime dir" bash -c 'docker volume inspect "${1}_home" >/dev/null && [ -s "$2/$1/project-dir" ]' _ "$lkey" "$FSTATE"
 check "...as does every other volume (unknown to this HOME, so never removed)" test "$(docker volume ls -q | grep -v "^${gkey}_" | sort)" = "$others"
@@ -2007,6 +2010,50 @@ many=$(tools_image --tool "$B" --tool "pen-test-b:$((V + 1))"); TOOL_IMAGES+=("$
 check "another set of tools is another image" bash -c '[ "$1" != "$2" ] && [ "$3" = 2 ]' _ "$many" "$tag" "$(builds)"
 check "...and versions of one tool reach its script as separate arguments" \
   test "$(in_image "$many" 'ls /opt/pen-test-b | wc -l' | tr -d ' ')" = 2
+
+# A project layer on tools images: the Dockerfile says FROM pen:latest and runs the tool.
+A1=pen-test:$V A2=pen-test:$((V + 1))
+rm -rf .pen && mkdir .pen
+printf 'FROM pen:latest\nRUN pen-test >/etc/pen-smoke-tool\n' >.pen/Dockerfile
+rc=0; out=$("$PEN" --tool "$A1" --build-tools-image 2>&1 </dev/null) || rc=$?
+check "an unapproved .pen/ isn't stacked on tools" bash -c '[ "$1" = 1 ] && grep -qF "isn'"'"'t what was approved" <<<"$2"' _ "$rc" "$out"
+"$PEN" trust --yes </dev/null >/dev/null 2>&1
+layer1=$(tools_image --tool "$A1"); TOOL_IMAGES+=("pen-tools:${layer1##*:}")
+check "a project layer on tools is <key>:<hash of the tools image>" \
+  bash -c '[[ $1 == "$2":* ]] && [[ ${1##*:} =~ ^[0-9a-f]{16}$ ]] && docker image inspect "pen-tools:${1##*:}" >/dev/null' _ "$layer1" "$KEY"
+check "...and its Dockerfile can RUN the tool" test "$(in_image "$layer1" 'cat /etc/pen-smoke-tool')" = "$V"
+layer2=$(tools_image --tool "$A2"); TOOL_IMAGES+=("pen-tools:${layer2##*:}")
+check "another tool set in the project is another image" bash -c '[ "$1" != "$2" ] && [[ $2 == "$3":* ]]' _ "$layer1" "$layer2" "$KEY"
+check "...with that set's tool" test "$(in_image "$layer2" 'cat /etc/pen-smoke-tool')" = "$((V + 1))"
+check "...leaving the first as it was" test "$(in_image "$layer1" 'cat /etc/pen-smoke-tool')" = "$V"
+id1=$(docker image inspect --format '{{.Id}}' "$layer1")
+check "building the first again gives the same image" \
+  test "$(docker image inspect --format '{{.Id}}' "$(tools_image --tool "$A1")")" = "$id1"
+
+printf 'FROM pen:latest\nRUN pen-test >/etc/pen-smoke-tool; echo changed >/etc/pen-smoke-changed\n' >.pen/Dockerfile
+rc=0; out=$("$PEN" --tool "$A1" --build-tools-image 2>&1 </dev/null) || rc=$?
+check "a changed Dockerfile isn't built on tools until approved" bash -c '[ "$1" = 1 ] && grep -qF "isn'"'"'t what was approved" <<<"$2"' _ "$rc" "$out"
+check "...leaving the image as it was" test "$(docker image inspect --format '{{.Id}}' "$layer1")" = "$id1"
+"$PEN" trust --yes </dev/null >/dev/null 2>&1
+check "once approved, it keeps the same tag" test "$(tools_image --tool "$A1")" = "$layer1"
+check "...which now holds the new layer, not the old one" test "$(in_image "$layer1" 'cat /etc/pen-smoke-changed')" = changed
+
+printf 'FROM pen:latest\nRUN test ! -e /opt/pen-test\n' >.pen/Dockerfile
+"$PEN" trust --yes </dev/null >/dev/null 2>&1
+check "with no tools, a project layer is still <key>:latest, on plain pen:latest" test "$(tools_image)" = "$KEY:latest"
+check "a session doesn't use the stacked image yet" contains "[no tool]" \
+  "$("$PEN" --tool "$A1" run sh -c 'test -e /opt/pen-test || echo "[no tool]"' </dev/null 2>/dev/null)"
+rm -rf .pen
+
+git worktree add -q -b smoke-wt28 "$SCRATCH/wt28" 2>/dev/null
+WT28=$(cd "$SCRATCH/wt28" && pwd -P)
+mkdir -p "$WT28/.pen"; printf 'FROM pen:latest\nRUN pen-test >/etc/pen-smoke-tool\n' >"$WT28/.pen/Dockerfile"
+(cd "$WT28" && "$PEN" trust --yes </dev/null >/dev/null 2>&1)
+wt_layer=$(cd "$WT28" && tools_image --tool "$A1")
+check "in a linked worktree it's <key>-<dir hash>:<hash of the tools image>" \
+  test "$wt_layer" = "$KEY-$(printf %s "$WT28" | sha | cut -c1-8):${layer1##*:}"
+check "...and can RUN the tool too" test "$(in_image "$wt_layer" 'cat /etc/pen-smoke-tool')" = "$V"
+git worktree remove --force "$WT28"; git branch -qD smoke-wt28
 
 check "a session doesn't use the tools image yet" contains "[no tool]" \
   "$("$PEN" --tool "$A" --tool "$B" run sh -c 'test -e /opt/pen-test || echo "[no tool]"' </dev/null 2>/dev/null)"

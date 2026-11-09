@@ -66,8 +66,13 @@ internal static class Image
     /// one: a session in the main checkout can write to an in-tree worktree's .pen/
     /// at any moment, so checking .pen/ itself would prove nothing about the build.
     /// </para>
+    /// <para>
+    /// <paramref name="baseImage"/> stands in for pen:latest in the Dockerfile, which
+    /// stays as it is. A tag says nothing about which .pen/ made it, so an existing
+    /// image must never skip the build: only building is what ties it to the approved copy.
+    /// </para>
     /// </summary>
-    public static string? EnsureProjectLayer(HostEnv host, Project project, bool noCache = false)
+    public static string? EnsureProjectLayer(HostEnv host, Project project, bool noCache = false, string baseImage = Name)
     {
         var dockerfile = Path.Combine(project.PenDir, "Dockerfile");
         if (!File.Exists(dockerfile)) return null;
@@ -76,10 +81,11 @@ internal static class Image
             throw new PenException($"can't build from .pen/: {context.Result.Problem}");
         if (context.Result.Hash != TrustStore.For(host, project).LayerHash)
             throw new PenException(".pen/ isn't what was approved (it may have just changed): review it with pen trust, then rerun");
-        var name = ProjectLayerName(project);
+        var name = ProjectLayerName(project, baseImage);
 
         var args = new List<string> { "build", "--progress", "plain", "-t", name, "--label", $"pen.project={project.Key}" };
         if (noCache) args.Add("--no-cache");
+        if (baseImage != Name) args.AddRange(["--build-context", $"{Name}=docker-image://{baseImage}"]);
         args.AddRange(["-f", Path.Combine(context.Dir, "Dockerfile"), context.Dir]);
         RunBuild(args, context: null, $"building the project layer {name} from .pen/Dockerfile", "building the project layer from .pen/Dockerfile failed");
         return name;
@@ -148,11 +154,15 @@ internal static class Image
     }
 
     /// <summary>
-    /// &lt;key&gt;:latest for the main checkout (or a plain dir), and
-    /// &lt;key&gt;-&lt;hash(dir)&gt;:latest for a linked worktree, whose .pen/ is its own.
+    /// &lt;key&gt; for the main checkout (or a plain dir), and &lt;key&gt;-&lt;hash(dir)&gt;
+    /// for a linked worktree, whose .pen/ is its own. Tagged latest on pen:latest, and
+    /// on a tools image with that image's hash, so tool sets and bases don't share a tag.
     /// </summary>
-    public static string ProjectLayerName(Project project) =>
-        project.Dir == project.RepoDir ? $"{project.Key}:latest" : $"{project.Key}-{Project.Hash(project.Dir)}:latest";
+    public static string ProjectLayerName(Project project, string baseImage = Name)
+    {
+        var tag = baseImage == Name ? "latest" : baseImage[(baseImage.LastIndexOf(':') + 1)..];
+        return project.Dir == project.RepoDir ? $"{project.Key}:{tag}" : $"{project.Key}-{Project.Hash(project.Dir)}:{tag}";
+    }
 
     /// <summary>Rebuilds the project's layer, if it has one and it's approved; pen upgrade doesn't ask.</summary>
     internal static void UpgradeProjectLayer(HostEnv host, Project project, bool clean)

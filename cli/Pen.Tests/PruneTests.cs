@@ -191,7 +191,22 @@ public class PruneTests
     [InlineData("pen-foo-0123abcd-89abcdef-89abcdef:latest", false)]
     [InlineData("pen-foo-0123abcd-bar-89abcdef:latest", false)]
     [InlineData("pen-foo-0123abcdx:latest", false)]
+    [InlineData("pen-foo-0123abcd:0123456789abcdef", true)]
+    [InlineData("pen-foo-0123abcd-89abcdef:0123456789abcdef", true)]
+    [InlineData("pen-foo-0123abcd:0123456789abcde", false)]
+    [InlineData("pen-foo-0123abcd:0123456789abcdef0", false)]
+    [InlineData("pen-foo-0123abcd:0123456789ABCDEF", false)]
+    [InlineData("pen-foo-0123abcd-89abcdef-89abcdef:0123456789abcdef", false)]
+    [InlineData("pen-foo-0123abcdx:0123456789abcdef", false)]
+    [InlineData("pen-tools:0123456789abcdef", false)]
     public void IsImageOf(string image, bool expected) => Assert.Equal(expected, Prune.IsImageOf("pen-foo-0123abcd", image));
+
+    [Fact]
+    public void AProjectNamedToolsDoesntClaimTheSharedToolsImages()
+    {
+        Assert.False(Prune.IsImageOf("pen-tools-0123abcd", "pen-tools:0123456789abcdef"));
+        Assert.True(Prune.IsImageOf("pen-tools-0123abcd", "pen-tools-0123abcd:0123456789abcdef"));
+    }
 
     [Fact]
     public void TheListingGroupsByStatus_WithManualCommandsForUnknownKeys()

@@ -125,12 +125,11 @@ internal static partial class Prune
 
     /// <summary>
     /// Whether <paramref name="image"/> (repository:tag) is a project layer of
-    /// <paramref name="key"/>: &lt;key&gt;:latest, or &lt;key&gt;-&lt;hash&gt;:latest
-    /// for a linked worktree (<see cref="Image.ProjectLayerName"/>).
+    /// <paramref name="key"/>: &lt;key&gt;, or &lt;key&gt;-&lt;hash&gt; for a linked worktree,
+    /// tagged latest or with a tools image's hash (<see cref="Image.ProjectLayerName"/>).
     /// </summary>
     internal static bool IsImageOf(string key, string image) =>
-        image == key + ":latest"
-        || (image.StartsWith(key + "-", StringComparison.Ordinal) && WorktreeSuffix().IsMatch(image[(key.Length + 1)..]));
+        image.StartsWith(key, StringComparison.Ordinal) && LayerSuffix().IsMatch(image[key.Length..]);
 
     internal static string? ReadProjectDir(string runtimeDir)
     {
@@ -250,6 +249,6 @@ internal static partial class Prune
     [GeneratedRegex("^pen-[a-z0-9_-]+-[0-9a-f]{8}$")]
     private static partial Regex KeyPattern();
 
-    [GeneratedRegex("^[0-9a-f]{8}:latest$")]
-    private static partial Regex WorktreeSuffix();
+    [GeneratedRegex("^(-[0-9a-f]{8})?:(latest|[0-9a-f]{16})$")]
+    private static partial Regex LayerSuffix();
 }

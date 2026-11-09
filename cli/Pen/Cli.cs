@@ -18,9 +18,10 @@ internal sealed record Command(CommandKind Kind, IReadOnlyList<string> Args, boo
 internal static class Cli
 {
     /// <summary>
-    /// With --tool only: builds those tools' image if it's missing and prints its name.
+    /// With --tool only: builds those tools' image if it's missing, then the current
+    /// directory's project layer on it if there's one, and prints the name of the last.
     /// Undocumented, for the smoke checks, since sessions don't run tools images.
-    /// It reads no config, so nothing in .pen/ reaches a build.
+    /// It reads no config and never asks: a .pen/ that isn't approved is refused.
     /// </summary>
     private const string BuildToolsImageOption = "--build-tools-image";
 
