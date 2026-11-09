@@ -131,7 +131,7 @@ internal static class Image
 
         // The project layer too, when run in a project that has one.
         Project? project = null;
-        try { project = Project.Resolve(Environment.CurrentDirectory, HostEnv.FromProcess()); }
+        try { project = Project.Resolve(StartDir.Get(), HostEnv.FromProcess()); }
         catch (PenException) { }
         if (project != null && File.Exists(Path.Combine(project.PenDir, "Dockerfile")))
         {

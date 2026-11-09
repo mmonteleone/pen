@@ -73,6 +73,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         var session = CreateSessionDir();
         using var sessionLock = FileLock.TryTake(session.LockFile, exclusive: true)
             ?? throw new InvalidOperationException("new session's lock is taken");
+        ProtectedFiles.Save(session, mounts, project.Dir, Sessions.Running(project.Key, RuntimeDir));
         var env = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["PROJECT_DIR"] = project.Dir,
@@ -227,12 +228,24 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
 
         // The .git check, now that the agent is gone and before anything runs git.
         var result = new SessionEndResult(true, null);
+        bool keepFiles = false;
+        IReadOnlyList<string>? restoreBlocked = null;
         if (env.TryGetValue("PROJECT_DIR", out var projectDir))
         {
             var check = GitCheck.RunAtSessionEnd(projectDir, session);
             GitCheck.Report(projectDir, check);
-            result = new(check.Failure == null, check.Failure == null && check.Moved.Count == 0 ? projectDir : null);
+            result = new(check.Failure == null, check.Failure == null && check.Moved.Count == 0 && check.Restored is not { Count: > 0 } ? projectDir : null);
+            keepFiles = check.RestoreIncomplete;
+            restoreBlocked = check.RestoreBlocked;
         }
+        else if (File.Exists(session.ProtectedManifest))
+        {
+            Out.Raw(GitCheck.NotCheckedWarning(session.Path, "the session's record of its project is damaged, so its protected files weren't compared"));
+            result = new(false, null);
+            keepFiles = true;
+        }
+        if (keepFiles)
+            Out.Raw(GitCheck.KeptCopiesAdvice(session, restoreBlocked));
 
         // What the session ended up allowing (pen allow may have added to it),
         // so the blocked line doesn't suggest a domain that's allowed by now.
@@ -247,10 +260,10 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
             var down = Process.RunAndCaptureText(psi);
             if (down.ExitStatus.ExitCode != 0)
                 Out.Line($"stopping session {session.Id}'s stack failed: {down.StandardError.Trim()} (it will be retried by the next pen command here)");
-            else
+            else if (!keepFiles)
                 DeleteSessionFiles(session);
         }
-        else
+        else if (!keepFiles)
         {
             DeleteSessionFiles(session);
         }

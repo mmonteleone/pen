@@ -9,7 +9,10 @@ internal sealed record Quarantined(string From, string To, string Why, (string F
 /// How a session-end check went: what it renamed before it stopped, and why it
 /// couldn't finish (null if it did). Git is only safe to run if Failure is null.
 /// </summary>
-internal sealed record CheckResult(List<Quarantined> Moved, string? Failure, List<ModeChange>? Opened = null);
+internal sealed record CheckResult(List<Quarantined> Moved, string? Failure, List<ModeChange>? Opened = null, List<RestoredFile>? Restored = null, bool RestoreIncomplete = false, List<string>? RestoreBlocked = null);
+
+/// <summary>A protected file that changed with nothing to set aside: it was missing, its directory went, or only its mode changed.</summary>
+internal sealed record RestoredFile(string Path, string What);
 
 /// <summary>A directory the check made listable and left that way, with the mode it had.</summary>
 internal sealed record ModeChange(string Path, UnixFileMode Was, UnixFileMode Now);
@@ -48,7 +51,10 @@ internal static class GitCheck
 
     /// <summary>
     /// The check for a session that's ending, against what the session recorded
-    /// at its start. A directory it can enter but not list gets u+rx so it can
+    /// at its start. First the protected files go back to their saved copies
+    /// (<see cref="ProtectedFiles.Restore"/>), so what follows reads those; if that
+    /// doesn't complete, RestoreIncomplete says the session's files must be kept
+    /// for a retry, since they hold the only good copies. A directory it can enter but not list gets u+rx so it can
     /// be scanned, and keeps it (Opened). Never throws: whatever goes wrong here
     /// (or in code it reaches), a session must still be torn down, and retrying
     /// wouldn't help. The caller must not run git unless Failure is null.
@@ -56,12 +62,19 @@ internal static class GitCheck
     public static CheckResult RunAtSessionEnd(string dir, SessionDir session)
     {
         var opened = new List<ModeChange>();
-        return Finish(dir, opened, (moved, unlistable, badNames) =>
+        var restored = new List<RestoredFile>();
+        var blocked = new List<string>();
+        var restoreDone = !File.Exists(session.ProtectedManifest);
+        var result = Finish(dir, opened, (moved, unlistable, badNames) =>
         {
             var (startedWithGit, commonGitDir) = session.ReadGit();
+            restoreDone = ProtectedFiles.Restore(session, dir, commonGitDir, moved, restored, opened, blocked);
+            if (!Directory.Exists(dir))
+                throw new PenException($"{Out.Field(dir)} isn't there any more or can't be reached, so pen couldn't check it. If it was moved, inspect its .git by hand before running git in it");
             // A session from a pen that didn't record its module repos keeps none.
             Check(dir, startedWithGit, commonGitDir, session.ReadModules() ?? [], moved, unlistable, badNames, p => TryOpen(p, opened));
         });
+        return result with { Restored = restored, RestoreIncomplete = !restoreDone, RestoreBlocked = blocked.Distinct(StringComparer.Ordinal).ToList() };
     }
 
     /// <summary>Runs <paramref name="check"/> and states why the result can't be vouched for, if it can't.</summary>
@@ -79,23 +92,23 @@ internal static class GitCheck
         if (badNames.Count > 0)
             failures.Add("these names aren't valid UTF-8, so pen can't look inside them or rename them, though git on this machine can still enter them and run what's there (shown with octal escapes): " + string.Join(", ", RepoGuard.ListedBadNames(dir, badNames)));
         if (moved.Any(q => q.To.Length == 0))
-            failures.Add("a file named above couldn't be moved out of git's way");
+            failures.Add("a file named above couldn't be moved out of git's way or restored");
         return new(moved, failures.Count == 0 ? null : string.Join("; ", failures), opened);
     }
 
     /// <summary>
-    /// Adds u+rx to a directory. Never through a symlink, which an overlapping
+    /// Adds u+rx to a directory, and u+w if <paramref name="write"/>. Never through a symlink, which an overlapping
     /// session could have swapped in since the listing: chmod would change
     /// whatever it points to. Checking just before is the portable way, since
     /// glibc's fchmodat can't do AT_SYMLINK_NOFOLLOW.
     /// </summary>
-    internal static bool TryOpen(string path, List<ModeChange> opened)
+    internal static bool TryOpen(string path, List<ModeChange> opened, bool write = false)
     {
         try
         {
             if (RepoGuard.IsLink(path)) return false;
             var was = File.GetUnixFileMode(path);
-            var now = was | UnixFileMode.UserRead | UnixFileMode.UserExecute;
+            var now = was | UnixFileMode.UserRead | UnixFileMode.UserExecute | (write ? UnixFileMode.UserWrite : UnixFileMode.None);
             if (now == was) return false; // the mode isn't why it can't be listed
             File.SetUnixFileMode(path, now);
             opened.Add(new(path, was, now));
@@ -110,7 +123,7 @@ internal static class GitCheck
         // The agent could do this to a mount's root too. The user will fix the
         // mode and then run git, so "host git can't get in" doesn't excuse it.
         if (!Native.CanEnter(dir))
-            throw new PenException($"pen can't enter {Out.Field(dir)}. Fixing its permissions would let git run whatever was planted there");
+            throw new PenException($"pen can't enter {Out.Field(dir)}. Once its permissions are fixed, git can run whatever was planted there, until pen has checked it again");
 
         var git = Path.Combine(dir, ".git");
         HashSet<string> known = [];
@@ -124,7 +137,7 @@ internal static class GitCheck
             git = commonGitDir ?? git;
             // Likewise: nothing under it can be seen, and it's what git reads first.
             if (Directory.Exists(git) && !Native.CanList(git))
-                throw new PenException($"pen can't read {Out.Field(git)}. Fixing its permissions would let git run whatever was planted there");
+                throw new PenException($"pen can't read {Out.Field(git)}. Once its permissions are fixed, git can run whatever was planted there, until pen has checked it again");
             var commondir = Path.Combine(git, "commondir");
             if (RepoGuard.Exists(commondir))
                 Move(commondir, "a normal repo never has one: it makes git read config and hooks from another directory", moved);
@@ -195,9 +208,9 @@ internal static class GitCheck
     /// <summary>
     /// Renames <paramref name="path"/> to a free "….pen-quarantine" name. For a
     /// .git directory (<paramref name="breakLayout"/>), its HEAD goes too:
-    /// renamed, it would still look like a bare repo to git.
+    /// renamed, it would still look like a bare repo to git. Returns whether it moved.
     /// </summary>
-    private static void Move(string path, string why, List<Quarantined> moved, bool breakLayout = false)
+    internal static bool Move(string path, string why, List<Quarantined> moved, bool breakLayout = false)
     {
         try
         {
@@ -215,16 +228,18 @@ internal static class GitCheck
                 }
             }
             moved.Add(new(path, to, why, inner));
+            return true;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             // Never fatal: the rest still gets checked, and the warning names it.
             var reason = e is UnauthorizedAccessException u ? Out.PermissionDenied(u) : e.Message; // Native.Rename's is strerror's
             moved.Add(new(path, "", $"{why}. COULD NOT MOVE IT ({reason}): don't run git here until you've dealt with it"));
+            return false;
         }
     }
 
-    private static string FreeName(string path)
+    internal static string FreeName(string path)
     {
         var to = path + Suffix;
         for (int i = 2; RepoGuard.Exists(to); i++) to = $"{path}{Suffix}-{i}";
@@ -236,7 +251,7 @@ internal static class GitCheck
     {
         var sb = new StringBuilder();
         sb.AppendLine("pen: WARNING: this session left git files that would make git on this machine run code from the sandbox.");
-        sb.AppendLine("pen: They've been renamed out of git's way:");
+        sb.AppendLine("pen: They've been moved out of git's way:");
         foreach (var q in moved)
         {
             sb.Append("  ").Append(RepoGuard.Rel(dir, q.From));
@@ -266,6 +281,29 @@ internal static class GitCheck
         return sb.ToString().TrimEnd('\n');
     }
 
+    /// <summary>
+    /// What to do about a session whose protected files couldn't all be put back
+    /// and which keeps its copies: first the way that uses them, in one command so
+    /// that nothing (a shell prompt) runs git between it and pen's retry. Only
+    /// then the way that gives them up.
+    /// </summary>
+    public static string KeptCopiesAdvice(SessionDir session, IReadOnlyList<string>? blocked)
+    {
+        // A linked worktree's key is its main checkout's, and only there is pen sure to find this session.
+        var repoDir = session.ReadRepoDir();
+        var retry = (repoDir == null ? "" : $"cd {Quote(repoDir)} && ") + RetryCommand;
+        var fix = blocked is { Count: > 0 }
+            ? $"chmod u+rwx {string.Join(' ', blocked.Select(Quote))} && {retry}"
+            : $"deal with what's named above, then: {retry}";
+        return $"""
+            pen: To restore the good copies pen kept, run this, as one line: {fix}
+            pen: Only if that can't work: rm -r {Quote(session.Path)} discards them and accepts what's on disk. Compare first with the copies in {Quote(session.ProtectedDir)} (manifest.json lists them).
+            """;
+    }
+
+    /// <summary>Starts a session that does nothing, which first finishes any session left unfinished, or refuses.</summary>
+    internal const string RetryCommand = "pen true";
+
     /// <summary>The loud warning for a check that couldn't vouch for <paramref name="dir"/>: <paramref name="why"/> says what stopped it.</summary>
     public static string NotCheckedWarning(string dir, string why) =>
         $"""
@@ -278,6 +316,8 @@ internal static class GitCheck
     public static void Report(string dir, CheckResult check)
     {
         if (check.Moved.Count > 0) Out.Raw(Warning(dir, check.Moved));
+        foreach (var r in check.Restored ?? [])
+            Out.Line($"{RepoGuard.Rel(dir, r.Path)}: {r.What}");
         foreach (var c in check.Opened ?? [])
             Out.Line($"changed {RepoGuard.Rel(dir, c.Path)} from mode {Octal(c.Was)} to {Octal(c.Now)} so it could be checked, and left it that way");
         if (check.Failure != null) Out.Raw(NotCheckedWarning(dir, check.Failure));

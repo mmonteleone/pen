@@ -29,6 +29,9 @@ internal sealed class SessionDir(string projectKey, string path)
     /// NUL-terminated: the session-end check quarantines any others.
     /// </summary>
     public string ModulesFile => File("modules");
+    /// <summary>The copies of the protected files, and their manifest (<see cref="ProtectedFiles"/>).</summary>
+    public string ProtectedDir => File("protected");
+    public string ProtectedManifest => System.IO.Path.Combine(ProtectedDir, "manifest.json");
     /// <summary>The command run in the sandbox, each argument NUL-terminated (empty: a shell), for pen ps.</summary>
     public string CommandFile => File("command");
     /// <summary>When the session started, in UTC, for pen ps.</summary>
@@ -87,6 +90,16 @@ internal sealed class SessionDir(string projectKey, string path)
         if (!System.IO.File.Exists(StartedWithGit)) return (false, null);
         var common = System.IO.File.ReadAllText(StartedWithGit).TrimEnd('\n');
         return (true, common.Length == 0 ? null : common);
+    }
+
+    /// <summary>The project's main checkout, as its runtime dir records it, or null if that can't be read.</summary>
+    public string? ReadRepoDir()
+    {
+        var sessions = System.IO.Path.GetDirectoryName(Path);
+        var runtime = sessions == null ? null : System.IO.Path.GetDirectoryName(sessions);
+        if (runtime == null) return null;
+        try { return System.IO.File.ReadAllText(System.IO.Path.Combine(runtime, Session.ProjectDirFile)).TrimEnd('\n'); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
     }
 
     public DateTime? ReadStarted() =>

@@ -103,4 +103,19 @@ public class ProjectTests
         Assert.True(p.IsRepo);
         Assert.False(Project.Resolve(t.Sub("plain"), t.Host()).IsRepo);
     }
+
+    [Fact]
+    public void ADirectoryThatCantBeRead_IsRefused_NotTakenForAPlainDirectory()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        File.SetUnixFileMode(repo, UnixFileMode.None);
+        try
+        {
+            var e = Assert.Throws<PenException>(() => Project.Resolve(repo, t.Host()));
+            Assert.Contains("chmod u+rwx", e.Message);
+            Assert.Contains(repo, e.Message);
+        }
+        finally { File.SetUnixFileMode(repo, (UnixFileMode)0b111_101_101); }
+    }
 }

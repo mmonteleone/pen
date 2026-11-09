@@ -62,6 +62,7 @@ internal static class Program
         }
 
         var host = HostEnv.FromProcess();
+        StartDir.Leave(host);
         if (command.Kind == CommandKind.Ps) return Ps.Run(host);
         if (command.Kind == CommandKind.Prune) return Prune.Run(host, Console.In);
         Config.EnsureUserConfig(host);
@@ -76,7 +77,7 @@ internal static class Program
                 return AllowCommand.Add(host, command.Args, command.Global);
         }
 
-        var project = Project.Resolve(Environment.CurrentDirectory, host);
+        var project = Project.Resolve(StartDir.Get(), host);
         Config ProjectConfig() => Config.Load(project.PenDir, ".pen", ConfigKind.Project);
         return command.Kind switch
         {

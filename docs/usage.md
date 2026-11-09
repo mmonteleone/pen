@@ -266,6 +266,15 @@ A directory or symlink whose name isn't valid UTF-8 (possible on Linux) can't be
 it, so pen refuses to start until it's renamed or removed, and at session end reports that git wasn't
 checked instead of moving it. Plain files with such names, such as legacy Latin-1 ones, are fine.
 
+At session start pen saves copies of the git files it mounts read-only one by one (`config`,
+`config.worktree`, included config files, `commondir` and a worktree's `.git` file, including those of
+submodule repos), and refuses to start if one isn't a regular file of at most 1 MB. At session end,
+any that changed is put back, with the changed version kept as `….pen-quarantine` and a warning that
+says how to restore it. That includes changes you made on the host during the session, such as
+`git config`, so make those between sessions.
+If a file can't be put back, pen says so, prints the command that fixes it, keeps its copies and
+refuses new sessions until that works.
+
 pen moves nested repos aside at session end, but during a session the agent can create one, with
 its own config and hooks, that host tools would run git in. To close that gap, on the host:
 

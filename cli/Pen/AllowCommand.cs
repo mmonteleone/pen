@@ -54,7 +54,7 @@ internal static class AllowCommand
     public static int Add(HostEnv host, IReadOnlyList<string> domains, bool global)
     {
         Project? project = null;
-        try { project = Project.Resolve(Environment.CurrentDirectory, host); }
+        try { project = Project.Resolve(StartDir.Get(), host); }
         catch (PenException) when (global) { } // --global works from anywhere
         if (project != null)
         {

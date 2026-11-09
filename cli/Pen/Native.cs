@@ -39,6 +39,9 @@ internal sealed record UndecodableEntry(byte[] Name, bool CouldHoldRepo)
     }
 }
 
+/// <summary>A regular file's exact bytes and mode, read through one descriptor.</summary>
+internal sealed record RegularFile(byte[] Bytes, UnixFileMode Mode);
+
 /// <summary>The few libc calls pen needs. Same signatures on macOS and Linux.</summary>
 internal static partial class Native
 {
@@ -92,7 +95,7 @@ internal static partial class Native
     [LibraryImport(Libc, EntryPoint = "access", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
     private static partial int AccessNative(string path, int mode);
 
-    private const int X_OK = 1, R_OK = 4;
+    private const int F_OK = 0, X_OK = 1, W_OK = 2, R_OK = 4;
 
     /// <summary>
     /// Whether the directory is shut to this user or gone, so host git can't get
@@ -102,11 +105,18 @@ internal static partial class Native
     public static bool IsShutOrGone(string path) =>
         AccessNative(path, X_OK) != 0 && Marshal.GetLastPInvokeError() is EACCES or ENOENT or ENOTDIR;
 
+    /// <summary>Whether nothing is at the path. False when something above it just can't be entered.</summary>
+    public static bool IsMissing(string path) =>
+        AccessNative(path, F_OK) != 0 && Marshal.GetLastPInvokeError() is ENOENT or ENOTDIR;
+
     /// <summary>Whether this user can enter the directory, as host git would have to. False if it's gone.</summary>
     public static bool CanEnter(string path) => AccessNative(path, X_OK) == 0;
 
     /// <summary>Whether this user can both enter the directory and list it. False if it's gone.</summary>
     public static bool CanList(string path) => AccessNative(path, R_OK | X_OK) == 0;
+
+    /// <summary>Whether this user can make and remove entries in the directory. False if it's gone.</summary>
+    public static bool CanWriteIn(string path) => AccessNative(path, W_OK | X_OK) == 0;
 
     [LibraryImport(Libc, EntryPoint = "opendir", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
     private static partial nint OpenDirNative(string path);
@@ -158,9 +168,11 @@ internal static partial class Native
     public const int LOCK_SH = 1, LOCK_EX = 2, LOCK_NB = 4, LOCK_UN = 8;
 
     // open(2) flags differ between the platforms; O_RDWR is 2 and ENOENT 2 on both.
-    private const int O_RDONLY = 0, O_RDWR = 2, ENOENT = 2, EPERM = 1, EACCES = 13, ENOTDIR = 20;
+    private const int O_RDONLY = 0, O_WRONLY = 1, O_RDWR = 2, ENOENT = 2, EPERM = 1, EACCES = 13, ENOTDIR = 20;
     private static int O_CLOEXEC => OperatingSystem.IsMacOS() ? 0x1000000 : 0x80000;
     private static int O_NONBLOCK => OperatingSystem.IsMacOS() ? 0x4 : 0x800;
+    private static int O_NOFOLLOW => OperatingSystem.IsMacOS() ? 0x100
+        : RuntimeInformation.ProcessArchitecture is Architecture.Arm64 or Architecture.Arm ? 0x8000 : 0x20000;
 
     /// <summary>The largest file <see cref="ReadRegularFile"/> reads: far above any real path file or config.</summary>
     private const int MaxTextFile = 1024 * 1024;
@@ -174,16 +186,8 @@ internal static partial class Native
     /// </summary>
     public static string? ReadRegularFile(string path)
     {
-        int fd = OpenNative(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-        if (fd < 0)
-        {
-            int errno = Marshal.GetLastPInvokeError();
-            if (errno is EACCES or EPERM) throw new UnauthorizedAccessException($"Access to the path '{path}' is denied.");
-            if (errno is ENOENT or ENOTDIR) throw new FileNotFoundException(path);
-            return null; // a socket, among others, can't be opened at all
-        }
-        using var handle = new SafeFileHandle(fd, ownsHandle: true);
-        if (handle.Type != System.IO.FileHandleType.RegularFile) return null;
+        using var handle = OpenRegular(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        if (handle == null) return null;
         var length = RandomAccess.GetLength(handle);
         if (length > MaxTextFile) return null;
         using var reader = new StreamReader(new FileStream(handle, FileAccess.Read));
@@ -192,6 +196,58 @@ internal static partial class Native
         int read = reader.ReadBlock(chars, 0, chars.Length);
         return read > length ? null : new string(chars, 0, read);
     }
+
+    /// <summary>
+    /// The regular file at <paramref name="path"/>, opened without blocking, or
+    /// null if it's anything else, a symlink too when the flags say O_NOFOLLOW (a
+    /// FIFO with no reader, a directory for writing and a socket can't be opened
+    /// at all, and are null as well).
+    /// </summary>
+    private static SafeFileHandle? OpenRegular(string path, int flags)
+    {
+        int fd = OpenNative(path, flags);
+        if (fd < 0)
+        {
+            int errno = Marshal.GetLastPInvokeError();
+            if (errno is EACCES or EPERM) throw new UnauthorizedAccessException($"Access to the path '{path}' is denied.");
+            if (errno is ENOENT or ENOTDIR) throw new FileNotFoundException(path);
+            return null;
+        }
+        var handle = new SafeFileHandle(fd, ownsHandle: true);
+        if (handle.Type == System.IO.FileHandleType.RegularFile) return handle;
+        handle.Dispose();
+        return null;
+    }
+
+    /// <summary>
+    /// A protected file's exact bytes and mode, or null if it's anything but a
+    /// regular file (a symlink isn't followed) or over <see cref="MaxTextFile"/>.
+    /// Never a partial read: a copy has to be complete to be restorable.
+    /// </summary>
+    public static RegularFile? ReadProtected(string path)
+    {
+        using var handle = OpenRegular(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
+        if (handle == null) return null;
+        var length = RandomAccess.GetLength(handle);
+        if (length > MaxTextFile) return null;
+        // One spare byte: filling it means the file grew past what was checked.
+        var bytes = new byte[length + 1];
+        int total = 0;
+        while (total < bytes.Length)
+        {
+            int n = RandomAccess.Read(handle, bytes.AsSpan(total), total);
+            if (n == 0) break;
+            total += n;
+        }
+        return total > length ? null : new(bytes[..total], File.GetUnixFileMode(handle));
+    }
+
+    /// <summary>
+    /// The regular file at <paramref name="path"/>, never through a symlink at
+    /// that name, for changing it through the descriptor. Null if it's anything else.
+    /// </summary>
+    public static SafeFileHandle? OpenProtected(string path, bool write) =>
+        OpenRegular(path, (write ? O_WRONLY : O_RDONLY) | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
 
     /// <summary>realpath(3): resolves symlinks and, on macOS, the on-disk case. Null if the path doesn't exist.</summary>
     public static string? RealPath(string path)

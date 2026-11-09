@@ -827,6 +827,27 @@ check "...with the warning" contains "pen: WARNING" "$out"
 check "...and takes the stack down" test "$(containers)" = 0
 rm -f .git/commondir.pen-quarantine
 
+# The agent shuts pen's own cwd along with a plant: the end must still run, and say what to do.
+canary=$SCRATCH/shut-canary
+printf '#!/bin/sh\ntouch %q\n' "$canary" >"$SCRATCH/shut-hook"; chmod +x "$SCRATCH/shut-hook"
+out=$(in_sandbox "printf '[core]\\n fsmonitor = $SCRATCH/shut-hook\\n' >> .git/CONFIG; chmod 000 ." 2>&1 || true)
+perm=$(stat -c %a "$PROJECT_DIR" 2>/dev/null || stat -f %Lp "$PROJECT_DIR")
+check "chmod 000 . in a session: it's really shut" test "$perm" = 0
+check "...and pen warns that git wasn't checked" contains "git wasn't checked" "$out"
+check "...and takes the stack down" test "$(cd "$SCRATCH" && containers)" = 0
+out2=$("$PEN" run true </dev/null 2>&1 || true)
+check "...and a command started there says why it can't run" grep -qE "current directory|can.t read" <<<"$out2"
+line=$(sed -n 's/.*as one line: //p' <<<"$out")
+check "...and prints a command to fix it" contains "chmod u+rwx" "$line"
+(cd "$SCRATCH" && eval "${line%pen true}\"\$PEN\" run true </dev/null" >/dev/null 2>&1)
+check "...which restores the config" bash -c '! grep -q fsmonitor .git/config'
+git status >/dev/null 2>&1
+check "...so the planted fsmonitor doesn't run" test ! -e "$canary"
+check "...and ends that session" test "$(containers)" = 0
+chmod 755 "$PROJECT_DIR"
+check "...and the next session starts normally" pen_run true
+rm -f .git/config.pen-quarantine
+
 out=$(in_sandbox 'mkdir unlisted && git init -q unlisted/x && chmod 311 unlisted' 2>&1 || true)
 check "a repo hidden in a directory left unlistable is quarantined" \
   bash -c '[ ! -e unlisted/x/.git ] && [ -d unlisted/x/.git.pen-quarantine ]'
