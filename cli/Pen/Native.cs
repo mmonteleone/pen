@@ -197,6 +197,13 @@ internal static partial class Native
         return read > length ? null : new string(chars, 0, read);
     }
 
+    /// <summary>A regular file's exact bytes, through a symlink if it's one, or null as for <see cref="ReadRegularFile"/>.</summary>
+    public static byte[]? ReadRegularBytes(string path)
+    {
+        using var handle = OpenRegular(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        return handle == null ? null : ReadBounded(handle);
+    }
+
     /// <summary>
     /// The regular file at <paramref name="path"/>, opened without blocking, or
     /// null if it's anything else, a symlink too when the flags say O_NOFOLLOW (a
@@ -228,6 +235,12 @@ internal static partial class Native
     {
         using var handle = OpenRegular(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
         if (handle == null) return null;
+        return ReadBounded(handle) is { } bytes ? new(bytes, File.GetUnixFileMode(handle)) : null;
+    }
+
+    /// <summary>All of an open file, or null if it's over <see cref="MaxTextFile"/>.</summary>
+    private static byte[]? ReadBounded(SafeFileHandle handle)
+    {
         var length = RandomAccess.GetLength(handle);
         if (length > MaxTextFile) return null;
         // One spare byte: filling it means the file grew past what was checked.
@@ -239,7 +252,7 @@ internal static partial class Native
             if (n == 0) break;
             total += n;
         }
-        return total > length ? null : new(bytes[..total], File.GetUnixFileMode(handle));
+        return total > length ? null : bytes[..total];
     }
 
     /// <summary>

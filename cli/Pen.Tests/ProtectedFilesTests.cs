@@ -162,6 +162,7 @@ public class ProtectedFilesTests
         var (repo, git) = Repo(t);
         var wt = Path.Combine(t.Path, "wt");
         Git.Run(repo, "worktree", "add", "-q", wt);
+        File.WriteAllText(Path.Combine(git, "HEAD"), "[a]\n\tk = v\n"); // what git reads as config has to be config
         File.AppendAllText(Path.Combine(git, "config"), "[include]\n path = HEAD\n");
         var mounts = RepoGuard.PrepareMounts(wt, "/nonexistent-home");
         Assert.True(Assert.Single(mounts, m => m.Path == Path.Combine(git, "HEAD")).Verify);
@@ -183,12 +184,14 @@ public class ProtectedFilesTests
         using var t = new TempDir();
         var (repo, git) = Repo(t);
         var inc = Path.Combine(git, "inc.cfg");
-        File.WriteAllBytes(inc, Binary);
+        // Valid config, as an include has to be, with bytes a text reading would change.
+        byte[] exact = [.. "[a]\r\n\tk = "u8, 0xFF, 0xFE, (byte)'\r', (byte)'\n', (byte)'#', 0x00, 0xC0, (byte)'\r'];
+        File.WriteAllBytes(inc, exact);
         File.AppendAllText(Path.Combine(git, "config"), "[include]\n path = inc.cfg\n");
         File.SetUnixFileMode(inc, UnixFileMode.UserRead);
         var s = Started(t, repo, git);
         var f = Assert.Single(ProtectedFiles.Read(s)!.Files, f => f.Path == inc);
-        Assert.Equal(Binary, File.ReadAllBytes(Path.Combine(s.ProtectedDir, f.Copy)));
+        Assert.Equal(exact, File.ReadAllBytes(Path.Combine(s.ProtectedDir, f.Copy)));
         Assert.Equal(UnixFileMode.UserRead, f.Mode);
     }
 

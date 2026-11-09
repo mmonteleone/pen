@@ -909,6 +909,29 @@ check "a .git made by git init in a project without one is quarantined" \
 check "...with the warning" contains "git init" "$out"
 check "...and a project without .git gets no .git mounts" bash -c "cd '$NOGIT' && rm -rf .git.pen-quarantine && '$PEN' run bash -c '[ ! -e .git ] && ! touch .pen/x' </dev/null"
 
+# The core.hooksPath warning: one per session where the hooks are in the sandbox's reach, none elsewhere.
+hooks_warnings() { grep -cF "core.hooksPath" <<<"$1" || true; }
+git config core.hooksPath .husky
+out=$(pen_run true 2>&1 >/dev/null)
+check "core.hooksPath in the project warns once" test "$(hooks_warnings "$out")" = 1
+check "...in plain words" contains "can be changed from the sandbox" "$out"
+git worktree add -q "$SCRATCH/hooks-wt" 2>/dev/null
+out=$(cd "$SCRATCH/hooks-wt" && pen_run true 2>&1 >/dev/null)
+check "...and once in a linked worktree, where it's that worktree's" test "$(hooks_warnings "$out")" = 1
+git worktree remove --force "$SCRATCH/hooks-wt"
+git config core.hooksPath "$PROJECT_DIR/.git/hooks"
+out=$(pen_run true 2>&1 >/dev/null)
+check ".git/hooks by its full path doesn't warn" test "$(hooks_warnings "$out")" = 0
+git config core.hooksPath /dev/null
+out=$(pen_run true 2>&1 >/dev/null)
+check "a path outside the project doesn't warn" test "$(hooks_warnings "$out")" = 0
+git config --unset core.hooksPath
+printf '[core]\n\thooksPath = %s/hooks\n' "$PROJECT_DIR" >"$SCRATCH/hooks-global"
+out=$(GIT_CONFIG_GLOBAL=$SCRATCH/hooks-global pen_run true 2>&1 >/dev/null)
+check "global config that leads into the project warns once" test "$(hooks_warnings "$out")" = 1
+out=$(pen_run true 2>&1 >/dev/null)
+check "no core.hooksPath, no warning" test "$(hooks_warnings "$out")" = 0
+
 best=99
 for i in 1 2 3; do
   t0=$(now); pen_run true; t1=$(now)

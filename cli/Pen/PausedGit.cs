@@ -280,7 +280,7 @@ internal static class PausedGit
             : new(heading, lines.Take(MaxLines).Select(Shown).ToList(), Math.Max(0, lines.Count - MaxLines));
 
     /// <summary>A line of hostile text as one printable line of bounded length.</summary>
-    private static string Shown(string line) =>
+    internal static string Shown(string line) =>
         line.Length <= MaxLineLength ? Out.Field(line)
             : $"{Out.Field(line[..MaxLineLength])} … ({line.Length - MaxLineLength} more characters)";
 

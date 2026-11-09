@@ -4,62 +4,38 @@ namespace Pen;
 
 /// <summary>
 /// Reads git config files directly, never by running git (which could run
-/// whatever the file names). Handles the syntax git writes and people
-/// commonly hand-write: [section], [section "sub"], [section.sub], quoted
-/// values, escapes, comments and backslash continuations.
+/// whatever the file names). This is git's own grammar, from config.c, byte by
+/// byte: whatever git would read from a file is what's returned, and a file git
+/// would reject, or read in a way pen can't represent, is a refusal naming its
+/// line. A best-effort reading would let a file mean one thing here and another
+/// to git. The one thing git accepts that's refused is a NUL in a value or
+/// subsection, where git silently cuts the string short.
 /// </summary>
 internal static class GitConfigFile
 {
-    /// <summary>One key. Section and key are lowercased; a quoted subsection keeps its case.</summary>
+    /// <summary>One key. Section and key are lowercased; a quoted subsection keeps its case. A key with no "=" has the value "true".</summary>
     internal readonly record struct Entry(string Section, string? Subsection, string Key, string Value);
 
-    public static List<Entry> Parse(string text)
+    /// <summary>The entries in <paramref name="text"/>, or a <see cref="PenException"/> if it isn't what git would read.</summary>
+    public static List<Entry> Parse(string text) => Parse(Encoding.UTF8.GetBytes(text), "git config");
+
+    /// <summary>The entries in a file's bytes, or a <see cref="PenException"/> naming <paramref name="source"/> if it isn't what git would read.</summary>
+    public static List<Entry> Parse(byte[] bytes, string source)
     {
-        var entries = new List<Entry>();
-        string section = "";
-        string? sub = null;
-        var lines = text.Replace("\r\n", "\n").Split('\n');
-        for (int i = 0; i < lines.Length; i++)
-        {
-            var line = lines[i];
-            while (EndsInContinuation(line) && i + 1 < lines.Length) line = line[..^1] + lines[++i];
-            var t = line.Trim();
-            if (t.Length == 0 || t[0] is '#' or ';') continue;
-
-            if (t[0] == '[')
-            {
-                int close = HeaderEnd(t);
-                if (close < 0) { section = ""; sub = null; continue; }
-                (section, sub) = ParseHeader(t[1..close]);
-                t = t[(close + 1)..].Trim(); // git allows "[core] bare = true"
-                if (t.Length == 0 || t[0] is '#' or ';') continue;
-            }
-
-            int eq = t.IndexOf('=');
-            string key, value;
-            if (eq < 0)
-            {
-                int end = t.IndexOfAny([' ', '\t', '#', ';']);
-                key = end < 0 ? t : t[..end];
-                value = "true"; // a bare key is a boolean true
-            }
-            else
-            {
-                key = t[..eq].Trim();
-                value = Unquote(t[(eq + 1)..].Trim());
-            }
-            if (key.Length > 0) entries.Add(new(section, sub, key.ToLowerInvariant(), value));
-        }
-        return entries;
+        var reader = new Reader(bytes);
+        if (reader.Read() is { } why)
+            throw new PenException($"can't parse {source} at line {reader.Line} ({why}), so pen can't tell what git would read from it: fix or remove it, then rerun");
+        return reader.Entries;
     }
 
-    /// <summary>The entries of the file at <paramref name="path"/>: none if it's missing, and a <see cref="PenException"/> if it can't be read.</summary>
+    /// <summary>The entries of the file at <paramref name="path"/>: none if it's missing, and a <see cref="PenException"/> if it can't be read or parsed.</summary>
     public static List<Entry> ParseFile(string path)
     {
         try
         {
-            return Parse(Native.ReadRegularFile(path)
-                ?? throw new PenException($"can't read the git config file {Out.Field(path)}: it isn't a regular file of a reasonable size"));
+            return Parse(Native.ReadRegularBytes(path)
+                ?? throw new PenException($"can't read the git config file {Out.Field(path)}: it isn't a regular file of a reasonable size"),
+                $"the git config file {Out.Field(path)}");
         }
         catch (FileNotFoundException) { return []; }
         catch (DirectoryNotFoundException) { return []; }
@@ -69,67 +45,216 @@ internal static class GitConfigFile
         }
     }
 
-    /// <summary>git's boolean spellings; anything else is false.</summary>
-    public static bool IsTrue(string value) =>
-        value.ToLowerInvariant() is "true" or "yes" or "on" or "1";
-
-    private static bool EndsInContinuation(string line)
+    /// <summary>git's boolean: its false spellings and zero are false. Anything else is true, or git rejects it when it reads the key.</summary>
+    public static bool IsTrue(string value)
     {
-        int n = 0;
-        for (int i = line.Length - 1; i >= 0 && line[i] == '\\'; i--) n++;
-        return n % 2 == 1;
+        var v = value.ToLowerInvariant();
+        if (v is "" or "false" or "no" or "off") return false;
+        var digits = v.TrimStart('+', '-').TrimEnd('k', 'm', 'g');
+        return digits.Length == 0 || digits.Any(c => c != '0');
     }
 
-    private static int HeaderEnd(string t)
+    /// <summary>One pass over a file, following git_parse_source and its helpers.</summary>
+    private sealed class Reader(byte[] bytes)
     {
-        bool quoted = false;
-        for (int i = 1; i < t.Length; i++)
-        {
-            if (quoted && t[i] == '\\') { i++; continue; }
-            if (t[i] == '"') quoted = !quoted;
-            else if (t[i] == ']' && !quoted) return i;
-        }
-        return -1;
-    }
+        private const int Newline = '\n';
+        private static readonly byte[] Bom = [0xEF, 0xBB, 0xBF];
 
-    private static (string, string?) ParseHeader(string h)
-    {
-        int q = h.IndexOf('"');
-        if (q >= 0)
+        private int _pos;
+        private int _nextLine = 1;
+        private bool _eof;
+
+        public List<Entry> Entries { get; } = [];
+
+        /// <summary>The line of the last character read.</summary>
+        public int Line { get; private set; } = 1;
+
+        /// <summary>Reads the whole file. Returns why it can't be read, if it can't.</summary>
+        public string? Read()
         {
-            var name = h[..q].Trim().ToLowerInvariant();
-            var sb = new StringBuilder();
-            for (int i = q + 1; i < h.Length && h[i] != '"'; i++)
+            if (bytes.AsSpan().StartsWith(Bom)) _pos = Bom.Length;
+            var name = new List<byte>();
+            int baseLength = 0;
+            bool comment = false;
+            while (true)
             {
-                if (h[i] == '\\' && i + 1 < h.Length) i++;
-                sb.Append(h[i]);
+                int c = Next();
+                if (c == Newline)
+                {
+                    if (_eof) return null;
+                    comment = false;
+                    continue;
+                }
+                if (comment || IsSpace(c)) continue;
+                if (c is '#' or ';')
+                {
+                    comment = true;
+                    continue;
+                }
+                if (c == '[')
+                {
+                    name.Clear();
+                    if (BaseName(name) is { } bad) return bad;
+                    if (name.Count == 0) return "an empty section name";
+                    name.Add((byte)'.');
+                    baseLength = name.Count;
+                    continue;
+                }
+                if (!IsAlpha(c)) return "a line that isn't a section, a key or a comment";
+                name.RemoveRange(baseLength, name.Count - baseLength);
+                name.Add(Lower(c));
+                if (KeyAndValue(name) is { } wrong) return wrong;
             }
-            return (name, sb.ToString());
         }
-        h = h.Trim();
-        int dot = h.IndexOf('.');
-        // Old-style [section.sub]: git lowercases the subsection too.
-        return dot < 0 ? (h.ToLowerInvariant(), null) : (h[..dot].ToLowerInvariant(), h[(dot + 1)..].ToLowerInvariant());
-    }
 
-    /// <summary>A value: quotes removed, escapes applied, a trailing comment dropped.</summary>
-    internal static string Unquote(string value)
-    {
-        var sb = new StringBuilder();
-        bool quoted = false;
-        for (int i = 0; i < value.Length; i++)
+        /// <summary>git's get_next_char: CRLF is a newline, and the end of the file reads as newlines.</summary>
+        private int Next()
         {
-            char c = value[i];
-            if (c == '"') { quoted = !quoted; continue; }
-            if (c == '\\' && i + 1 < value.Length)
+            Line = _nextLine;
+            if (_pos >= bytes.Length)
             {
-                char n = value[++i];
-                sb.Append(n switch { 'n' => '\n', 't' => '\t', 'b' => '\b', _ => n });
-                continue;
+                _eof = true;
+                return Newline;
             }
-            if (!quoted && (c == '#' || c == ';')) break;
-            sb.Append(c);
+            int c = bytes[_pos++];
+            if (c == '\r' && _pos < bytes.Length && bytes[_pos] == '\n')
+            {
+                _pos++;
+                c = Newline;
+            }
+            if (c == Newline) _nextLine++;
+            return c;
         }
-        return sb.ToString().Trim();
+
+        private string? BaseName(List<byte> name)
+        {
+            while (true)
+            {
+                int c = Next();
+                if (_eof) return "a section header that isn't closed";
+                if (IsSpace(c)) return Subsection(name, c);
+                if (c == ']') return null;
+                if (!IsKeyChar(c) && c != '.') return "a character that can't be in a section name";
+                name.Add(Lower(c));
+            }
+        }
+
+        private string? Subsection(List<byte> name, int c)
+        {
+            do
+            {
+                if (c == Newline) return "a section header that isn't closed";
+                c = Next();
+            } while (IsSpace(c));
+            if (c != '"') return "a section header that isn't [section \"subsection\"]";
+            name.Add((byte)'.');
+            while (true)
+            {
+                c = Next();
+                if (c == Newline) return "a section header that isn't closed";
+                if (c == '"') break;
+                if (c == '\\')
+                {
+                    c = Next();
+                    if (c == Newline) return "a section header that isn't closed";
+                }
+                if (c == 0) return "a NUL in a subsection";
+                name.Add((byte)c);
+            }
+            return Next() == ']' ? null : "a section header that isn't [section \"subsection\"]";
+        }
+
+        private string? KeyAndValue(List<byte> name)
+        {
+            int c;
+            while (true)
+            {
+                c = Next();
+                if (_eof || !IsKeyChar(c)) break;
+                name.Add(Lower(c));
+            }
+            while (c is ' ' or '\t') c = Next();
+
+            byte[]? value = null;
+            if (c != Newline)
+            {
+                if (c != '=') return "a key followed by something other than \"=\"";
+                var problem = Value(out value);
+                if (problem != null) return problem;
+            }
+            Add(name, value);
+            return null;
+        }
+
+        /// <summary>git's parse_value, with its trimming: whitespace is dropped at the start, and at the end only if nothing, not even a pair of quotes or a backslash, came after it.</summary>
+        private string? Value(out byte[]? result)
+        {
+            result = null;
+            var value = new List<byte>();
+            bool quoted = false, comment = false;
+            int trimTo = 0;
+            while (true)
+            {
+                int c = Next();
+                if (c == Newline)
+                {
+                    if (quoted) return "a quote that isn't closed";
+                    if (trimTo > 0) value.RemoveRange(trimTo, value.Count - trimTo);
+                    if (value.Contains(0)) return "a NUL in a value";
+                    result = [.. value];
+                    return null;
+                }
+                if (comment) continue;
+                if (IsSpace(c) && !quoted)
+                {
+                    if (trimTo == 0) trimTo = value.Count;
+                    if (value.Count > 0) value.Add((byte)c);
+                    continue;
+                }
+                if (!quoted && c is ';' or '#')
+                {
+                    comment = true;
+                    continue;
+                }
+                trimTo = 0;
+                if (c == '\\')
+                {
+                    c = Next();
+                    switch (c)
+                    {
+                        case Newline: continue;
+                        case 't': c = '\t'; break;
+                        case 'b': c = '\b'; break;
+                        case 'n': c = '\n'; break;
+                        case '\\' or '"': break;
+                        default: return "an escape git doesn't know";
+                    }
+                    value.Add((byte)c);
+                    continue;
+                }
+                if (c == '"')
+                {
+                    quoted = !quoted;
+                    continue;
+                }
+                value.Add((byte)c);
+            }
+        }
+
+        /// <summary>Splits a full name as git does: the section up to the first dot, the key after the last, and the subsection between.</summary>
+        private void Add(List<byte> name, byte[]? value)
+        {
+            var full = name.ToArray().AsSpan();
+            int first = full.IndexOf((byte)'.'), last = full.LastIndexOf((byte)'.');
+            string section = first < 0 ? "" : Encoding.UTF8.GetString(full[..first]);
+            string? subsection = first == last ? null : Encoding.UTF8.GetString(full[(first + 1)..last]);
+            Entries.Add(new(section, subsection, Encoding.UTF8.GetString(full[(last + 1)..]), value == null ? "true" : Encoding.UTF8.GetString(value)));
+        }
+
+        // git's own ctype, not the locale's or Unicode's: \f, \v and NBSP aren't space, and only ASCII is alphabetic.
+        private static bool IsSpace(int c) => c is ' ' or '\t' or '\r' or '\n';
+        private static bool IsAlpha(int c) => c is (>= 'a' and <= 'z') or (>= 'A' and <= 'Z');
+        private static bool IsKeyChar(int c) => IsAlpha(c) || c is (>= '0' and <= '9') or '-';
+        private static byte Lower(int c) => (byte)(c is >= 'A' and <= 'Z' ? c + 32 : c);
     }
 }

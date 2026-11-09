@@ -430,6 +430,7 @@ internal static class RepoGuard
     /// 10. Depth itself isn't limited, since a file first met deep down mustn't
     /// lose what it includes when it's met again higher up. Files are keyed by
     /// path as written, not real path: a relative include resolves from there.
+    /// A ~user or %(prefix) path is refused: pen can't tell where it leads.
     /// </para>
     /// </summary>
     private static bool AddIncludes(string dir, string common, string configFile, string hostHome, List<Mount> mounts) =>
@@ -446,16 +447,21 @@ internal static class RepoGuard
                 throw new PenException($"{Rel(dir, configFile)} includes a path that isn't valid UTF-8, so pen can't tell which file git would read: remove the include or rename the file, then rerun");
             var p = e.Value;
             if (p == "~" || p.StartsWith("~/", StringComparison.Ordinal)) p = hostHome + p[1..];
-            else if (p.StartsWith('~')) continue; // ~user/: another user's home, never inside a project
+            else if (p.StartsWith('~') || p.StartsWith("%(prefix)/", StringComparison.Ordinal))
+                throw new PenException($"{Rel(dir, configFile)} includes {Out.Field(p)}, and pen can't resolve that form of path, so it can't tell which file git would read: write the path out in full or remove the include, then rerun");
             if (!Path.IsPathRooted(p)) p = Path.Combine(Path.GetDirectoryName(configFile)!, p);
-            p = Path.GetFullPath(p);
+
+            // As the OS walks it: ".." after a symlink is the parent of where that leads.
+            var written = Path.GetFullPath(p);
+            var real = HooksPath.RealPathWalk(p, _ => false, out _)
+                ?? throw new PenException($"{Rel(dir, configFile)} includes {Rel(dir, written)}, and pen can't follow that path to the file git would read: fix its permissions or remove the include, then rerun");
+            if (real == written) p = written; // no symlink to tell them apart, and a cycle then repeats one name
             if (!visited.Add(p)) continue;
             if (visited.Count > MaxIncludeFiles)
                 throw new PenException($"{Rel(dir, configFile)} takes git config includes past {MaxIncludeFiles} files, more than pen will follow: remove it or the includes in it, then rerun");
 
-            var real = ResolveExisting(p);
-            if (p != real && (IsInside(dir, p) || IsInside(common, p)))
-                throw new PenException($"{Rel(dir, configFile)} includes {Rel(dir, p)} through a symlink, which pen doesn't support: the agent could redirect the include");
+            if (written != real && (IsInside(dir, written) || IsInside(common, written)))
+                throw new PenException($"{Rel(dir, configFile)} includes {Rel(dir, written)} through a symlink, which pen doesn't support: the agent could redirect the include");
             if (Directory.Exists(real)) continue; // git ignores a directory
             bool writable = IsInside(dir, real) || IsInside(common, real);
             if (writable && !File.Exists(real))
@@ -486,7 +492,7 @@ internal static class RepoGuard
     }
 
     /// <summary>The real path of <paramref name="path"/>, or of its deepest existing ancestor plus the rest.</summary>
-    private static string ResolveExisting(string path)
+    internal static string ResolveExisting(string path)
     {
         var rest = new Stack<string>();
         var p = path;

@@ -221,6 +221,20 @@ internal static class RepoScan
         catch (UnauthorizedAccessException) { return null; }
     }
 
+    /// <summary>The git dir a validated linked worktree's .git file names: &lt;common&gt;/worktrees/&lt;name&gt;. Null if it can't be read.</summary>
+    internal static string? WorktreeEntry(string gitFile)
+    {
+        try
+        {
+            var gitdir = ReadPathFile(gitFile, "gitdir: ");
+            if (gitdir == null) return null;
+            if (!Path.IsPathRooted(gitdir)) gitdir = Path.Combine(Path.GetDirectoryName(gitFile)!, gitdir);
+            return Path.GetFullPath(gitdir).TrimEnd('/');
+        }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
+    }
+
     /// <summary>
     /// The module repo (one of <paramref name="moduleRepos"/>) whose checkout
     /// has <paramref name="gitFile"/> as its .git file, or null unless it has

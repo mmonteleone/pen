@@ -70,6 +70,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         // Past the refusals, so a session that won't start doesn't warn, and with
         // signals held, so Ctrl-C can't end pen between the probe's create and delete.
         RepoGuard.WarnIfCaseMayFold(project, Out.Line);
+        HooksPath.WarnIfWritable(project, host, Out.Line);
 
         // compose.yaml goes last:
         // its presence is what marks a session as open.
