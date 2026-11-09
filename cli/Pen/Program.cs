@@ -83,6 +83,7 @@ internal static class Program
         {
             CommandKind.Run => RunSession(host, project, user, ProjectConfig(), command),
             CommandKind.Allow => AllowCommand.List(host, project, user, ProjectConfig()),
+            CommandKind.Trust => Trust.Command(host, project, user, ProjectConfig(), command.Yes, Answers.FromProcess(), command.List),
             CommandKind.Sign => Sign.Run(host, project, command.Args.Count > 0 ? command.Args[0] : null),
             CommandKind.Reset => Reset.Run(host, project, Console.In),
             _ => throw new InvalidOperationException($"unhandled command {command.Kind}"),

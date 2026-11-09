@@ -11,6 +11,7 @@ internal sealed class SessionDir(string projectKey, string path)
 {
     public string Path { get; } = path;
     public string Id { get; } = System.IO.Path.GetFileName(path);
+    public string ProjectKey => projectKey;
     public string ComposeProject => $"{projectKey}-{Id}";
     public string Container => $"{ComposeProject}-agent";
     public string DindContainer => $"{ComposeProject}-dind";

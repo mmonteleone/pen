@@ -1,14 +1,14 @@
 namespace Pen;
 
-internal enum CommandKind { Run, Upgrade, Allow, Sign, Reset, Ps, Prune, Help, Version }
+internal enum CommandKind { Run, Upgrade, Allow, Trust, Sign, Reset, Ps, Prune, Help, Version }
 
 /// <summary>
 /// A parsed command line. For Run, Args is the command to run in the sandbox
 /// (empty: a shell); for Allow, the domains (lowercased); for Sign, the base, if given;
 /// for Help, the subcommand to describe, if any.
-/// Defaults: pen allow --defaults. Ports: pen --port, in order without duplicates.
+/// Defaults: pen allow --defaults. Yes, List: pen trust --yes, --list. Ports: pen --port, in order without duplicates.
 /// </summary>
-internal sealed record Command(CommandKind Kind, IReadOnlyList<string> Args, bool Clean = false, bool Global = false, bool Docker = false, bool Defaults = false)
+internal sealed record Command(CommandKind Kind, IReadOnlyList<string> Args, bool Clean = false, bool Global = false, bool Docker = false, bool Defaults = false, bool Yes = false, bool List = false)
 {
     public IReadOnlyList<int> Ports { get; init; } = [];
 }
@@ -29,6 +29,7 @@ internal static class Cli
                                     allow domains, applied to running sessions too
           pen allow                 list recently blocked domains
           pen allow --defaults      list the domains pen allows out of the box
+          pen trust [--yes|--list]  review and approve what this project's .pen/ asks for
           pen ps                    list running sessions, in every project
           pen sign [<base>]         on the host: re-sign unpushed commits with your key
           pen reset                 wipe this project's volumes (asks first)
@@ -62,8 +63,9 @@ internal static class Cli
             usage: pen upgrade [--clean]
 
             Updates the base image and reinstalls the agents at their latest versions,
-            then pulls newer proxy and Docker-in-Docker images. Run in a project with a
-            .pen/Dockerfile, it rebuilds that layer too. Logins and config are kept.
+            then pulls newer proxy and Docker-in-Docker images. Run in a project with an
+            approved .pen/Dockerfile (see pen trust), it rebuilds that layer too. Logins
+            and config are kept.
 
               --clean    rebuild without the build cache
             """,
@@ -75,13 +77,26 @@ internal static class Cli
             With no arguments, lists domains the proxy blocked in this project's sessions
             (last 7 days) that still aren't allowed.
 
-            With domains, adds them to allow in .pen/config.toml (creating it if needed)
-            and applies them to this project's running sessions. A leading dot
-            (.example.com) also allows subdomains.
+            With domains, adds them to allow in .pen/config.toml (creating it if needed),
+            approves them for this directory (see pen trust) and applies them to this
+            project's running sessions. A leading dot (.example.com) also allows subdomains.
 
               --global     add them to ~/.config/pen/config.toml instead, for every
                            project, and apply them to all running sessions
               --defaults   list the domains pen allows out of the box
+            """,
+        ["trust"] = """
+            usage: pen trust [--yes | --list]
+
+            .pen/ can be written by an agent, so what it asks for needs your approval first:
+            allow domains not already allowed, docker = true, a github_owner that differs
+            from origin's, and a .pen/Dockerfile with the rest of .pen/ it builds from.
+            pen trust lists what's new in this directory and asks, as a session would.
+            Approved values aren't asked about again; a changed .pen/Dockerfile or other
+            file there is. Approvals are per directory, so a new worktree starts with none.
+
+              --yes      approve without asking, for scripts
+              --list     list everything new, however long, and approve nothing
             """,
         ["ps"] = """
             usage: pen ps
@@ -129,6 +144,7 @@ internal static class Cli
         ["run"] = CommandKind.Run,
         ["upgrade"] = CommandKind.Upgrade,
         ["allow"] = CommandKind.Allow,
+        ["trust"] = CommandKind.Trust,
         ["sign"] = CommandKind.Sign,
         ["reset"] = CommandKind.Reset,
         ["ps"] = CommandKind.Ps,
@@ -237,6 +253,17 @@ internal static class Cli
                     }
                     if (global && domains.Count == 0) throw Error("pen allow --global: missing the domains to allow");
                     return new(CommandKind.Allow, domains, Global: global);
+                case CommandKind.Trust:
+                    var yes = false;
+                    var list = false;
+                    foreach (var a in rest)
+                    {
+                        if (a == "--yes") yes = true;
+                        else if (a == "--list") list = true;
+                        else throw Error($"pen trust: unexpected argument \"{a}\"");
+                    }
+                    if (yes && list) throw Error("pen trust: --yes and --list don't go together");
+                    return new(CommandKind.Trust, [], Yes: yes, List: list);
                 case CommandKind.Sign:
                     if (rest.Count > 1) throw Error($"pen sign: unexpected argument \"{rest[1]}\"");
                     if (rest.Count == 1 && rest[0].StartsWith('-')) throw Error($"pen sign: unknown option \"{rest[0]}\"");

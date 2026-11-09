@@ -12,8 +12,8 @@ internal static class AllowCommand
 {
     public const string ProjectConfigStub = """
         # pen project config (TOML), read-only inside the sandbox. Not for secrets:
-        # it's usually committed. Edits apply to the next session; `pen allow` also
-        # applies to running ones.
+        # it's usually committed. Edits apply to the next session, once approved;
+        # `pen allow` also applies to running ones.
         #
         # github_owner = "<owner>"   whose GitHub token to use (default: origin's owner)
         # docker = true              Docker-in-Docker for every session
@@ -75,6 +75,8 @@ internal static class AllowCommand
             RepoGuard.EnsureDirectory(project!.Dir, project.PenDir);
             RepoGuard.RequireNotLink(project.Dir, project.ProjectConfigPath);
             added = Append(project.ProjectConfigPath, where, ConfigKind.Project, domains, ProjectConfigStub);
+            // The user typed them, so they're approved, also if they were already in the file.
+            TrustStore.For(host, project).ApproveDomains(domains);
         }
 
         var skipped = domains.Except(added).ToList();
@@ -102,7 +104,8 @@ internal static class AllowCommand
 
     /// <summary>
     /// Regenerates one running session's allowlist from the current config
-    /// files and has its Squid reload it. Reports a failure, naming the session.
+    /// files, of its project's only the approved domains, and has its Squid
+    /// reload it. Reports a failure, naming the session.
     /// </summary>
     internal static bool Apply(HostEnv host, SessionDir s)
     {
@@ -113,7 +116,8 @@ internal static class AllowCommand
                 throw new PenException("its session.env is missing");
             var user = Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User);
             var projectConfig = Config.Load(Path.Combine(projectDir, ".pen"), Out.Field(Path.Combine(projectDir, ".pen")), ConfigKind.Project);
-            var merged = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow, projectConfig.Allow);
+            var approved = TrustStore.Load(host.RuntimeDir(s.ProjectKey), projectDir).ApprovedOf(projectConfig.Allow);
+            var merged = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow, approved);
             // Truncate and write, never rename: the proxy's single-file bind
             // mount pins the inode.
             using (var f = new FileStream(s.File("allowlist.txt"), FileMode.Truncate, FileAccess.Write))
@@ -183,7 +187,9 @@ internal static class AllowCommand
             .Select(d => Path.Combine(d, "proxy.log"))
             .Where(File.Exists)
             .Select(p => File.ReadLines(p));
-        var allowed = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow, projectConfig.Allow);
+        // What a session would get: an unapproved domain in .pen/ stays listed.
+        var approved = TrustStore.For(host, project).ApprovedOf(projectConfig.Allow);
+        var allowed = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow, approved).ToHashSet(StringComparer.Ordinal);
         var blocked = BlockedAcross(logs).Where(b => !Allowlist.IsAllowed(allowed, b.Host)).ToList();
         if (blocked.Count == 0)
         {

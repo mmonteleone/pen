@@ -212,7 +212,11 @@ internal static partial class Prune
                 return false;
             }
         }
-        try { Directory.Delete(runtimeDir, recursive: true); }
+        try
+        {
+            LayerContext.RemoveAllIn(runtimeDir);
+            Directory.Delete(runtimeDir, recursive: true);
+        }
         catch (DirectoryNotFoundException) { }
         catch (Exception x) when (x is IOException or UnauthorizedAccessException)
         {

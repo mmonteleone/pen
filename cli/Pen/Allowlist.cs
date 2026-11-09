@@ -14,7 +14,7 @@ internal static partial class Allowlist
         return !IPAddress.TryParse(bare, out _) && !bare.Split('.').All(l => l.All(char.IsAsciiDigit));
     }
 
-    [GeneratedRegex(@"^\.?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")]
+    [GeneratedRegex(@"^\.?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\z")]
     private static partial Regex DomainRegex();
 
     /// <summary>Domains from an allowlist file: one per line, '#' comments, blank lines ignored.</summary>
@@ -37,19 +37,34 @@ internal static partial class Allowlist
         foreach (var d in all)
         {
             if (!seen.Add(d)) continue;
-            if (wildcards.Any(w => w != d && Covers(w, d))) continue;
+            if (WildcardsOver(d).Any(w => w != d && wildcards.Contains(w))) continue;
             result.Add(d);
         }
         return result;
     }
 
-    /// <summary>Whether wildcard <paramref name="w"/> (".x.com") matches <paramref name="d"/>, a domain or a narrower wildcard.</summary>
-    private static bool Covers(string w, string d) =>
-        d == w[1..] || d.EndsWith(w, StringComparison.Ordinal);
+    /// <summary>
+    /// The wildcards that match <paramref name="d"/>, a domain or a wildcard:
+    /// a.x.com is under .a.x.com, .x.com and .com. A few per name, so a list of any
+    /// length is checked in time proportional to it.
+    /// </summary>
+    private static IEnumerable<string> WildcardsOver(string d)
+    {
+        var bare = d.TrimStart('.');
+        for (int at = 0; ; at = bare.IndexOf('.', at) + 1)
+        {
+            yield return "." + bare[at..];
+            if (bare.IndexOf('.', at) < 0) yield break;
+        }
+    }
 
     /// <summary>Whether <paramref name="host"/> is allowed by a merged list (exact, or under a wildcard).</summary>
     public static bool IsAllowed(IEnumerable<string> list, string host) =>
-        list.Any(d => d == host || (d.StartsWith('.') && Covers(d, host)));
+        IsAllowed(list.ToHashSet(StringComparer.Ordinal), host);
+
+    /// <inheritdoc cref="IsAllowed(IEnumerable{string}, string)"/>
+    public static bool IsAllowed(HashSet<string> list, string host) =>
+        list.Contains(host) || WildcardsOver(host).Any(list.Contains);
 
     public static string Render(IEnumerable<string> domains) => string.Join('\n', domains) + "\n";
 
@@ -60,12 +75,13 @@ internal static partial class Allowlist
     public static List<string> BlockedHosts(IEnumerable<string> logLines)
     {
         var hosts = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal); // the agent decides how many hosts there are
         foreach (var line in logLines)
         {
             var f = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             if (f.Length < 5 || !f[2].StartsWith("TCP_DENIED", StringComparison.Ordinal)) continue;
             var host = HostOf(f[4]);
-            if (host.Length > 0 && !hosts.Contains(host)) hosts.Add(host);
+            if (host.Length > 0 && seen.Add(host)) hosts.Add(host);
         }
         return hosts;
     }

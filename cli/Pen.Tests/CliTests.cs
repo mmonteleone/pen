@@ -19,6 +19,21 @@ public class CliTests
     }
 
     [Fact]
+    public void TrustTakesOnlyYes()
+    {
+        Assert.Equal(CommandKind.Trust, P("trust").Kind);
+        Assert.False(P("trust").Yes);
+        Assert.True(P("trust", "--yes").Yes);
+        Assert.True(P("trust", "--list").List);
+        Assert.Equal(2, Assert.Throws<PenException>(() => P("trust", "--yes", "--list")).ExitCode);
+        Assert.Equal(CommandKind.Help, P("trust", "--help").Kind);
+        Assert.Equal(2, Assert.Throws<PenException>(() => P("trust", "-y")).ExitCode);
+        Assert.Equal(CommandKind.Run, P("run", "trust").Kind);
+        Assert.Contains("pen trust", Cli.Usage);
+        Assert.Contains("--yes", Cli.SubcommandHelp["trust"]);
+    }
+
+    [Fact]
     public void NoArgumentsIsAShell()
     {
         var c = P();

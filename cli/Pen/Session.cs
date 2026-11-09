@@ -19,7 +19,8 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
 
     /// <param name="docker">with Docker-in-Docker (pen --docker, or docker = true in .pen/config.toml)</param>
     /// <param name="ports">to forward from the host (pen --port and ports in .pen/config.toml, merged)</param>
-    public int Run(IReadOnlyList<string> command, bool docker = false, IReadOnlyList<Port>? ports = null)
+    /// <param name="answers">where approvals of .pen/ come from (default: this process's stdin)</param>
+    public int Run(IReadOnlyList<string> command, bool docker = false, IReadOnlyList<Port>? ports = null, Answers? answers = null)
     {
         // Every session holds project.lock and its dir's worktree lock
         // shared; pen reset holds the first exclusive, pen sign the second.
@@ -33,11 +34,13 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
             throw new PenException("not starting: deal with the warning above first");
 
         RepoGuard.CheckAtStart(project.Dir);
+        // Before anything below uses a setting from .pen/.
+        Trust.RequireForSession(host, project, user, projectConfig, answers ?? Answers.FromProcess());
         var mounts = RepoGuard.PrepareMounts(project.Dir, host.Home);
         // What the session-end check takes as the submodules' own (PrepareMounts protects them).
         var modules = project.IsRepo ? RepoScan.FindModuleRepos(project.CommonGitDir!) : [];
         Image.EnsureCurrent();
-        var image = Image.EnsureProjectLayer(project) ?? Image.Name;
+        var image = Image.EnsureProjectLayer(host, project) ?? Image.Name;
         // Under rootless Docker, the host user is container root: the agent
         // runs as UID 0 (with no capabilities) on a read-only root filesystem.
         var rootless = Docker.IsRootless();
@@ -250,7 +253,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         // What the session ended up allowing (pen allow may have added to it),
         // so the blocked line doesn't suggest a domain that's allowed by now.
         var allowedFile = session.File("allowlist.txt");
-        var allowed = File.Exists(allowedFile) ? Allowlist.ParseList(File.ReadAllText(allowedFile)).ToList() : [];
+        var allowed = File.Exists(allowedFile) ? Allowlist.ParseList(File.ReadAllText(allowedFile)).ToHashSet(StringComparer.Ordinal) : [];
 
         if (env.Count > 0)
         {

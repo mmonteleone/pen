@@ -26,6 +26,7 @@ pen [--docker] [--port <n>]… run <cmd…>
 pen allow <domain…> [--global]  allow domains for this project (or all projects)
 pen allow                       list recently blocked domains
 pen allow --defaults            list the domains pen allows out of the box
+pen trust [--yes | --list]      review and approve what this project's .pen/ asks for
 pen ps                          list running sessions, in every project, with their forwarded ports
 pen sign [<base>]               re-sign your unpushed commits with your own key
 pen upgrade [--clean]           update the base image and agents
@@ -65,7 +66,8 @@ ports = [5173]
 ```
 
 Each key belongs to one file, except `allow`: a project's list adds to yours, which adds to pen's
-defaults. Changes apply to the next session. `pen allow` also applies to running ones.
+defaults. Changes apply to the next session, once [approved](#project-settings). `pen allow` also
+applies to running ones.
 
 ### Network
 
@@ -154,6 +156,24 @@ Optional, in the project's `.pen/` directory (read-only inside the sandbox):
    && rm -rf /var/lib/apt/lists/*
   ```
 
+An agent can write a `.pen/` for a later session (in a worktree inside the project, say), so a
+session asks before using what's new there, and doesn't start if you decline:
+
+- `allow` domains not already allowed;
+- `docker = true`;
+- a `github_owner` that differs from `origin`'s owner;
+- a `.pen/Dockerfile`, by a hash of everything in `.pen/` except `config.toml`, so any change there
+  asks again. The prompt shows it, and the path of a private copy of the rest, from the same moment
+  as the hash. Builds read such a copy, without `config.toml`, so `COPY config.toml` doesn't work. A `.pen/` with a special file, an oversized tree, a name that isn't valid UTF-8 or a
+  symlink leading anywhere but straight to a file or directory in `.pen/` can't be approved at all.
+
+`ports` isn't asked about: it only publishes to the host's loopback. Without a terminal a session
+refuses instead. `pen trust` reviews and approves the same list, `pen trust --yes` without asking.
+A long list of domains is cut short; `pen trust --list` shows everything.
+Domains you add with `pen allow <domain>` count as approved, and unapproved ones never reach a
+running session's allowlist. Approvals are per directory, kept in pen's state directory, so a new
+worktree starts with none.
+
 ## Git in the sandbox
 
 Everyday git works inside: commit, branch, merge, rebase, fetch, worktrees. `.git/config` and
@@ -231,7 +251,7 @@ or set `docker = true` in `.pen/config.toml`. The session gets its own Docker da
   embedded image files changed, the next session rebuilds the base image.
 - `pen upgrade` reinstalls the agents at their latest versions and pulls newer proxy and Docker
   images, without waiting for a pen release (`--clean` skips the build cache). Run it in a project
-  with a `.pen/Dockerfile` to rebuild that layer too. Logins and config are kept.
+  with an approved `.pen/Dockerfile` to rebuild that layer too. Logins and config are kept.
 - `pen reset` wipes a project's sandbox state.
 - `pen prune` finds the volumes, project layers and state of projects you've moved or deleted, and
   removes them after asking. Ones it can't place are listed with the commands to remove them by

@@ -23,9 +23,12 @@ internal static partial class GitHub
     private static partial Regex OwnerRegex();
 
     /// <summary>The owner to use: github_owner from .pen/config.toml, else origin's.</summary>
-    public static string? ProjectOwner(Project project, Config projectConfig)
+    public static string? ProjectOwner(Project project, Config projectConfig) =>
+        projectConfig.GitHubOwner ?? OriginOwner(project);
+
+    /// <summary>The owner in origin's URL, from the repo's git config.</summary>
+    public static string? OriginOwner(Project project)
     {
-        if (projectConfig.GitHubOwner != null) return projectConfig.GitHubOwner;
         if (project.CommonGitDir == null) return null;
         var gitConfig = Path.Combine(project.CommonGitDir, "config");
         if (!File.Exists(gitConfig)) return null;

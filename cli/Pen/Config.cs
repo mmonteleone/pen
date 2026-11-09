@@ -173,7 +173,7 @@ internal sealed partial class Config
     private static string String(object value, string key, Func<string, PenException> error) =>
         value is string s && s.Length > 0 ? s : throw error($"{key} must be a non-empty string (in quotes)");
 
-    [GeneratedRegex("^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")]
+    [GeneratedRegex(@"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\z")]
     internal static partial Regex OwnerRegex();
 
     [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]*$")]

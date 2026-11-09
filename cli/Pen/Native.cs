@@ -249,6 +249,20 @@ internal static partial class Native
     public static SafeFileHandle? OpenProtected(string path, bool write) =>
         OpenRegular(path, (write ? O_WRONLY : O_RDONLY) | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
 
+    /// <summary>
+    /// The file at <paramref name="path"/> opened for reading if it's a regular
+    /// file, or null for anything else or any failure: never follows a symlink
+    /// there, and returns at once for a FIFO. Type and contents then come from one
+    /// descriptor, so swapping the file changes nothing.
+    /// </summary>
+    public static SafeFileHandle? OpenRegularNoFollow(string path)
+    {
+        // O_NOFOLLOW differs by architecture on Linux, and fails closed where it isn't known.
+        if (!OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture is not (Architecture.X64 or Architecture.Arm64)) return null;
+        try { return OpenRegular(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+    }
+
     /// <summary>realpath(3): resolves symlinks and, on macOS, the on-disk case. Null if the path doesn't exist.</summary>
     public static string? RealPath(string path)
     {

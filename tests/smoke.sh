@@ -384,6 +384,8 @@ for bad in "--port 0" "--port 65536" "--port http" "--port=80x ls" "--port"; do
 done
 rc=0; out=$("$PEN" --port 8765 allow 2>&1 </dev/null) || rc=$?
 check "--port with a subcommand is a usage error" bash -c '[ "$1" = 2 ] && grep -qF -- "--port goes only with a command to run, not pen allow" <<<"$2"' _ "$rc" "$out"
+check "pen --help lists pen trust" contains "pen trust" "$("$PEN" --help)"
+check "pen trust --help documents --yes" contains "--yes" "$("$PEN" trust --help)"
 check "pen --help documents --port" contains "--port <n>" "$("$PEN" --help)"
 check "pen run --help documents --port and ports" bash -c "'$PEN' run --help | grep -qF -- '--port <n>' && '$PEN' run --help | grep -qF 'ports = ['"
 check "pen --port 8765 --port=8766 starts a session" bash -c "'$PEN' --port 8765 --port=8766 run true </dev/null >/dev/null 2>&1"
@@ -598,6 +600,10 @@ check "removing the token later shows the notice again" contains "no GitHub toke
 mkdir -p .pen
 echo 'github_owner = "other-owner"' >.pen/config.toml
 fake_config "[github]" "other-owner = \"ghp_other\""
+out=$(fake_pen run bash -c 'echo "[$GH_TOKEN]"' 2>&1 || true)
+check "an unapproved github_owner is refused without a terminal, pointing to pen trust" has_all "$out" "github_owner = other-owner" "pen trust"
+check "...before the token goes anywhere" not contains "[ghp_other]" "$out"
+fake_pen trust --yes >/dev/null 2>&1
 check "github_owner in .pen/config.toml picks the owner" contains "[ghp_other]" "$(fake_pen run bash -c 'echo "[$GH_TOKEN]"' 2>&1)"
 rm -rf .pen
 fake_config "# none"
@@ -618,6 +624,7 @@ out=$(in_sandbox 'curl -s -o /dev/null -I https://github.com' 2>&1 || true)
 check "...and nothing when nothing was blocked" not contains "blocked:" "$out"
 mkdir -p .pen
 echo 'allow = ["example.com"]' >.pen/config.toml
+"$PEN" trust --yes </dev/null >/dev/null 2>&1
 check "a domain in .pen/config.toml's allow becomes reachable" \
   test "$(in_sandbox 'curl -s -o /dev/null -w %{http_code} -I https://example.com' 2>/dev/null)" = 200
 rm -rf .pen
@@ -877,6 +884,13 @@ section "14. Project layer (step 10)"
 rm -rf .pen && mkdir .pen
 printf 'FROM pen:latest\nRUN echo layer-ok >/etc/pen-smoke-layer\n' >.pen/Dockerfile
 echo 'allow = ["example.org"]' >.pen/config.toml
+out=$(in_sandbox 'cat /etc/pen-smoke-layer' 2>&1 || true)
+check "an unapproved .pen/ doesn't start a session without a terminal" has_all "$out" "allow example.org" ".pen/Dockerfile" "pen trust"
+check "...builds no layer" bash -c '! docker image inspect "$1" >/dev/null 2>&1' _ "$KEY:latest"
+check "...and starts nothing" test "$(containers)" = 0
+check "pen trust without a terminal needs --yes" contains "--yes" "$("$PEN" trust </dev/null 2>&1 || true)"
+"$PEN" trust --yes </dev/null >/dev/null 2>&1
+check "pen trust --yes has nothing new to approve the second time" contains "nothing new" "$("$PEN" trust --yes </dev/null 2>&1)"
 out=$(in_sandbox 'cat /etc/pen-smoke-layer; curl -s -o /dev/null -w "code=%{http_code}\n" -I https://example.org' 2>&1)
 check ".pen/Dockerfile is built and used" contains "layer-ok" "$out"
 check "...as <project key>:latest" bash -c 'docker image inspect "$1" >/dev/null' _ "$KEY:latest"
@@ -892,7 +906,24 @@ docker image tag pen:smoke-backup "$IMAGE" && docker rmi pen:smoke-backup >/dev/
 check "a FROM pen:latest layer picks up a base-image rebuild" \
   test "$(docker image inspect --format '{{ index .Config.Labels "smoke.base" }}' "$KEY:latest")" = rebuilt
 
+# What a build sees from .pen/, read through pen's private copy of it.
+printf 'FROM pen:latest\nCOPY . /etc/pen-ctx/\n' >.pen/Dockerfile
+printf 'secret\n' >.pen/.dockerignore
+echo s >.pen/secret
+printf '#!/bin/sh\necho script-ran\n' >.pen/run.sh; chmod 755 .pen/run.sh
+ln -s run.sh .pen/link
+"$PEN" trust --yes </dev/null >/dev/null 2>&1
+out=$(in_sandbox '/etc/pen-ctx/run.sh; readlink /etc/pen-ctx/link; [ -e /etc/pen-ctx/config.toml ] && echo config-copied; [ -e /etc/pen-ctx/secret ] && echo secret-copied; true' 2>&1)
+check "a build's context keeps modes and symlinks" has_all "$out" "script-ran" "run.sh"
+check "...leaves out config.toml, which isn't hashed" not contains "config-copied" "$out"
+check "...and honors .dockerignore" not contains "secret-copied" "$out"
+check "...and the private copy is gone afterwards" bash -c '! ls -d "$1"/layer-*/ >/dev/null 2>&1' _ "$RUNTIME"
+rm -rf .pen/.dockerignore .pen/secret .pen/run.sh .pen/link
+
 printf 'FROM pen:latest\nRUN echo smoke-build-error && exit 3\n' >.pen/Dockerfile
+out=$(pen_run true 2>&1 || true)
+check "a changed Dockerfile is asked about again, and alone" bash -c 'grep -q "\.pen/Dockerfile" <<<"$1" && ! grep -q "allow example.org" <<<"$1" && ! grep -q smoke-build-error <<<"$1"' _ "$out"
+"$PEN" trust --yes </dev/null >/dev/null 2>&1
 out=$(pen_run true 2>&1 || true)
 check "a failing layer build stops the launch" contains "building the project layer from .pen/Dockerfile failed" "$out"
 check "...showing the build output" contains "smoke-build-error" "$out"
@@ -921,6 +952,7 @@ check "...plus an allow list with the domain" test "$(grep -cx '  "example.com",
 out=$("$PEN" allow example.com 2>&1)
 check "running it again adds nothing" bash -c 'grep -q "already in .pen/config.toml" <<<"$1" && [ "$(grep -c "example.com" .pen/config.toml)" = 1 ]' _ "$out"
 check "a non-domain is refused" not "$PEN" allow 'http://x.io' 2>/dev/null
+check "a domain added with pen allow doesn't ask next session" pen_run true
 
 OTHER=$(cd "$(mktemp -d "$HOME/.pen-smoke-other.XXXXXX")" && pwd -P)
 EXTRA_DIRS+=("$OTHER")
@@ -1082,6 +1114,7 @@ if want 19; then
 # ==============================================================================
 section "19. Unsigned-commit reminder and pen sign (step 3)"
 
+rm -rf .pen # section 15 leaves an allow that this HOME hasn't approved
 ssh-keygen -q -t ed25519 -N '' -C pen-smoke -f "$SCRATCH/signkey"
 git config --file "$FAKE_HOME/.gitconfig" gpg.format ssh
 git config --file "$FAKE_HOME/.gitconfig" user.signingkey "$SCRATCH/signkey"
@@ -1093,7 +1126,7 @@ git push -q origin HEAD:refs/heads/smoke-base
 git branch -q -u origin/smoke-base
 git config commit.gpgsign true # the repo's own setting doesn't matter, only the host's global one
 
-out=$(fake_pen run git -c user.name=Agent -c user.email=agent@example.invalid commit -q --allow-empty -m s1 2>&1)
+out=$(fake_pen run git -c user.name=Agent -c user.email=agent@example.invalid commit -q --allow-empty -m s1 2>&1) || fail "session in section 19 refused: $out"
 check "no reminder when the host's global commit.gpgsign is off" not contains "unsigned commit" "$out"
 git config --file "$FAKE_HOME/.gitconfig" commit.gpgsign true
 out=$(fake_pen run git -c user.name=Agent -c user.email=agent@example.invalid commit -q --allow-empty -m s2 2>&1)
@@ -1269,6 +1302,8 @@ check "an inner container's .git/commondir is quarantined at session end" \
 rm -f .git/commondir.pen-quarantine
 
 echo 'docker = true' >.pen/config.toml
+check "docker = true isn't used until approved" contains "docker = true" "$(pen_run true 2>&1 || true)"
+"$PEN" trust --yes </dev/null >/dev/null 2>&1
 out=$(pen_run bash -c 'echo "[$DOCKER_HOST]"; docker version --format "server {{.Server.Version}}"' 2>&1 || true)
 check "docker = true in .pen/config.toml turns dind on" has_all "$out" "[tcp://dind:2375]" "server "
 echo 'docker = "maybe"' >.pen/config.toml
@@ -1282,6 +1317,7 @@ if want 21; then
 # ==============================================================================
 section "21. Linked worktrees (worktrees B4, B5)"
 
+rm -rf .pen # section 15 leaves an allow that the throwaway HOME hasn't approved
 git worktree add -q -b smoke-wt "$SCRATCH/wt21" 2>/dev/null
 WT=$(cd "$SCRATCH/wt21" && pwd -P)
 WT_HASH=$(printf %s "$WT" | sha | cut -c1-8)
@@ -1381,6 +1417,8 @@ docker rm -f "$name_main" >/dev/null
 wait "$p_main" 2>/dev/null || true
 
 mkdir -p "$WT/.pen"; echo 'FROM pen:latest' >"$WT/.pen/Dockerfile"
+check "a worktree's .pen/Dockerfile needs its own approval" contains "pen trust" "$(cd "$WT" && "$PEN" run true </dev/null 2>&1 || true)"
+(cd "$WT" && "$PEN" trust --yes </dev/null >/dev/null 2>&1)
 check "a worktree's .pen/Dockerfile builds its own layer, $KEY-$WT_HASH:latest" \
   bash -c "cd '$WT' && '$PEN' run true </dev/null >/dev/null 2>&1 && docker image inspect '$KEY-$WT_HASH:latest' >/dev/null 2>&1"
 docker image rm -f "$KEY-$WT_HASH:latest" >/dev/null 2>&1 || true
@@ -1495,7 +1533,7 @@ git -C "$GONE" init -q
 git -C "$LIVE" init -q
 mkdir -p "$GONE/.pen"
 echo 'FROM pen:latest' >"$GONE/.pen/Dockerfile"
-(cd "$GONE" && fake_pen run true) >/dev/null 2>&1 || fail "a session in the project to delete failed"
+(cd "$GONE" && fake_pen trust --yes && fake_pen run true) >/dev/null 2>&1 || fail "a session in the project to delete failed"
 (cd "$LIVE" && fake_pen run true) >/dev/null 2>&1 || fail "a session in the live project failed"
 gkey=$(basename "$(ls -d "$FSTATE"/pen-*-"$(printf %s "$GONE" | sha | cut -c1-8)")")
 lkey=$(basename "$(ls -d "$FSTATE"/pen-*-"$(printf %s "$LIVE" | sha | cut -c1-8)")")
