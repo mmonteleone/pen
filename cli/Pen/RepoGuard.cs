@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 
 namespace Pen;
@@ -157,6 +158,64 @@ internal static class RepoGuard
         NestedKind.GitLink => " (a .git symlink)",
         _ => "",
     };
+
+    internal const string CaseWarning = "warning: this repo's git dir isn't known to be case-sensitive, so read-only protection of single files in it may not hold: the agent could change .git/config by writing .git/CONFIG. Don't run git in this repo on this machine until the session ends";
+
+    /// <summary>
+    /// Warns once if the repo's common git dir may fold case: that's where
+    /// config and hooks are, for a linked worktree too. A plain directory has
+    /// no git dir to probe, so no warning.
+    /// </summary>
+    internal static void WarnIfCaseMayFold(Project project, Action<string> warn, Func<string, bool>? probe = null)
+    {
+        if (project.CommonGitDir is { } common && (probe ?? MayFoldCase)(common)) warn(CaseWarning);
+    }
+
+    internal static bool MayFoldCase(string gitDir) => MayFoldCase(gitDir, NewCaseProbeName());
+
+    /// <summary>
+    /// A random name git has no use for: the files it reads in a git dir have
+    /// fixed names, and the only other names it takes there as refs are all
+    /// caps with no dot. Lower case, so the upper-case form is a different name.
+    /// </summary>
+    internal static string NewCaseProbeName() =>
+        ".pen-case-probe-" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
+
+    /// <summary>
+    /// Whether <paramref name="gitDir"/> may fold case: an empty file created
+    /// there is also found under its upper-case name. Anything short of a clean
+    /// "no" counts as yes: either name there already (it isn't this probe's to
+    /// touch), the file not being created, or it having gone by the time it's
+    /// looked for. Exclusive creation doesn't follow a symlink, and the file is
+    /// removed on every path once creating it has been tried.
+    /// </summary>
+    internal static bool MayFoldCase(string gitDir, string name)
+    {
+        var probe = Path.Combine(gitDir, name);
+        var upper = Path.Combine(gitDir, name.ToUpperInvariant());
+        try
+        {
+            if (Exists(probe) || Exists(upper)) return true;
+            try
+            {
+                new FileStream(probe, new FileStreamOptions
+                {
+                    Mode = FileMode.CreateNew,
+                    Access = FileAccess.Write,
+                    UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
+                }).Dispose();
+                return Exists(upper) || !Exists(probe);
+            }
+            finally
+            {
+                File.Delete(probe);
+            }
+        }
+        catch (Exception x) when (x is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
 
     /// <summary>
     /// The mounts over the project mount, creating what must exist to be

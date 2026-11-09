@@ -431,6 +431,32 @@ check "proxy.log is 666" test "$(mode_of "${s}proxy.log")" = 666
 check "the runtime dir records the project's real path in project-dir (prune D1)" test "$(cat "$RUNTIME/project-dir")" = "$PROJECT_DIR"
 check "the project's volumes are named by its key" bash -c 'docker volume inspect "$1" "$2" >/dev/null' _ "${KEY}_home" "${KEY}_nuget"
 check "pen:latest carries its image hash" test -n "$(docker image inspect --format '{{ index .Config.Labels "pen.image-hash" }}' "$IMAGE")"
+
+# The case warning: one per session where the git dir folds case, none elsewhere.
+CASE_WARNING="isn't known to be case-sensitive"
+case_warnings() { grep -cF "$CASE_WARNING" <<<"$1" || true; }
+probes_left() { find "$PROJECT_DIR/.git" -maxdepth 1 -iname '.pen-case-probe-*' | wc -l | tr -d ' '; }
+touch "$PROJECT_DIR/.git/.smoke-case-check"
+if [ -e "$PROJECT_DIR/.git/.SMOKE-CASE-CHECK" ]; then want_warnings=1; else want_warnings=0; fi
+rm -f "$PROJECT_DIR/.git/.smoke-case-check"
+out=$(pen_run true 2>&1 >/dev/null)
+check "a session warns $want_warnings time(s) about case on this filesystem" test "$(case_warnings "$out")" = "$want_warnings"
+check "the case probe leaves nothing in the git dir" test "$(probes_left)" = 0
+git worktree add -q "$SCRATCH/case-wt" 2>/dev/null
+out=$(cd "$SCRATCH/case-wt" && pen_run true 2>&1 >/dev/null)
+check "a linked worktree's session warns as the common git dir says" test "$(case_warnings "$out")" = "$want_warnings"
+check "...and its probe leaves nothing there either" test "$(probes_left)" = 0
+git worktree remove --force "$SCRATCH/case-wt"
+if [ "$PEN_UID" != 0 ]; then
+  chmod 555 "$PROJECT_DIR/.git"
+  out=$(pen_run true 2>&1 >/dev/null || true)
+  chmod 755 "$PROJECT_DIR/.git"
+  check "a git dir the probe can't write to gets the one warning" test "$(case_warnings "$out")" = 1
+fi
+NOREPO=$(cd "$(mktemp -d "$HOME/.pen-smoke-norepo.XXXXXX")" && pwd -P)
+EXTRA_DIRS+=("$NOREPO")
+out=$(cd "$NOREPO" && pen_run true 2>&1 >/dev/null)
+check "a project that isn't a repo gets no case warning" test "$(case_warnings "$out")" = 0
 fi
 
 if want 7; then

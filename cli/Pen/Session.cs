@@ -64,6 +64,10 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         // From here on Ctrl-C belongs to the agent, and a hangup still ends the session cleanly.
         using var signals = new SessionSignals();
 
+        // Past the refusals, so a session that won't start doesn't warn, and with
+        // signals held, so Ctrl-C can't end pen between the probe's create and delete.
+        RepoGuard.WarnIfCaseMayFold(project, Out.Line);
+
         // compose.yaml goes last:
         // its presence is what marks a session as open.
         var session = CreateSessionDir();
