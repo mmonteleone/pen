@@ -56,7 +56,11 @@ internal static class GitConfigFile
     /// <summary>The entries of the file at <paramref name="path"/>: none if it's missing, and a <see cref="PenException"/> if it can't be read.</summary>
     public static List<Entry> ParseFile(string path)
     {
-        try { return Parse(File.ReadAllText(path)); }
+        try
+        {
+            return Parse(Native.ReadRegularFile(path)
+                ?? throw new PenException($"can't read the git config file {path}: it isn't a regular file of a reasonable size"));
+        }
         catch (FileNotFoundException) { return []; }
         catch (DirectoryNotFoundException) { return []; }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)

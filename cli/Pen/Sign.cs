@@ -209,10 +209,10 @@ internal static class Sign
         if (!Session.FinishDeadSessions(project.Key, host.RuntimeDir(project.Key)))
             throw new PenException("not signing: deal with the warning above first");
 
-        var moved = GitCheck.Run(project.Dir, startedWithGit: true, project.CommonGitDir);
-        if (moved.Count > 0)
+        var check = GitCheck.RunWithoutOpening(project.Dir, startedWithGit: true, project.CommonGitDir);
+        if (check.Moved.Count > 0 || check.Failure != null)
         {
-            Out.Raw(GitCheck.Warning(project.Dir, moved));
+            GitCheck.Report(project.Dir, check);
             throw new PenException("not signing: deal with the files above first");
         }
 

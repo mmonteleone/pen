@@ -253,6 +253,8 @@ public class SessionEndTests
     {
         using var t = new TempDir();
         var session = Create(t, docker: false);
+        // Nothing for Sign's own check to move, so only its guard can refuse.
+        File.Delete(Path.Combine(t.Path, "repo", ".git", "commondir"));
         BreakCheck(session);
         var (docker, gitCalls) = FakeHost(t);
         using var _ = docker;
@@ -265,8 +267,55 @@ public class SessionEndTests
 
         var error = Assert.Throws<PenException>(() => Sign.Run(host, project, null));
 
-        Assert.Contains("not signing", error.Message);
+        Assert.Contains("not signing: deal with the warning", error.Message);
         Assert.False(File.Exists(gitCalls));
+    }
+
+    [Fact]
+    public void SignRefusesAnUnlistableDirectoryAndRunsNoGit()
+    {
+        using var t = new TempDir();
+        Create(t, docker: false);
+        var repo = Path.Combine(t.Path, "repo");
+        File.Delete(Path.Combine(repo, ".git", "commondir"));
+        var sub = t.Sub("repo", "sub");
+        var (docker, gitCalls) = FakeHost(t);
+        using var _ = docker;
+        var host = t.Host();
+        var project = Project.Resolve(repo, host);
+        File.SetUnixFileMode(sub, UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        try
+        {
+            PenException? error = null;
+            var output = CapturingStderr(() => error = Assert.Throws<PenException>(() => Sign.Run(host, project, null)));
+            Assert.Contains("not signing: deal with the files", error!.Message);
+            Assert.Contains("git wasn't checked", output);
+            Assert.Contains("sub", output);
+            Assert.False(File.Exists(gitCalls));
+        }
+        finally { File.SetUnixFileMode(sub, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
+    }
+
+    [Fact]
+    public void WhatCouldntBeMovedGetsTheNotCheckedWarningAndNoGit()
+    {
+        using var t = new TempDir();
+        var session = Create(t, docker: false);
+        var git = Path.Combine(t.Path, "repo", ".git");
+        File.SetUnixFileMode(git, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            var (docker, gitCalls) = FakeHost(t);
+            using var _ = docker;
+            var ok = true;
+            var output = CapturingStderr(() => ok = Session.EndAndRemind(session).CheckFinished);
+            Assert.False(ok);
+            Assert.Contains("COULD NOT MOVE", output);
+            Assert.Contains("git wasn't checked", output);
+            Assert.False(File.Exists(gitCalls));
+            Assert.False(session.IsOpen);
+        }
+        finally { File.SetUnixFileMode(git, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
     }
 
     [Fact]

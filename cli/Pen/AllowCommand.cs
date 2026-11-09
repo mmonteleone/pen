@@ -28,9 +28,9 @@ internal static class AllowCommand
     /// </summary>
     public static List<string> Append(string path, string displayPath, ConfigKind kind, IReadOnlyList<string> domains, string stub)
     {
-        bool exists = File.Exists(path);
-        var text = exists ? File.ReadAllText(path) : stub;
-        var updated = ConfigEdit.AddAllowed(text, displayPath, kind, domains, out var added);
+        var existing = Config.ReadText(path, displayPath);
+        bool exists = existing != null;
+        var updated = ConfigEdit.AddAllowed(existing ?? stub, displayPath, kind, domains, out var added);
         if (added.Count == 0) return added;
 
         var mode = exists ? File.GetUnixFileMode(path)

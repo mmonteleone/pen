@@ -639,6 +639,15 @@ mkdir -p "$SCRATCH/forged"
 printf 'gitdir: %s/.git/worktrees/wt\n' "$PROJECT_DIR" >"$SCRATCH/forged/.git"
 check "refuses a .git file that isn't a valid linked worktree (section 21 runs in one)" refuse "$SCRATCH/forged" "isn't a valid linked worktree"
 forget "$SCRATCH/forged"; rm -rf "$SCRATCH/forged"
+git init -q unlisted/x; chmod 311 unlisted
+check "refuses a directory it can enter but not list, naming it" refuse "$PROJECT_DIR" "unlisted"
+chmod 755 unlisted; rm -rf unlisted
+mkdir -p shut; chmod 000 shut
+check "a directory that can't be entered at all starts" pen_run true
+chmod 755 shut; rm -rf shut
+mkdir fifo; mkfifo fifo/.git
+check "refuses a FIFO named .git rather than hanging on it" refuse "$PROJECT_DIR" "fifo"
+rm -rf fifo
 touch .gitmodules
 check "a repo with .gitmodules starts (section 26 runs with real submodules)" pen_run true
 rm .gitmodules
@@ -791,6 +800,12 @@ check "...quarantining .git/commondir" bash -c '[ ! -e .git/commondir ] && [ -e 
 check "...with the warning" contains "pen: WARNING" "$out"
 check "...and takes the stack down" test "$(containers)" = 0
 rm -f .git/commondir.pen-quarantine
+
+out=$(in_sandbox 'mkdir unlisted && git init -q unlisted/x && chmod 311 unlisted' 2>&1 || true)
+check "a repo hidden in a directory left unlistable is quarantined" \
+  bash -c '[ ! -e unlisted/x/.git ] && [ -d unlisted/x/.git.pen-quarantine ]'
+check "...saying pen left the directory's mode changed" contains "changed unlisted from mode 311" "$out"
+rm -rf unlisted
 
 NOGIT=$(cd "$(mktemp -d "$HOME/.pen-smoke-nogit.XXXXXX")" && pwd -P)
 EXTRA_DIRS+=("$NOGIT")

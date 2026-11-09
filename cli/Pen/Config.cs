@@ -54,7 +54,18 @@ internal sealed partial class Config
                 $"{displayDir}/{FileName} (see the README), then delete it");
 
         var path = Path.Combine(dir, FileName);
-        return File.Exists(path) ? Parse(File.ReadAllText(path), $"{displayDir}/{FileName}", kind) : new Config();
+        var display = $"{displayDir}/{FileName}";
+        return ReadText(path, display) is { } text ? Parse(text, display, kind) : new Config();
+    }
+
+    /// <summary>A config.toml's text: an in-tree worktree's .pen/ is writable from a session, so it may be a FIFO or huge. Null if there's none.</summary>
+    internal static string? ReadText(string path, string displayPath)
+    {
+        try
+        {
+            return Native.ReadRegularFile(path) ?? throw new PenException($"{displayPath} isn't a regular file of a reasonable size: remove it, then rerun");
+        }
+        catch (FileNotFoundException) { return null; }
     }
 
     /// <summary>Parses config.toml text. <paramref name="displayPath"/> names the file in errors.</summary>

@@ -53,11 +53,62 @@ internal static partial class Native
             throw new IOException(Marshal.GetLastPInvokeErrorMessage());
     }
 
+    [LibraryImport(Libc, EntryPoint = "access", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
+    private static partial int AccessNative(string path, int mode);
+
+    private const int X_OK = 1, R_OK = 4;
+
+    /// <summary>
+    /// Whether the directory is shut to this user or gone, so host git can't get
+    /// in either. Only those: any other failure (ENAMETOOLONG, say) says nothing
+    /// about whether it can be entered.
+    /// </summary>
+    public static bool IsShutOrGone(string path) =>
+        AccessNative(path, X_OK) != 0 && Marshal.GetLastPInvokeError() is EACCES or ENOENT or ENOTDIR;
+
+    /// <summary>Whether this user can enter the directory, as host git would have to. False if it's gone.</summary>
+    public static bool CanEnter(string path) => AccessNative(path, X_OK) == 0;
+
+    /// <summary>Whether this user can both enter the directory and list it. False if it's gone.</summary>
+    public static bool CanList(string path) => AccessNative(path, R_OK | X_OK) == 0;
+
     public const int LOCK_SH = 1, LOCK_EX = 2, LOCK_NB = 4, LOCK_UN = 8;
 
     // open(2) flags differ between the platforms; O_RDWR is 2 and ENOENT 2 on both.
-    private const int O_RDWR = 2, ENOENT = 2;
+    private const int O_RDONLY = 0, O_RDWR = 2, ENOENT = 2, EPERM = 1, EACCES = 13, ENOTDIR = 20;
     private static int O_CLOEXEC => OperatingSystem.IsMacOS() ? 0x1000000 : 0x80000;
+    private static int O_NONBLOCK => OperatingSystem.IsMacOS() ? 0x4 : 0x800;
+
+    /// <summary>The largest file <see cref="ReadRegularFile"/> reads: far above any real path file or config.</summary>
+    private const int MaxTextFile = 1024 * 1024;
+
+    /// <summary>
+    /// A regular file's text, or null if it's anything else or over
+    /// <see cref="MaxTextFile"/>: opening a FIFO for reading blocks until a writer
+    /// comes, and a sparse file costs nothing to make and runs pen out of memory.
+    /// The non-blocking open returns at once, and the size check and read use that
+    /// same descriptor.
+    /// </summary>
+    public static string? ReadRegularFile(string path)
+    {
+        int fd = OpenNative(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0)
+        {
+            int errno = Marshal.GetLastPInvokeError();
+            if (errno is EACCES or EPERM) throw new UnauthorizedAccessException($"Access to the path '{path}' is denied.");
+            if (errno is ENOENT or ENOTDIR) throw new FileNotFoundException(path);
+            return null; // a socket, among others, can't be opened at all
+        }
+        using var handle = new SafeFileHandle(fd, ownsHandle: true);
+        if (handle.Type != System.IO.FileHandleType.RegularFile) return null;
+        var length = RandomAccess.GetLength(handle);
+        if (length > MaxTextFile) return null;
+        using var reader = new StreamReader(new FileStream(handle, FileAccess.Read));
+        // One spare char: filling it means the file grew past what was checked.
+        var chars = new char[length + 1];
+        int read = reader.ReadBlock(chars, 0, chars.Length);
+        return read > length ? null : new string(chars, 0, read);
+    }
 
     /// <summary>realpath(3): resolves symlinks and, on macOS, the on-disk case. Null if the path doesn't exist.</summary>
     public static string? RealPath(string path)

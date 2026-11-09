@@ -12,7 +12,8 @@ internal sealed record Mount(string Path, bool ReadOnly);
 /// </summary>
 internal static class RepoGuard
 {
-    private const int MaxListed = 10;
+    internal const int MaxListed = 10;
+    internal const int MaxIncludeFiles = 100;
 
     /// <summary>
     /// Refuses layouts whose config and hooks the sandbox can't protect. A
@@ -32,6 +33,8 @@ internal static class RepoGuard
         var common = git;
         if (File.Exists(git))
             common = CheckWorktree(dir, git);
+        if (Directory.Exists(common) && !Native.CanList(common))
+            throw new PenException($"refusing to run in {dir}: pen can't read {Rel(dir, common)}, so it can't protect it: fix its permissions, then rerun");
         if (Exists(Path.Combine(common, "commondir")))
             throw new PenException($"{Rel(dir, Path.Combine(common, "commondir"))} exists, which a normal repo never has: it makes git read config and hooks from another directory. Inspect it and remove it, then rerun");
 
@@ -41,7 +44,16 @@ internal static class RepoGuard
                 + string.Join('\n', unreadable.Select(u => "  " + Rel(dir, u)))
                 + "\nfix their permissions or remove them, then rerun");
 
-        var nested = RepoScan.FindNested(dir, common);
+        var scan = RepoScan.ScanNested(dir, common);
+        if (scan.Unlistable.Count > 0)
+        {
+            var listed = scan.Unlistable.Take(MaxListed).Select(u => "  " + Rel(dir, u));
+            if (scan.Unlistable.Count > MaxListed) listed = listed.Append($"  … and {scan.Unlistable.Count - MaxListed} more");
+            throw new PenException($"refusing to run in {dir}: pen can't list these directories, though git on this machine can still enter them, so it can't see a repo inside one:\n"
+                + string.Join('\n', listed)
+                + "\nfix their permissions (chmod u+rx) or remove them, then rerun");
+        }
+        var nested = scan.Found;
         if (nested.Count == 0) return;
         var sb = new StringBuilder();
         sb.Append(Directory.Exists(git)
@@ -194,12 +206,11 @@ internal static class RepoGuard
         EnsureDirectory(dir, hooks);
         mounts.Add(new(hooks, ReadOnly: true));
 
-        var entries = AddIncludes(dir, gitDir, config, hostHome, mounts, depth: 0);
+        bool worktreeConfig = AddIncludes(dir, gitDir, config, hostHome, mounts);
         // With extensions.worktreeConfig, git also reads config.worktree
         // files, which the agent could otherwise create.
         // Any true value is enough: includeIf conditions may differ in a
         // different worktree or branch sharing this git dir.
-        bool worktreeConfig = entries.Any(e => e.Section == "extensions" && e.Key == "worktreeconfig" && GitConfigFile.IsTrue(e.Value));
         AddWorktreeConfig(dir, gitDir, Path.Combine(gitDir, "config.worktree"), worktreeConfig, hostHome, mounts);
 
         // Each linked worktree: host git in it reads config and hooks from
@@ -227,7 +238,7 @@ internal static class RepoGuard
                     // Its config can include a file in the writable project.
                     var worktreeFile = Path.Combine(wt, "config.worktree");
                     RequireNotLink(dir, worktreeFile);
-                    AddIncludes(dir, gitDir, worktreeFile, hostHome, mounts, depth: 0);
+                    AddIncludes(dir, gitDir, worktreeFile, hostHome, mounts);
                     continue;
                 }
                 if (Exists(commondir)) mounts.Add(new(commondir, ReadOnly: true));
@@ -283,8 +294,8 @@ internal static class RepoGuard
         try
         {
             if (!File.Exists(gitdirFile) || IsLink(gitdirFile)) return false;
-            var text = File.ReadAllText(gitdirFile).TrimEnd('\n', '\r');
-            if (text.Length == 0 || text.Contains('\n') || text.Contains('\0')) return false;
+            var text = Native.ReadRegularFile(gitdirFile)?.TrimEnd('\n', '\r');
+            if (string.IsNullOrEmpty(text) || text.Contains('\n') || text.Contains('\0')) return false;
             if (!Path.IsPathRooted(text)) text = Path.Combine(entry, text);
             return IsInside(dir, ResolveExisting(Path.GetFullPath(text)));
         }
@@ -297,7 +308,7 @@ internal static class RepoGuard
         if (!enabled && !Exists(path)) return;
         EnsureFile(dir, path);
         mounts.Add(new(path, ReadOnly: true));
-        AddIncludes(dir, gitDir, path, hostHome, mounts, depth: 0);
+        AddIncludes(dir, gitDir, path, hostHome, mounts);
     }
 
     /// <summary>
@@ -306,20 +317,34 @@ internal static class RepoGuard
     /// config, so each is mounted read-only too. A missing one inside the git
     /// dir is created empty; a missing one in the working tree is refused,
     /// since creating it would add a file to the project.
+    /// Returns whether any file in the walk sets extensions.worktreeConfig.
+    /// <para>
+    /// The agent can write some of these files, so each is walked only once, and
+    /// a walk over <see cref="MaxIncludeFiles"/> files is refused: cycles and
+    /// fan-outs would otherwise take time exponential in git's depth limit of
+    /// 10. Depth itself isn't limited, since a file first met deep down mustn't
+    /// lose what it includes when it's met again higher up. Files are keyed by
+    /// path as written, not real path: a relative include resolves from there.
+    /// </para>
     /// </summary>
-    private static List<GitConfigFile.Entry> AddIncludes(string dir, string gitDir, string configFile, string hostHome, List<Mount> mounts, int depth)
+    private static bool AddIncludes(string dir, string gitDir, string configFile, string hostHome, List<Mount> mounts) =>
+        AddIncludes(dir, gitDir, configFile, hostHome, mounts, new HashSet<string>(StringComparer.Ordinal) { configFile });
+
+    private static bool AddIncludes(string dir, string gitDir, string configFile, string hostHome, List<Mount> mounts, HashSet<string> visited)
     {
-        var entries = new List<GitConfigFile.Entry>();
-        if (depth > 10) return entries; // git's own limit
+        bool worktreeConfig = false;
         foreach (var e in GitConfigFile.ParseFile(configFile))
         {
-            entries.Add(e);
+            if (e.Section == "extensions" && e.Key == "worktreeconfig" && GitConfigFile.IsTrue(e.Value)) worktreeConfig = true;
             if (e.Section is not ("include" or "includeif") || e.Key != "path" || e.Value.Length == 0) continue;
             var p = e.Value;
             if (p == "~" || p.StartsWith("~/", StringComparison.Ordinal)) p = hostHome + p[1..];
             else if (p.StartsWith('~')) continue; // ~user/: another user's home, never inside a project
             if (!Path.IsPathRooted(p)) p = Path.Combine(Path.GetDirectoryName(configFile)!, p);
             p = Path.GetFullPath(p);
+            if (!visited.Add(p)) continue;
+            if (visited.Count > MaxIncludeFiles)
+                throw new PenException($"{Rel(dir, configFile)} takes git config includes past {MaxIncludeFiles} files, more than pen will follow: remove it or the includes in it, then rerun");
 
             var real = ResolveExisting(p);
             if (p != real && (IsInside(dir, p) || IsInside(gitDir, p)))
@@ -341,9 +366,9 @@ internal static class RepoGuard
             // Even host-only includes can enable worktreeConfig or include
             // another file that the sandbox can write. Conditional includes
             // are followed conservatively for every worktree and branch.
-            entries.AddRange(AddIncludes(dir, gitDir, p, hostHome, mounts, depth + 1));
+            worktreeConfig |= AddIncludes(dir, gitDir, p, hostHome, mounts, visited);
         }
-        return entries;
+        return worktreeConfig;
     }
 
     /// <summary>The real path of <paramref name="path"/>, or of its deepest existing ancestor plus the rest.</summary>

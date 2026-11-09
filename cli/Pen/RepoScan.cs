@@ -24,6 +24,9 @@ internal sealed record NestedRepo(string Path, NestedKind Kind)
 /// <summary>What the walk of a git dir's submodule repos found (Repos) and couldn't read (Unreadable).</summary>
 internal sealed record ModuleScan(List<string> Repos, List<string> Unreadable);
 
+/// <summary>What the walk of the tree found (Found), and the directories it could enter but not list (Unlistable).</summary>
+internal sealed record NestedScan(List<NestedRepo> Found, List<string> Unlistable);
+
 /// <summary>
 /// The nested-repo scan, shared by the start-of-session refusal and the
 /// session-end check. It only lists names (one readdir per directory) and
@@ -34,7 +37,7 @@ internal static class RepoScan
     private static readonly EnumerationOptions Options = new()
     {
         AttributesToSkip = 0, // dot files are "hidden" on Unix, and .git is one
-        IgnoreInaccessible = true,
+        IgnoreInaccessible = false, // a directory that can't be listed has to be noticed
         RecurseSubdirectories = false,
         ReturnSpecialDirectories = false,
     };
@@ -51,24 +54,41 @@ internal static class RepoScan
     /// So are the checkouts of <paramref name="moduleRepos"/> (default: the
     /// module repos in the common git dir now; see <see cref="ResolveModuleCheckout"/>).
     /// </summary>
-    public static List<NestedRepo> FindNested(string root, string? commonGitDir = null, IReadOnlyCollection<string>? moduleRepos = null)
+    public static List<NestedRepo> FindNested(string root, string? commonGitDir = null, IReadOnlyCollection<string>? moduleRepos = null) =>
+        ScanNested(root, commonGitDir, moduleRepos).Found;
+
+    /// <summary>
+    /// <see cref="FindNested"/>'s walk, with the directories it couldn't list
+    /// although they can be entered (chmod 311): host git could run in a repo
+    /// in one, so callers must not treat the scan as complete. One that can't
+    /// be entered at all (a root-owned 700 database directory) isn't reported,
+    /// since host git can't get in either. <paramref name="tryOpen"/>, if given,
+    /// gets each such directory and returns whether it changed its mode, after
+    /// which the listing is tried again. The access(2) call is only made after
+    /// a listing fails, so a healthy tree pays nothing for it.
+    /// </summary>
+    public static NestedScan ScanNested(string root, string? commonGitDir = null, IReadOnlyCollection<string>? moduleRepos = null, Func<string, bool>? tryOpen = null)
     {
         commonGitDir ??= Path.Combine(root, ".git");
         var modules = new HashSet<string>(moduleRepos ?? FindModuleRepos(commonGitDir).Where(r => !IsLinkPath(r)), StringComparer.Ordinal);
         var found = new List<NestedRepo>();
+        var unlistable = new List<string>();
         var pending = new Stack<string>();
         pending.Push(root);
         while (pending.TryPop(out var dir))
         {
-            List<Entry> entries;
-            try
+            var entries = List(dir);
+            if (entries == null)
             {
-                entries = new FileSystemEnumerable<Entry>(dir,
-                    (ref FileSystemEntry e) => new Entry(e.FileName.ToString(), e.IsDirectory, (e.Attributes & FileAttributes.ReparsePoint) != 0),
-                    Options).ToList();
+                // Gone, or shut: nothing host git could reach.
+                if (Native.IsShutOrGone(dir)) continue;
+                if (tryOpen != null && tryOpen(dir)) entries = List(dir);
+                if (entries == null)
+                {
+                    unlistable.Add(dir);
+                    continue;
+                }
             }
-            catch (IOException) { continue; } // gone, or not a directory any more
-            catch (UnauthorizedAccessException) { continue; }
 
             bool head = false, objects = false, refs = false, commondir = false;
             foreach (var e in entries)
@@ -95,7 +115,19 @@ internal static class RepoScan
                 found.Add(new(Path.Combine(dir, entries.First(e => Is(e.Name, "HEAD")).Name), NestedKind.Bare));
         }
         found.Sort((a, b) => string.CompareOrdinal(a.Path, b.Path));
-        return found;
+        unlistable.Sort(StringComparer.Ordinal);
+        return new(found, unlistable);
+    }
+
+    private static List<Entry>? List(string dir)
+    {
+        try
+        {
+            return new FileSystemEnumerable<Entry>(dir,
+                (ref FileSystemEntry e) => new Entry(e.FileName.ToString(), e.IsDirectory, (e.Attributes & FileAttributes.ReparsePoint) != 0),
+                Options).ToList();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
     }
 
     private static bool Is(string name, string wanted) => name.Equals(wanted, StringComparison.OrdinalIgnoreCase);
@@ -236,8 +268,9 @@ internal static class RepoScan
         if (entries == null) return;
         foreach (var entry in entries)
         {
+            // Before the symlink test, so a quarantined symlink isn't flagged and renamed again.
+            if (Path.GetFileName(entry).Contains(GitCheck.Suffix, StringComparison.Ordinal)) continue;
             if (IsLinkPath(entry)) scan.Repos.Add(entry);
-            else if (Path.GetFileName(entry).Contains(GitCheck.Suffix, StringComparison.Ordinal)) continue;
             else if (!Path.Exists(entry))
             {
                 // Listed but not there to stat: dir can be read but not entered.
@@ -276,8 +309,8 @@ internal static class RepoScan
     private static string? ReadPathFile(string path, string prefix)
     {
         if (!File.Exists(path) || IsLinkPath(path)) return null;
-        var text = File.ReadAllText(path);
-        if (!text.StartsWith(prefix, StringComparison.Ordinal)) return null;
+        var text = Native.ReadRegularFile(path);
+        if (text == null || !text.StartsWith(prefix, StringComparison.Ordinal)) return null;
         var value = text[prefix.Length..].TrimEnd('\n', '\r');
         return value.Length == 0 || value.Contains('\n') || value.Contains('\0') ? null : value;
     }
