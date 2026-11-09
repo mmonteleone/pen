@@ -476,6 +476,28 @@ public class SessionEndTests
     }
 
     [Fact]
+    public void APausedRebaseIsReportedAtSessionEnd_AndLeftInPlace()
+    {
+        using var t = new TempDir();
+        var session = Create(t, docker: false);
+        var repo = Path.Combine(t.Path, "repo");
+        File.Delete(Path.Combine(repo, ".git", "commondir"));
+        var todo = Path.Combine(t.Sub("repo", ".git", "rebase-merge"), "git-rebase-todo");
+        File.WriteAllText(todo, "exec evil\n");
+        var (docker, gitCalls) = FakeHost(t);
+        using var _ = docker;
+
+        var ok = false;
+        var output = CapturingStderr(() => ok = Session.EndAndRemind(session).CheckFinished);
+
+        Assert.True(ok); // it doesn't stop pen's own git, which continues nothing
+        Assert.Contains(".git/rebase-merge: a paused rebase", output);
+        Assert.Contains("exec evil", output);
+        Assert.Equal("exec evil\n", File.ReadAllText(todo));
+        Assert.Single(RepoGitCalls(gitCalls));
+    }
+
+    [Fact]
     public void AFailedCheckWarnsRunsNoGitAndStillEndsTheSession()
     {
         using var t = new TempDir();

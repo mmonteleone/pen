@@ -772,6 +772,46 @@ check "...touch .pen/config.toml fails inside" has "fail: pencreate"
 check "...mv .pen fails" has "fail: mvpen"
 st=$(git status --porcelain | tr '\n' ' ')
 check "...and host git status shows nothing new${st:+ (it shows: $st)}" test -z "$st"
+out=$(in_sandbox 'mkdir .git/rebase-merge .git/sequencer && printf "pick abc one\n  x touch planted-by-a-rebase\n# exec commented\n" >.git/rebase-merge/git-rebase-todo && mkfifo .git/rebase-merge/done && printf "x from-the-sequencer\n" >.git/sequencer/todo' 2>&1)
+check "a planted paused rebase is reported at session end" contains ".git/rebase-merge: a paused rebase" "$out"
+check "...with its exec line" contains "x touch planted-by-a-rebase" "$out"
+check "...and not the commented one" not contains "exec commented" "$out"
+check "...saying to inspect it before continuing" contains "before git rebase --continue" "$out"
+check "...and that a FIFO in it can't be read" contains "couldn't read done" "$out"
+check "...and the sequencer's" contains "x from-the-sequencer" "$out"
+check "...and it's left in place" grep -q planted-by-a-rebase .git/rebase-merge/git-rebase-todo
+rm -rf .git/rebase-merge .git/sequencer
+
+out=$(in_sandbox 'mkdir .git/rebase-merge && echo "\$(touch prompt-canary)" >.git/rebase-merge/msgnum && echo 2 >.git/rebase-merge/end' 2>&1)
+check "a planted count a shell prompt would run is quarantined at session end" contains ".git/rebase-merge/msgnum → .git/rebase-merge/msgnum.pen-quarantine" "$out"
+check "...while its neighbour git could have written stays" test -f .git/rebase-merge/end
+prompt_sh=$(for f in /opt/homebrew/opt/git/etc/bash_completion.d/git-prompt.sh /usr/lib/git-core/git-sh-prompt /usr/share/git-core/contrib/completion/git-prompt.sh; do [ -f "$f" ] && echo "$f" && break; done)
+if [ -n "$prompt_sh" ]; then
+  printf 'source %q\nPROMPT_COMMAND=%q\n' "$prompt_sh" '__git_ps1 a b' >"$SCRATCH/prompt.rc"
+  bash --noprofile --rcfile "$SCRATCH/prompt.rc" -i </dev/null >/dev/null 2>&1 || true
+  check "...and the next prompt runs nothing" test ! -e prompt-canary
+  mv .git/rebase-merge/msgnum.pen-quarantine .git/rebase-merge/msgnum
+  bash --noprofile --rcfile "$SCRATCH/prompt.rc" -i </dev/null >/dev/null 2>&1 || true
+  check "...though it does if the file is put back (so that check means something)" test -e prompt-canary
+  rm -f prompt-canary
+else
+  note "git-prompt.sh isn't installed here, so the shell prompt replay was skipped"
+fi
+rm -rf .git/rebase-merge
+
+out=$(in_sandbox 'mkdir .git/rebase-merge && echo "\$(touch prompt-canary)" >.git/rebase-merge/msgnum && echo 2 >.git/rebase-merge/end && chmod 555 .git/rebase-merge' 2>&1)
+check "a read-only state dir doesn't keep a planted count in place" contains ".git/rebase-merge/msgnum → .git/rebase-merge/msgnum.pen-quarantine" "$out"
+check "...and says what mode it changed" contains "changed .git/rebase-merge from mode 555" "$out"
+chmod -R u+w .git/rebase-merge; rm -rf .git/rebase-merge
+out=$(in_sandbox 'mkdir "$HOME/rm" && echo "\$(touch prompt-canary)" >"$HOME/rm/msgnum" && ln -s "$HOME/rm" .git/rebase-merge && chmod 555 .git' 2>&1)
+check "...nor does a read-only .git keep a symlinked one" contains ".git/rebase-merge → .git/rebase-merge.pen-quarantine" "$out"
+check "...and the check finished" not contains "git wasn't checked" "$out"
+chmod u+w .git; rm -f .git/rebase-merge.pen-quarantine
+out=$(in_sandbox 'mkdir .git/rebase-merge && echo "\$(touch prompt-canary)" >.git/rebase-merge/msgnum && echo 2 >.git/rebase-merge/end && chmod 311 .git' 2>&1)
+check "...nor does a .git that can't be listed" contains ".git/rebase-merge/msgnum → .git/rebase-merge/msgnum.pen-quarantine" "$out"
+check "...and the check finished" not contains "git wasn't checked" "$out"
+chmod u+rwx .git; rm -rf .git/rebase-merge
+
 git worktree remove --force "$SCRATCH/wt"
 git branch -q -D scratch
 
@@ -1205,6 +1245,18 @@ git update-ref refs/remotes/fork/s3 HEAD
 out=$(fake_pen sign 2>&1 || true)
 check "pen sign refuses when a commit is already on a remote branch" contains "on a remote branch" "$out"
 git update-ref -d refs/remotes/fork/s3
+mkdir .git/rebase-merge
+echo 'exec planted-by-a-rebase' >.git/rebase-merge/git-rebase-todo
+out=$(fake_pen sign 2>&1 || true)
+check "pen sign reports a paused rebase with its exec line" has_all "$out" ".git/rebase-merge: a paused rebase" "exec planted-by-a-rebase"
+check "...and doesn't refuse over it" not contains "not signing" "$out"
+check "...and leaves it in place" test -f .git/rebase-merge/git-rebase-todo
+rm -rf .git/rebase-merge
+mkdir .git/rebase-merge
+echo '$(touch prompt-canary)' >.git/rebase-merge/msgnum
+out=$(fake_pen sign 2>&1 || true)
+check "pen sign refuses over a planted count, having quarantined it" has_all "$out" "msgnum.pen-quarantine" "not signing"
+rm -rf .git/rebase-merge
 git remote remove origin
 note "GitHub showing the signed commits as Verified after a push is a manual check (step 3)"
 fi

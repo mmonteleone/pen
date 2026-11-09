@@ -9,7 +9,7 @@ internal sealed record Quarantined(string From, string To, string Why, (string F
 /// How a session-end check went: what it renamed before it stopped, and why it
 /// couldn't finish (null if it did). Git is only safe to run if Failure is null.
 /// </summary>
-internal sealed record CheckResult(List<Quarantined> Moved, string? Failure, List<ModeChange>? Opened = null, List<RestoredFile>? Restored = null, bool RestoreIncomplete = false, List<string>? RestoreBlocked = null);
+internal sealed record CheckResult(List<Quarantined> Moved, string? Failure, List<ModeChange>? Opened = null, List<RestoredFile>? Restored = null, bool RestoreIncomplete = false, List<string>? RestoreBlocked = null, List<PausedOp>? Paused = null);
 
 /// <summary>A protected file that changed with nothing to set aside: it was missing, its directory went, or only its mode changed.</summary>
 internal sealed record RestoredFile(string Path, string What);
@@ -47,7 +47,9 @@ internal static class GitCheck
     /// directory that can't be listed is a Failure rather than something to open.
     /// </summary>
     public static CheckResult RunWithoutOpening(string dir, bool startedWithGit, string? commonGitDir = null, IReadOnlyCollection<string>? modulesAtStart = null) =>
-        Finish(dir, opened: null, (moved, unlistable, badNames) => Check(dir, startedWithGit, commonGitDir, modulesAtStart, moved, unlistable, badNames, tryOpen: null));
+        Finish(dir, opened: null, (moved, unlistable, badNames, paused) =>
+            SweepingHazardsIfItStops(startedWithGit ? commonGitDir ?? Path.Combine(dir, ".git") : null, moved, unlistable, tryOpen: null, tryOpenForWriting: null,
+                () => Check(dir, startedWithGit, commonGitDir, modulesAtStart, moved, unlistable, badNames, paused, tryOpen: null, tryOpenForWriting: null)));
 
     /// <summary>
     /// The check for a session that's ending, against what the session recorded
@@ -65,26 +67,32 @@ internal static class GitCheck
         var restored = new List<RestoredFile>();
         var blocked = new List<string>();
         var restoreDone = !File.Exists(session.ProtectedManifest);
-        var result = Finish(dir, opened, (moved, unlistable, badNames) =>
+        var result = Finish(dir, opened, (moved, unlistable, badNames, paused) =>
         {
             var (startedWithGit, commonGitDir) = session.ReadGit();
-            restoreDone = ProtectedFiles.Restore(session, dir, commonGitDir, moved, restored, opened, blocked);
-            if (!Directory.Exists(dir))
-                throw new PenException($"{Out.Field(dir)} isn't there any more or can't be reached, so pen couldn't check it. If it was moved, inspect its .git by hand before running git in it");
-            // A session from a pen that didn't record its module repos keeps none.
-            Check(dir, startedWithGit, commonGitDir, session.ReadModules() ?? [], moved, unlistable, badNames, p => TryOpen(p, opened));
+            bool OpenToRead(string p) => TryOpen(p, opened);
+            bool OpenToWrite(string p) => TryOpen(p, opened, write: true);
+            SweepingHazardsIfItStops(startedWithGit ? commonGitDir ?? Path.Combine(dir, ".git") : null, moved, unlistable, OpenToRead, OpenToWrite, () =>
+            {
+                restoreDone = ProtectedFiles.Restore(session, dir, commonGitDir, moved, restored, opened, blocked);
+                if (!Directory.Exists(dir))
+                    throw new PenException($"{Out.Field(dir)} isn't there any more or can't be reached, so pen couldn't check it. If it was moved, inspect its .git by hand before running git in it");
+                // A session from a pen that didn't record its module repos keeps none.
+                Check(dir, startedWithGit, commonGitDir, session.ReadModules() ?? [], moved, unlistable, badNames, paused, OpenToRead, OpenToWrite);
+            });
         });
         return result with { Restored = restored, RestoreIncomplete = !restoreDone, RestoreBlocked = blocked.Distinct(StringComparer.Ordinal).ToList() };
     }
 
     /// <summary>Runs <paramref name="check"/> and states why the result can't be vouched for, if it can't.</summary>
-    private static CheckResult Finish(string dir, List<ModeChange>? opened, Action<List<Quarantined>, List<string>, List<BadName>> check)
+    private static CheckResult Finish(string dir, List<ModeChange>? opened, Action<List<Quarantined>, List<string>, List<BadName>, List<PausedOp>> check)
     {
         var moved = new List<Quarantined>();
         var unlistable = new List<string>();
         var badNames = new List<BadName>();
+        var paused = new List<PausedOp>();
         var failures = new List<string>();
-        try { check(moved, unlistable, badNames); }
+        try { check(moved, unlistable, badNames, paused); }
         catch (Exception e) { failures.Add(Out.Describe(e)); }
         if (unlistable.Count > 0)
             failures.Add("pen can't list these directories, so it can't see a repo inside one: " + string.Join(", ", unlistable.Take(RepoGuard.MaxListed).Select(u => RepoGuard.Rel(dir, u)))
@@ -93,7 +101,7 @@ internal static class GitCheck
             failures.Add("these names aren't valid UTF-8, so pen can't look inside them or rename them, though git on this machine can still enter them and run what's there (shown with octal escapes): " + string.Join(", ", RepoGuard.ListedBadNames(dir, badNames)));
         if (moved.Any(q => q.To.Length == 0))
             failures.Add("a file named above couldn't be moved out of git's way or restored");
-        return new(moved, failures.Count == 0 ? null : string.Join("; ", failures), opened);
+        return new(moved, failures.Count == 0 ? null : string.Join("; ", failures), opened, Paused: paused);
     }
 
     /// <summary>
@@ -117,7 +125,7 @@ internal static class GitCheck
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
     }
 
-    private static void Check(string dir, bool startedWithGit, string? commonGitDir, IReadOnlyCollection<string>? modulesAtStart, List<Quarantined> moved, List<string> unlistable, List<BadName> badNames, Func<string, bool>? tryOpen)
+    private static void Check(string dir, bool startedWithGit, string? commonGitDir, IReadOnlyCollection<string>? modulesAtStart, List<Quarantined> moved, List<string> unlistable, List<BadName> badNames, List<PausedOp> paused, Func<string, bool>? tryOpen, Func<string, bool>? tryOpenForWriting)
     {
         if (!Directory.Exists(dir)) return;
         // The agent could do this to a mount's root too. The user will fix the
@@ -136,12 +144,14 @@ internal static class GitCheck
         {
             git = commonGitDir ?? git;
             // Likewise: nothing under it can be seen, and it's what git reads first.
+            // One it can search, git and the shell prompt read through without listing it.
+            if (Native.CanEnter(git) && !Native.CanList(git)) tryOpen?.Invoke(git);
             if (Directory.Exists(git) && !Native.CanList(git))
                 throw new PenException($"pen can't read {Out.Field(git)}. Once its permissions are fixed, git can run whatever was planted there, until pen has checked it again");
             var commondir = Path.Combine(git, "commondir");
             if (RepoGuard.Exists(commondir))
                 Move(commondir, "a normal repo never has one: it makes git read config and hooks from another directory", moved);
-            known = CheckModuleRepos(git, modulesAtStart, moved, badNames);
+            known = CheckModuleRepos(git, modulesAtStart, moved, badNames, tryOpenForWriting);
         }
 
         var scan = RepoScan.ScanNested(dir, startedWithGit ? commonGitDir : null, known, tryOpen);
@@ -158,6 +168,13 @@ internal static class GitCheck
             };
             Move(n.Path, why, moved, breakLayout: n.Kind == NestedKind.GitDir);
         }
+
+        // Last, so what was just quarantined isn't looked through.
+        if (startedWithGit)
+        {
+            SweepHazards(git, moved, unlistable, tryOpen, tryOpenForWriting);
+            paused.AddRange(PausedGit.Find(git));
+        }
     }
 
     /// <summary>
@@ -169,7 +186,7 @@ internal static class GitCheck
     /// start, since nothing vouches for what's in it now. Returns the repos
     /// left, whose checkouts in the tree are the project's own.
     /// </summary>
-    private static HashSet<string> CheckModuleRepos(string gitDir, IReadOnlyCollection<string>? modulesAtStart, List<Quarantined> moved, List<BadName> badNames)
+    private static HashSet<string> CheckModuleRepos(string gitDir, IReadOnlyCollection<string>? modulesAtStart, List<Quarantined> moved, List<BadName> badNames, Func<string, bool>? tryOpenForWriting)
     {
         var listed = modulesAtStart == null ? null : new HashSet<string>(modulesAtStart, StringComparer.Ordinal);
         var known = new HashSet<string>(StringComparer.Ordinal);
@@ -200,9 +217,68 @@ internal static class GitCheck
         foreach (var dir in scan.Unreadable)
         {
             if (gone.Any(g => RepoGuard.IsInside(g, dir))) continue;
-            Move(dir, "a directory where git keeps submodule repos that can't be read, so pen can't check it: inspect its contents before you fix its permissions", moved, breakLayout: true);
+            const string why = "a directory where git keeps submodule repos that can't be read, so pen can't check it: inspect its contents before you fix its permissions";
+            if (!TryRenameWithOpening(dir, why, moved, tryOpenForWriting, breakLayout: true))
+                Move(dir, why, moved, breakLayout: true);
         }
         return known;
+    }
+
+    private static void SweepHazards(string git, List<Quarantined> moved, List<string> unreachable, Func<string, bool>? tryOpen, Func<string, bool>? tryOpenForWriting)
+    {
+        foreach (var hazard in PausedGit.PromptHazards(git, tryOpen, unreachable))
+            MoveHazard(hazard, moved, tryOpenForWriting);
+    }
+
+    /// <summary>
+    /// Runs the check. If it stops early, what a shell prompt would run still has
+    /// to go, since the prompt reads through a git dir pen can't list and doesn't
+    /// wait for the failure to be read: every known name is tried directly. If
+    /// even that stops, the check's own failure stands and says not to run git.
+    /// </summary>
+    private static void SweepingHazardsIfItStops(string? git, List<Quarantined> moved, List<string> unreachable, Func<string, bool>? tryOpen, Func<string, bool>? tryOpenForWriting, Action check)
+    {
+        try { check(); }
+        catch (Exception)
+        {
+            if (git != null)
+            {
+                try { SweepHazards(git, moved, unreachable, tryOpen, tryOpenForWriting); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException or PenException) { }
+            }
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Gets what a shell prompt would run out of its way, since the prompt doesn't
+    /// wait for the user to read a warning, and the agent could have made the
+    /// directory holding it read-only. The order: rename it; add u+w to the
+    /// directory holding it and rename it (only at session end: <paramref name="tryOpenForWriting"/>);
+    /// then the same for the state directory holding it. If none of that works
+    /// the last Move records that it couldn't, which makes the check a Failure.
+    /// </summary>
+    private static void MoveHazard(PromptHazard hazard, List<Quarantined> moved, Func<string, bool>? tryOpenForWriting)
+    {
+        // Gone with a state directory that an earlier one in it took aside.
+        if (!RepoGuard.Exists(hazard.Path)) return;
+        if (TryRenameWithOpening(hazard.Path, hazard.Why, moved, tryOpenForWriting)) return;
+        if (hazard.StateDir != null && TryRenameWithOpening(hazard.StateDir, hazard.Why, moved, tryOpenForWriting)) return;
+        Move(hazard.StateDir ?? hazard.Path, hazard.Why, moved);
+    }
+
+    private static bool TryRenameWithOpening(string path, string why, List<Quarantined> moved, Func<string, bool>? tryOpenForWriting, bool breakLayout = false)
+    {
+        var held = new List<Quarantined>();
+        Move(path, why, held, breakLayout);
+        if (held[0].To.Length == 0 && tryOpenForWriting?.Invoke(Path.GetDirectoryName(path)!) == true)
+        {
+            held.Clear();
+            Move(path, why, held, breakLayout);
+        }
+        if (held[0].To.Length == 0) return false;
+        moved.AddRange(held);
+        return true;
     }
 
     /// <summary>
@@ -309,10 +385,10 @@ internal static class GitCheck
         $"""
         pen: WARNING: git wasn't checked: don't run git here ({Out.Field(dir)}).
         pen: The check for files that make git on this machine run code from the sandbox couldn't finish: {why}
-        pen: Your shell prompt and IDE may run git too, so keep them out of this directory. Inspect its .git (config, hooks, modules) and any repos nested in it by hand first.
+        pen: Your shell prompt and IDE may run git too, so keep them out of this directory. Inspect its .git (config, hooks, modules, rebase-merge, rebase-apply, sequencer) and any repos nested in it by hand first.
         """;
 
-    /// <summary>Prints what a session-end check found: first what it renamed, then that it didn't finish.</summary>
+    /// <summary>Prints what a session-end check found: first what it renamed, then any paused operations, then that it didn't finish.</summary>
     public static void Report(string dir, CheckResult check)
     {
         if (check.Moved.Count > 0) Out.Raw(Warning(dir, check.Moved));
@@ -320,6 +396,7 @@ internal static class GitCheck
             Out.Line($"{RepoGuard.Rel(dir, r.Path)}: {r.What}");
         foreach (var c in check.Opened ?? [])
             Out.Line($"changed {RepoGuard.Rel(dir, c.Path)} from mode {Octal(c.Was)} to {Octal(c.Now)} so it could be checked, and left it that way");
+        if (check.Paused is { Count: > 0 } paused) Out.Raw(PausedGit.Warning(dir, paused));
         if (check.Failure != null) Out.Raw(NotCheckedWarning(dir, check.Failure));
     }
 

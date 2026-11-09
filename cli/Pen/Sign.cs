@@ -434,6 +434,8 @@ internal static class Sign
             GitCheck.Report(project.Dir, check);
             throw new PenException("not signing: deal with the files above first");
         }
+        // Signing doesn't continue these, so they're not a reason to refuse.
+        GitCheck.Report(project.Dir, check);
 
         return SignBranch(new HostGit(project.Dir), baseArg);
     }
