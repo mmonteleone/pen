@@ -127,15 +127,18 @@ internal static class Cli
 
             <base> defaults to the branch's upstream (or origin/HEAD). pen refuses to
             rewrite commits that are already on a remote branch, and won't run while a
-            session is open in this project.
+            session is open in this directory or pen reset runs. It doesn't refuse for a
+            session in another worktree of the repo, but that session's agent can change
+            what pen sign reads, so wait for it to end too.
             """,
         ["reset"] = """
             usage: pen reset
 
             Removes this project's sandbox volumes, after asking: its home (agent logins
             and config, shell history), its NuGet cache and its Docker-in-Docker images.
-            The project's files and ~/.config/pen are untouched. Not while a session is
-            open in this project.
+            The project's files and ~/.config/pen are untouched. A repo's linked worktrees
+            share these volumes, so it refuses while a session or pen sign runs in the
+            main checkout or any of its worktrees.
             """,
         ["prune"] = """
             usage: pen prune

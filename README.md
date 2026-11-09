@@ -110,8 +110,10 @@ arm64 and x64. Neither installation method will need a host .NET SDK.
 
 ### Start a session
 
-On macOS, the Docker VM must share your project and `~/.config/pen` read-write at their real
-paths. Projects outside your home directory may need an extra share.
+On macOS, the Docker VM must share these at their real paths: your project, `~/.local/state/pen`
+(each session's files, such as the proxy's log) and, for a linked worktree, the main checkout's
+`.git` read-write, and the home seed `~/.config/pen/home`, which is mounted read-only. Projects
+outside your home directory may need an extra share.
 
 From your project root, choose an agent:
 
@@ -163,9 +165,14 @@ deliberate container escape.
   `pen sign` in another worktree. The agent can plant files that run code as soon as host git reads
   them, and [the host precautions](docs/usage.md#host-precautions) don't stop this.
 - The agent can delete project files, uncommitted work and unpushed commits. Keep backups.
-- Allowed domains, including AI providers and GitHub, can still carry data out of the sandbox.
+- Allowed domains, including AI providers and GitHub, can still carry data out of the sandbox. Many
+  take uploads given credentials, and a prompt injection can supply its own, such as an attacker's
+  token.
 - Review changes before running them on the host: build scripts and other project files can
   execute commands. Read-only git config and hooks don't prevent that.
+- So can [agent and editor config in the project](docs/usage.md#project-files-host-tools-act-on):
+  `.claude/settings.json` hooks, `.mcp.json` servers and `.vscode/tasks.json` tasks run on the host
+  when you use those tools there, and `.lfsconfig` redirects host `git lfs`.
 - On a case-insensitive filesystem (macOS's default), the agent can change `.git/config` by writing
   `.git/CONFIG`. `pen` warns at session start and puts the file back at session end, but host git
   would read the changed file until then.

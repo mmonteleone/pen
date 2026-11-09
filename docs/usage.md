@@ -81,8 +81,24 @@ the rest of the file as you wrote it.
 Repeating the command reapplies the current configuration to running sessions, even if the
 domains are already saved, so a failed live update can be retried with the same command.
 
-The defaults are sites an agent without credentials can only read from. Sites that accept
-anonymous writes, such as wikis or pastebins, could let an agent send your code out.
+The defaults are there to be read from, but many of them take uploads from anyone with credentials,
+and a prompt injection can hand the agent an attacker's: a GitHub token for `github.com`, an npm
+token for `registry.npmjs.org`, a registry login for `ghcr.io` or Docker Hub, or an AI provider's
+API key. Tools add more: `.nuget.org` takes packages with a NuGet API key, and the `go` tool's
+`storage.googleapis.com` takes uploads to a bucket through a signed URL, which needs no other
+credentials. Any of these can carry your code to an attacker's account. Sites that accept anonymous
+writes, such as wikis or pastebins, would let an agent send it out with nothing at all.
+
+The sandbox reaches the network only through the proxy, which resolves names itself. Inside, the
+session's own services (such as `proxy`) resolve, but external names don't, as long as Docker doesn't
+forward DNS queries from the internal network to the host's resolver. Older Docker Engines did that
+when the host's resolver is on a loopback address (systemd-resolved's `127.0.0.53`, say), so DNS
+queries could carry data out. The fix (CVE-2024-29018) is in 23.0.11 and later 23.0 releases,
+25.0.5 and later 25.0 releases, and 26.0 onward, but no 24.x release. Docker Desktop was never
+affected. The smoke suite checks that external names don't resolve.
+
+Blocked domains are listed at session end and by `pen allow`. A domain longer than 80 characters is
+cut short there with "…". The `pen allow` command suggested at session end names it in full.
 
 ### GitHub
 
@@ -192,10 +208,12 @@ update in a newer pen.
 - **`go`:** the official tarball of the newest patch release, in `/usr/local/go`. A module that
   asks for a newer Go downloads that toolchain through the module proxy into the home volume.
   The proxy redirects toolchains and large modules to `storage.googleapis.com`, which is all of
-  Google Cloud Storage, so sessions with Go can reach any bucket there.
+  Google Cloud Storage, so sessions with Go can reach any bucket there. `go install` puts programs
+  in `~/go/bin`, which isn't on `PATH`: run them by path, or add it to `PATH` in your shell config.
 - **`rust`:** rustup in `/usr/local/rustup`, each toolchain with clippy and rustfmt. The default
   toolchain is `stable` if listed, otherwise the newest. Cargo's cache and `cargo install` go to
-  `~/.cargo` in the home volume. A toolchain that isn't in the image (asked for by
+  `~/.cargo` in the home volume. `~/.cargo/bin` isn't on `PATH`, so run what `cargo install` puts
+  there by path, or add it to `PATH` in your shell config. A toolchain that isn't in the image (asked for by
   `rust-toolchain.toml`, say) fails in a session rather than installing: add it as a tool.
 - **`java`:** Ubuntu's headless JDK. `java` and `javac` are the newest one's; the others are in
   `/usr/lib/jvm`. Maven and Gradle aren't installed: use the project's wrappers (`mvnw`,
@@ -359,7 +377,8 @@ or set `docker = true` in `.pen/config.toml`. The session gets its own Docker da
   images, without waiting for a pen release (`--clean` skips the build cache). Run it in a project
   with approved `tools` or an approved `.pen/Dockerfile` to rebuild those too; `tools` in your own config
   are always rebuilt. Logins and config are kept.
-- `pen reset` wipes a project's sandbox state.
+- `pen reset` wipes a project's sandbox state. Linked worktrees share it, so it refuses while a
+  session or `pen sign` runs in the main checkout or any worktree of the repo.
 - `pen prune` finds the volumes, project layers and state of projects you've moved or deleted, and
   tools images on an old base image, and removes them after asking. Ones it can't place are listed with the commands to remove them by
   hand. A directory on a volume that isn't mounted looks deleted, so mount it first.
@@ -373,6 +392,8 @@ standalone installs will use a replacement release binary. See the
 - Pasting images into the agent doesn't work. Save the image to the project and pass its path.
 - Servers the agent starts are reachable from the host only on [forwarded ports](#dev-servers).
 - Some git commands must run on the host. See [Git in the sandbox](#git-in-the-sandbox).
+- The image has no `tzdata-legacy`, so old time zone names such as `US/Pacific` don't resolve. Use
+  current ones (`America/Los_Angeles`), or install the package in a `.pen/Dockerfile`.
 
 ## Limitations
 
@@ -395,6 +416,35 @@ known ways to make host git run code, and there may be others.
   agent's own output reaches your terminal directly during a session, though, and pen doesn't reset
   the terminal afterwards, so an agent can leave conceal or the alternate screen on and hide what pen
   prints next.
+
+### Project files host tools act on
+
+Agents and editors read config from the project, which the agent can write. Some of it runs
+commands when you use those tools on the host in that directory, outside the sandbox and with your
+credentials:
+
+- **`.claude/settings.json` and `.claude/settings.local.json`:** once you've trusted the folder or a
+  folder above it in Claude Code, its hooks, `env` and helper commands such as `apiKeyHelper`
+  run whenever host Claude Code starts there. `claude -p` and the SDK use them without asking even
+  in a folder you've never trusted.
+- **`.mcp.json`:** a project MCP server is a command. Claude Code asks before connecting one, but in
+  a trusted folder the project's own settings can approve it, so that question can be skipped.
+  `claude -p` and the SDK connect project servers without asking.
+- **`.vscode/tasks.json`:** a task runs whatever command it names when you run it, and one marked
+  `"runOn": "folderOpen"` runs when VS Code opens the folder if you've allowed automatic tasks
+  (`task.allowAutomaticTasks`). `.vscode/settings.json` and `launch.json` can name programs too.
+- **`.lfsconfig`:** host `git lfs` reads these keys from this file, unless your git config sets them:
+  `lfs.url`, `lfs.pushurl`, `remote.<name>.lfsurl`, `lfs.<url>.access`, `lfs.gitprotocol`,
+  `lfs.fetchinclude`, `lfs.fetchexclude`, `lfs.allowincompletepush`, `lfs.skipdownloaderrors` and
+  `lfs.locksverify`. None of them names a program to run. An agent can point the URLs at a server
+  it chose. In a repo that uses Git LFS, a host `git push` then uploads the LFS objects it pushes
+  there and asks your credential helper for that server's credentials, and a fetch or checkout
+  downloads LFS files from it. An `ssh://` URL makes it connect there with your SSH client.
+
+Other agents' project config (Codex's `.codex/`, OpenCode's `opencode.json` and `.opencode/`) can do
+similar things. Before using any of these tools on the host in the project, review the changes to
+those files, including ignored ones such as `.claude/settings.local.json`, which `git diff` doesn't
+show. pen doesn't check or protect any of them.
 
 ### While a session runs
 

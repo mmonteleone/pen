@@ -2,7 +2,7 @@
 # The CLI copies this file into the session's dir next to squid.conf,
 # allowlist.txt and proxy.log, so the relative paths below resolve there.
 #
-# Required env (set by the CLI; by hand in tests/smoke.sh until the CLI exists):
+# Required env (set by the CLI):
 #   PROJECT_DIR     host absolute path of the project, mounted at the same path
 #   PEN_PROJECT     project key (pen-<dir>-<hash>); names the volumes
 #   PEN_UID/PEN_GID host user, created in the container at start

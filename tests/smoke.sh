@@ -247,7 +247,7 @@ fi
 
 if want 2; then
 # ==============================================================================
-section "2. Entrypoint and hardening (step 9)"
+section "2. Entrypoint and hardening"
 
 git -C "$PROJECT_DIR" config commit.gpgsign true
 out=$(in_sandbox '
@@ -322,7 +322,7 @@ fi
 
 if want 3; then
 # ==============================================================================
-section "3. Proxy and network (step 2)"
+section "3. Proxy and network"
 
 code() { in_sandbox "curl -s -o /dev/null -w '%{http_code} %{http_connect}' -I $1"; }
 check "github.com → 200 through the proxy" test "$(code https://github.com | cut -d' ' -f1)" = 200
@@ -339,11 +339,10 @@ pen_run true >/dev/null 2>&1
 check "a session leaves no anonymous volumes behind (squid's log and spool dirs are tmpfs)" \
   test -z "$(comm -13 <(echo "$before") <(docker volume ls -q --filter dangling=true | sort))"
 
-if in_sandbox 'getent hosts example.com' >/dev/null 2>&1; then
-  note "DNS: external names RESOLVE inside the sandbox → keep the DNS-tunneling limitation in the README"
-else
-  note "DNS: external names do NOT resolve inside the sandbox → drop the DNS limitation from the README"
-fi
+# Docker Engine 23.0.11, 25.0.5 and 26.0+ don't forward DNS from an internal
+# network (CVE-2024-29018); docs/usage.md#network relies on that.
+check "the proxy's name resolves inside the sandbox" in_sandbox 'getent hosts proxy >/dev/null'
+check "external names don't resolve inside the sandbox" not in_sandbox 'getent hosts example.com >/dev/null'
 
 in_sandbox 'curl -s -o /dev/null -I https://example.com; curl -s -o /dev/null -I https://github.com' >/dev/null 2>&1 || true
 log=$(last_session)proxy.log
@@ -680,7 +679,7 @@ out=$(HOME=$FAKE_HOME DOCKER_CONFIG=${DOCKER_CONFIG:-$REAL_HOME/.docker} $PTY --
 check "a private fetch with no token fails with an error instead of prompting" \
   bash -c 'grep -qE "rc=[1-9]" <<<"$1" && grep -q "EXIT 0" <<<"$1"' _ "$out"
 git remote remove origin
-note "real-token checks (gh repo view, clone, push 403, per-owner tokens) are manual; use a read-only PAT as described in README.md"
+note "real-token checks (gh repo view, clone, push 403, per-owner tokens) are manual; use a read-only PAT as described in docs/usage.md#github"
 fi
 
 if want 10; then
@@ -719,7 +718,7 @@ fi
 
 if want 11; then
 # ==============================================================================
-section "11. .NET and NuGet, with --tool dotnet (step 7)"
+section "11. .NET and NuGet, with --tool dotnet"
 tool_free # asserts what's there without the tool, and dotnet:8 alone
 
 # dn_sandbox [pen options…] <bash script>: in_sandbox with the dotnet tool (dotnet:10 unless options say).
@@ -780,12 +779,12 @@ else
 fi
 
 real_home
-note "login checks (step 5: log in to claude and codex, still logged in after pen upgrade --clean, logged out in another project) are manual"
+note "login checks (log in to claude and codex, still logged in after pen upgrade --clean, logged out in another project) are manual"
 fi
 
 if want 12; then
 # ==============================================================================
-section "12. Repo refusals at start (step 4)"
+section "12. Repo refusals at start"
 
 git worktree add -q "$SCRATCH/wt" 2>/dev/null # kept until section 13 (its .git/worktrees entry is mounted read-only)
 mkdir -p "$SCRATCH/forged"
@@ -847,7 +846,7 @@ fi
 
 if want 13; then
 # ==============================================================================
-section "13. Read-only .git and .pen, session-end check and quarantine (step 4)"
+section "13. Read-only .git and .pen, session-end check and quarantine"
 
 # Section 12 leaves this worktree for the worktree-entry checks below.
 [ -e "$SCRATCH/wt" ] || git worktree add -q "$SCRATCH/wt" 2>/dev/null
@@ -1062,7 +1061,7 @@ fi
 
 if want 14; then
 # ==============================================================================
-section "14. Project layer (step 10)"
+section "14. Project layer"
 tool_free # without tools, the layer is <key>:latest
 
 rm -rf .pen && mkdir .pen
@@ -1119,7 +1118,7 @@ fi
 
 if want 15; then
 # ==============================================================================
-section "15. pen allow <domain…> (step 2)"
+section "15. pen allow <domain…>"
 
 loop='for i in $(seq 60); do [ "$(curl -s -o /dev/null -w %{http_code} -I https://example.com)" = 200 ] && { echo got-200; exit 0; }; sleep 0.5; done; echo never-200'
 "$PEN" run bash -c "$loop" </dev/null >"$SCRATCH/allow1.out" 2>&1 &
@@ -1174,7 +1173,7 @@ fi
 
 if want 16; then
 # ==============================================================================
-section "16. pen allow with no arguments (step 2)"
+section "16. pen allow with no arguments"
 
 "$PEN" run bash -c 'curl -s -o /dev/null -I https://example.edu; sleep 1.5; curl -s -o /dev/null -I https://example.org; echo READY; sleep 120' \
   </dev/null >"$SCRATCH/list.out" 2>&1 &
@@ -1193,7 +1192,7 @@ fi
 
 if want 17; then
 # ==============================================================================
-section "17. Home seed (step 11)"
+section "17. Home seed"
 
 SEEDP=$(cd "$(mktemp -d "$HOME/.pen-smoke-seed.XXXXXX")" && pwd -P)
 EXTRA_DIRS+=("$SEEDP")
@@ -1282,7 +1281,7 @@ fi
 
 if want 18; then
 # ==============================================================================
-section "18. pen reset (step 5)"
+section "18. pen reset"
 
 in_sandbox 'echo kept >~/.reset-marker'
 "$PEN" run sleep 120 </dev/null >/dev/null 2>&1 &
@@ -1302,12 +1301,12 @@ check "answering no removes nothing" bash -c 'grep -q "nothing removed" <<<"$1" 
 out=$(echo y | "$PEN" reset 2>&1)
 check "answering yes removes the project's volumes" bash -c 'grep -q "removed ${2}_home, ${2}_nuget" <<<"$1" && ! docker volume inspect "${2}_home" >/dev/null 2>&1' _ "$out" "$KEY"
 check "...so the next session starts with a fresh home" test "$(in_sandbox 'cat ~/.reset-marker 2>/dev/null || echo fresh')" = fresh
-note "reset logging out of claude and codex is a manual check (step 5)"
+note "reset logging out of claude and codex is a manual check"
 fi
 
 if want 19; then
 # ==============================================================================
-section "19. Unsigned-commit reminder and pen sign (step 3)"
+section "19. Unsigned-commit reminder and pen sign"
 
 rm -rf .pen # section 15 leaves an allow that this HOME hasn't approved
 ssh-keygen -q -t ed25519 -N '' -C pen-smoke -f "$SCRATCH/signkey"
@@ -1413,12 +1412,12 @@ out=$(fake_pen sign 2>&1 || true)
 check "pen sign refuses over a planted count, having quarantined it" has_all "$out" "msgnum.pen-quarantine" "not signing"
 rm -rf .git/rebase-merge
 git remote remove origin
-note "GitHub showing the signed commits as Verified after a push is a manual check (step 3)"
+note "GitHub showing the signed commits as Verified after a push is a manual check"
 fi
 
 if want 20; then
 # ==============================================================================
-section "20. Docker-in-Docker (step 8)"
+section "20. Docker-in-Docker"
 
 pen_docker() { "$PEN" --docker run "$@" </dev/null; }
 rm -rf .pen && mkdir .pen
@@ -1451,7 +1450,7 @@ owner=$(stat -c %u inner-file 2>/dev/null || stat -f %u inner-file)
 if [ -n "$ROOTLESS" ] || [ "$(uname -s)" = Darwin ]; then
   check "...and the file an inner root container wrote belongs to the host user" test "$owner" = "$(id -u)"
 else
-  note "rootful Linux: the file an inner root container wrote is owned by UID $owner (expected: root; see the README's DinD gotchas)"
+  note "rootful Linux: the file an inner root container wrote is owned by UID $owner (expected: root; see docs/usage.md#docker-in-docker)"
 fi
 rm -f inner-file 2>/dev/null || pen_docker docker run --rm -v "$PROJECT_DIR:/src" alpine rm -f /src/inner-file >/dev/null 2>&1 || true
 
@@ -1522,7 +1521,7 @@ fi
 
 if want 21; then
 # ==============================================================================
-section "21. Linked worktrees (worktrees B4, B5)"
+section "21. Linked worktrees"
 
 rm -rf .pen # section 15 leaves an allow that the throwaway HOME hasn't approved
 git worktree add -q -b smoke-wt "$SCRATCH/wt21" 2>/dev/null
@@ -1698,7 +1697,7 @@ fi
 
 if want 22; then
 # ==============================================================================
-section "22. Port forwarding (ports C2)"
+section "22. Port forwarding"
 
 P=8765
 # sid_of <agent container>: its session id; other_agent <name>: another running agent.
@@ -1785,7 +1784,7 @@ fi
 
 if want 23; then
 # ==============================================================================
-section "23. pen prune (prune D2)"
+section "23. pen prune"
 
 # Under the throwaway HOME, whose state holds only smoke fixtures: your own
 # projects' volumes show up there as unknown, which pen prune never removes.
@@ -1852,7 +1851,7 @@ fi
 
 if want 24; then
 # ==============================================================================
-section "24. Submodule repos protected (submodules E1)"
+section "24. Submodule repos protected"
 
 # A worktree inside the project with submodules of its own: their repos live
 # in .git/worktrees/<n>/modules/ (section 26 has the project's own). With
@@ -1900,7 +1899,7 @@ fi
 
 if want 25; then
 # ==============================================================================
-section "25. Submodule checkouts, and quarantining only new module repos (submodules E2)"
+section "25. Submodule checkouts, and quarantining only new module repos"
 
 # As in section 24, but with the worktree's submodule checked out: its .git
 # file points at the module repo, whose core.worktree points back, so pen
@@ -1952,7 +1951,7 @@ fi
 
 if want 26; then
 # ==============================================================================
-section "26. Submodules in the project (submodules E3)"
+section "26. Submodules in the project"
 
 SMLIB=$SCRATCH/smlib
 [ -d "$SMLIB/.git" ] || { git init -q "$SMLIB"

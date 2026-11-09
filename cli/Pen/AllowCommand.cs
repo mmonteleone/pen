@@ -17,6 +17,8 @@ internal static class AllowCommand
         #
         # github_owner = "<owner>"   whose GitHub token to use (default: origin's owner)
         # docker = true              Docker-in-Docker for every session
+        # ports = [5173]             forward localhost:5173 on the host to the sandbox
+        # tools = ["go", "rust"]     toolchains, as name or name:version (pen --tool list)
 
         """;
 
