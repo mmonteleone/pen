@@ -21,6 +21,9 @@ internal sealed record NestedRepo(string Path, NestedKind Kind)
     public string RepoDir => System.IO.Path.GetDirectoryName(Path)!;
 }
 
+/// <summary>What the walk of a git dir's submodule repos found (Repos) and couldn't read (Unreadable).</summary>
+internal sealed record ModuleScan(List<string> Repos, List<string> Unreadable);
+
 /// <summary>
 /// The nested-repo scan, shared by the start-of-session refusal and the
 /// session-end check. It only lists names (one readdir per directory) and
@@ -185,6 +188,7 @@ internal static class RepoScan
         }
         catch (IOException) { return null; }
         catch (UnauthorizedAccessException) { return null; }
+        catch (PenException) { return null; } // an unreadable config: not a checkout pen can vouch for
     }
 
     /// <summary>
@@ -200,37 +204,65 @@ internal static class RepoScan
     /// quarantined one are no submodule's. Parents come before their nested
     /// repos; siblings in ordinal order. Reads directories only; never runs git.
     /// </summary>
-    internal static List<string> FindModuleRepos(string gitDir)
+    internal static List<string> FindModuleRepos(string gitDir) => ScanModules(gitDir).Repos;
+
+    /// <summary>
+    /// <see cref="FindModuleRepos"/>'s walk, with the directories it couldn't
+    /// read: what's in those is unknown, so callers refuse or quarantine them.
+    /// </summary>
+    internal static ModuleScan ScanModules(string gitDir)
     {
-        var found = new List<string>();
-        AddModuleRepos(gitDir, found);
-        return found;
+        var scan = new ModuleScan([], []);
+        AddModuleRepos(gitDir, scan);
+        return scan;
     }
 
-    private static void AddModuleRepos(string gitDir, List<string> found)
+    private static void AddModuleRepos(string gitDir, ModuleScan scan)
     {
-        WalkModules(Path.Combine(gitDir, "modules"), found);
+        WalkModules(Path.Combine(gitDir, "modules"), scan);
         var worktrees = Path.Combine(gitDir, "worktrees");
         if (IsLinkPath(worktrees) || !Directory.Exists(worktrees)) return; // a symlinked worktrees/ is refused by the mounts
-        foreach (var wt in Directory.EnumerateDirectories(worktrees).Order(StringComparer.Ordinal))
-            if (!IsLinkPath(wt)) WalkModules(Path.Combine(wt, "modules"), found);
+        var entries = ListOrNote(worktrees, Directory.EnumerateDirectories, scan);
+        if (entries == null) return;
+        foreach (var wt in entries)
+            if (!IsLinkPath(wt)) WalkModules(Path.Combine(wt, "modules"), scan);
     }
 
-    private static void WalkModules(string dir, List<string> found)
+    private static void WalkModules(string dir, ModuleScan scan)
     {
-        if (IsLinkPath(dir)) { found.Add(dir); return; }
+        if (IsLinkPath(dir)) { scan.Repos.Add(dir); return; }
         if (!Directory.Exists(dir)) return;
-        foreach (var entry in Directory.EnumerateFileSystemEntries(dir).Order(StringComparer.Ordinal))
+        var entries = ListOrNote(dir, Directory.EnumerateFileSystemEntries, scan);
+        if (entries == null) return;
+        foreach (var entry in entries)
         {
-            if (IsLinkPath(entry)) found.Add(entry);
-            else if (!Directory.Exists(entry)) continue; // git keeps only directories here
+            if (IsLinkPath(entry)) scan.Repos.Add(entry);
             else if (Path.GetFileName(entry).Contains(GitCheck.Suffix, StringComparison.Ordinal)) continue;
+            else if (!Path.Exists(entry))
+            {
+                // Listed but not there to stat: dir can be read but not entered.
+                scan.Unreadable.Add(dir);
+                return;
+            }
+            else if (!Directory.Exists(entry)) continue; // git keeps only directories here
             else if (IsGitDirLayout(entry))
             {
-                found.Add(entry);
-                AddModuleRepos(entry, found);
+                scan.Repos.Add(entry);
+                AddModuleRepos(entry, scan);
             }
-            else WalkModules(entry, found); // a level of a name with "/" in it
+            else WalkModules(entry, scan); // a level of a name with "/" in it
+        }
+    }
+
+    /// <summary>The sorted entries of <paramref name="dir"/>; none if it's gone; null, noting it, if it can't be read.</summary>
+    private static List<string>? ListOrNote(string dir, Func<string, IEnumerable<string>> list, ModuleScan scan)
+    {
+        try { return list(dir).Order(StringComparer.Ordinal).ToList(); }
+        catch (DirectoryNotFoundException) { return []; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            scan.Unreadable.Add(dir);
+            return null;
         }
     }
 

@@ -16,6 +16,17 @@ internal static class Out
 
     public static void Raw(string message) => Write(message);
 
+    /// <summary>
+    /// The message for a permission error: the path, when it names one. The
+    /// exception's own text can't be shown, since the AOT build (UseSystemResourceKeys)
+    /// has it as "UnauthorizedAccess_IODenied_Path, /the/path".
+    /// </summary>
+    public static string PermissionDenied(UnauthorizedAccessException e)
+    {
+        var at = e.Message.IndexOf('/', StringComparison.Ordinal);
+        return at < 0 ? "permission denied" : $"permission denied: {e.Message[at..].Replace("' is denied.", "", StringComparison.Ordinal)}";
+    }
+
     /// <summary>A question, with the cursor left after it.</summary>
     public static void Prompt(string question)
     {

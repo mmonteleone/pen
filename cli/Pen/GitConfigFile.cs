@@ -53,11 +53,16 @@ internal static class GitConfigFile
         return entries;
     }
 
+    /// <summary>The entries of the file at <paramref name="path"/>: none if it's missing, and a <see cref="PenException"/> if it can't be read.</summary>
     public static List<Entry> ParseFile(string path)
     {
         try { return Parse(File.ReadAllText(path)); }
         catch (FileNotFoundException) { return []; }
         catch (DirectoryNotFoundException) { return []; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            throw new PenException($"can't read the git config file {path}: fix its permissions, then rerun");
+        }
     }
 
     /// <summary>git's boolean spellings; anything else is false.</summary>

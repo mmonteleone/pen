@@ -56,6 +56,11 @@ internal static class Program
             Out.Line(e.Message);
             return e.ExitCode;
         }
+        catch (UnauthorizedAccessException e)
+        {
+            Out.Line(Out.PermissionDenied(e));
+            return 1;
+        }
     }
 
     // --docker turns Docker-in-Docker on for one session; docker = true in

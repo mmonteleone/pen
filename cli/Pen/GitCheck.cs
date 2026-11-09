@@ -65,7 +65,9 @@ internal static class GitCheck
     /// Quarantines the submodule repos in <paramref name="gitDir"/> that
     /// weren't there at the start (<paramref name="modulesAtStart"/>; null: all
     /// are kept), any symlink where git keeps them, and a commondir in one that
-    /// stays. Repos nested in a quarantined one go with it. Returns the repos
+    /// stays. Repos nested in a quarantined one go with it. A directory there
+    /// that can't be read is quarantined whether or not it was there at the
+    /// start, since nothing vouches for what's in it now. Returns the repos
     /// left, whose checkouts in the tree are the project's own.
     /// </summary>
     private static HashSet<string> CheckModuleRepos(string gitDir, IReadOnlyCollection<string>? modulesAtStart, List<Quarantined> moved)
@@ -73,7 +75,8 @@ internal static class GitCheck
         var listed = modulesAtStart == null ? null : new HashSet<string>(modulesAtStart, StringComparer.Ordinal);
         var known = new HashSet<string>(StringComparer.Ordinal);
         var gone = new List<string>();
-        foreach (var repo in RepoScan.FindModuleRepos(gitDir))
+        var scan = RepoScan.ScanModules(gitDir);
+        foreach (var repo in scan.Repos)
         {
             if (gone.Any(g => RepoGuard.IsInside(g, repo))) continue;
             if (RepoGuard.IsLink(repo))
@@ -93,6 +96,11 @@ internal static class GitCheck
                     Move(commondir, "a submodule's repo never has one: it makes git read config and hooks from another directory", moved);
                 if (!RepoGuard.Exists(commondir)) known.Add(repo);
             }
+        }
+        foreach (var dir in scan.Unreadable)
+        {
+            if (gone.Any(g => RepoGuard.IsInside(g, dir))) continue;
+            Move(dir, "a directory where git keeps submodule repos that can't be read, so pen can't check it: inspect its contents before you fix its permissions", moved, breakLayout: true);
         }
         return known;
     }
@@ -121,7 +129,7 @@ internal static class GitCheck
             }
             moved.Add(new(path, to, why, inner));
         }
-        catch (IOException e)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             // Never fatal: the rest still gets checked, and the warning names it.
             moved.Add(new(path, "", $"{why}. COULD NOT MOVE IT ({e.Message}): don't run git here until you've dealt with it"));

@@ -35,6 +35,12 @@ internal static class RepoGuard
         if (Exists(Path.Combine(common, "commondir")))
             throw new PenException($"{Rel(dir, Path.Combine(common, "commondir"))} exists, which a normal repo never has: it makes git read config and hooks from another directory. Inspect it and remove it, then rerun");
 
+        var unreadable = RepoScan.ScanModules(common).Unreadable;
+        if (unreadable.Count > 0)
+            throw new PenException($"refusing to run in {dir}: pen can't read these directories where git keeps submodule repos, so it can't protect what's in them:\n"
+                + string.Join('\n', unreadable.Select(u => "  " + Rel(dir, u)))
+                + "\nfix their permissions or remove them, then rerun");
+
         var nested = RepoScan.FindNested(dir, common);
         if (nested.Count == 0) return;
         var sb = new StringBuilder();
@@ -69,9 +75,13 @@ internal static class RepoGuard
             var gitmodules = Path.Combine(super, ".gitmodules");
             if (!File.Exists(gitmodules) || IsLink(gitmodules)) continue;
             var rel = Path.GetRelativePath(super, repoDir);
-            if (GitConfigFile.ParseFile(gitmodules).Any(e =>
-                    e.Section == "submodule" && e.Key == "path" && e.Value.TrimEnd('/') == rel))
-                return true;
+            try
+            {
+                if (GitConfigFile.ParseFile(gitmodules).Any(e =>
+                        e.Section == "submodule" && e.Key == "path" && e.Value.TrimEnd('/') == rel))
+                    return true;
+            }
+            catch (PenException) { } // no advice from a file that can't be read
         }
         return false;
     }
