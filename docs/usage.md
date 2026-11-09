@@ -295,6 +295,15 @@ says how to restore it. That includes changes you made on the host during the se
 If a file can't be put back, pen says so, prints the command that fixes it, keeps its copies and
 refuses new sessions until that works.
 
+Also at session end, pen quarantines any `config.worktree` in the git dir, its worktree entries and
+submodule repos that wasn't there when the session started, or that first appeared while another
+session of the project was running. git reads settings from that file, some of which run programs. A worktree
+made with `git worktree add` while `extensions.worktreeConfig` is on, in the sandbox or during a session on
+the host, loses the `config.worktree` git copies into it, and the warning says how to restore it.
+`pen sign` has no record of what was there at a session's start, so it leaves these files alone and doesn't
+mention them. A session moves what it made when it ends, so one can only be there while a session is still running in
+another worktree. pen sign's own git commands turn off `core.fsmonitor` and hooks; your own git in such a worktree isn't protected until that session ends.
+
 pen moves nested repos aside at session end, but during a session the agent can create one, with
 its own config and hooks, that host tools would run git in. To close that gap, on the host:
 

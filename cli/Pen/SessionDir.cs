@@ -33,6 +33,8 @@ internal sealed class SessionDir(string projectKey, string path)
     /// <summary>The copies of the protected files, and their manifest (<see cref="ProtectedFiles"/>).</summary>
     public string ProtectedDir => File("protected");
     public string ProtectedManifest => System.IO.Path.Combine(ProtectedDir, "manifest.json");
+    /// <summary>The manifest, once the files in it have been put back and their copies deleted.</summary>
+    public string RestoredManifest => File("restored-manifest.json");
     /// <summary>The command run in the sandbox, each argument NUL-terminated (empty: a shell), for pen ps.</summary>
     public string CommandFile => File("command");
     /// <summary>When the session started, in UTC, for pen ps.</summary>

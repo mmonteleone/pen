@@ -451,6 +451,26 @@ public class SignTests
         Assert.Equal([f.Head()], Sign.Verified(f.Git, [f.Head()]));
     }
 
+    /// <summary>pen sign doesn't quarantine a config.worktree (it has no record of a start), so what it runs must not take its settings.</summary>
+    [Fact]
+    public void AnUnvouchedConfigWorktree_RunsNothingInPenSign()
+    {
+        using var f = new Fixture();
+        SetBase(f);
+        var marker = Path.Combine(f.T.Path, "ran");
+        var hook = Path.Combine(f.T.Path, "hook.sh");
+        File.WriteAllText(hook, $"#!/bin/sh\ntouch '{marker}'\n");
+        File.SetUnixFileMode(hook, (UnixFileMode)0b111_101_101);
+        Tests.Git.Run(f.Repo, "config", "extensions.worktreeConfig", "true");
+        var planted = Path.Combine(f.Repo, ".git", "config.worktree");
+        File.WriteAllText(planted, $"[core]\n\tfsmonitor = {hook}\n");
+
+        Sign.SignBranch(f.Git, null);
+
+        Assert.False(File.Exists(marker), "the planted fsmonitor ran");
+        Assert.True(File.Exists(planted));
+    }
+
     [Fact]
     public void ARepoFileIsntTrusted_EvenWithNoGlobalSetting_OrARelativeGlobalOne()
     {

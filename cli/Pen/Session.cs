@@ -300,12 +300,13 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
     {
         foreach (var f in Directory.EnumerateFileSystemEntries(session.Path))
         {
-            var name = System.IO.Path.GetFileName(f);
-            if (name is "proxy.log" or "session.lock" or "compose.yaml") continue;
+            if (f == session.ProxyLog || f == session.LockFile || f == session.ComposeFile || f == session.RestoredManifest) continue;
             if (Directory.Exists(f)) Directory.Delete(f, recursive: true); else File.Delete(f);
         }
-        // compose.yaml marks the session open, so it goes last but for the lock.
+        // compose.yaml marks the session open, so it goes last but for the lock and
+        // the record of what it vouched for: an open session always has that record.
         File.Delete(session.ComposeFile);
+        File.Delete(session.RestoredManifest);
         File.Delete(session.LockFile);
     }
 

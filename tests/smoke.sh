@@ -1475,6 +1475,63 @@ check "a worktree's .pen/Dockerfile builds its own layer, $KEY-$WT_HASH:latest" 
   bash -c "cd '$WT' && '$PEN' run true </dev/null >/dev/null 2>&1 && docker image inspect '$KEY-$WT_HASH:latest' >/dev/null 2>&1"
 docker image rm -f "$KEY-$WT_HASH:latest" >/dev/null 2>&1 || true
 
+# A worktree the agent makes, with config in its entry: host git in it would run this.
+hook21=$SCRATCH/hook21
+canary21=$SCRATCH/canary21
+printf '#!/bin/sh\ntouch %s\n' "$canary21" >"$hook21"
+chmod +x "$hook21"
+plant21="git worktree add -q --detach forged21 && printf '[core]\n\tfsmonitor = $hook21\n' >'$G/worktrees/forged21/config.worktree'"
+fires21() { rm -f "$canary21"; git -C forged21 status >/dev/null 2>&1; [ -e "$canary21" ]; }
+unforge21() { chmod -R u+rwx "$G/worktrees" 2>/dev/null; rm -rf forged21 "$G/worktrees/forged21"*; git worktree prune; }
+git config extensions.worktreeConfig true
+for mode in "" 555 311 000; do
+  out=$(in_sandbox "$plant21${mode:+ && chmod $mode '$G/worktrees/forged21'}" 2>&1)
+  check "a config.worktree in a worktree the agent made (entry mode ${mode:-as made}) is quarantined" \
+    test ! -e "$G/worktrees/forged21/config.worktree" -a -e "$G/worktrees/forged21/config.worktree.pen-quarantine"
+  check "...with the warning" contains "pen: WARNING" "$out"
+  check "...and git there no longer runs it" not fires21
+  unforge21
+done
+
+"$PEN" run bash -c "$plant21; sleep 120" </dev/null >/dev/null 2>&1 &
+p_a=$!
+wait_for "^$KEY-.*-agent$" || fail "planting session didn't start"
+for i in $(seq 100); do [ -e "$G/worktrees/forged21/config.worktree" ] && [ -s "$G/worktrees/forged21/config.worktree" ] && break; sleep 0.1; done
+name_a=$(docker ps --format '{{.Names}}' | grep -E "^$KEY-.*-agent$" | head -1)
+check "the replay is real: while that session runs, git in its worktree runs the planted config" fires21
+out=$(pen_run true 2>&1)
+check "a second session can't take the unchanged plant as its baseline: it's quarantined at its end" \
+  test ! -e "$G/worktrees/forged21/config.worktree" -a -e "$G/worktrees/forged21/config.worktree.pen-quarantine"
+check "...with the warning" contains "pen: WARNING" "$out"
+check "...and git there no longer runs it" not fires21
+docker rm -f "$name_a" >/dev/null
+wait "$p_a" 2>/dev/null || true
+unforge21
+
+"$PEN" run bash -c "$plant21; sleep 120" </dev/null >/dev/null 2>&1 &
+p_a=$!
+wait_for "^$KEY-.*-agent$" || fail "planting session didn't start"
+for i in $(seq 100); do [ -s "$G/worktrees/forged21/config.worktree" ] && break; sleep 0.1; done
+name_a=$(docker ps --format '{{.Names}}' | grep -E "^$KEY-.*-agent$" | head -1)
+"$PEN" run sleep 120 </dev/null >/dev/null 2>&1 &
+p_b=$!
+check "...started alongside the planting session" wait_count "^$KEY-.*-agent$" 2
+name_b=$(docker ps --format '{{.Names}}' | grep -E "^$KEY-.*-agent$" | grep -vxF "$name_a" | head -1)
+docker rm -f "$name_a" >/dev/null
+wait "$p_a" 2>/dev/null || true
+check "when the planting session ends first, the plant goes then" not fires21
+docker rm -f "$name_b" >/dev/null
+wait "$p_b" 2>/dev/null || true
+check "...and the second's end doesn't write it back" test ! -e "$G/worktrees/forged21/config.worktree"
+check "...so git there still doesn't run it" not fires21
+unforge21
+
+git config --worktree user.name mine
+out=$(pen_run true 2>&1)
+check "the repo's own config.worktree stays, with no warning" bash -c '[ "$(git config --worktree user.name)" = mine ] && ! grep -q "pen: WARNING" <<<"$1"' _ "$out"
+git config --unset extensions.worktreeConfig
+rm -f "$G/config.worktree"
+
 check "nothing is left running" test "$(containers)" = 0
 rm -f main-only.txt
 git worktree remove --force "$WT"

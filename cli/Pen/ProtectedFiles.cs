@@ -7,8 +7,9 @@ namespace Pen;
 /// <summary>
 /// One saved file: its real path, its copy's name in the session's protected dir,
 /// and its mode at the start. Adopted: a config.worktree first seen while another
-/// session's agent could have planted it, so nothing vouches for the copy: it's
-/// never written back, only moved aside if it changes.
+/// session's agent could have planted it, or inherited from a session that adopted
+/// it, so nothing vouches for it: it's never written back, and it's quarantined at
+/// the end like one that isn't listed at all, changed or not.
 /// </summary>
 internal sealed record ProtectedFile(string Path, string Copy, UnixFileMode Mode, bool Adopted = false);
 
@@ -17,7 +18,22 @@ internal sealed record ProtectedFile(string Path, string Copy, UnixFileMode Mode
 /// (<see cref="Mount.Verify"/>). ReadOnlyDirs: the directories mounted read-only
 /// as a whole, whose contents the sandbox can't change or add to.
 /// </summary>
-internal sealed record ProtectedManifest(List<ProtectedFile> Files, List<string> ReadOnlyDirs);
+internal sealed record ProtectedManifest(List<ProtectedFile> Files, List<string> ReadOnlyDirs)
+{
+    /// <summary>
+    /// Whether a config.worktree found at the session's end is one this session
+    /// vouches for: saved at its start and not adopted, or in a directory its
+    /// sandbox had read-only as a whole. Never a symlink, which only reads as
+    /// the file it leads to.
+    /// </summary>
+    public bool Vouches(string path)
+    {
+        if (RepoGuard.IsLink(path)) return false;
+        var real = Native.RealPath(path) ?? path;
+        return Files.Any(f => !f.Adopted && (f.Path == path || f.Path == real))
+            || ReadOnlyDirs.Any(d => RepoGuard.IsInside(d, path) || RepoGuard.IsInside(d, real));
+    }
+}
 
 /// <summary>
 /// Copies of the protected files, taken at a session's start and put back at
@@ -41,11 +57,14 @@ internal static class ProtectedFiles
     /// <summary>
     /// Saves the files in <paramref name="mounts"/> marked Verify, refusing the
     /// session if one can't be saved whole. A file <paramref name="running"/>
-    /// sessions already saved keeps their copy, the oldest's: its agent may have
-    /// changed the file since, and this session's end would otherwise put that
-    /// change back after that session's end had removed it. The same file can have
+    /// sessions already saved keeps their copy, the oldest that still has one: its
+    /// agent may have changed the file since, and this session's end would otherwise
+    /// put that change back after that session's end had removed it. The file on disk
+    /// is only taken when no session has a copy, which means none could have changed
+    /// it since the last one put it back. The same file can have
     /// another name by now (an agent's rename on a case-insensitive filesystem), so
-    /// they're matched by what each name resolves to today. The manifest goes
+    /// they're matched by what each name resolves to today. A session that adopted
+    /// a file hands that on, since its copy is whatever was there. The manifest goes
     /// last, through a rename, so its presence means the copies are complete.
     /// </summary>
     public static void Save(SessionDir session, IReadOnlyList<Mount> mounts, string dir, IReadOnlyList<SessionDir> running)
@@ -87,6 +106,32 @@ internal static class ProtectedFiles
     /// <summary>The manifest, or null for a session that has none. Throws if it can't be read.</summary>
     public static ProtectedManifest? Read(SessionDir session) =>
         File.Exists(session.ProtectedManifest) ? Parse(File.ReadAllText(session.ProtectedManifest)) : null;
+
+    /// <summary>
+    /// What the session recorded at its start, whether or not its files have been
+    /// put back; null if it has no such record, or none that can be read. In that
+    /// order, since a session's manifest is moved from the first to the second.
+    /// </summary>
+    private static ProtectedManifest? ReadRecord(SessionDir session)
+    {
+        try
+        {
+            try
+            {
+                if (Read(session) is { } manifest) return manifest;
+            }
+            catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException) { } // moved just now
+            return File.Exists(session.RestoredManifest) ? Parse(File.ReadAllText(session.RestoredManifest)) : null;
+        }
+        catch (Exception e) when (IsDamage(e)) { return null; }
+    }
+
+    /// <summary>
+    /// What the session-end check goes by: a session with no readable record
+    /// vouches for no config.worktree, as one from a pen that didn't record its
+    /// module repos keeps none of them.
+    /// </summary>
+    public static ProtectedManifest AtStart(SessionDir session) => ReadRecord(session) ?? new([], []);
 
     internal static string Serialize(ProtectedManifest manifest)
     {
@@ -139,8 +184,14 @@ internal static class ProtectedFiles
     /// stale file; anything else there is renamed aside and the file recreated.
     /// Identical files aren't touched.
     /// <para>
+    /// Adopted files aren't looked at: nothing vouches for them, so the end check
+    /// quarantines whatever is there (<see cref="ProtectedManifest.Vouches"/>).
+    /// </para>
+    /// <para>
     /// Returns whether that's all done, and only then removes the copies, so a
-    /// retried end can't write them over later edits. If not, an entry in
+    /// retried end can't write them over later edits. The manifest stays, as
+    /// <see cref="SessionDir.RestoredManifest"/>: a retried end and a session starting
+    /// now both need to know what this one vouched for. If not, an entry in
     /// <paramref name="moved"/> with no destination fails the check, and the caller
     /// must keep the session's files: they're the only good copies, and a new
     /// session would otherwise take what's on disk as its baseline. Whatever goes
@@ -159,7 +210,7 @@ internal static class ProtectedFiles
         }
         if (manifest == null) return true;
         int before = moved.Count;
-        foreach (var f in manifest.Files)
+        foreach (var f in manifest.Files.Where(f => !f.Adopted))
         {
             try { RestoreOne(session, f, dir, commonGitDir, moved, restored, opened, blocked); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or PenException)
@@ -168,6 +219,7 @@ internal static class ProtectedFiles
             }
         }
         if (moved.Skip(before).Any(q => q.To.Length == 0)) return false;
+        File.Move(session.ProtectedManifest, session.RestoredManifest, overwrite: true);
         Directory.Delete(session.ProtectedDir, recursive: true);
         return true;
     }
@@ -183,7 +235,6 @@ internal static class ProtectedFiles
         try { current = Native.ReadProtected(f.Path); }
         catch (FileNotFoundException)
         {
-            if (f.Adopted) return;
             OpenParent(f.Path, opened, blocked);
             WriteNew(f.Path, original, f.Mode);
             restored.Add(new(f.Path, "it was deleted during the session, and has been recreated"));
@@ -196,13 +247,6 @@ internal static class ProtectedFiles
             if (current.Mode != f.Mode) RestoreMode(f, current.Mode, restored);
             return;
         }
-        if (f.Adopted)
-        {
-            OpenParent(f.Path, opened, blocked);
-            GitCheck.Move(f.Path, "a config.worktree first seen while another session was running, changed since then", moved);
-            return;
-        }
-
         Microsoft.Win32.SafeHandles.SafeFileHandle? writable = null;
         try
         {
@@ -294,8 +338,7 @@ internal static class ProtectedFiles
 
     private static bool DirectoryGone(ProtectedFile f, string directory, List<RestoredFile> restored)
     {
-        if (!f.Adopted)
-            restored.Add(new(f.Path, $"not put back: {Out.Field(directory)} {(RepoGuard.Exists(directory) ? "was replaced by a file" : "was removed")} during the session"));
+        restored.Add(new(f.Path, $"not put back: {Out.Field(directory)} {(RepoGuard.Exists(directory) ? "was replaced by a file" : "was removed")} during the session"));
         return false;
     }
 
@@ -306,44 +349,66 @@ internal static class ProtectedFiles
         restored.Add(new(f.Path, $"its mode was changed during the session to {Convert.ToString((int)was, 8)}, and is back to {Convert.ToString((int)f.Mode, 8)}"));
     }
 
-    /// <summary>What running sessions have saved: their files by what each path resolves to now, the oldest session's where they overlap.</summary>
-    private sealed record OlderSessions(Dictionary<string, (SessionDir Session, ProtectedFile File)> Files, List<string> ReadOnlyDirs, bool Any);
+    /// <summary>
+    /// What running sessions have saved: their files by what each path resolves to
+    /// now, oldest session first; the files any of them adopted; each one's read-only
+    /// directories; and whether one has no record to go by. A session that has put its
+    /// files back is still here, as its agent may have planted what its check hasn't
+    /// reached yet, but its copies are gone, so the next session's are what count.
+    /// </summary>
+    private sealed record OlderSessions(Dictionary<string, List<(SessionDir Session, ProtectedFile File)>> Files, HashSet<string> Adopted, List<List<string>> ReadOnlyDirs, bool Unrecorded);
 
     private static OlderSessions Older(IReadOnlyList<SessionDir> running)
     {
-        var files = new Dictionary<string, (SessionDir, ProtectedFile)>(StringComparer.Ordinal);
-        var readOnly = new List<string>();
-        bool any = false;
-        foreach (var s in running.OrderByDescending(s => s.ReadStarted() ?? DateTime.MaxValue))
+        var files = new Dictionary<string, List<(SessionDir, ProtectedFile)>>(StringComparer.Ordinal);
+        var adopted = new HashSet<string>(StringComparer.Ordinal);
+        var readOnly = new List<List<string>>();
+        bool unrecorded = false;
+        foreach (var s in running.OrderBy(s => s.ReadStarted() ?? DateTime.MaxValue))
         {
-            ProtectedManifest? manifest;
-            // Ended while we looked, so it has put back what it saved; a session from an older pen has none.
-            try { manifest = Read(s); }
-            catch (Exception e) when (IsDamage(e)) { continue; }
-            if (manifest == null) continue;
-            any = true;
-            readOnly.AddRange(manifest.ReadOnlyDirs);
-            foreach (var f in manifest.Files) files[Native.RealPath(f.Path) ?? f.Path] = (s, f);
+            var manifest = ReadRecord(s);
+            if (manifest == null)
+            {
+                // Its record goes after its compose.yaml, so one that's still open with
+                // no record is from an older pen or damaged: its agent could write.
+                unrecorded |= s.IsOpen;
+                continue;
+            }
+            readOnly.Add(manifest.ReadOnlyDirs);
+            foreach (var f in manifest.Files)
+            {
+                var real = Native.RealPath(f.Path) ?? f.Path;
+                if (!files.TryGetValue(real, out var saved)) files[real] = saved = [];
+                saved.Add((s, f));
+                if (f.Adopted) adopted.Add(real);
+            }
         }
-        return new(files, readOnly, any);
+        return new(files, adopted, readOnly, unrecorded);
     }
 
-    /// <summary>Whether <paramref name="path"/> is a config.worktree a running session's agent could have made: that session didn't save it, and could write there.</summary>
-    private static bool IsAdopted(string path, OlderSessions older) =>
-        older.Any && !older.Files.ContainsKey(path)
-        && string.Equals(Path.GetFileName(path), "config.worktree", StringComparison.OrdinalIgnoreCase)
-        && !older.ReadOnlyDirs.Any(d => RepoGuard.IsInside(d, path));
-
-    private static RegularFile Baseline(string dir, string path, Dictionary<string, (SessionDir Session, ProtectedFile File)> saved)
+    /// <summary>
+    /// Whether <paramref name="path"/> is a config.worktree a running session's agent
+    /// could have made: a session adopted it, or none saved it and one of them could
+    /// write there. Being read-only in one says nothing about the others.
+    /// </summary>
+    private static bool IsAdopted(string path, OlderSessions older)
     {
-        if (saved.TryGetValue(path, out var older))
+        if (!string.Equals(Path.GetFileName(path), "config.worktree", StringComparison.OrdinalIgnoreCase)) return false;
+        if (older.Adopted.Contains(path)) return true;
+        if (older.Files.ContainsKey(path)) return false;
+        return older.Unrecorded || older.ReadOnlyDirs.Any(dirs => !dirs.Any(d => RepoGuard.IsInside(d, path)));
+    }
+
+    private static RegularFile Baseline(string dir, string path, Dictionary<string, List<(SessionDir Session, ProtectedFile File)>> saved)
+    {
+        foreach (var older in saved.GetValueOrDefault(path) ?? [])
         {
             try
             {
                 var copy = Native.ReadProtected(Path.Combine(older.Session.ProtectedDir, older.File.Copy));
                 if (copy != null) return new(copy.Bytes, older.File.Mode);
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // that session ended: see Saved
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // that session has put its files back
         }
         try
         {

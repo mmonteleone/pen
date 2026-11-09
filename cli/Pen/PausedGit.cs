@@ -81,8 +81,17 @@ internal static class PausedGit
     /// not listed (git and the prompt can read through one too) hides nothing. A
     /// worktree entry or worktrees dir still closed after <paramref name="tryOpen"/>
     /// goes in <paramref name="unreachable"/>: what's in it can't be vouched for.
+    /// <para>
+    /// With <paramref name="atStart"/> (a session's end), so does each config.worktree
+    /// it doesn't vouch for, wherever git would read one. git takes settings from it
+    /// that run programs, as soon as anything runs git in that worktree, the prompt
+    /// included. Whether extensions.worktreeConfig is on now doesn't matter: one left
+    /// there takes effect whenever it's turned on. So does a symlink in place
+    /// of worktrees/ or of an entry in it, which git follows to a config.worktree nothing
+    /// checks, and which was refused at the start so can't have been there then.
+    /// </para>
     /// </summary>
-    public static List<PromptHazard> PromptHazards(string gitDir, Func<string, bool>? tryOpen, List<string> unreachable)
+    public static List<PromptHazard> PromptHazards(string gitDir, Func<string, bool>? tryOpen, List<string> unreachable, ProtectedManifest? atStart = null)
     {
         var found = new List<PromptHazard>();
         if (!Directory.Exists(gitDir)) return found;
@@ -90,10 +99,15 @@ internal static class PausedGit
         {
             LookForHazards(Path.Combine(dir, "rebase-merge"), ["msgnum", "end"], found);
             LookForHazards(Path.Combine(dir, "rebase-apply"), ["next", "last"], found);
+            if (atStart == null) return;
+            var config = Path.Combine(dir, "config.worktree");
+            if (RepoGuard.Exists(config) && !atStart.Vouches(config))
+                found.Add(new(config, null, "a config.worktree that wasn't there at the session's start, or that another session could have made: git reads it as config, so a setting in it can run code on this machine. git worktree add copies one into a new worktree, so it may be harmless"));
         }
         void CouldntLook(string path)
         {
             if (!RepoGuard.IsLink(path)) unreachable.Add(path); // git won't follow a symlink here to a project's worktree: a warning covers it
+            else if (atStart != null) found.Add(new(path, null, "a symlink where git keeps a worktree's files: it points git at a config.worktree in another directory"));
         }
         WithWorktrees(gitDir, Visit, CouldntLook, tryOpen);
         foreach (var repo in RepoScan.FindModuleRepos(gitDir))
