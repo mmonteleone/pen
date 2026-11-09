@@ -307,13 +307,14 @@ public class ScanFailClosedTests
     {
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
-        // Made a level at a time from inside: the whole path is over PATH_MAX.
+        // Made a level at a time from inside: the whole path is over PATH_MAX (4096 on Linux, 1024 on macOS).
+        // In bash, since dash's cd fails past that length.
         var name = new string('d', 100);
-        var script = $"cd '{repo}' && for i in $(seq 1 15); do mkdir {name} && cd {name}; done";
-        var r = Process.RunAndCaptureText(new ProcessStartInfo("sh", ["-c", script]) { RedirectStandardOutput = true, RedirectStandardError = true });
-        Assert.Equal(0, r.ExitStatus.ExitCode);
+        var script = $"cd '{repo}' && for i in $(seq 1 50); do mkdir {name} && cd {name}; done";
+        var r = Process.RunAndCaptureText(new ProcessStartInfo("bash", ["-c", script]) { RedirectStandardOutput = true, RedirectStandardError = true });
         try
         {
+            Assert.Equal(0, r.ExitStatus.ExitCode);
             var deep = RepoScan.ScanNested(repo).Unlistable;
             Assert.StartsWith(Path.Combine(repo, name), Assert.Single(deep));
             Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(repo));

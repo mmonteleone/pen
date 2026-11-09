@@ -257,6 +257,10 @@ a defense against a deliberate container escape.
   URLs and paths it names. Review `.gitmodules` diffs before running submodule commands on the host.
 - Docker-in-Docker weakens isolation.
 
+A directory or symlink whose name isn't valid UTF-8 (possible on Linux) can't be checked for a repo inside
+it, so pen refuses to start until it's renamed or removed, and at session end reports that git wasn't
+checked instead of moving it. Plain files with such names, such as legacy Latin-1 ones, are fine.
+
 pen moves nested repos aside at session end, but during a session the agent can create one, with
 its own config and hooks, that host tools would run git in. To close that gap, on the host:
 

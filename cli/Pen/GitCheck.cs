@@ -44,7 +44,7 @@ internal static class GitCheck
     /// directory that can't be listed is a Failure rather than something to open.
     /// </summary>
     public static CheckResult RunWithoutOpening(string dir, bool startedWithGit, string? commonGitDir = null, IReadOnlyCollection<string>? modulesAtStart = null) =>
-        Finish(dir, opened: null, (moved, unlistable) => Check(dir, startedWithGit, commonGitDir, modulesAtStart, moved, unlistable, tryOpen: null));
+        Finish(dir, opened: null, (moved, unlistable, badNames) => Check(dir, startedWithGit, commonGitDir, modulesAtStart, moved, unlistable, badNames, tryOpen: null));
 
     /// <summary>
     /// The check for a session that's ending, against what the session recorded
@@ -56,25 +56,28 @@ internal static class GitCheck
     public static CheckResult RunAtSessionEnd(string dir, SessionDir session)
     {
         var opened = new List<ModeChange>();
-        return Finish(dir, opened, (moved, unlistable) =>
+        return Finish(dir, opened, (moved, unlistable, badNames) =>
         {
             var (startedWithGit, commonGitDir) = session.ReadGit();
             // A session from a pen that didn't record its module repos keeps none.
-            Check(dir, startedWithGit, commonGitDir, session.ReadModules() ?? [], moved, unlistable, p => TryOpen(p, opened));
+            Check(dir, startedWithGit, commonGitDir, session.ReadModules() ?? [], moved, unlistable, badNames, p => TryOpen(p, opened));
         });
     }
 
     /// <summary>Runs <paramref name="check"/> and states why the result can't be vouched for, if it can't.</summary>
-    private static CheckResult Finish(string dir, List<ModeChange>? opened, Action<List<Quarantined>, List<string>> check)
+    private static CheckResult Finish(string dir, List<ModeChange>? opened, Action<List<Quarantined>, List<string>, List<BadName>> check)
     {
         var moved = new List<Quarantined>();
         var unlistable = new List<string>();
+        var badNames = new List<BadName>();
         var failures = new List<string>();
-        try { check(moved, unlistable); }
+        try { check(moved, unlistable, badNames); }
         catch (Exception e) { failures.Add(Out.Describe(e)); }
         if (unlistable.Count > 0)
             failures.Add("pen can't list these directories, so it can't see a repo inside one: " + string.Join(", ", unlistable.Take(RepoGuard.MaxListed).Select(u => RepoGuard.Rel(dir, u)))
                 + (unlistable.Count > RepoGuard.MaxListed ? $" and {unlistable.Count - RepoGuard.MaxListed} more" : ""));
+        if (badNames.Count > 0)
+            failures.Add("these names aren't valid UTF-8, so pen can't look inside them or rename them, though git on this machine can still enter them and run what's there (shown with octal escapes): " + string.Join(", ", RepoGuard.ListedBadNames(dir, badNames)));
         if (moved.Any(q => q.To.Length == 0))
             failures.Add("a file named above couldn't be moved out of git's way");
         return new(moved, failures.Count == 0 ? null : string.Join("; ", failures), opened);
@@ -101,7 +104,7 @@ internal static class GitCheck
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
     }
 
-    private static void Check(string dir, bool startedWithGit, string? commonGitDir, IReadOnlyCollection<string>? modulesAtStart, List<Quarantined> moved, List<string> unlistable, Func<string, bool>? tryOpen)
+    private static void Check(string dir, bool startedWithGit, string? commonGitDir, IReadOnlyCollection<string>? modulesAtStart, List<Quarantined> moved, List<string> unlistable, List<BadName> badNames, Func<string, bool>? tryOpen)
     {
         if (!Directory.Exists(dir)) return;
         // The agent could do this to a mount's root too. The user will fix the
@@ -125,11 +128,12 @@ internal static class GitCheck
             var commondir = Path.Combine(git, "commondir");
             if (RepoGuard.Exists(commondir))
                 Move(commondir, "a normal repo never has one: it makes git read config and hooks from another directory", moved);
-            known = CheckModuleRepos(git, modulesAtStart, moved);
+            known = CheckModuleRepos(git, modulesAtStart, moved, badNames);
         }
 
         var scan = RepoScan.ScanNested(dir, startedWithGit ? commonGitDir : null, known, tryOpen);
         unlistable.AddRange(scan.Unlistable);
+        badNames.AddRange(scan.BadNames);
         foreach (var n in scan.Found)
         {
             var why = n.Kind switch
@@ -152,12 +156,13 @@ internal static class GitCheck
     /// start, since nothing vouches for what's in it now. Returns the repos
     /// left, whose checkouts in the tree are the project's own.
     /// </summary>
-    private static HashSet<string> CheckModuleRepos(string gitDir, IReadOnlyCollection<string>? modulesAtStart, List<Quarantined> moved)
+    private static HashSet<string> CheckModuleRepos(string gitDir, IReadOnlyCollection<string>? modulesAtStart, List<Quarantined> moved, List<BadName> badNames)
     {
         var listed = modulesAtStart == null ? null : new HashSet<string>(modulesAtStart, StringComparer.Ordinal);
         var known = new HashSet<string>(StringComparer.Ordinal);
         var gone = new List<string>();
         var scan = RepoScan.ScanModules(gitDir);
+        badNames.AddRange(scan.BadNames);
         foreach (var repo in scan.Repos)
         {
             if (gone.Any(g => RepoGuard.IsInside(g, repo))) continue;
@@ -215,17 +220,9 @@ internal static class GitCheck
         {
             // Never fatal: the rest still gets checked, and the warning names it.
             var reason = e is UnauthorizedAccessException u ? Out.PermissionDenied(u) : e.Message; // Native.Rename's is strerror's
-            moved.Add(new(path, "", $"{why}. COULD NOT MOVE IT ({reason}){InvalidNameNote(path)}: don't run git here until you've dealt with it"));
+            moved.Add(new(path, "", $"{why}. COULD NOT MOVE IT ({reason}): don't run git here until you've dealt with it"));
         }
     }
-
-    /// <summary>
-    /// .NET decodes a file name that isn't valid UTF-8 with U+FFFD in place of
-    /// the bad bytes, so that string names nothing and the rename fails. A rename
-    /// that succeeded used the name as printed, so its restore command is exact.
-    /// </summary>
-    internal static string InvalidNameNote(string path) =>
-        path.Contains('\uFFFD') ? ", probably because its name isn't valid UTF-8, which pen can't name exactly" : "";
 
     private static string FreeName(string path)
     {

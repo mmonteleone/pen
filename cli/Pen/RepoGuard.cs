@@ -38,13 +38,28 @@ internal static class RepoGuard
         if (Exists(Path.Combine(common, "commondir")))
             throw new PenException($"{Rel(dir, Path.Combine(common, "commondir"))} exists, which a normal repo never has: it makes git read config and hooks from another directory. Inspect it and remove it, then rerun");
 
-        var unreadable = RepoScan.ScanModules(common).Unreadable;
+        var modules = RepoScan.ScanModules(common);
+        var unreadable = modules.Unreadable;
         if (unreadable.Count > 0)
             throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't read these directories where git keeps submodule repos, so it can't protect what's in them:\n"
                 + string.Join('\n', unreadable.Select(u => "  " + Rel(dir, u)))
                 + "\nfix their permissions or remove them, then rerun");
 
         var scan = RepoScan.ScanNested(dir, common);
+        var badNames = modules.BadNames.Concat(scan.BadNames).ToList();
+        if (badNames.Count > 0)
+        {
+            var command = badNames.Any(n => !n.EndsInNewline)
+                ? ": cd to its directory and run mv -- \"$(printf 'NAME')\" new-name, with NAME as shown"
+                : "";
+            // A repo renamed there would be adopted as a submodule's at the next start.
+            var gitDirNote = modules.BadNames.Count > 0
+                ? $"\ninspect any under {Rel(dir, common)} first and prefer removing them: a repo renamed there is trusted as a submodule's repo at the next start"
+                : "";
+            throw new PenException($"refusing to run in {Out.Field(dir)}: these names aren't valid UTF-8, so pen can't look inside them, though git on this machine can still enter them and run what's there (shown with octal escapes):\n"
+                + string.Join('\n', ListedBadNames(dir, badNames).Select(n => "  " + n))
+                + "\nrename or remove each, then rerun" + command + gitDirNote);
+        }
         if (scan.Unlistable.Count > 0)
         {
             var listed = scan.Unlistable.Take(MaxListed).Select(u => "  " + Rel(dir, u));
@@ -71,6 +86,13 @@ internal static class RepoGuard
             sb.Append("\nfor a submodule, run git submodule absorbgitdirs here on this machine: it moves the submodule's .git dir into this repo's, where pen can protect it");
         if (anyOther) sb.Append("\nrun pen in each repo instead");
         throw new PenException(sb.ToString());
+    }
+
+    /// <summary>The first few of <paramref name="names"/> for a message, and how many more there are.</summary>
+    internal static IEnumerable<string> ListedBadNames(string dir, List<BadName> names)
+    {
+        var listed = names.Take(MaxListed).Select(n => Rel(dir, n.Shown) + (n.EndsInNewline ? " (it ends in a newline, so no command can name it here: rename it by hand)" : ""));
+        return names.Count > MaxListed ? listed.Append($"… and {names.Count - MaxListed} more") : listed;
     }
 
     /// <summary>

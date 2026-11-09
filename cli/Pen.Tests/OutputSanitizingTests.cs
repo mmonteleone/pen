@@ -86,13 +86,6 @@ public class OutputSanitizingTests
     }
 
     [Fact]
-    public void AFailedMoveSaysWhenTheNameMayNotBeValidUtf8()
-    {
-        Assert.Contains("valid UTF-8", GitCheck.InvalidNameNote("/p/bad\ufffdname/.git"));
-        Assert.Equal("", GitCheck.InvalidNameNote("/p/good/.git"));
-    }
-
-    [Fact]
     public void AnUnlistableDirectorysNameIsAField()
     {
         using var t = new TempDir();

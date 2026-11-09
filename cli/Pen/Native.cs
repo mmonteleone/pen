@@ -1,7 +1,43 @@
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Unicode;
 using Microsoft.Win32.SafeHandles;
 
 namespace Pen;
+
+/// <summary>
+/// A directory entry whose name isn't valid UTF-8. CouldHoldRepo: a directory,
+/// a symlink, or a type the file system doesn't report; not a plain file or a
+/// special file, which git can't take for a repo.
+/// </summary>
+internal sealed record UndecodableEntry(byte[] Name, bool CouldHoldRepo)
+{
+    /// <summary>The name as .NET's listing shows it.</summary>
+    public string Decoded => Encoding.UTF8.GetString(Name);
+
+    /// <summary>Command substitution drops trailing newlines, so no printf command can name this one.</summary>
+    public bool EndsInNewline => Name[^1] == (byte)'\n';
+
+    /// <summary>
+    /// The exact name as printf(1) text: octal escapes for all but the plainest
+    /// bytes, and for a leading -, which printf would read as an option. ASCII
+    /// only, so it's safe to print and to paste.
+    /// </summary>
+    public string Escaped
+    {
+        get
+        {
+            var sb = new StringBuilder();
+            for (int i = 0; i < Name.Length; i++)
+            {
+                var b = Name[i];
+                if (char.IsAsciiLetterOrDigit((char)b) || b is (byte)'.' or (byte)'_' or (byte)' ' || (b == (byte)'-' && i > 0)) sb.Append((char)b);
+                else sb.Append('\\').Append(Convert.ToString(b, 8).PadLeft(3, '0'));
+            }
+            return sb.ToString();
+        }
+    }
+}
 
 /// <summary>The few libc calls pen needs. Same signatures on macOS and Linux.</summary>
 internal static partial class Native
@@ -71,6 +107,53 @@ internal static partial class Native
 
     /// <summary>Whether this user can both enter the directory and list it. False if it's gone.</summary>
     public static bool CanList(string path) => AccessNative(path, R_OK | X_OK) == 0;
+
+    [LibraryImport(Libc, EntryPoint = "opendir", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
+    private static partial nint OpenDirNative(string path);
+
+    [LibraryImport(Libc, EntryPoint = "readdir", SetLastError = true)]
+    private static partial nint ReadDirNative(nint dir);
+
+    [LibraryImport(Libc, EntryPoint = "closedir")]
+    private static partial int CloseDirNative(nint dir);
+
+    private const byte DT_UNKNOWN = 0, DT_DIR = 4, DT_LNK = 10;
+
+    /// <summary>Where struct dirent keeps d_type and d_name, on the 64-bit layouts pen knows.</summary>
+    private static (int Type, int Name)? DirentLayout =>
+        OperatingSystem.IsLinux() && nint.Size == 8 ? (18, 19)
+        : OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? (20, 21)
+        : null;
+
+    /// <summary>
+    /// The entries of <paramref name="dir"/> whose names aren't valid UTF-8, or
+    /// null if that can't be found out (including on a platform whose dirent
+    /// layout isn't known). Only readdir(3) sees the real bytes: .NET's listing
+    /// has U+FFFD in place of the bad ones.
+    /// </summary>
+    public static List<UndecodableEntry>? ListUndecodable(string dir)
+    {
+        if (DirentLayout is not { } layout) return null;
+        var handle = OpenDirNative(dir);
+        if (handle == 0) return null;
+        try
+        {
+            var found = new List<UndecodableEntry>();
+            while (true)
+            {
+                var entry = ReadDirNative(handle);
+                if (entry == 0) return Marshal.GetLastPInvokeError() == 0 ? found : null;
+                var name = new List<byte>();
+                for (byte b; (b = Marshal.ReadByte(entry, layout.Name + name.Count)) != 0;) name.Add(b);
+                var bytes = name.ToArray();
+                if (Utf8.IsValid(bytes)) continue;
+                // Unknown counts as able to hold a repo: nothing here can look closer.
+                var type = Marshal.ReadByte(entry, layout.Type);
+                found.Add(new(bytes, type is DT_DIR or DT_LNK or DT_UNKNOWN));
+            }
+        }
+        finally { CloseDirNative(handle); }
+    }
 
     public const int LOCK_SH = 1, LOCK_EX = 2, LOCK_NB = 4, LOCK_UN = 8;
 

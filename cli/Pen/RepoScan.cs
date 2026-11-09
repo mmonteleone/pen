@@ -21,11 +21,23 @@ internal sealed record NestedRepo(string Path, NestedKind Kind)
     public string RepoDir => System.IO.Path.GetDirectoryName(Path)!;
 }
 
-/// <summary>What the walk of a git dir's submodule repos found (Repos) and couldn't read (Unreadable).</summary>
-internal sealed record ModuleScan(List<string> Repos, List<string> Unreadable);
+/// <summary>
+/// An entry a scan can't look inside, since its name isn't valid UTF-8: .NET's
+/// listing has U+FFFD in place of the bad bytes, so that string names nothing
+/// (or another entry), while git on this machine can still enter it. Shown is
+/// its path for messages, with the name exact (<see cref="UndecodableEntry.Escaped"/>).
+/// EndsInNewline: no command pen could print would name it.
+/// </summary>
+internal sealed record BadName(string Shown, bool EndsInNewline)
+{
+    public static BadName At(string dir, UndecodableEntry entry) => new(Path.Combine(dir, entry.Escaped), entry.EndsInNewline);
+}
 
-/// <summary>What the walk of the tree found (Found), and the directories it could enter but not list (Unlistable).</summary>
-internal sealed record NestedScan(List<NestedRepo> Found, List<string> Unlistable);
+/// <summary>What the walk of a git dir's submodule repos found (Repos), couldn't read (Unreadable) and couldn't name (BadNames).</summary>
+internal sealed record ModuleScan(List<string> Repos, List<string> Unreadable, List<BadName> BadNames);
+
+/// <summary>What the walk of the tree found (Found), the directories it could enter but not list (Unlistable), and the entries it couldn't name (BadNames).</summary>
+internal sealed record NestedScan(List<NestedRepo> Found, List<string> Unlistable, List<BadName> BadNames);
 
 /// <summary>
 /// The nested-repo scan, shared by the start-of-session refusal and the
@@ -65,7 +77,10 @@ internal static class RepoScan
     /// since host git can't get in either. <paramref name="tryOpen"/>, if given,
     /// gets each such directory and returns whether it changed its mode, after
     /// which the listing is tried again. The access(2) call is only made after
-    /// a listing fails, so a healthy tree pays nothing for it.
+    /// a listing fails, so a healthy tree pays nothing for it. Likewise, only a
+    /// listed name with U+FFFD in it costs a look at the directory's raw names.
+    /// BadNames has each entry there that could hold a repo; a plain file with
+    /// such a name can't, so it's left alone.
     /// </summary>
     public static NestedScan ScanNested(string root, string? commonGitDir = null, IReadOnlyCollection<string>? moduleRepos = null, Func<string, bool>? tryOpen = null)
     {
@@ -73,6 +88,7 @@ internal static class RepoScan
         var modules = new HashSet<string>(moduleRepos ?? FindModuleRepos(commonGitDir).Where(r => !IsLinkPath(r)), StringComparer.Ordinal);
         var found = new List<NestedRepo>();
         var unlistable = new List<string>();
+        var badNames = new List<BadName>();
         var pending = new Stack<string>();
         pending.Push(root);
         while (pending.TryPop(out var dir))
@@ -90,10 +106,28 @@ internal static class RepoScan
                 }
             }
 
+            HashSet<string> undecodable = [];
+            if (entries.Any(e => HasReplacement(e.Name)))
+            {
+                var raw = Native.ListUndecodable(dir);
+                if (raw == null)
+                {
+                    unlistable.Add(dir);
+                    continue;
+                }
+                foreach (var u in raw)
+                {
+                    undecodable.Add(u.Decoded);
+                    if (u.CouldHoldRepo) badNames.Add(BadName.At(dir, u));
+                }
+            }
+
             bool head = false, objects = false, refs = false, commondir = false;
             foreach (var e in entries)
             {
                 var path = Path.Combine(dir, e.Name);
+                // Unless a real entry has the name it decodes to, which is scanned as usual.
+                if (undecodable.Contains(e.Name) && !Path.Exists(path)) continue;
                 if (Is(e.Name, ".git"))
                 {
                     if (dir == root) continue; // the project's own; never descended into
@@ -116,8 +150,11 @@ internal static class RepoScan
         }
         found.Sort((a, b) => string.CompareOrdinal(a.Path, b.Path));
         unlistable.Sort(StringComparer.Ordinal);
-        return new(found, unlistable);
+        badNames.Sort((a, b) => string.CompareOrdinal(a.Shown, b.Shown));
+        return new(found, unlistable, badNames);
     }
+
+    private static bool HasReplacement(string name) => name.Contains('\uFFFD');
 
     private static List<Entry>? List(string dir)
     {
@@ -241,10 +278,14 @@ internal static class RepoScan
     /// <summary>
     /// <see cref="FindModuleRepos"/>'s walk, with the directories it couldn't
     /// read: what's in those is unknown, so callers refuse or quarantine them.
+    /// BadNames has every entry whose name isn't valid UTF-8, of any type, since
+    /// git keeps only directories with names it chose here: callers refuse those
+    /// or report "couldn't check", because renaming the parent would take every
+    /// submodule repo with it.
     /// </summary>
     internal static ModuleScan ScanModules(string gitDir)
     {
-        var scan = new ModuleScan([], []);
+        var scan = new ModuleScan([], [], []);
         AddModuleRepos(gitDir, scan);
         return scan;
     }
@@ -254,10 +295,12 @@ internal static class RepoScan
         WalkModules(Path.Combine(gitDir, "modules"), scan);
         var worktrees = Path.Combine(gitDir, "worktrees");
         if (IsLinkPath(worktrees) || !Directory.Exists(worktrees)) return; // a symlinked worktrees/ is refused by the mounts
-        var entries = ListOrNote(worktrees, Directory.EnumerateDirectories, scan);
+        var entries = ListOrNote(worktrees, Directory.EnumerateFileSystemEntries, scan);
         if (entries == null) return;
+        var undecodable = NoteBadNames(worktrees, entries, scan);
+        if (undecodable == null) return;
         foreach (var wt in entries)
-            if (!IsLinkPath(wt)) WalkModules(Path.Combine(wt, "modules"), scan);
+            if (!undecodable.Contains(Path.GetFileName(wt)) && !IsLinkPath(wt)) WalkModules(Path.Combine(wt, "modules"), scan);
     }
 
     private static void WalkModules(string dir, ModuleScan scan)
@@ -266,8 +309,12 @@ internal static class RepoScan
         if (!Directory.Exists(dir)) return;
         var entries = ListOrNote(dir, Directory.EnumerateFileSystemEntries, scan);
         if (entries == null) return;
+        var undecodable = NoteBadNames(dir, entries, scan);
+        if (undecodable == null) return;
         foreach (var entry in entries)
         {
+            // Unless a real entry has the name it decodes to, which is walked as usual.
+            if (undecodable.Contains(Path.GetFileName(entry)) && !Path.Exists(entry)) continue;
             // Before the symlink test, so a quarantined symlink isn't flagged and renamed again.
             if (Path.GetFileName(entry).Contains(GitCheck.Suffix, StringComparison.Ordinal)) continue;
             if (IsLinkPath(entry)) scan.Repos.Add(entry);
@@ -285,6 +332,24 @@ internal static class RepoScan
             }
             else WalkModules(entry, scan); // a level of a name with "/" in it
         }
+    }
+
+    /// <summary>
+    /// Notes the entries of <paramref name="dir"/> whose names aren't valid
+    /// UTF-8, returning their names as listed; null, noting the directory, if
+    /// its raw names can't be read.
+    /// </summary>
+    private static HashSet<string>? NoteBadNames(string dir, List<string> entries, ModuleScan scan)
+    {
+        if (!entries.Any(e => HasReplacement(Path.GetFileName(e)))) return [];
+        var raw = Native.ListUndecodable(dir);
+        if (raw == null)
+        {
+            scan.Unreadable.Add(dir);
+            return null;
+        }
+        scan.BadNames.AddRange(raw.Select(u => BadName.At(dir, u)));
+        return raw.Select(u => u.Decoded).ToHashSet(StringComparer.Ordinal);
     }
 
     /// <summary>The sorted entries of <paramref name="dir"/>; none if it's gone; null, noting it, if it can't be read.</summary>
