@@ -34,6 +34,56 @@ public class RecipeTests
     }
 
     [Fact]
+    public void TheDotnetRecipeIsOfferedWithSeveralVersions()
+    {
+        Assert.True(RecipeCatalog.Embedded.TryGet("dotnet", out var recipe));
+        Assert.False(recipe.Hidden);
+        Assert.True(recipe.Multiple);
+        Assert.Equal("10", recipe.Default);
+        Assert.Contains("dotnet", RecipeCatalog.Embedded.Available());
+        Assert.Equal(
+            [".nuget.org", "builds.dotnet.microsoft.com", "aka.ms", "www.microsoft.com", "crl3.digicert.com", "ocsp.digicert.com"],
+            recipe.Allow);
+    }
+
+    [Theory]
+    [InlineData("6", true)]
+    [InlineData("7", true)]
+    [InlineData("8", true)]
+    [InlineData("9", true)]
+    [InlineData("10", true)]
+    [InlineData("11", true)]
+    [InlineData("5", false)]
+    [InlineData("12", false)]
+    [InlineData("1", false)]
+    [InlineData("08", false)]
+    [InlineData("8.0", false)]
+    [InlineData("10.0.100", false)]
+    [InlineData("100", false)]
+    [InlineData("8\n", false)]
+    [InlineData("latest", false)]
+    [InlineData("lts", false)]
+    public void TheDotnetRecipeAcceptsOnlyMajorVersionsThatInstall(string version, bool accepted)
+    {
+        Assert.True(RecipeCatalog.Embedded.TryGet("dotnet", out var recipe));
+        Assert.Equal(accepted, recipe.AcceptsVersion(version));
+    }
+
+    [Fact]
+    public void TheDotnetRecipeSetsContainerSettingsButNoSingleVersion()
+    {
+        Assert.True(RecipeCatalog.Embedded.TryGet("dotnet", out var recipe));
+        Assert.Equal(
+            ["ASPNETCORE_HTTP_PORTS", "DOTNET_RUNNING_IN_CONTAINER", "DOTNET_GENERATE_ASPNET_CERTIFICATE", "DOTNET_USE_POLLING_FILE_WATCHER",
+             "NUGET_XMLDOC_MODE", "POWERSHELL_DISTRIBUTION_CHANNEL", "DOTNET_NOLOGO", "DOTNET_CLI_TELEMETRY_OPTOUT"],
+            recipe.Env.Select(e => e.Key));
+        Assert.Contains(new KeyValuePair<string, string>("ASPNETCORE_HTTP_PORTS", "8080"), recipe.Env);
+        Assert.Contains(new KeyValuePair<string, string>("DOTNET_CLI_TELEMETRY_OPTOUT", "1"), recipe.Env);
+        foreach (var leftOut in new[] { "DOTNET_VERSION", "ASPNET_VERSION", "DOTNET_SDK_VERSION" })
+            Assert.DoesNotContain(recipe.Env, e => e.Key == leftOut);
+    }
+
+    [Fact]
     public void AllSettingsAreRead()
     {
         Assert.True(LoadToml("""

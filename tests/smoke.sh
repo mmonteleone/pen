@@ -698,21 +698,56 @@ fi
 
 if want 11; then
 # ==============================================================================
-section "11. .NET and NuGet (step 7)"
+section "11. .NET and NuGet, with --tool dotnet (step 7)"
 
-out=$(in_sandbox 'mkdir -p app && cd app && dotnet new console -o . --force >/dev/null && dotnet add package Humanizer.Core >/dev/null && dotnet run' 2>&1 || true)
+# dn_sandbox [pen options…] <bash script>: in_sandbox with the dotnet tool (dotnet:10 unless options say).
+dn_sandbox() { local script=${*: -1}; "$PEN" --tool dotnet "${@:1:$#-1}" run bash -c "$script" </dev/null; }
+majors() { awk '{ split($1, v, "."); print v[1] }' | sort -n | uniq | tr '\n' ' '; }
+
+out=$(dn_sandbox 'pwsh -NoProfile -Command "\$PSVersionTable.PSVersion.Major"; dotnet --list-sdks' 2>/dev/null || true)
+check "the tool's pwsh runs" grep -qxE '[0-9]+' <<<"$(head -1 <<<"$out")"
+check "...and dotnet lists the SDK of the default version, 10" test "$(tail -n +2 <<<"$out" | majors)" = "10 "
+check "dotnet:8 with dotnet:10 lists both SDKs" \
+  test "$(dn_sandbox --tool dotnet:8 'dotnet --list-sdks' 2>/dev/null | majors)" = "8 10 "
+out=$(dn_sandbox 'env' 2>/dev/null || true)
+check "...with the ASP.NET and container settings" has_all "$out" ASPNETCORE_HTTP_PORTS=8080 DOTNET_RUNNING_IN_CONTAINER=true \
+  DOTNET_GENERATE_ASPNET_CERTIFICATE=false DOTNET_USE_POLLING_FILE_WATCHER=true NUGET_XMLDOC_MODE=skip \
+  POWERSHELL_DISTRIBUTION_CHANNEL= DOTNET_NOLOGO=1 DOTNET_CLI_TELEMETRY_OPTOUT=1
+
+out=$(dn_sandbox 'mkdir -p app && cd app && dotnet new console -o . --force >/dev/null && dotnet add package Humanizer.Core >/dev/null && dotnet run' 2>&1 || true)
 check "dotnet new console, a NuGet restore and dotnet run work" contains "Hello, World!" "$out"
-out=$(in_sandbox 'cd app && rm -rf obj bin && dotnet restore -v d' 2>&1 || true)
+check "...with nothing blocked" not contains "blocked:" "$out"
+out=$(dn_sandbox 'cd app && rm -rf obj bin && dotnet restore -v d' 2>&1 || true)
 check "a second restore finds the package in the cache volume (no download)" not grep -qiE 'GET https://[^ ]*humanizer' <<<"$out"
 check "NUGET_PACKAGES is the host's path, backed by the project's volume" \
-  test "$(in_sandbox 'echo $NUGET_PACKAGES; ls $NUGET_PACKAGES' 2>/dev/null | head -2 | tr '\n' ' ')" = "$NUGET_PACKAGES humanizer.core "
+  test "$(dn_sandbox 'echo $NUGET_PACKAGES; ls $NUGET_PACKAGES' 2>/dev/null | head -2 | tr '\n' ' ')" = "$NUGET_PACKAGES humanizer.core "
 if command -v dotnet >/dev/null; then
   check "host build and run after the sandbox's build" bash -c "cd app && dotnet build -v q >/dev/null 2>&1 && dotnet run --no-build | grep -q 'Hello, World!'"
-  check "...then the sandbox builds again" contains "Hello, World!" "$(in_sandbox 'cd app && dotnet build -v q >/dev/null && dotnet run --no-build' 2>&1)"
+  check "...then the sandbox builds again" contains "Hello, World!" "$(dn_sandbox 'cd app && dotnet build -v q >/dev/null && dotnet run --no-build' 2>&1)"
 else
   note "no .NET SDK on the host: skipped the host/sandbox round trip"
 fi
 rm -rf app
+
+# A web app serves on ASPNETCORE_HTTP_PORTS (8080), forwarded to the host.
+if python3 -c 'import socket, sys; s = socket.socket(); s.settimeout(2); sys.exit(s.connect_ex(("127.0.0.1", 8080)) != 0)'; then
+  note "port 8080 is in use on this machine: skipped the web app check"
+else
+  "$PEN" --tool dotnet --port 8080 run bash -c '
+    mkdir -p web && cd web && dotnet new web -o . --force >/dev/null && dotnet build -v q >/dev/null || exit 1
+    dotnet run --no-build --no-launch-profile >/dev/null 2>&1 &
+    for i in $(seq 120); do curl -s --noproxy "*" -o /dev/null localhost:8080 && break; sleep 0.5; done
+    echo serving
+    for i in $(seq 60); do [ -e .served ] && break; sleep 0.5; done
+  ' </dev/null >"$SCRATCH/web.out" 2>&1 &
+  p=$!
+  for i in $(seq 600); do grep -q '^serving$' "$SCRATCH/web.out" && break; kill -0 "$p" 2>/dev/null || break; sleep 0.5; done
+  out=$(curl -s -m 5 http://127.0.0.1:8080/ || true)
+  touch web/.served 2>/dev/null || true
+  wait "$p" || true
+  check "a new web app builds and serves on the forwarded port 8080" test "$out" = "Hello World!"
+  rm -rf web
+fi
 
 note "login checks (step 5: log in to claude and codex, still logged in after pen upgrade --clean, logged out in another project) are manual"
 fi
