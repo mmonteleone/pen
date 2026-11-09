@@ -10,6 +10,7 @@ Detailed settings and workflows. For installation and a first session, see the
 - [Git](#git-in-the-sandbox): [worktrees](#worktrees), [submodules](#submodules),
   [commit signing](#commit-signing)
 - [Dev servers](#dev-servers) and [Docker-in-Docker](#docker-in-docker)
+- [Running in herdr](#running-in-herdr)
 - [Upgrading and resetting](#upgrading-and-resetting)
 - [Differences from running on the host](#differences-from-running-on-the-host) and
   [limitations](#limitations)
@@ -369,6 +370,71 @@ or set `docker = true` in `.pen/config.toml`. The session gets its own Docker da
 - The daemon runs privileged, and the agent has full control of it, so isolation is weaker and
   [the git protections don't hold](#docker-in-docker-and-the-git-protections) while it's on.
 
+## Running in herdr
+
+[herdr](https://herdr.dev) runs agents in terminal panes and shows each one's state in a sidebar. pen
+runs in a herdr pane like any other command. What follows was tested with herdr 0.9.5 on macOS with
+OrbStack, except where it says otherwise.
+
+**Setup.** In `~/.config/herdr/config.toml`, drop the sidebar's ahead/behind count:
+
+```toml
+[ui.sidebar.spaces]
+rows = [["state_icon", "workspace"], ["branch"]]
+```
+
+herdr computes that count by running `git rev-list` in the project while a herdr window is attached,
+whenever the branch has an upstream and its refs change, including when the agent commits during a
+session. That's host git while [`.git` is untrusted](#while-a-session-runs). With the rows above, no
+git ran. The branch name stays, as herdr reads it from `.git` without running git.
+
+Start agents as `HERDR_AGENT=claude pen claude` (or `codex`, `opencode`, `pi`). herdr recognizes an
+agent by the pane's foreground process, which is `pen`, so without the hint the pane shows as a plain
+terminal with no state.
+
+**What works:**
+
+- Several sessions at once, one per pane, including one per [worktree](#worktrees). Creating or
+  deleting a worktree from herdr (`herdr worktree create` and `remove`, or the sidebar's worktree
+  actions) runs `git worktree add` or `remove` on the host, so do that while no session runs in the
+  repo.
+- Detaching (`ctrl+b q`) or closing the terminal herdr is attached in leaves sessions running, and
+  reattaching finds them as they were.
+- With the hint, herdr recognizes the pane as the agent. It then shows idle, but that's herdr's default
+  for a recognized agent whose screen matches no rule (`herdr agent explain` says
+  `default_known_agent_idle_fallback`), and `HERDR_AGENT=claude pen bash` shows the same. Whether
+  herdr reads working, blocked and done from the screen through pen hasn't been checked. To check it in
+  a logged-in project, start `HERDR_AGENT=claude pen claude` in a pane, then from another terminal
+  run `herdr agent list` to find its pane ID. Ask the agent something that takes a few seconds and
+  check that `herdr agent get <pane>` shows `working`, then `done`. Ask it to run `date` and check
+  for `blocked` while it waits for approval. If a state is wrong, `herdr agent explain <pane>` shows
+  why.
+- `herdr agent start --kind claude` types `claude` into the pane's shell, so it starts Claude Code on
+  the host, outside pen. It starts pen only if `claude` is a shell function there that runs
+  `HERDR_AGENT=claude command pen claude "$@"`. Without the hint it times out, and the session it
+  started keeps running.
+
+**What doesn't:**
+
+- Closing a pane, or stopping herdr's server, cuts the end of a session short. herdr sends a hangup,
+  which starts pen's normal end path, then kills pen, about a second later in our tests. In these tests the
+  agent had been removed and the git check had run by then, but the session's files were left, and
+  the proxy container may be too. What pen printed, including any notice that it quarantined
+  something, went with the pane and isn't shown again later, so look for `….pen-quarantine` files in
+  the project and its git dir. `pen ps` shows nothing in between. Starting a session (for example
+  `pen true`), `pen sign`, `pen reset` or `pen allow` in the project finishes the cleanup. So exit the agent before closing its pane, and if you didn't, run `pen true`
+  in the project before any host git.
+- A pane split from one running pen opens in pen's working directory, `~/.local/state/pen`, not the
+  project. Split from a shell, or pass `--cwd`.
+- An agent that's stopped rather than exiting can leave the pane in bracketed-paste mode, which garbles
+  what herdr types into the shell next. Run `reset` there.
+
+**Keep herdr's socket out of the sandbox.** Its API runs commands on the host. Panes get
+`HERDR_SOCKET_PATH`, `HERDR_BIN_PATH` and an `SSH_AUTH_SOCK` in herdr's directory. pen passes none of
+them in: a session started in a herdr pane had no `HERDR_*` variables and no `~/.config/herdr`. Don't
+add them to `[env]`, and don't run pen in a directory that contains `~/.config/herdr`. herdr's agent
+integrations aren't needed for state, so leave them out of the [home seed](#agent-config-the-home-seed).
+
 ## Upgrading and resetting
 
 - To update the CLI, run `git pull` and `cli/install.sh` from your pen source checkout. If the
@@ -450,7 +516,8 @@ show. pen doesn't check or protect any of them.
 
 `.git` is untrusted while a session runs. Don't run git on the host in that repo until pen exits: not in
 the project, the main checkout or any linked worktree. An IDE's git integration and a git-aware shell
-prompt count, since they run git on their own, so keep them out of the directory too.
+prompt count, since they run git on their own, so keep them out of the directory too. So does
+[herdr's ahead/behind count](#running-in-herdr).
 
 Not everything git reads can be protected in advance. For example, a `.git/commondir` file makes git
 read its config and hooks from another directory, and it can't be mounted read-only ahead of time
