@@ -15,7 +15,11 @@ internal sealed record GitResult(int ExitCode, byte[] Stdout, string Stderr)
 /// Every git call pen makes on the host goes through here.
 /// Each one gets command-line overrides, which beat repo
 /// config, so nothing in the repo's config runs a program on the host: no
-/// hooks (update-ref runs reference-transaction), no fsmonitor, no pager.
+/// hooks (update-ref runs reference-transaction), no fsmonitor, no pager, and
+/// no lazy fetch from a promisor remote for an object the agent deleted. Replace
+/// refs are off too, so an object read by its hash is that object's own bytes.
+/// That doesn't cover history walks: .git/info/grafts and .git/shallow can still
+/// change which parents one follows.
 /// </summary>
 internal sealed class HostGit
 {
@@ -29,21 +33,26 @@ internal sealed class HostGit
         "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PAGER", "PAGER",
     ];
 
+    private static readonly string[] ForcedEnv = ["GIT_NO_LAZY_FETCH", "GIT_NO_REPLACE_OBJECTS"];
+
     private readonly string? _dir;
     private readonly IReadOnlyList<string> _config;
+    private readonly IReadOnlyDictionary<string, string>? _env;
 
     /// <param name="dir">The repo to run in, or null for a call that reads only global config.</param>
     /// <param name="config">Extra "-c key=value" pairs, already split (e.g. the signing settings).</param>
-    public HostGit(string? dir, IReadOnlyList<string>? config = null)
+    /// <param name="env">Extra environment for every call, such as another HOME.</param>
+    public HostGit(string? dir, IReadOnlyList<string>? config = null, IReadOnlyDictionary<string, string>? env = null)
     {
         _dir = dir;
         _config = config ?? [];
+        _env = env;
     }
 
     /// <summary>For global-config reads: run from /, so no repo is discovered at all.</summary>
     public static HostGit Global { get; } = new(null);
 
-    public HostGit With(IReadOnlyList<string> config) => new(_dir, [.. _config, .. config]);
+    public HostGit With(IReadOnlyList<string> config) => new(_dir, [.. _config, .. config], _env);
 
     /// <summary>The full argument list for <c>git</c>: the overrides always come first.</summary>
     public List<string> Args(IEnumerable<string> args)
@@ -58,8 +67,11 @@ internal sealed class HostGit
 
     public GitResult Run(IEnumerable<string> args, byte[]? stdin = null, IReadOnlyDictionary<string, string>? env = null)
     {
-        var psi = Proc.Info("git", Args(args), env);
+        var psi = Proc.Info("git", Args(args), _env);
+        if (env != null)
+            foreach (var (k, v) in env) psi.Environment[k] = v;
         foreach (var name in ScrubbedEnv) psi.Environment.Remove(name);
+        foreach (var name in ForcedEnv) psi.Environment[name] = "1";
         if (_dir == null) psi.WorkingDirectory = "/";
         psi.RedirectStandardOutput = psi.RedirectStandardError = true;
         psi.RedirectStandardInput = true;
@@ -96,10 +108,12 @@ internal sealed class HostGit
         return r.Ok ? r.Text.Trim() : null;
     }
 
-    /// <summary>A global config value (includes followed), or null if unset.</summary>
-    public static string? GlobalConfig(string key) =>
-        Global.TryOut("config", "--global", "--includes", "--get", key);
+    /// <summary>A global config value (includes followed), or null if unset. Never reads this repo's config.</summary>
+    public string? GlobalValue(string key) =>
+        new HostGit(null, null, _env).TryOut("config", "--global", "--includes", "--get", key);
 
-    public static bool GlobalBool(string key) =>
-        Global.TryOut("config", "--global", "--includes", "--type=bool", "--get", key) == "true";
+    public bool GlobalFlag(string key) =>
+        new HostGit(null, null, _env).TryOut("config", "--global", "--includes", "--type=bool", "--get", key) == "true";
+
+    public static string? GlobalConfig(string key) => Global.GlobalValue(key);
 }

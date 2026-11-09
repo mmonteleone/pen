@@ -1112,8 +1112,39 @@ check "...keeping their trees, authors and dates" \
   test "$(for c in $(git rev-list --reverse origin/smoke-base..HEAD); do git log -1 --format='%T %an <%ae> %ad' "$c"; done)" = "$before"
 check "...with the host user as committer" test "$(git log -1 --format=%cn)" = "Smoke Host"
 check "...and the signatures verify" bash -c 'echo "smoke-host@example.invalid $(cat "$1.pub")" >"$1.signers" && git -c gpg.ssh.program=ssh-keygen -c gpg.ssh.allowedSignersFile="$1.signers" verify-commit HEAD 2>/dev/null' _ "$SCRATCH/signkey"
+check "with no allowed signers file, it says how to fix that" has_all "$out" "can't verify the signatures just made" "gpg.ssh.allowedSignersFile isn't set"
+before=$(git rev-parse HEAD)
+sleep 1.1 # so a re-signed commit gets a new committer date, and so a new hash
+out=$(fake_pen sign 2>&1)
+check "...and each pen sign re-signs" test "$(git rev-parse HEAD)" != "$before"
+check "...saying so again" contains "can't verify the signatures just made" "$out"
+git config --file "$FAKE_HOME/.gitconfig" gpg.ssh.allowedSignersFile "$SCRATCH/signkey.signers"
 check "the reminder is gone after signing" not contains "unsigned" "$(fake_pen run true 2>&1)"
+before=$(git rev-parse HEAD)
 check "running pen sign again changes nothing" contains "are signed" "$(fake_pen sign 2>&1)"
+check "...keeping the validly signed commits' hashes" test "$(git rev-parse HEAD)" = "$before"
+
+# A commit with any signature header, which is all pen used to look at.
+forged=$(printf 'tree %s\nparent %s\nauthor Agent <agent@example.invalid> 1700000000 +0000\ncommitter Agent <agent@example.invalid> 1700000000 +0000\ngpgsig -----BEGIN SSH SIGNATURE-----\n Zm9v\n -----END SSH SIGNATURE-----\n\nforged\n' \
+  "$(git rev-parse 'HEAD^{tree}')" "$before" | git hash-object -t commit -w --stdin)
+git update-ref HEAD "$forged"
+out=$(fake_pen sign 2>&1)
+check "a forged signature header is re-signed" contains "re-signing 3 commits" "$out"
+check "...and verifies now" bash -c 'git -c gpg.ssh.program=ssh-keygen -c gpg.ssh.allowedSignersFile="$1.signers" verify-commit HEAD 2>/dev/null' _ "$SCRATCH/signkey"
+check "...leaving the valid ones below it" test "$(git rev-parse HEAD~1)" = "$before"
+
+# The agent's own key, trusted by the repo's config, doesn't count.
+ssh-keygen -q -t ed25519 -N '' -C pen-smoke-agent -f "$SCRATCH/agentkey"
+echo "agent@example.invalid $(cat "$SCRATCH/agentkey.pub")" >"$SCRATCH/agentkey.signers"
+git config gpg.ssh.allowedSignersFile "$SCRATCH/agentkey.signers"
+git -c user.name=Agent -c user.email=agent@example.invalid -c gpg.format=ssh -c gpg.ssh.program=ssh-keygen -c user.signingkey="$SCRATCH/agentkey" commit -q -S --allow-empty -m "agent-signed"
+forged=$(git rev-parse HEAD)
+check "a commit signed by the agent verifies by the repo's allowedSignersFile" test "$(git -c gpg.ssh.program=ssh-keygen log -1 --format=%G?)" = G
+out=$(fake_pen sign 2>&1)
+check "...but pen sign ignores that file and re-signs it" contains "agent-signed" "$out"
+check "...with the host's key" bash -c 'git -c gpg.ssh.program=ssh-keygen -c gpg.ssh.allowedSignersFile="$1.signers" verify-commit HEAD 2>/dev/null' _ "$SCRATCH/signkey"
+check "...replacing it" test "$(git rev-parse HEAD)" != "$forged"
+git config --unset gpg.ssh.allowedSignersFile
 
 fake_pen run git -c user.name=Agent -c user.email=agent@example.invalid commit -q --allow-empty -m s3 >/dev/null 2>&1
 git update-ref refs/remotes/fork/s3 HEAD

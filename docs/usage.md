@@ -193,6 +193,11 @@ There's no signing key in the sandbox, so agent commits are unsigned. After revi
 and messages, using your normal git signing setup. The base defaults to the upstream branch,
 falling back to `origin/HEAD`. It refuses to touch commits that are already pushed.
 
+Commits whose signature verifies under your global git config are kept, unless a commit below them
+changes. A signature only verifies if your global config can check it: for SSH signing, set
+`gpg.ssh.allowedSignersFile` to an absolute path, or each `pen sign` re-signs everything and changes
+the hashes again (pen says so when this happens). Settings in the repo's own config don't count.
+
 Turning on "Require signed commits" on GitHub catches a forgotten `pen sign` at push time.
 
 ## Dev servers
