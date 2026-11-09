@@ -53,6 +53,9 @@ internal static class Program
             case CommandKind.Help:
                 Console.Out.Write(command.Args.Count > 0 ? Cli.SubcommandHelp[command.Args[0]] + "\n" : Cli.Usage);
                 return 0;
+            case CommandKind.ToolList:
+                Console.Out.Write(RecipeCatalog.Embedded.Listing());
+                return 0;
             case CommandKind.Allow when command.Defaults:
                 Console.Out.Write(AllowCommand.Defaults());
                 return 0;
@@ -93,7 +96,11 @@ internal static class Program
     // --docker turns Docker-in-Docker on for one session; docker = true in
     // .pen/config.toml for every session. Nothing turns it off per session.
     // --port adds to ports in .pen/config.toml.
-    private static int RunSession(HostEnv host, Project project, Config user, Config projectConfig, Command command) =>
-        new Session(host, project, user, projectConfig).Run(command.Args, docker: command.Docker || projectConfig.Docker == true,
+    // tools from both config files and --tool have to go together, but nothing else uses them: the session is unchanged.
+    private static int RunSession(HostEnv host, Project project, Config user, Config projectConfig, Command command)
+    {
+        ToolSpec.Merge(RecipeCatalog.Embedded, user.Tools, projectConfig.Tools, command.Tools);
+        return new Session(host, project, user, projectConfig).Run(command.Args, docker: command.Docker || projectConfig.Docker == true,
             ports: Port.Merge(projectConfig.Ports, command.Ports));
+    }
 }

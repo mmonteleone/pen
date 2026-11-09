@@ -68,10 +68,11 @@ Docker on Linux. macOS testing so far uses OrbStack; results from other engines 
 | `image/` | Base image, entrypoint and managed agent config |
 | `proxy/` | Squid proxy config and default domain allowlist |
 | `templates/` | Initial user config and agent home seed |
+| `tools/` | Tool recipes: `tools/<name>/tool.toml` and `install.sh` |
 | `tests/` | Container smoke tests and helpers |
 
 **Container files and templates are embedded in the CLI.** The installed pen never reads this
-checkout. Reinstall after changing `compose.yaml`, `image/`, `proxy/` or `templates/`, just as
+checkout. Reinstall after changing `compose.yaml`, `image/`, `proxy/`, `templates/` or `tools/`, just as
 you would after a CLI change. Changes under `image/` trigger an image rebuild on the next session.
 
 [AGENTS.md](AGENTS.md) explains command flow, sessions, locking and git protection. Read it

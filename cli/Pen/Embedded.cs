@@ -6,7 +6,7 @@ using System.Text;
 namespace Pen;
 
 /// <summary>
-/// Files embedded in the binary (compose.yaml, image/, proxy/, templates/),
+/// Files embedded in the binary (compose.yaml, image/, proxy/, templates/, tools/),
 /// named by their repo-relative paths.
 /// </summary>
 internal static class Embedded

@@ -37,6 +37,8 @@
     <EmbeddedResource Include="$(RepoRoot)image/**/*" LogicalName="image/%(RecursiveDir)%(Filename)%(Extension)" />
     <EmbeddedResource Include="$(RepoRoot)proxy/**/*" LogicalName="proxy/%(RecursiveDir)%(Filename)%(Extension)" />
     <EmbeddedResource Include="$(RepoRoot)templates/**/*" LogicalName="templates/%(RecursiveDir)%(Filename)%(Extension)" />
+    <!-- Dot files such as .DS_Store would be errors: a recipe is exactly its two files. -->
+    <EmbeddedResource Include="$(RepoRoot)tools/**/*" Exclude="$(RepoRoot)tools/**/.*" LogicalName="tools/%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

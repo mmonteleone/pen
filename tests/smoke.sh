@@ -390,6 +390,18 @@ check "pen --help documents --port" contains "--port <n>" "$("$PEN" --help)"
 check "pen run --help documents --port and ports" bash -c "'$PEN' run --help | grep -qF -- '--port <n>' && '$PEN' run --help | grep -qF 'ports = ['"
 check "pen --port 8765 --port=8766 starts a session" bash -c "'$PEN' --port 8765 --port=8766 run true </dev/null >/dev/null 2>&1"
 check "...and --port after the command is the command's" contains "[--port 8765]" "$("$PEN" run sh -c 'echo "[$*]"' _ --port 8765 </dev/null 2>/dev/null)"
+check "pen --help documents --tool" contains "--tool <spec>" "$("$PEN" --help)"
+check "pen --tool list works outside a session" bash -c "'$PEN' --tool list </dev/null >/dev/null"
+check "...and doesn't offer pen's test recipe" not contains "pen-test" "$("$PEN" --tool list </dev/null)"
+for bad in "--tool nope" "--tool=nope:1 ls" "--tool" "--tool list ls"; do
+  rc=0; out=$("$PEN" $bad 2>&1 </dev/null) || rc=$?
+  check "pen $bad is a usage error (exit 2), before any session" bash -c '[ "$1" = 2 ] && grep -q "^pen: --tool" <<<"$2"' _ "$rc" "$out"
+done
+rc=0; out=$("$PEN" --tool 'pen-test:$(touch /tmp/x)' 2>&1 </dev/null) || rc=$?
+check "a shell-like tool version is refused by the recipe's regex in the AOT build" bash -c '[ "$1" = 2 ] && grep -qF "isn'"'"'t a valid version of pen-test" <<<"$2"' _ "$rc" "$out"
+rc=0; out=$("$PEN" --tool pen-test:1 allow 2>&1 </dev/null) || rc=$?
+check "--tool with a subcommand is a usage error" bash -c '[ "$1" = 2 ] && grep -qF -- "--tool goes only with a command to run, not pen allow" <<<"$2"' _ "$rc" "$out"
+check "pen --tool leaves the session as it was: nothing is installed" contains "[no tool]" "$("$PEN" --tool pen-test run sh -c 'test -e /opt/pen-test || echo "[no tool]"' </dev/null 2>/dev/null)"
 
 check "refuses \$HOME" refuse "$HOME" "home directory"
 check "refuses /" refuse / "refusing to run in /"
@@ -574,6 +586,18 @@ rm .pen/config.toml
 fake_config "ports = [3000]"
 check "ports in ~/.config/pen/config.toml is refused, pointing to .pen/config.toml" \
   contains '~/.config/pen/config.toml: "ports" belongs in .pen/config.toml (or use pen --port)' "$(fake_pen run true 2>&1 || true)"
+fake_config 'tools = ["pen-test:1"]'
+check "tools in ~/.config/pen/config.toml is accepted" fake_pen run true
+check "...and a version --tool can't coexist with is refused" contains "pen-test:1 and pen-test:2 can't be used together" "$(fake_pen --tool pen-test:2 run true 2>&1 || true)"
+printf 'tools = ["pen-test:2"]\n' >.pen/config.toml
+check "...as is one from .pen/config.toml" contains "pen-test:1 and pen-test:2 can't be used together" "$(fake_pen run true 2>&1 || true)"
+printf 'tools = ["pen-test:01"]\n' >.pen/config.toml
+check "...but the same version, however spelled, is fine" fake_pen --tool pen-test run true
+printf 'tools = ["nope"]\n' >.pen/config.toml
+check "an unknown tool in .pen/config.toml is refused, naming the file" contains '.pen/config.toml: tools: unknown tool "nope"' "$(pen_run true 2>&1 || true)"
+printf 'tools = ["pen-test:1;id"]\n' >.pen/config.toml
+check "...and so is a shell-like version" contains ".pen/config.toml: tools: \"1;id\" isn't a valid version of pen-test" "$(pen_run true 2>&1 || true)"
+rm .pen/config.toml
 fake_config "# empty"
 echo "allow = example.com" >.pen/config
 check "a legacy .pen/config is refused with a pointer to the new files" contains ".pen/config is pen's old config format" "$(pen_run true 2>&1 || true)"

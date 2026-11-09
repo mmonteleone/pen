@@ -12,7 +12,7 @@ internal enum ConfigKind { User, Project }
 /// config.toml in a config directory (~/.config/pen/ or a project's .pen/),
 /// which may be missing. TOML errors name the file and line; pen's own checks
 /// name the file and key. Keys are either user-only or project-only, except
-/// allow, whose lists are appended (defaults, user, project).
+/// allow and tools, whose lists are appended (defaults, user, project; user, project, --tool).
 /// </summary>
 internal sealed partial class Config
 {
@@ -32,6 +32,8 @@ internal sealed partial class Config
     public bool? Docker { get; private set; }
     /// <summary>ports = [3000, …]: ports to forward from the host's 127.0.0.1, in file order without duplicates (project only).</summary>
     public List<int> Ports { get; } = [];
+    /// <summary>tools = ["name", "name:version", …], validated against the recipes and canonical (both).</summary>
+    public IReadOnlyList<ToolSpec> Tools { get; private set; } = [];
 
     public static Config Empty { get; } = new();
 
@@ -68,8 +70,8 @@ internal sealed partial class Config
         catch (FileNotFoundException) { return null; }
     }
 
-    /// <summary>Parses config.toml text. <paramref name="displayPath"/> names the file in errors.</summary>
-    public static Config Parse(string text, string displayPath, ConfigKind kind)
+    /// <summary>TOML text as its untyped table. <paramref name="displayPath"/> names the file in errors.</summary>
+    internal static TomlTable ParseToml(string text, string displayPath)
     {
         // Validating the syntax tree first enforces the whole TOML spec (e.g.
         // a key or table defined twice), with line numbers; the model built
@@ -80,16 +82,20 @@ internal sealed partial class Config
             if (d.Kind == Tomlyn.Syntax.DiagnosticMessageKind.Error)
                 throw new PenException($"{displayPath}:{d.Span.Start.Line + 1}: {Out.Field(d.Message)}");
         }
-        TomlTable table;
         try
         {
-            table = TomlSerializer.Deserialize(text, TomlContext.Default.TomlTable) ?? new TomlTable();
+            return TomlSerializer.Deserialize(text, TomlContext.Default.TomlTable) ?? new TomlTable();
         }
         catch (TomlException e)
         {
             throw new PenException($"{displayPath}: {Out.Field(e.Message)}");
         }
+    }
 
+    /// <summary>Parses config.toml text. <paramref name="displayPath"/> names the file in errors.</summary>
+    public static Config Parse(string text, string displayPath, ConfigKind kind)
+    {
+        var table = ParseToml(text, displayPath);
         var config = new Config();
         var userFile = "~/.config/pen/" + FileName;
         var projectFile = ".pen/" + FileName;
@@ -134,7 +140,7 @@ internal sealed partial class Config
                     foreach (var (name, v) in Table(value, key, Error))
                     {
                         if (!EnvNameRegex().IsMatch(name)) throw Error($"env.{name}: \"{name}\" isn't a valid environment variable name");
-                        if (ReservedEnv.Contains(name) || name.StartsWith("PEN_", StringComparison.OrdinalIgnoreCase) || name.StartsWith("GIT_CONFIG", StringComparison.OrdinalIgnoreCase))
+                        if (IsReservedEnv(name))
                             throw Error($"env.{name}: {name} is set by pen and can't be overridden");
                         config.Env.Add(new(name, String(v, $"env.{name}", Error)));
                     }
@@ -160,6 +166,19 @@ internal sealed partial class Config
                     }
                     break;
 
+                case "tools":
+                    if (value is not TomlArray toolSpecs) throw Error("tools must be a list of tools, e.g. tools = [\"name\", \"name:version\"]");
+                    var parsed = new List<ToolSpec>();
+                    foreach (var t in toolSpecs)
+                    {
+                        if (t is not string spec) throw Error($"tools: {t?.ToString() ?? "null"} isn't a tool (use name or name:version, in quotes)");
+                        if (ToolSpec.TryParse(spec, RecipeCatalog.Embedded, out var tool) is { } invalid) throw Error($"tools: {invalid}");
+                        parsed.Add(tool);
+                    }
+                    if (ToolSpec.TryCanonicalize(parsed, RecipeCatalog.Embedded, out var canonical) is { } conflict) throw Error($"tools: {conflict}");
+                    config.Tools = canonical;
+                    break;
+
                 default:
                     throw Error($"unknown key \"{key}\"");
             }
@@ -167,17 +186,20 @@ internal sealed partial class Config
         return config;
     }
 
-    private static TomlTable Table(object value, string key, Func<string, PenException> error) =>
+    internal static bool IsReservedEnv(string name) =>
+        ReservedEnv.Contains(name) || name.StartsWith("PEN_", StringComparison.OrdinalIgnoreCase) || name.StartsWith("GIT_CONFIG", StringComparison.OrdinalIgnoreCase);
+
+    internal static TomlTable Table(object value, string key, Func<string, PenException> error) =>
         value as TomlTable ?? throw error($"{key} must be a table ([{key}])");
 
-    private static string String(object value, string key, Func<string, PenException> error) =>
+    internal static string String(object value, string key, Func<string, PenException> error) =>
         value is string s && s.Length > 0 ? s : throw error($"{key} must be a non-empty string (in quotes)");
 
     [GeneratedRegex(@"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\z")]
     internal static partial Regex OwnerRegex();
 
     [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]*$")]
-    private static partial Regex EnvNameRegex();
+    internal static partial Regex EnvNameRegex();
 
     /// <summary>
     /// Creates ~/.config/pen/ and, each only when missing, its config.toml

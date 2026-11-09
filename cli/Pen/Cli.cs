@@ -1,16 +1,18 @@
 namespace Pen;
 
-internal enum CommandKind { Run, Upgrade, Allow, Trust, Sign, Reset, Ps, Prune, Help, Version }
+internal enum CommandKind { Run, Upgrade, Allow, Trust, Sign, Reset, Ps, Prune, Help, Version, ToolList }
 
 /// <summary>
 /// A parsed command line. For Run, Args is the command to run in the sandbox
 /// (empty: a shell); for Allow, the domains (lowercased); for Sign, the base, if given;
 /// for Help, the subcommand to describe, if any.
 /// Defaults: pen allow --defaults. Yes, List: pen trust --yes, --list. Ports: pen --port, in order without duplicates.
+/// Tools: pen --tool, canonical.
 /// </summary>
 internal sealed record Command(CommandKind Kind, IReadOnlyList<string> Args, bool Clean = false, bool Global = false, bool Docker = false, bool Defaults = false, bool Yes = false, bool List = false)
 {
     public IReadOnlyList<int> Ports { get; init; } = [];
+    public IReadOnlyList<ToolSpec> Tools { get; init; } = [];
 }
 
 internal static class Cli
@@ -24,6 +26,10 @@ internal static class Cli
                                     --docker: with Docker-in-Docker (or docker = true in .pen/config.toml)
                                     --port <n>: forward localhost:<n> to the sandbox (repeatable;
                                     or ports = [<n>, …] in .pen/config.toml)
+                                    --tool <spec>: a tool, as name or name:version (repeatable;
+                                    or tools = […] in either config.toml). Checked only:
+                                    sessions don't install tools yet
+          pen --tool list           list the tools pen can install
           pen upgrade [--clean]     newer base image and agents; --clean skips the cache
           pen allow <domain…> [--global]
                                     allow domains, applied to running sessions too
@@ -41,8 +47,8 @@ internal static class Cli
     public static readonly Dictionary<string, string> SubcommandHelp = new(StringComparer.Ordinal)
     {
         ["run"] = """
-            usage: pen [--docker] [--port <n>]… [<cmd…>]
-                   pen [--docker] [--port <n>]… run [--] <cmd…>
+            usage: pen [--docker] [--port <n>]… [--tool <spec>]… [<cmd…>]
+                   pen [--docker] [--port <n>]… [--tool <spec>]… run [--] <cmd…>
 
             Runs a command in this project's sandbox, or an interactive shell when there's
             none, e.g. pen claude, pen codex, pen run npm ci. Everything after the command's
@@ -58,6 +64,10 @@ internal static class Cli
                          sandbox (repeatable); ports = [<n>, …] in .pen/config.toml does
                          this for every session. A server in the sandbox must listen on
                          0.0.0.0, not only localhost
+              --tool <spec>
+                         a tool, as name or name:version (repeatable); tools = […] in
+                         either config.toml adds to these, and pen --tool list shows what's
+                         available. Checked only: sessions don't install tools yet
             """,
         ["upgrade"] = """
             usage: pen upgrade [--clean]
@@ -153,8 +163,8 @@ internal static class Cli
 
     /// <summary>
     /// A first argument that's a subcommand selects it; any other first argument
-    /// is the command to run. Options before the command are pen's: --docker and
-    /// --port (for running), help and version. Any other one is an error.
+    /// is the command to run. Options before the command are pen's: --docker,
+    /// --port and --tool (for running), help and version. Any other one is an error.
     /// </summary>
     public static Command Parse(IReadOnlyList<string> args)
     {
@@ -162,6 +172,7 @@ internal static class Cli
         string? runOption = null;
         var docker = false;
         var ports = new List<int>();
+        var tools = new List<ToolSpec>();
         var i = 0;
         while (i < args.Count)
         {
@@ -180,8 +191,23 @@ internal static class Cli
                 if (!ports.Contains(port)) ports.Add(port);
                 i += a == "--port" ? 2 : 1;
             }
+            else if (a == "--tool" || a.StartsWith("--tool=", StringComparison.Ordinal))
+            {
+                var value = a == "--tool" ? (i + 1 < args.Count ? args[i + 1] : null) : a["--tool=".Length..];
+                if (value == null) throw Error("--tool: missing the tool (name or name:version)");
+                if (value == "list")
+                {
+                    if (args.Count != (a == "--tool" ? 2 : 1)) throw Error("--tool list takes nothing else");
+                    return new(CommandKind.ToolList, []);
+                }
+                if (ToolSpec.TryParse(value, RecipeCatalog.Embedded, out var tool) is { } invalid) throw Error($"--tool: {invalid}");
+                tools.Add(tool);
+                i += a == "--tool" ? 2 : 1;
+            }
             else break;
-            runOption ??= a.StartsWith("--port", StringComparison.Ordinal) ? "--port" : a;
+            runOption ??= a.StartsWith("--port", StringComparison.Ordinal) ? "--port"
+                : a.StartsWith("--tool", StringComparison.Ordinal) ? "--tool"
+                : a;
         }
         if (runOption != null)
         {
@@ -191,7 +217,8 @@ internal static class Cli
                 throw Error(after.Count > 0 && Subcommands.ContainsKey(after[0])
                     ? $"{runOption} goes only with a command to run, not pen {after[0]}"
                     : $"{runOption} goes only with a command to run");
-            return c with { Docker = docker, Ports = ports };
+            if (ToolSpec.TryCanonicalize(tools, RecipeCatalog.Embedded, out var canonical) is { } conflict) throw Error($"--tool: {conflict}");
+            return c with { Docker = docker, Ports = ports, Tools = canonical };
         }
         if (args.Count == 0) return new(CommandKind.Run, []);
         var first = args[0];
