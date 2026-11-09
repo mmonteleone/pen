@@ -204,7 +204,10 @@ internal static class Sign
         if (!project.IsRepo) throw new PenException($"{project.Dir} isn't a git repo");
         Session.EnsureRuntimeDir(host, project);
         using var locks = Sessions.TakeForSign(host, project);
-        Session.FinishDeadSessions(project.Key, host.RuntimeDir(project.Key));
+        // This command's own check below takes the module repos there now, so
+        // it can't stand in for an ended session's that didn't finish.
+        if (!Session.FinishDeadSessions(project.Key, host.RuntimeDir(project.Key)))
+            throw new PenException("not signing: deal with the warning above first");
 
         var moved = GitCheck.Run(project.Dir, startedWithGit: true, project.CommonGitDir);
         if (moved.Count > 0)

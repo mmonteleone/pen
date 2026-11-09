@@ -3,6 +3,12 @@ using System.Security.Cryptography;
 
 namespace Pen;
 
+/// <summary>
+/// How ending a session went: whether its .git check finished, and the dir to
+/// give a signing reminder for (null if the check failed or moved something).
+/// </summary>
+internal readonly record struct SessionEndResult(bool CheckFinished, string? ReminderDir);
+
 /// <summary>Session lifecycle: prepare protections, run the agent, stop writers and check Git.</summary>
 internal sealed class Session(HostEnv host, Project project, Config user, Config projectConfig)
 {
@@ -20,7 +26,11 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         EnsureRuntimeDir(host, project);
         using var locks = Sessions.TakeForSession(RuntimeDir, project);
 
-        FinishDeadSessions(project.Key, RuntimeDir);
+        // A check that didn't finish vouches for nothing: starting now would take
+        // the module repos there as this session's baseline, and its end would
+        // run git in the directory just warned about.
+        if (!FinishDeadSessions(project.Key, RuntimeDir))
+            throw new PenException("not starting: deal with the warning above first");
 
         RepoGuard.CheckAtStart(project.Dir);
         var mounts = RepoGuard.PrepareMounts(project.Dir, host.Home);
@@ -121,7 +131,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
             signals.Child = null;
         }
 
-        End(session);
+        EndAndRemind(session);
         return exitCode;
     }
 
@@ -194,8 +204,11 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
     /// docker session dind with it, since containers inside dind can write to
     /// the project until it's gone. Then the stack, then the session's files
     /// except proxy.log. The caller holds the session's lock and releases it after.
+    /// A check that can't finish doesn't stop any of this: it warns, and the
+    /// session ends. End never runs git itself: whether that's safe can depend
+    /// on other sessions' checks in the same repo, so the caller decides.
     /// </summary>
-    internal static void End(SessionDir session)
+    internal static SessionEndResult End(SessionDir session)
     {
         var env = session.ReadEnv();
         var failures = new List<string>();
@@ -208,17 +221,13 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         if (failures.Count > 0)
             throw new PenException($"{string.Join("\n", failures)}\nsession {session.Id} is retained for retry by the next pen command here; Git has not been checked");
 
-        // The .git check, now that the agent is gone and before anything runs
-        // git. pen's own git call (the unsigned-commit count) only runs when
-        // the check moved nothing.
-        string? reminder = null;
+        // The .git check, now that the agent is gone and before anything runs git.
+        var result = new SessionEndResult(true, null);
         if (env.TryGetValue("PROJECT_DIR", out var projectDir))
         {
-            var (startedWithGit, commonGitDir) = session.ReadGit();
-            // A session from a pen that didn't record its module repos keeps none.
-            var moved = GitCheck.Run(projectDir, startedWithGit, commonGitDir, session.ReadModules() ?? []);
-            if (moved.Count > 0) Out.Raw(GitCheck.Warning(projectDir, moved));
-            else reminder = Sign.Reminder(projectDir);
+            var check = GitCheck.RunAtSessionEnd(projectDir, session);
+            GitCheck.Report(projectDir, check);
+            result = new(check.Failure == null, check.Failure == null && check.Moved.Count == 0 ? projectDir : null);
         }
 
         // What the session ended up allowing (pen allow may have added to it),
@@ -248,6 +257,22 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
             var line = Allowlist.BlockedLine(blocked);
             if (line != null) Out.Line(line);
         }
+        return result;
+    }
+
+    /// <summary>The end path for a session that's the only one this command is ending.</summary>
+    internal static SessionEndResult EndAndRemind(SessionDir session)
+    {
+        var result = End(session);
+        Remind(result);
+        return result;
+    }
+
+    /// <summary>Runs pen's own git call (the unsigned-commit count), so only once no check has failed.</summary>
+    private static void Remind(SessionEndResult result)
+    {
+        if (result.ReminderDir == null) return;
+        var reminder = Sign.Reminder(result.ReminderDir);
         if (reminder != null) Out.Line(reminder);
     }
 
@@ -267,12 +292,16 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
     /// <summary>
     /// Runs the end path for every session that still has a compose.yaml but
     /// whose lock nobody holds (its pen crashed or was killed), and deletes
-    /// ended sessions' dirs after <see cref="KeepEndedSessions"/>.
+    /// ended sessions' dirs after <see cref="KeepEndedSessions"/>. Returns false
+    /// if one's .git check didn't finish: the caller must not run git then, and
+    /// neither does this. These sessions may share a repo, so their reminders
+    /// wait until every check has finished.
     /// </summary>
-    internal static void FinishDeadSessions(string projectKey, string runtimeDir)
+    internal static bool FinishDeadSessions(string projectKey, string runtimeDir)
     {
         var sessions = System.IO.Path.Combine(runtimeDir, "sessions");
-        if (!Directory.Exists(sessions)) return;
+        if (!Directory.Exists(sessions)) return true;
+        var ended = new List<SessionEndResult>();
         foreach (var path in Directory.EnumerateDirectories(sessions))
         {
             var s = new SessionDir(projectKey, path);
@@ -281,7 +310,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
                 using var l = FileLock.TryTake(s.LockFile, exclusive: true);
                 if (l == null || !s.IsOpen) continue; // running, or ended while we looked
                 Out.Line($"ending session {s.Id}, whose pen exited without ending it");
-                End(s);
+                ended.Add(End(s));
             }
             else if (DateTime.UtcNow - LastActivity(path) > KeepEndedSessions)
             {
@@ -290,6 +319,9 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
                 catch (UnauthorizedAccessException) { }
             }
         }
+        if (ended.Any(e => !e.CheckFinished)) return false;
+        foreach (var e in ended) Remind(e);
+        return true;
     }
 
     private static DateTime LastActivity(string dir)

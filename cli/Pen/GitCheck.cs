@@ -6,6 +6,12 @@ namespace Pen;
 internal sealed record Quarantined(string From, string To, string Why, (string From, string To)? Inner = null);
 
 /// <summary>
+/// How a session-end check went: what it renamed before it stopped, and why it
+/// couldn't finish (null if it did). Git is only safe to run if Failure is null.
+/// </summary>
+internal sealed record CheckResult(List<Quarantined> Moved, string? Failure);
+
+/// <summary>
 /// The session-end .git check. It reads
 /// files directly and never runs git, and it renames whatever would make host
 /// git read config or hooks the agent could write, before the shell prompt
@@ -29,7 +35,47 @@ internal static class GitCheck
     public static List<Quarantined> Run(string dir, bool startedWithGit, string? commonGitDir = null, IReadOnlyCollection<string>? modulesAtStart = null)
     {
         var moved = new List<Quarantined>();
-        if (!Directory.Exists(dir)) return moved;
+        Check(dir, startedWithGit, commonGitDir, modulesAtStart, moved);
+        return moved;
+    }
+
+    /// <summary>
+    /// The check for a session that's ending, against what the session recorded
+    /// at its start. Never throws: whatever goes wrong here (or in code it
+    /// reaches), a session must still be torn down, and retrying wouldn't help.
+    /// The caller must not run git unless Failure is null.
+    /// </summary>
+    public static CheckResult RunAtSessionEnd(string dir, SessionDir session)
+    {
+        var moved = new List<Quarantined>();
+        try
+        {
+            var (startedWithGit, commonGitDir) = session.ReadGit();
+            // A session from a pen that didn't record its module repos keeps none.
+            Check(dir, startedWithGit, commonGitDir, session.ReadModules() ?? [], moved);
+            return new(moved, null);
+        }
+        catch (Exception e)
+        {
+            return new(moved, Describe(e));
+        }
+    }
+
+    /// <summary>
+    /// An exception as text for the user. The AOT build (UseSystemResourceKeys)
+    /// has framework exceptions' messages as raw resource keys, so only pen's
+    /// own are shown as they are.
+    /// </summary>
+    private static string Describe(Exception e) => e switch
+    {
+        PenException => e.Message,
+        UnauthorizedAccessException u => Out.PermissionDenied(u),
+        _ => e.GetType().Name,
+    };
+
+    private static void Check(string dir, bool startedWithGit, string? commonGitDir, IReadOnlyCollection<string>? modulesAtStart, List<Quarantined> moved)
+    {
+        if (!Directory.Exists(dir)) return;
 
         var git = Path.Combine(dir, ".git");
         HashSet<string> known = [];
@@ -58,7 +104,6 @@ internal static class GitCheck
             };
             Move(n.Path, why, moved, breakLayout: n.Kind == NestedKind.GitDir);
         }
-        return moved;
     }
 
     /// <summary>
@@ -169,6 +214,21 @@ internal static class GitCheck
             }
         }
         return sb.ToString().TrimEnd('\n');
+    }
+
+    /// <summary>The loud warning for a check that couldn't vouch for <paramref name="dir"/>: <paramref name="why"/> says what stopped it.</summary>
+    public static string NotCheckedWarning(string dir, string why) =>
+        $"""
+        pen: WARNING: git wasn't checked: don't run git here ({dir}).
+        pen: The check for files that make git on this machine run code from the sandbox couldn't finish: {why}
+        pen: Your shell prompt and IDE may run git too, so keep them out of this directory. Inspect its .git (config, hooks, modules) and any repos nested in it by hand first.
+        """;
+
+    /// <summary>Prints what a session-end check found: first what it renamed, then that it didn't finish.</summary>
+    public static void Report(string dir, CheckResult check)
+    {
+        if (check.Moved.Count > 0) Out.Raw(Warning(dir, check.Moved));
+        if (check.Failure != null) Out.Raw(NotCheckedWarning(dir, check.Failure));
     }
 
     private static string Quote(string s) => "'" + s.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
