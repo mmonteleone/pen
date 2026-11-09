@@ -156,8 +156,9 @@ Optional, in the project's `.pen/` directory (read-only inside the sandbox):
    && rm -rf /var/lib/apt/lists/*
   ```
 
-An agent can write a `.pen/` for a later session (in a worktree inside the project, say), so a
-session asks before using what's new there, and doesn't start if you decline:
+A cloned repo can come with a `.pen/`, and an agent can write one for a later session (in a worktree
+inside the project, say), so a session asks before using what's new there, and doesn't start if you
+decline:
 
 - `allow` domains not already allowed;
 - `docker = true`;
@@ -171,13 +172,15 @@ session asks before using what's new there, and doesn't start if you decline:
 refuses instead. `pen trust` reviews and approves the same list, `pen trust --yes` without asking.
 A long list of domains is cut short; `pen trust --list` shows everything.
 Domains you add with `pen allow <domain>` count as approved, and unapproved ones never reach a
-running session's allowlist. Approvals are per directory, kept in pen's state directory, so a new
-worktree starts with none.
+running session's allowlist. `pen upgrade` skips a `.pen/Dockerfile` that isn't approved. Approvals are
+per directory, kept in pen's state directory, so a new worktree starts with none.
 
 ## Git in the sandbox
 
-Everyday git works inside: commit, branch, merge, rebase, fetch, worktrees. `.git/config` and
-`.git/hooks` are read-only, so these must run on the host:
+Everyday git works inside: commit, branch, merge, rebase, fetch, worktrees. Don't also run git on the
+host while a session runs: [`.git` is untrusted until it ends](#while-a-session-runs). `.git/config` and
+`.git/hooks` are mounted read-only, though [a case-insensitive filesystem or a `core.hooksPath` in the
+repo](#at-session-start) gets around that. So these must run on the host, between sessions:
 
 - `git init` for a new project;
 - `git config`, `git remote add`, setting upstreams, deleting branches, hook installers (husky);
@@ -193,14 +196,17 @@ A linked worktree (`git worktree add ../feat -b feat`) is a repo root too, so yo
 per branch in parallel. All worktrees of a repo are one project: they share its logins, caches,
 `pen reset` and the one-`--docker`-session limit. Each worktree has its own `.pen/`, so `pen allow`
 in one applies only to that worktree. In the sandbox, a worktree sees the repo's shared git data
-(objects, branches) but not the main checkout's files. Worktrees of a bare repo aren't supported.
+(objects, branches) but not the main checkout's files. It can write that data, so a session in one
+worktree makes [host git unsafe](#while-a-session-runs) in all of them and in the main checkout.
+Worktrees of a bare repo aren't supported.
 
 ### Submodules
 
 Set submodules up on the host (`git submodule update --init --recursive`). In the sandbox, the
 agent can commit inside a submodule and commit the bump in the parent repo. Each submodule's config
-and hooks are read-only like the parent's. Only the `origin` owner's GitHub token is available, so
-submodules from another owner can be fetched only if they're public.
+and `hooks` directory are mounted read-only like the parent's, with the same
+[gaps](#at-session-start), and a submodule's `core.hooksPath` gets no warning. Only the `origin` owner's
+GitHub token is available, so submodules from another owner can be fetched only if they're public.
 
 A submodule whose checkout has its own `.git` directory (made by older git, or by cloning in place
 before `git submodule add`) is refused: `git submodule absorbgitdirs` on the host moves it into the
@@ -211,12 +217,18 @@ parent's `.git/modules/`.
 There's no signing key in the sandbox, so agent commits are unsigned. After reviewing them, run
 `pen sign` on the host: it re-creates `<base>..HEAD` with your signature, keeping trees, authors
 and messages, using your normal git signing setup. The base defaults to the upstream branch,
-falling back to `origin/HEAD`. It refuses to touch commits that are already pushed.
+falling back to `origin/HEAD`. It refuses to touch commits that are already pushed, or commits whose
+headers aren't in the form git writes, since they could be re-created wrongly. It refuses while a
+session runs in the same directory. It doesn't refuse for a session in another worktree of the repo, but
+[you should wait for that one too](#while-a-session-runs).
 
 Commits whose signature verifies under your global git config are kept, unless a commit below them
-changes. A signature only verifies if your global config can check it: for SSH signing, set
-`gpg.ssh.allowedSignersFile` to an absolute path, or each `pen sign` re-signs everything and changes
-the hashes again (pen says so when this happens). Settings in the repo's own config don't count.
+changes. A `gpgsig` header alone doesn't count: a commit the agent forged is re-signed. Settings in the
+repo's own config don't count either, so a repo can't make its own key verify. `gpg.minTrustLevel` is
+`marginal` unless you set it globally. A signature only verifies if your global config can check it:
+for SSH signing, set `gpg.ssh.allowedSignersFile` globally to a path outside the repo (absolute or
+`~/…`), or each `pen sign` re-signs everything and changes the hashes again. pen says so when this
+happens, and how to fix it.
 
 Turning on "Require signed commits" on GitHub catches a forgotten `pen sign` at push time.
 
@@ -243,7 +255,8 @@ or set `docker = true` in `.pen/config.toml`. The session gets its own Docker da
 - Published ports are at `dind:<port>`, not `localhost`, and only the sandbox reaches them.
 - Containers get proxy env vars. Add service names (e.g. `api`) to `NO_PROXY` in compose files.
 - On rootful Linux, files containers write to the project are owned by root. Pass `--user`.
-- The daemon runs privileged, so isolation is weaker while it's on.
+- The daemon runs privileged, and the agent has full control of it, so isolation is weaker and
+  [the git protections don't hold](#docker-in-docker-and-the-git-protections) while it's on.
 
 ## Upgrading and resetting
 
@@ -270,7 +283,8 @@ standalone installs will use a replacement release binary. See the
 ## Limitations
 
 pen guards against an unattended agent doing damage by accident or via prompt injection. It is not
-a defense against a deliberate container escape.
+a defense against a deliberate container escape. Its git protections are best-effort: they cover
+known ways to make host git run code, and there may be others.
 
 - Allowed domains (including AI providers and GitHub) can still be used to exfiltrate data.
 - The project is mounted read-write: the agent can delete files, uncommitted work and unpushed
@@ -280,20 +294,71 @@ a defense against a deliberate container escape.
   committing on the host.
 - `.gitmodules` is a project file the agent can edit, and host `git submodule` commands clone the
   URLs and paths it names. Review `.gitmodules` diffs before running submodule commands on the host.
-- Docker-in-Docker weakens isolation.
+- Docker-in-Docker [undoes the git protections](#docker-in-docker-and-the-git-protections).
+- Credentials are passed through as they are. [A write-capable GitHub token](#github) allows writes to
+  GitHub from the sandbox.
+- pen removes control characters from what it prints, so a file name can't rewrite a warning. The
+  agent's own output reaches your terminal directly during a session, though, and pen doesn't reset
+  the terminal afterwards, so an agent can leave conceal or the alternate screen on and hide what pen
+  prints next.
+
+### While a session runs
+
+`.git` is untrusted while a session runs. Don't run git on the host in that repo until pen exits: not in
+the project, the main checkout or any linked worktree. An IDE's git integration and a git-aware shell
+prompt count, since they run git on their own, so keep them out of the directory too.
+
+Not everything git reads can be protected in advance. For example, a `.git/commondir` file makes git
+read its config and hooks from another directory, and it can't be mounted read-only ahead of time
+because an empty one breaks git. An agent can write one pointing into the project, and the next host
+`git status` runs what it planted there. The session-end check moves it aside, but nothing stops it
+before then. [The host precautions below](#host-precautions) don't help with this.
+
+The same goes for `pen sign` in another worktree, which pen allows, as it only refuses for a session in
+its own directory. Its git calls turn off hooks and `core.fsmonitor`, but the agent can still change the
+commits and other git data it reads. Wait for every session in the repo to end first.
+
+### At session start
+
+pen warns at the start of every session about two things it doesn't block.
+
+**Case-insensitive filesystems** (macOS's default). A single file mounted read-only can still be written
+under another spelling of its name: writing `.git/CONFIG` changes `.git/config`. pen creates a temporary
+file in the repo's git dir and looks for its upper-case name, and warns if it finds it or can't tell.
+The session-end check puts such a file back, but host git would read it until then, which is one more
+reason not to run it. Directory mounts (`.git/hooks`, `.pen/`) held under other spellings in the smoke
+suite's check in a real session. That has only been run on OrbStack, not on Docker Desktop.
+
+**`core.hooksPath` in the repo.** Only `.git/hooks` is mounted read-only. If `core.hooksPath` leads anywhere else
+in the project or git dir, such as Husky's `.husky`, those hooks are ordinary files the agent can
+change, and git on the host will run them. A read-only mount wouldn't help much, since a hook can run
+any project file, so pen warns and does nothing else. It reads the setting as git does, through system,
+global and repo config and their includes, and also warns if it can't tell where the path leads. Check
+those hooks before running git on the host. pen's own git calls never run hooks.
+
+This warning covers the main repo only. A submodule whose `core.hooksPath` is `.husky`, say, gets no
+warning, though the agent can change those hooks too and host git in that submodule runs them.
+
+### At session end
 
 A directory or symlink whose name isn't valid UTF-8 (possible on Linux) can't be checked for a repo inside
 it, so pen refuses to start until it's renamed or removed, and at session end reports that git wasn't
-checked instead of moving it. Plain files with such names, such as legacy Latin-1 ones, are fine.
+checked instead of moving it. Plain files with such names, such as legacy Latin-1 ones, are fine in the
+project. In `.git/modules` and `.git/worktrees` anything with such a name is refused, plain files too.
 
-At session start pen saves copies of the git files it mounts read-only one by one (`config`,
+At session start pen saves copies of these files, which it mounts read-only one by one: `config`,
 `config.worktree`, included config files, `commondir` and a worktree's `.git` file, including those of
-submodule repos), and refuses to start if one isn't a regular file of at most 1 MB. At session end,
-any that changed is put back, with the changed version kept as `….pen-quarantine` and a warning that
+submodule repos. It refuses to start if one isn't a regular file of at most 1 MB. (A linked worktree
+also gets the main checkout's `HEAD` and `index` mounted read-only. They aren't saved or compared, since
+they change legitimately.) At session end, any that changed is put back, with the changed version kept as `….pen-quarantine` and a warning that
 says how to restore it. That includes changes you made on the host during the session, such as
-`git config`, so make those between sessions.
+`git config`, so make those between sessions. The comparison covers those single files only: nothing
+compares what's in a `hooks` directory or `.pen/`, which rely on their read-only mounts.
+
 If a file can't be put back, pen says so, prints the command that fixes it, keeps its copies and
-refuses new sessions until that works.
+refuses new sessions until that works. When the agent made a directory unreadable, that command fixes
+the mode and runs `pen true` to retry. Run it as printed, on one line. With `chmod` on a line of its own,
+a shell prompt that shows dirty state through `git-prompt.sh` runs planted code before pen has looked.
 
 Also at session end, pen quarantines any `config.worktree` in the git dir, its worktree entries and
 submodule repos that wasn't there when the session started, or that first appeared while another
@@ -304,13 +369,64 @@ the host, loses the `config.worktree` git copies into it, and the warning says h
 mention them. A session moves what it made when it ends, so one can only be there while a session is still running in
 another worktree. pen sign's own git commands turn off `core.fsmonitor` and hooks; your own git in such a worktree isn't protected until that session ends.
 
+At session end and in `pen sign`, pen warns about paused rebases, `git am`s, cherry-picks and reverts
+(`rebase-merge`, `rebase-apply`, `sequencer`) in the git dir, its worktree entries and submodule repos.
+They may be yours, so they stay where they are, but the sandbox could have written them, and continuing
+one runs what it says on your machine. The warning lists the `exec` lines in a rebase's todo, any merge
+strategy that isn't one of git's own (git runs it as a program) and options for `git apply`. A short
+entry doesn't mean it's safe: pen can't vouch for what a pick brings in, or the text a reword opens in
+your editor. Inspect each one before `git rebase --continue` or `--skip`, or the same for the others.
+
+One case can't wait for that. git's own `git-prompt.sh` puts some of those state files into the prompt,
+and where the shell expands the prompt (bash's `PROMPT_COMMAND` mode, zsh's `PROMPT_SUBST`), planted
+content runs at the next prompt with no git command typed. So a `msgnum`, `end`, `next`, `last` or
+`head-name` holding what git wouldn't have written is quarantined like the files above, and `pen sign`
+stops when it does this. A real rebase's files stay. This is tested with `git-prompt.sh`
+in bash and zsh. Other prompts, such as starship or oh-my-zsh's, aren't tested and may read other files.
+
+If the check can't finish, the session still ends and pen prints "git wasn't checked: don't run git
+here", with what stopped it, and runs no git of its own. Inspect `.git` by hand before running git
+there. pen doesn't remember this: the warning is printed once, and the next session takes the submodule
+repos it finds as its own, unless the session's copies are still waiting to be put back (as above).
+
+A directory that can be entered but not listed (`chmod 311`) is refused at session start. At session
+end pen adds `u+rx`, scans it as usual and says it did. In the project, a directory that can't be
+entered at all (`chmod 000`, or a root-owned database directory) is allowed, since host git can't get in
+either, so pen can't see a repo planted in one. Inspect it before you fix its mode and run git there.
+
+The git dir is stricter. An unreadable directory under `.git/modules` is refused at session start and
+quarantined at session end, and an unreadable `.git` is refused at start and "wasn't checked" at the end.
+
+### Docker-in-Docker and the git protections
+
+With `--docker`, the agent controls a privileged daemon. A container it starts with
+`--privileged --pid=host` can use `nsenter` to unmount pen's read-only mounts and write `.git/config`,
+`.git/hooks` and `.pen/` on the host.
+
+- The session-end check puts `.git/config` and the other single files above back.
+- Nothing checks hooks, so one written this way runs on the host with no warning. Read `.git/hooks` and
+  each submodule's `hooks` under `.git/modules` before running git on the host.
+- A changed `.pen/` was still [asked about](#project-settings) when tested with `allow` and `docker`. So
+  are `github_owner` and `.pen/Dockerfile`. `ports` is never asked about. Approvals are kept outside the
+  project, but don't rely on them here: a privileged inner container may be able to reach the Docker VM,
+  which hasn't been tested.
+
+### Host precautions
+
 pen moves nested repos aside at session end, but during a session the agent can create one, with
-its own config and hooks, that host tools would run git in. To close that gap, on the host:
+its own config and hooks, that host tools would run git in. Two settings on the host narrow this. Neither
+makes host git safe while a session runs.
 
 ```
 git config --global safe.bareRepository explicit
 ```
 
-and in VS Code, set `git.autoRepositoryDetection` to `false` or `openEditors` so it doesn't scan
-subfolders for repos.
+This stops git from using a bare-shaped repo it discovers, which needs nothing more than a directory
+that looks like one. It doesn't stop a nested repo with an ordinary `.git`: git in there still runs its
+planted `core.fsmonitor` and hooks. It doesn't stop [a written `.git/commondir`](#while-a-session-runs)
+either. So don't `cd` into a subdirectory that has appeared with a repo in it until the session ends.
+
+In VS Code, set `git.autoRepositoryDetection` to `false` or `openEditors`. This stops it scanning
+subfolders for repos. With `openEditors`, it still looks for a repo around any file you open, and either
+way it still runs git in the repo you opened, so close that too.
 
