@@ -3,6 +3,12 @@ using System.Net.Sockets;
 
 namespace Pen.Tests;
 
+/// <summary>
+/// Runs alone: a child that another test forks in parallel holds every open fd
+/// until it execs, so a closed listener can stay bound for that moment. It also
+/// keeps other tests from being handed a port these have just released.
+/// </summary>
+[Collection(nameof(LockAndProcessTests))]
 public class PortTests
 {
     private static (List<int> Forwarded, List<string> Warnings) Choose(IReadOnlyList<Port> ports, params int[] taken)
