@@ -5,6 +5,20 @@ public class CliTests
     private static Command P(params string[] args) => Cli.Parse(args);
 
     [Fact]
+    public void AnIOExceptionNothingHandledIsOneCleanLine_AndBugsStillThrow()
+    {
+        Assert.Equal(0, Program.Guarded(() => 0));
+        Assert.Equal(1, Program.Guarded(() => throw new IOException("IO_SharingViolation_NoFileName")));
+        Assert.Equal(1, Program.Guarded(() => throw new PathTooLongException("IO_PathTooLong")));
+        Assert.Equal(3, Program.Guarded(() => throw new PenException("refused", 3)));
+        Assert.Throws<InvalidOperationException>(() => Program.Guarded(() => throw new InvalidOperationException()));
+
+        var message = Program.FileFailure(new PathTooLongException("IO_PathTooLong"));
+        Assert.StartsWith("a file operation failed (PathTooLongException)", message);
+        Assert.DoesNotContain("IO_PathTooLong", message);
+    }
+
+    [Fact]
     public void NoArgumentsIsAShell()
     {
         var c = P();
