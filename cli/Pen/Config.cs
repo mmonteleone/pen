@@ -78,7 +78,7 @@ internal sealed partial class Config
         foreach (var d in doc.Diagnostics)
         {
             if (d.Kind == Tomlyn.Syntax.DiagnosticMessageKind.Error)
-                throw new PenException($"{displayPath}:{d.Span.Start.Line + 1}: {d.Message}");
+                throw new PenException($"{displayPath}:{d.Span.Start.Line + 1}: {Out.Field(d.Message)}");
         }
         TomlTable table;
         try
@@ -87,7 +87,7 @@ internal sealed partial class Config
         }
         catch (TomlException e)
         {
-            throw new PenException($"{displayPath}: {e.Message}");
+            throw new PenException($"{displayPath}: {Out.Field(e.Message)}");
         }
 
         var config = new Config();
@@ -95,7 +95,7 @@ internal sealed partial class Config
         var projectFile = ".pen/" + FileName;
         foreach (var (key, value) in table)
         {
-            PenException Error(string message) => new($"{displayPath}: {message}");
+            PenException Error(string message) => new($"{displayPath}: {Out.Field(message)}");
             PenException BelongsIn(string file, string? why = null) =>
                 Error($"\"{key}\" belongs in {file}{why}");
 

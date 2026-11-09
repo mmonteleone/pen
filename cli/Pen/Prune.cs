@@ -155,17 +155,17 @@ internal static partial class Prune
             foreach (var e in group) sb.Append("  ").Append(describe(e)).Append('\n');
         }
 
-        Group(Status.Live, "kept, in use:", e => $"{host.Display(e.RecordedDir!)}  ({e.Key})");
+        Group(Status.Live, "kept, in use:", e => $"{Out.Field(host.Display(e.RecordedDir!))}  ({e.Key})");
         Group(Status.Unknown, "kept, project unknown (pen hasn't run there since it began recording projects; run any\n"
                                 + "pen command in it to record it, or remove it by hand):",
             e => e.Key + (e.Volumes.Count > 0 ? $"\n    docker volume rm {string.Join(' ', e.Volumes)}" : "")
                        + (e.Images.Count > 0 ? $"\n    docker image rm {string.Join(' ', e.Images)}" : "")
                        + (e.RuntimeDir != null ? $"\n    rm -r {Quote(host.Display(e.RuntimeDir))}" : ""));
         Group(Status.Moved, "to remove, moved (the dir now belongs to another project):",
-            e => $"{host.Display(e.RecordedDir!)}  ({e.Key}, now {e.CurrentKey}){Contents(e)}");
+            e => $"{Out.Field(host.Display(e.RecordedDir!))}  ({e.Key}, now {e.CurrentKey}){Contents(e)}");
         Group(Status.Missing, "to remove, missing (the dir is gone: if it's on a volume that isn't mounted, mount it\n"
                                 + "and run pen prune again instead):",
-            e => $"{host.Display(e.RecordedDir!)}  ({e.Key}){Contents(e)}");
+            e => $"{Out.Field(host.Display(e.RecordedDir!))}  ({e.Key}){Contents(e)}");
         return sb.ToString().TrimEnd('\n');
     }
 
@@ -216,7 +216,7 @@ internal static partial class Prune
         catch (DirectoryNotFoundException) { }
         catch (Exception x) when (x is IOException or UnauthorizedAccessException)
         {
-            Out.Line($"can't remove {host.Display(runtimeDir)}: {x.Message}");
+            Out.Line($"can't remove {host.Display(runtimeDir)}: {Out.Describe(x)}");
             return false;
         }
         Out.Line($"removed {e.Key}");

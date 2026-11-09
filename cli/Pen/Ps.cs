@@ -16,7 +16,7 @@ internal static partial class Ps
             Out.Line("no sessions running");
             return 0;
         }
-        Console.Out.Write(Render(host, sessions, DateTime.UtcNow));
+        Out.Stdout(Render(host, sessions, DateTime.UtcNow));
         return 0;
     }
 
@@ -28,12 +28,12 @@ internal static partial class Ps
             {
                 var started = s.ReadStarted();
                 return (
-                    Project: s.ReadEnv().TryGetValue("PROJECT_DIR", out var dir) ? host.Display(dir) : "?",
+                    Project: s.ReadEnv().TryGetValue("PROJECT_DIR", out var dir) ? Out.Field(host.Display(dir)) : "?",
                     Started: started,
                     Cells: new[]
                     {
                         "",
-                        s.Id,
+                        Out.Field(s.Id),
                         File.Exists(s.DockerMarker) ? "docker" : "",
                         string.Join(',', s.ReadPorts()),
                         started is { } t ? Age(now - t) : "?",
@@ -72,7 +72,7 @@ internal static partial class Ps
         if (command == null) return "?";
         if (command.Length == 0) return "(shell)";
         var line = string.Join(' ', command.Select(Quote));
-        line = Whitespace().Replace(line, " ");
+        line = Out.Field(Whitespace().Replace(line, " "));
         return line.Length <= MaxCommand ? line : line[..(MaxCommand - 1)] + "…";
     }
 

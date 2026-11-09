@@ -45,7 +45,7 @@ internal sealed record CommitObject(
                 case "author":
                     int lt = value.IndexOf('<');
                     int gt = lt < 0 ? -1 : value.IndexOf('>', lt);
-                    if (gt < 0) throw new PenException($"can't parse commit author \"{value}\"");
+                    if (gt < 0) throw new PenException($"can't parse commit author \"{Out.Field(value)}\"");
                     authorName = value[..lt].TrimEnd();
                     authorEmail = value[(lt + 1)..gt];
                     authorDate = value[(gt + 1)..].Trim();
@@ -74,7 +74,7 @@ internal static class Sign
         {
             var sha = git.TryOut("rev-parse", "--verify", "-q", "--end-of-options", name + "^{commit}");
             if (!string.IsNullOrEmpty(sha)) return (name == "@{upstream}" ? git.TryOut("rev-parse", "--abbrev-ref", name) ?? name : name, sha);
-            if (arg != null) throw new PenException($"\"{arg}\" isn't a commit");
+            if (arg != null) throw new PenException($"\"{Out.Field(arg)}\" isn't a commit");
         }
         return null;
     }
@@ -166,7 +166,7 @@ internal static class Sign
     {
         var r = git.Run("update-ref", "-m", "pen sign", branchRef, newHead, oldHead);
         if (!r.Ok)
-            throw new PenException($"{branchRef} moved while signing, so nothing was changed (the signed commits are unreferenced): {r.Stderr.Trim()}");
+            throw new PenException($"{Out.Field(branchRef)} moved while signing, so nothing was changed (the signed commits are unreferenced): {r.Stderr.Trim()}");
     }
 
     /// <summary>
@@ -198,10 +198,14 @@ internal static class Sign
         return config;
     }
 
+    /// <summary>A commit's line in what pen sign says it will re-sign. The agent wrote the subject.</summary>
+    internal static string Listing(string sha, CommitObject commit) =>
+        $"  {sha[..12]} {Out.Field(commit.Subject)}{(commit.Signed ? " (signed)" : "")}";
+
     /// <summary>The whole pen sign command, run in the project dir on the host.</summary>
     public static int Run(HostEnv host, Project project, string? baseArg)
     {
-        if (!project.IsRepo) throw new PenException($"{project.Dir} isn't a git repo");
+        if (!project.IsRepo) throw new PenException($"{Out.Field(project.Dir)} isn't a git repo");
         Session.EnsureRuntimeDir(host, project);
         using var locks = Sessions.TakeForSign(host, project);
         // This command's own check below takes the module repos there now, so
@@ -221,12 +225,12 @@ internal static class Sign
             ?? throw new PenException("HEAD is detached: check out the branch to sign");
         var head = git.Out("rev-parse", "--verify", "HEAD^{commit}");
         var b = ResolveBase(git, baseArg)
-            ?? throw new PenException($"{branchRef["refs/heads/".Length..]} has no upstream and there's no origin/HEAD: name the base, e.g. pen sign origin/main");
+            ?? throw new PenException($"{Out.Field(branchRef["refs/heads/".Length..])} has no upstream and there's no origin/HEAD: name the base, e.g. pen sign origin/main");
 
         var range = Range(git, b.Commit, head);
         if (range.Count == 0)
         {
-            Out.Line($"nothing to sign: no commits in {b.Name}..HEAD");
+            Out.Line($"nothing to sign: no commits in {Out.Field(b.Name)}..HEAD");
             return 0;
         }
         var pushed = OnARemote(git, b.Commit, head, range);
@@ -236,19 +240,19 @@ internal static class Sign
         var objects = Read(git, range);
         if (objects.Values.All(c => c.Signed))
         {
-            Out.Line($"nothing to sign: all {range.Count} commits in {b.Name}..HEAD are signed");
+            Out.Line($"nothing to sign: all {range.Count} commits in {Out.Field(b.Name)}..HEAD are signed");
             return 0;
         }
 
-        Out.Line($"re-signing {range.Count} commit{(range.Count == 1 ? "" : "s")} in {b.Name}..HEAD (same trees and authors; hashes change):");
+        Out.Line($"re-signing {range.Count} commit{(range.Count == 1 ? "" : "s")} in {Out.Field(b.Name)}..HEAD (same trees and authors; hashes change):");
         foreach (var sha in range)
-            Out.Raw($"  {sha[..12]} {objects[sha].Subject}{(objects[sha].Signed ? " (signed)" : "")}");
+            Out.Raw(Listing(sha, objects[sha]));
 
         var signing = git.With(SigningConfig());
         var map = Rewrite(signing, range);
         var newHead = map[head];
         if (newHead != head) UpdateBranch(git, branchRef, newHead, head);
-        Out.Line($"signed: {branchRef["refs/heads/".Length..]} is now {newHead[..12]} (was {head[..12]}; the old commits stay in the reflog)");
+        Out.Line($"signed: {Out.Field(branchRef["refs/heads/".Length..])} is now {newHead[..12]} (was {head[..12]}; the old commits stay in the reflog)");
         return 0;
     }
 

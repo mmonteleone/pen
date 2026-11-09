@@ -112,7 +112,7 @@ internal static class AllowCommand
             if (!env.TryGetValue("PROJECT_DIR", out var projectDir))
                 throw new PenException("its session.env is missing");
             var user = Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User);
-            var projectConfig = Config.Load(Path.Combine(projectDir, ".pen"), Path.Combine(projectDir, ".pen"), ConfigKind.Project);
+            var projectConfig = Config.Load(Path.Combine(projectDir, ".pen"), Out.Field(Path.Combine(projectDir, ".pen")), ConfigKind.Project);
             var merged = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow, projectConfig.Allow);
             // Truncate and write, never rename: the proxy's single-file bind
             // mount pins the inode.
@@ -129,7 +129,7 @@ internal static class AllowCommand
         }
         catch (Exception e) when (e is PenException or IOException or UnauthorizedAccessException)
         {
-            Out.Line($"couldn't apply it to the running session {s.ComposeProject}: {e.Message}");
+            Out.Line($"couldn't apply it to the running session {s.ComposeProject}: {Out.Describe(e)}");
             return false;
         }
     }
@@ -187,19 +187,19 @@ internal static class AllowCommand
         var blocked = BlockedAcross(logs).Where(b => !Allowlist.IsAllowed(allowed, b.Host)).ToList();
         if (blocked.Count == 0)
         {
-            Console.Out.WriteLine("nothing blocked in this project's sessions (last 7 days) that isn't allowed now");
+            Out.Stdout("nothing blocked in this project's sessions (last 7 days) that isn't allowed now\n");
             return 0;
         }
 
-        Console.Out.WriteLine("blocked in this project's sessions, newest first:");
+        Out.Stdout("blocked in this project's sessions, newest first:\n");
         foreach (var b in blocked)
         {
             var when = b.Last == DateTimeOffset.MinValue ? "" : b.Last.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
-            Console.Out.WriteLine($"  {b.Host,-40} {when}");
+            Out.Stdout($"  {Out.Field(b.Host),-40} {when}\n");
         }
         var allowable = blocked.Select(b => b.Host).Where(Allowlist.IsValidDomain).ToList();
         if (allowable.Count > 0)
-            Console.Out.WriteLine($"pen allow {string.Join(' ', allowable)}   (add --global for all projects)");
+            Out.Stdout($"pen allow {string.Join(' ', allowable)}   (add --global for all projects)\n");
         return 0;
     }
 }

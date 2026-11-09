@@ -93,7 +93,7 @@ internal static partial class Allowlist
     public static string? BlockedLine(IReadOnlyList<string> hosts)
     {
         if (hosts.Count == 0) return null;
-        var line = "blocked: " + string.Join(", ", hosts);
+        var line = "blocked: " + string.Join(", ", hosts.Select(Out.Field));
         var allowable = hosts.Where(IsValidDomain).ToList();
         if (allowable.Count > 0)
             line += $" → pen allow {string.Join(' ', allowable)} (add --global for all projects)";

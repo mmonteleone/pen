@@ -4,9 +4,9 @@ using System.Net.Sockets;
 namespace Pen.Tests;
 
 /// <summary>
-/// Runs alone: a child that another test forks in parallel holds every open fd
-/// until it execs, so a closed listener can stay bound for that moment. It also
-/// keeps other tests from being handed a port these have just released.
+/// Runs alone: a process start in a parallel test can keep a just-closed
+/// listener bound briefly. It also keeps other tests from being handed a port
+/// these have just released.
 /// </summary>
 [Collection(nameof(LockAndProcessTests))]
 public class PortTests

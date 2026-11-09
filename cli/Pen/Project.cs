@@ -28,7 +28,7 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
     /// <summary>Resolves <paramref name="cwd"/> and applies the directory refusals.</summary>
     public static Project Resolve(string cwd, HostEnv host)
     {
-        var dir = Native.RealPath(cwd) ?? throw new PenException($"can't resolve the current directory {cwd}");
+        var dir = Native.RealPath(cwd) ?? throw new PenException($"can't resolve the current directory {Out.Field(cwd)}");
         CheckAllowed(dir, host);
         var (common, repoDir) = FindRepo(dir);
         return new Project(dir, KeyFor(repoDir), common, repoDir);
@@ -91,7 +91,7 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
         {
             var real = Native.RealPath(penPath) ?? penPath.Replace(host.Home, home, StringComparison.Ordinal);
             if (IsSameOrAncestor(dir, real) || IsSameOrAncestor(real, dir))
-                throw new PenException($"refusing to run in {dir}: it overlaps {host.Display(penPath)}, which the sandbox must not reach");
+                throw new PenException($"refusing to run in {Out.Field(dir)}: it overlaps {host.Display(penPath)}, which the sandbox must not reach");
         }
 
         if (!Path.Exists(Path.Combine(dir, ".git")))
@@ -99,7 +99,7 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
             for (var parent = Path.GetDirectoryName(dir); parent != null; parent = Path.GetDirectoryName(parent))
             {
                 if (Path.Exists(Path.Combine(parent, ".git")))
-                    throw new PenException($"{dir} is inside the git repo at {parent}: run pen from the repo root");
+                    throw new PenException($"{Out.Field(dir)} is inside the git repo at {Out.Field(parent)}: run pen from the repo root");
             }
         }
     }

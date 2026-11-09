@@ -59,13 +59,13 @@ internal static class GitConfigFile
         try
         {
             return Parse(Native.ReadRegularFile(path)
-                ?? throw new PenException($"can't read the git config file {path}: it isn't a regular file of a reasonable size"));
+                ?? throw new PenException($"can't read the git config file {Out.Field(path)}: it isn't a regular file of a reasonable size"));
         }
         catch (FileNotFoundException) { return []; }
         catch (DirectoryNotFoundException) { return []; }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            throw new PenException($"can't read the git config file {path}: fix its permissions, then rerun");
+            throw new PenException($"can't read the git config file {Out.Field(path)}: fix its permissions, then rerun");
         }
     }
 

@@ -34,13 +34,13 @@ internal static class RepoGuard
         if (File.Exists(git))
             common = CheckWorktree(dir, git);
         if (Directory.Exists(common) && !Native.CanList(common))
-            throw new PenException($"refusing to run in {dir}: pen can't read {Rel(dir, common)}, so it can't protect it: fix its permissions, then rerun");
+            throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't read {Rel(dir, common)}, so it can't protect it: fix its permissions, then rerun");
         if (Exists(Path.Combine(common, "commondir")))
             throw new PenException($"{Rel(dir, Path.Combine(common, "commondir"))} exists, which a normal repo never has: it makes git read config and hooks from another directory. Inspect it and remove it, then rerun");
 
         var unreadable = RepoScan.ScanModules(common).Unreadable;
         if (unreadable.Count > 0)
-            throw new PenException($"refusing to run in {dir}: pen can't read these directories where git keeps submodule repos, so it can't protect what's in them:\n"
+            throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't read these directories where git keeps submodule repos, so it can't protect what's in them:\n"
                 + string.Join('\n', unreadable.Select(u => "  " + Rel(dir, u)))
                 + "\nfix their permissions or remove them, then rerun");
 
@@ -49,7 +49,7 @@ internal static class RepoGuard
         {
             var listed = scan.Unlistable.Take(MaxListed).Select(u => "  " + Rel(dir, u));
             if (scan.Unlistable.Count > MaxListed) listed = listed.Append($"  … and {scan.Unlistable.Count - MaxListed} more");
-            throw new PenException($"refusing to run in {dir}: pen can't list these directories, though git on this machine can still enter them, so it can't see a repo inside one:\n"
+            throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't list these directories, though git on this machine can still enter them, so it can't see a repo inside one:\n"
                 + string.Join('\n', listed)
                 + "\nfix their permissions (chmod u+rx) or remove them, then rerun");
         }
@@ -110,9 +110,9 @@ internal static class RepoGuard
             ?? throw new PenException(".git is a file that isn't a valid linked worktree (a submodule's checkout, or a worktree whose entry in the main repo is missing or moved), which pen doesn't support. For a submodule, run pen in the repo that has it; for a worktree, git worktree repair in the main checkout may fix it");
         // ResolveWorktree requires the path to be real already; this is belt and braces.
         if (IsLink(common) || !Directory.Exists(common) || Native.RealPath(common) != common)
-            throw new PenException($"this worktree's git dir {common} isn't a real directory, which pen doesn't support");
+            throw new PenException($"this worktree's git dir {Out.Field(common)} isn't a real directory, which pen doesn't support");
         if (!IsMainCheckoutGitDir(common))
-            throw new PenException($"this is a worktree of the bare repo {common}, which pen doesn't support: run pen in a worktree of a repo with a main checkout");
+            throw new PenException($"this is a worktree of the bare repo {Out.Field(common)}, which pen doesn't support: run pen in a worktree of a repo with a main checkout");
         return common;
     }
 
@@ -424,6 +424,7 @@ internal static class RepoGuard
     internal static bool IsInside(string dir, string path) =>
         path == dir || path.StartsWith(dir.TrimEnd('/') + "/", StringComparison.Ordinal);
 
+    /// <summary>A path for messages, relative to <paramref name="dir"/> when it's inside, safe to print (<see cref="Out.Field"/>).</summary>
     internal static string Rel(string dir, string path) =>
-        path == dir ? "." : IsInside(dir, path) ? path[(dir.TrimEnd('/').Length + 1)..] : path;
+        Out.Field(path == dir ? "." : IsInside(dir, path) ? path[(dir.TrimEnd('/').Length + 1)..] : path);
 }

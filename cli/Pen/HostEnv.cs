@@ -21,7 +21,7 @@ internal sealed record HostEnv(string Home, uint Uid, uint Gid, string NuGetPack
         if (string.IsNullOrEmpty(nuget))
             nuget = System.IO.Path.Combine(home, ".nuget", "packages");
         else if (!nuget.StartsWith('/'))
-            throw new PenException($"NUGET_PACKAGES must be an absolute path (it's \"{nuget}\")");
+            throw new PenException($"NUGET_PACKAGES must be an absolute path (it's \"{Out.Field(nuget)}\")");
         nuget = nuget.TrimEnd('/');
 
         return new HostEnv(home, Native.GetUid(), Native.GetGid(), nuget);

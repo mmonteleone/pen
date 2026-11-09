@@ -71,7 +71,7 @@ internal static class GitCheck
         var unlistable = new List<string>();
         var failures = new List<string>();
         try { check(moved, unlistable); }
-        catch (Exception e) { failures.Add(Describe(e)); }
+        catch (Exception e) { failures.Add(Out.Describe(e)); }
         if (unlistable.Count > 0)
             failures.Add("pen can't list these directories, so it can't see a repo inside one: " + string.Join(", ", unlistable.Take(RepoGuard.MaxListed).Select(u => RepoGuard.Rel(dir, u)))
                 + (unlistable.Count > RepoGuard.MaxListed ? $" and {unlistable.Count - RepoGuard.MaxListed} more" : ""));
@@ -101,25 +101,13 @@ internal static class GitCheck
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
     }
 
-    /// <summary>
-    /// An exception as text for the user. The AOT build (UseSystemResourceKeys)
-    /// has framework exceptions' messages as raw resource keys, so only pen's
-    /// own are shown as they are.
-    /// </summary>
-    private static string Describe(Exception e) => e switch
-    {
-        PenException => e.Message,
-        UnauthorizedAccessException u => Out.PermissionDenied(u),
-        _ => e.GetType().Name,
-    };
-
     private static void Check(string dir, bool startedWithGit, string? commonGitDir, IReadOnlyCollection<string>? modulesAtStart, List<Quarantined> moved, List<string> unlistable, Func<string, bool>? tryOpen)
     {
         if (!Directory.Exists(dir)) return;
         // The agent could do this to a mount's root too. The user will fix the
         // mode and then run git, so "host git can't get in" doesn't excuse it.
         if (!Native.CanEnter(dir))
-            throw new PenException($"pen can't enter {dir}. Fixing its permissions would let git run whatever was planted there");
+            throw new PenException($"pen can't enter {Out.Field(dir)}. Fixing its permissions would let git run whatever was planted there");
 
         var git = Path.Combine(dir, ".git");
         HashSet<string> known = [];
@@ -133,7 +121,7 @@ internal static class GitCheck
             git = commonGitDir ?? git;
             // Likewise: nothing under it can be seen, and it's what git reads first.
             if (Directory.Exists(git) && !Native.CanList(git))
-                throw new PenException($"pen can't read {git}. Fixing its permissions would let git run whatever was planted there");
+                throw new PenException($"pen can't read {Out.Field(git)}. Fixing its permissions would let git run whatever was planted there");
             var commondir = Path.Combine(git, "commondir");
             if (RepoGuard.Exists(commondir))
                 Move(commondir, "a normal repo never has one: it makes git read config and hooks from another directory", moved);
@@ -227,9 +215,17 @@ internal static class GitCheck
         {
             // Never fatal: the rest still gets checked, and the warning names it.
             var reason = e is UnauthorizedAccessException u ? Out.PermissionDenied(u) : e.Message; // Native.Rename's is strerror's
-            moved.Add(new(path, "", $"{why}. COULD NOT MOVE IT ({reason}): don't run git here until you've dealt with it"));
+            moved.Add(new(path, "", $"{why}. COULD NOT MOVE IT ({reason}){InvalidNameNote(path)}: don't run git here until you've dealt with it"));
         }
     }
+
+    /// <summary>
+    /// .NET decodes a file name that isn't valid UTF-8 with U+FFFD in place of
+    /// the bad bytes, so that string names nothing and the rename fails. A rename
+    /// that succeeded used the name as printed, so its restore command is exact.
+    /// </summary>
+    internal static string InvalidNameNote(string path) =>
+        path.Contains('\uFFFD') ? ", probably because its name isn't valid UTF-8, which pen can't name exactly" : "";
 
     private static string FreeName(string path)
     {
@@ -256,6 +252,13 @@ internal static class GitCheck
             sb.AppendLine("pen: Inspect each one before putting it back (a hook or a core.* setting in its config runs on this machine). To restore one:");
             foreach (var q in restorable)
             {
+                // Command substitution drops trailing newlines, so no quoting
+                // that works in every shell can name this one.
+                if (q.From.EndsWith('\n'))
+                {
+                    sb.Append("  pen can't write a command for ").Append(Out.Field(q.From)).AppendLine(", since the name ends in a newline: rename it back by hand");
+                    continue;
+                }
                 sb.Append("  mv ").Append(Quote(q.To)).Append(' ').Append(Quote(q.From));
                 if (q.Inner is { } i)
                     sb.Append(" && mv ").Append(Quote(Path.Combine(q.From, Path.GetFileName(i.To))))
@@ -269,7 +272,7 @@ internal static class GitCheck
     /// <summary>The loud warning for a check that couldn't vouch for <paramref name="dir"/>: <paramref name="why"/> says what stopped it.</summary>
     public static string NotCheckedWarning(string dir, string why) =>
         $"""
-        pen: WARNING: git wasn't checked: don't run git here ({dir}).
+        pen: WARNING: git wasn't checked: don't run git here ({Out.Field(dir)}).
         pen: The check for files that make git on this machine run code from the sandbox couldn't finish: {why}
         pen: Your shell prompt and IDE may run git too, so keep them out of this directory. Inspect its .git (config, hooks, modules) and any repos nested in it by hand first.
         """;
@@ -285,5 +288,30 @@ internal static class GitCheck
 
     private static string Octal(UnixFileMode mode) => Convert.ToString((int)mode, 8);
 
-    private static string Quote(string s) => "'" + s.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
+    /// <summary>
+    /// A path as one word of a command the user pastes, on a name the agent
+    /// chose, in sh, bash, zsh or fish 3.4+. Plain single quotes where they mean
+    /// the same in all of them. Otherwise "$(printf '…')" with an octal escape
+    /// for all but the plainest characters, since: a control character has to
+    /// stay out of the terminal; fish reads a backslash in single quotes
+    /// differently; printf reads % and \; interactive bash and zsh expand !
+    /// inside double quotes. A leading - would be an option, to mv or to printf.
+    /// </summary>
+    internal static string Quote(string s)
+    {
+        if (s.StartsWith('-')) s = "./" + s;
+        if (!s.Any(c => Out.IsControl(c) || c == '\\'))
+            return "'" + s.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
+        var sb = new StringBuilder("\"$(printf '");
+        foreach (var c in s)
+        {
+            if (char.IsAsciiLetterOrDigit(c) || c is '/' or '.' or '_' or '-' or ' ' or ',' or ':' or '+' or '=' or '@'
+                || (c > '\x7f' && !Out.IsControl(c)))
+                sb.Append(c);
+            else
+                foreach (var b in Encoding.UTF8.GetBytes(c.ToString()))
+                    sb.Append('\\').Append(Convert.ToString(b, 8).PadLeft(3, '0'));
+        }
+        return sb.Append("')\"").ToString();
+    }
 }
