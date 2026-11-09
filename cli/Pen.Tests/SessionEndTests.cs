@@ -98,6 +98,29 @@ public class SessionEndTests
         }
     }
 
+    [Fact]
+    public void TheEndListsBlockedHostsFromBothLogs_AndKeepsThem()
+    {
+        using var t = new TempDir();
+        var session = Create(t, docker: false);
+        File.Delete(Path.Combine(t.Path, "repo", ".git", "commondir"));
+        File.WriteAllText(session.PreviousProxyLog,
+            "2026-11-01T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT old.example:443 -\n" +
+            "2026-11-01T10:00:01Z 172.18.0.3 TCP_DENIED/403 CONNECT both.example:443 -\n");
+        File.WriteAllText(session.ProxyLog,
+            "2026-11-02T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT both.example:443 -\n" +
+            "2026-11-02T10:00:01Z 172.18.0.3 TCP_DENIED/403 CONNECT new.example:443 -\n");
+        var (docker, _) = FakeHost(t);
+        using var _ = docker;
+
+        var output = CapturingStderr(() => Session.End(session));
+
+        Assert.Contains("old.example both.example new.example", output);
+        Assert.False(session.IsOpen);
+        Assert.True(File.Exists(session.ProxyLog));
+        Assert.True(File.Exists(session.PreviousProxyLog));
+    }
+
     /// <summary>Docker that succeeds, and a git that logs its calls and says commit.gpgsign is on, so a reminder goes on to call git in the repo.</summary>
     private static (FakeDocker Docker, string GitCalls) FakeHost(TempDir t)
     {

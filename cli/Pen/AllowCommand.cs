@@ -186,9 +186,7 @@ internal static class AllowCommand
         Session.FinishDeadSessions(project.Key, runtimeDir);
 
         var logs = Directory.EnumerateDirectories(Path.Combine(runtimeDir, "sessions"))
-            .Select(d => Path.Combine(d, "proxy.log"))
-            .Where(File.Exists)
-            .Select(p => File.ReadLines(p));
+            .Select(d => new SessionDir(project.Key, d).ProxyLogLines());
         // What a session would get: an unapproved domain in .pen/ stays listed.
         var store = TrustStore.For(host, project);
         var approved = store.ApprovedOf(projectConfig.Allow);
@@ -201,13 +199,16 @@ internal static class AllowCommand
             return 0;
         }
 
+        // The newest few: the agent decides how many there are.
+        var shown = blocked.Take(Allowlist.MaxListed).ToList();
         Out.Stdout("blocked in this project's sessions, newest first:\n");
-        foreach (var b in blocked)
+        foreach (var b in shown)
         {
             var when = b.Last == DateTimeOffset.MinValue ? "" : b.Last.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
-            Out.Stdout($"  {Out.Field(b.Host),-40} {when}\n");
+            Out.Stdout($"  {Allowlist.ShownHost(b.Host),-40} {when}\n");
         }
-        var allowable = blocked.Select(b => b.Host).Where(Allowlist.IsValidDomain).ToList();
+        if (blocked.Count > shown.Count) Out.Stdout($"  and {blocked.Count - shown.Count} more, blocked earlier\n");
+        var allowable = shown.Select(b => b.Host).Where(Allowlist.IsValidDomain).ToList();
         if (allowable.Count > 0)
             Out.Stdout($"pen allow {string.Join(' ', allowable)}   (add --global for all projects)\n");
         return 0;

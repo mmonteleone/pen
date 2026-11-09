@@ -849,11 +849,32 @@ public class SignTests
     public void NoBlankLineAfterTheHeaders_IsRefused(string end) =>
         Assert.Throws<PenException>(() => CommitObject.Parse(System.Text.Encoding.UTF8.GetBytes($"tree {Tree1}\n{Author}\n{Committer}{end}")));
 
-    [Fact]
-    public void AnAuthorThatIsntUtf8_IsRefused_SinceItWouldChangeOnTheWay()
+    [Theory]
+    [InlineData("author José <a@x.io> 1 +0000\ncommitter C <c@x.io> 1 +0000", "author name")]
+    [InlineData("author A <josé@x.io> 1 +0000\ncommitter C <c@x.io> 1 +0000", "author email")]
+    [InlineData("author A <a@x.io> 1 +0000\ncommitter José <c@x.io> 1 +0000", "committer name")]
+    [InlineData("author A <a@x.io> 1 +0000\ncommitter C <c@x.io> 1 +0000\nencoding é", "encoding header")]
+    public void AHeaderThatIsntUtf8_IsRefused_SinceItWouldChangeOnTheWay(string headers, string what)
     {
-        var bytes = System.Text.Encoding.Latin1.GetBytes($"tree {Tree1}\nauthor José <a@x.io> 1 +0000\n{Committer}\n\nm\n");
-        Assert.Throws<PenException>(() => CommitObject.Parse(bytes));
+        var bytes = System.Text.Encoding.Latin1.GetBytes($"tree {Tree1}\n{headers}\n\nm\n");
+        Assert.Equal(what, Assert.Throws<NotUtf8Exception>(() => CommitObject.Parse(bytes)).What);
+    }
+
+    [Fact]
+    public void ACommitWithANonUtf8Author_IsRefusedByNameWithoutItsBytes()
+    {
+        using var f = new Fixture();
+        SetBase(f);
+        var raw = System.Text.Encoding.Latin1.GetBytes($"tree {f.Tree("HEAD")}\nparent {f.Head()}\nauthor Jos\u00e9\u001b[31m <a@x.io> 1 +0000\n{Committer}\nencoding ISO-8859-1\n\nm\n");
+        var written = f.Git.Run(["hash-object", "-t", "commit", "-w", "--stdin"], raw);
+        Assert.True(written.Ok, written.Stderr);
+        var commit = written.Text.Trim();
+        Tests.Git.Run(f.Repo, "update-ref", "HEAD", commit);
+
+        var e = Assert.Throws<PenException>(() => Sign.SignBranch(f.Git, null));
+
+        Assert.Equal($"refusing commit {commit[..12]}: its author name isn't valid UTF-8, and pen can't pass that to git unchanged, so it can't be re-created with the same author name", e.Message);
+        Assert.Equal(commit, f.Head());
     }
 
     [Theory]

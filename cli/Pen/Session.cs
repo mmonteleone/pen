@@ -136,6 +136,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
             using var child = Proc.Start(psi);
             signals.Container = session.Container;
             signals.Child = child;
+            using var trimmer = ProxyLogTrimmer.Start(session, env);
             exitCode = Proc.Code(child.WaitForExitStatus());
         }
         catch (PenException e)
@@ -280,9 +281,9 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
             DeleteSessionFiles(session);
         }
 
-        if (File.Exists(session.ProxyLog))
+        if (File.Exists(session.ProxyLog) || File.Exists(session.PreviousProxyLog))
         {
-            var blocked = Allowlist.BlockedHosts(File.ReadLines(session.ProxyLog)).Where(h => !Allowlist.IsAllowed(allowed, h)).ToList();
+            var blocked = Allowlist.BlockedHosts(session.ProxyLogLines()).Where(h => !Allowlist.IsAllowed(allowed, h)).ToList();
             var line = Allowlist.BlockedLine(blocked);
             if (line != null) Out.Line(line);
         }
@@ -309,7 +310,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
     {
         foreach (var f in Directory.EnumerateFileSystemEntries(session.Path))
         {
-            if (f == session.ProxyLog || f == session.LockFile || f == session.ComposeFile || f == session.RestoredManifest) continue;
+            if (f == session.ProxyLog || f == session.PreviousProxyLog || f == session.LockFile || f == session.ComposeFile || f == session.RestoredManifest) continue;
             if (Directory.Exists(f)) Directory.Delete(f, recursive: true); else File.Delete(f);
         }
         // compose.yaml marks the session open, so it goes last but for the lock and

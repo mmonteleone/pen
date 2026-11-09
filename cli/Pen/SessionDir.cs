@@ -21,6 +21,18 @@ internal sealed class SessionDir(string projectKey, string path)
     /// <summary>The compose override: mounts over the project mount, dind's and the ports service's settings.</summary>
     public string OverrideFile => File("session.yaml");
     public string ProxyLog => File("proxy.log");
+    /// <summary>The tail of proxy.log when it was last trimmed (<see cref="ProxyLogTrimmer"/>).</summary>
+    public string PreviousProxyLog => File("proxy.log.1");
+
+    /// <summary>The proxy's log lines, oldest first: proxy.log.1, then proxy.log. Missing ones are skipped.</summary>
+    public IEnumerable<string> ProxyLogLines()
+    {
+        foreach (var log in new[] { PreviousProxyLog, ProxyLog })
+        {
+            if (!System.IO.File.Exists(log)) continue;
+            foreach (var line in System.IO.File.ReadLines(log)) yield return line;
+        }
+    }
     public string LockFile => File("session.lock");
     public string EnvFile => File("session.env");
     /// <summary>Present when the session started in a repo; holds its common git dir (empty from older pens: PROJECT_DIR/.git).</summary>

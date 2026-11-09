@@ -70,7 +70,7 @@ internal sealed record CommitObject(
             if (IsCoreHeader(current)) throw new PenException($"a second \"{current}\" header, or one out of place");
             if (current is "encoding" or "gpgsig" or "gpgsig-sha256" && !seen.Add(current))
                 throw new PenException($"a second \"{current}\" header");
-            if (current == "encoding") encoding = Utf8(line[(sp + 1)..], "encoding");
+            if (current == "encoding") encoding = Utf8(line[(sp + 1)..], "encoding header");
         }
         return new(tree, parents, authorName, authorEmail, authorDate, encoding, raw[(split + 2)..]);
     }
@@ -91,15 +91,24 @@ internal sealed record CommitObject(
             || seconds.Length == 0 || !seconds.All(char.IsAsciiDigit)
             || zone.Length != 5 || zone[0] is not ('+' or '-') || !zone[1..].All(char.IsAsciiDigit))
             throw new PenException($"a malformed date in its {key} header");
-        return (Utf8(value[..lt].TrimEnd(), key), Utf8(value[(lt + 1)..gt], key), date);
+        return (Utf8(value[..lt].TrimEnd(), key + " name"), Utf8(value[(lt + 1)..gt], key + " email"), date);
     }
 
-    /// <summary>Header text that goes to git as a string, which has to be valid UTF-8 to arrive unchanged.</summary>
-    private static string Utf8(string latin1, string key)
+    /// <summary>
+    /// Header text that goes to git as a string (in the environment or an argument),
+    /// which has to be valid UTF-8 to arrive unchanged: .NET can't pass other bytes.
+    /// </summary>
+    private static string Utf8(string latin1, string what)
     {
         try { return new UTF8Encoding(false, throwOnInvalidBytes: true).GetString(System.Text.Encoding.Latin1.GetBytes(latin1)); }
-        catch (DecoderFallbackException) { throw new PenException($"an {key} header that isn't UTF-8"); }
+        catch (DecoderFallbackException) { throw new NotUtf8Exception(what); }
     }
+}
+
+/// <summary>A commit header field that isn't valid UTF-8, so it can't be passed to git unchanged.</summary>
+internal sealed class NotUtf8Exception(string what) : Exception(what)
+{
+    public string What { get; } = what;
 }
 
 /// <summary>
@@ -155,6 +164,7 @@ internal static class Sign
             int size = int.Parse(header[2]);
             try { result[sha] = CommitObject.Parse(bytes[(nl + 1)..(nl + 1 + size)]); }
             catch (PenException e) { throw new PenException($"refusing commit {sha[..12]}: it has {e.Message}, which git doesn't write, so it could be re-created wrongly"); }
+            catch (NotUtf8Exception e) { throw new PenException($"refusing commit {sha[..12]}: its {e.What} isn't valid UTF-8, and pen can't pass that to git unchanged, so it can't be re-created with the same {e.What}"); }
             pos = nl + 1 + size + 1; // content, then a newline
         }
         MatchesGit(git, commits, result);

@@ -120,6 +120,9 @@ fake_pen() { HOME=$FAKE_HOME DOCKER_CONFIG=${DOCKER_CONFIG:-$REAL_HOME/.docker} 
 fake_config() { mkdir -p "$FAKE_HOME/.config/pen"; printf '%s\n' "$@" >"$FAKE_HOME/.config/pen/config.toml"; chmod 600 "$FAKE_HOME/.config/pen/config.toml"; }
 # The newest session's dir (under the real HOME's runtime dir).
 last_session() { ls -td "$RUNTIME"/sessions/*/ | head -1; }
+# tools_cell <session dir>: the regex for its TOOLS cell in pen ps, followed by
+# the separating spaces: the tools it recorded (the user's ones), or nothing.
+tools_cell() { local t; t=$(paste -sd, "$1/tools" | sed 's/[.]/\\./g'); echo "${t:+$t +}"; }
 containers() { docker ps -aq --filter "name=^$KEY-" | wc -l | tr -d ' '; }
 PTY="python3 $REPO/tests/pty-run.py"
 mode_of() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
@@ -190,6 +193,18 @@ seed=$FAKE_HOME/.config/pen/home
 "$PEN" run true </dev/null 2>&1 | grep '^pen:' || true
 RUNTIME=$(ls -d "$HOME"/.local/state/pen/pen-*-"$HASH")
 KEY=$(basename "$RUNTIME")
+
+# Tools in the real ~/.config/pen/config.toml go into every session there: their
+# programs, env and domains, and the image (pen-tools:…, and a project layer's tag).
+# A section that asserts what a session without tools gets runs between tool_free,
+# which points $PEN and $RUNTIME at the throwaway HOME with no config, and real_home.
+PEN_REAL=$PEN RUNTIME_REAL=$RUNTIME
+TOOL_FREE_PEN=$SCRATCH/pen-tool-free
+printf '#!/bin/sh\nHOME=%q DOCKER_CONFIG=%q exec %q "$@"\n' \
+  "$FAKE_HOME" "${DOCKER_CONFIG:-$REAL_HOME/.docker}" "$PEN" >"$TOOL_FREE_PEN"
+chmod +x "$TOOL_FREE_PEN"
+tool_free() { fake_config "# none"; PEN=$TOOL_FREE_PEN; RUNTIME=$FAKE_HOME/.local/state/pen/$KEY; }
+real_home() { PEN=$PEN_REAL; RUNTIME=$RUNTIME_REAL; }
 
 if want 1; then
 # ==============================================================================
@@ -509,8 +524,8 @@ section "7. Locks, dead sessions, signals"
 p=$!
 wait_for "^$KEY-.*-agent$" || fail "session didn't start"
 out=$("$PEN" ps)
-check "pen ps lists the running session: project, id, age and command" \
-  grep -qE "^~${PROJECT_DIR#"$HOME"} +[0-9a-f]{8} +[0-9]+[smh][0-9m]* +sleep 120$" <<<"$out"
+check "pen ps lists the running session: project, id, tools, age and command" \
+  grep -qE "^~${PROJECT_DIR#"$HOME"} +[0-9a-f]{8} +$(tools_cell "$(last_session)")[0-9]+[smh][0-9m]* +sleep 120$" <<<"$out"
 check "project.lock is held shared: another shared lock is fine" lock_free "$RUNTIME/project.lock" shared
 check "...and an exclusive one (pen reset) is refused" not lock_free "$RUNTIME/project.lock" exclusive
 check "this dir's worktree lock is held shared too" lock_free "$RUNTIME/worktree-$HASH.lock" shared
@@ -705,6 +720,7 @@ fi
 if want 11; then
 # ==============================================================================
 section "11. .NET and NuGet, with --tool dotnet (step 7)"
+tool_free # asserts what's there without the tool, and dotnet:8 alone
 
 # dn_sandbox [pen options…] <bash script>: in_sandbox with the dotnet tool (dotnet:10 unless options say).
 dn_sandbox() { local script=${*: -1}; "$PEN" --tool dotnet "${@:1:$#-1}" run bash -c "$script" </dev/null; }
@@ -763,6 +779,7 @@ else
   rm -rf web
 fi
 
+real_home
 note "login checks (step 5: log in to claude and codex, still logged in after pen upgrade --clean, logged out in another project) are manual"
 fi
 
@@ -1046,6 +1063,7 @@ fi
 if want 14; then
 # ==============================================================================
 section "14. Project layer (step 10)"
+tool_free # without tools, the layer is <key>:latest
 
 rm -rf .pen && mkdir .pen
 printf 'FROM pen:latest\nRUN echo layer-ok >/etc/pen-smoke-layer\n' >.pen/Dockerfile
@@ -1096,6 +1114,7 @@ check "...showing the build output" contains "smoke-build-error" "$out"
 check "...without starting anything" test "$(containers)" = 0
 rm -rf .pen
 docker image rm "$KEY:latest" >/dev/null 2>&1 || true
+real_home
 fi
 
 if want 15; then
@@ -1604,12 +1623,14 @@ check "...leaving the main checkout's HEAD alone" test "$(git rev-parse HEAD)" =
 docker rm -f "$name_main" >/dev/null
 wait "$p_main" 2>/dev/null || true
 
+tool_free # without tools, the layer is <key>-<dir hash>:latest
 mkdir -p "$WT/.pen"; echo 'FROM pen:latest' >"$WT/.pen/Dockerfile"
 check "a worktree's .pen/Dockerfile needs its own approval" contains "pen trust" "$(cd "$WT" && "$PEN" run true </dev/null 2>&1 || true)"
 (cd "$WT" && "$PEN" trust --yes </dev/null >/dev/null 2>&1)
 check "a worktree's .pen/Dockerfile builds its own layer, $KEY-$WT_HASH:latest" \
   bash -c "cd '$WT' && '$PEN' run true </dev/null >/dev/null 2>&1 && docker image inspect '$KEY-$WT_HASH:latest' >/dev/null 2>&1"
 docker image rm -f "$KEY-$WT_HASH:latest" >/dev/null 2>&1 || true
+real_home
 
 # A worktree the agent makes, with config in its entry: host git in it would run this.
 hook21=$SCRATCH/hook21
@@ -1724,7 +1745,7 @@ check "...so using it as a proxy fails" has "fail: viaports"
 check "...and the forwarder listens on no other port" has "fail: otherport"
 check "the session's ports file lists $P" test "$(cat "${s}ports")" = "$P"
 out=$("$PEN" ps)
-check "pen ps shows the forwarded port" grep -qE "^$DISP +$(sid_of "$agent") +$P +[0-9]+[smhd]" <<<"$out"
+check "pen ps shows the forwarded port" grep -qE "^$DISP +$(sid_of "$agent") +$P +$(tools_cell "$RUNTIME/sessions/$(sid_of "$agent")")[0-9]+[smhd]" <<<"$out"
 
 rc=0; out=$("$PEN" --port "$P" run true </dev/null 2>&1) || rc=$?
 check "the same --port in a second session is an error" \
@@ -1742,7 +1763,7 @@ second=$(other_agent "$agent")
 s2=$RUNTIME/sessions/$(sid_of "$second")
 check "...forwarding nothing: an empty ports file, no ports service or forwarder" \
   bash -c '[ -e "$1/ports" ] && [ ! -s "$1/ports" ] && ! grep -q "\"ports\":" "$1/session.yaml" && ! docker inspect "${2%-agent}-ports" >/dev/null 2>&1' _ "$s2" "$second"
-check "...and pen ps shows no ports for it" grep -qE "^$DISP +$(sid_of "$second") +[0-9]+[smhd] " <<<"$("$PEN" ps)"
+check "...and pen ps shows no ports for it" grep -qE "^$DISP +$(sid_of "$second") +$(tools_cell "$s2")[0-9]+[smhd] " <<<"$("$PEN" ps)"
 check "the first session still forwards $P" contains served-from-sandbox "$(curl -s -m 5 "http://127.0.0.1:$P/hello.txt")"
 
 docker rm -f "$agent" "$second" >/dev/null
@@ -2074,6 +2095,7 @@ fi
 if want 28; then
 # ==============================================================================
 section "28. Tools image"
+tool_free # each check names the tools its session has
 
 # Versions are unique to this run, so no earlier image or build cache can stand in.
 : >"$TOOLS_SHIM/builds"
@@ -2240,6 +2262,7 @@ rm -rf cg
 
 rc=0; out=$("$PEN" --tool "$A" --build-tools-image 2>&1 </dev/null) || rc=$?
 check "there's no build option any more: real sessions build" bash -c '[ "$1" = 2 ] && grep -qF "unknown option" <<<"$2"' _ "$rc" "$out"
+real_home
 fi
 
 section "All checks passed."

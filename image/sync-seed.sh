@@ -9,9 +9,19 @@ warn() { echo "pen-entrypoint: $*" >&2; }
 slug=$(LC_ALL=C sed 's/[^A-Za-z0-9]/-/g' <<<"$project")
 
 shopt -s dotglob nullglob
+# The home volume is agent-writable: a target that's a symlink is never
+# followed, so the sync can't write outside $HOME. A seed directory whose
+# target is anything but a real directory is skipped with a warning.
 copy_tree() {
   local from=$1 to=$2 rel=$3 e name path
-  mkdir -p -- "$to"
+  if [ -L "$to" ] || { [ -e "$to" ] && [ ! -d "$to" ]; }; then
+    warn "skipping $rel from the home seed: it's a directory there but not in this sandbox's home"
+    return 0
+  fi
+  if ! mkdir -p -- "$to"; then
+    warn "couldn't create $rel from the home seed"
+    return 0
+  fi
   for e in "$from"/*; do
     name=${e##*/}
     path=${rel:+$rel/}$name
@@ -23,7 +33,12 @@ copy_tree() {
     if [ -d "$e" ]; then
       copy_tree "$e" "$to/$name" "$path"
     else
-      cp -f -- "$e" "$to/$name" || warn "couldn't copy $path from the home seed"
+      if [ -d "$to/$name" ] && [ ! -L "$to/$name" ]; then
+        warn "skipping $path from the home seed: it's a directory in this sandbox's home"
+        continue
+      fi
+      # Replaced rather than written through, so a symlink there isn't followed.
+      { rm -f -- "$to/$name" && cp -- "$e" "$to/$name"; } || warn "couldn't copy $path from the home seed"
     fi
   done
 }

@@ -159,6 +159,28 @@ public class OutputSanitizingTests
     }
 
     [Fact]
+    public void PenAllowsListShowsTheNewestFew_AndCountsTheRest()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        var project = Project.Resolve(t.Sub("repo"), host);
+        Session.EnsureRuntimeDir(host, project);
+        var dir = t.Sub("home", ".local", "state", "pen", project.Key, "sessions", "12345678");
+        var start = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        File.WriteAllLines(Path.Combine(dir, "proxy.log"), Enumerable.Range(0, 5000).Select(i =>
+            $"{start.AddSeconds(i):yyyy-MM-ddTHH:mm:ssZ} 1.1.1.1 TCP_DENIED/403 CONNECT h{i}.example:443 -"));
+        var (_, stdout) = Capture(() => AllowCommand.List(host, project, new Config(), new Config()));
+        var lines = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(1 + Allowlist.MaxListed + 2, lines.Length);
+        Assert.StartsWith("  h4999.example ", lines[1]);
+        Assert.StartsWith("  h4980.example ", lines[Allowlist.MaxListed]);
+        Assert.Equal("  and 4980 more, blocked earlier", lines[^2]);
+        Assert.Equal("pen allow " + string.Join(' ', Enumerable.Range(4980, 20).Reverse().Select(i => $"h{i}.example")) + "   (add --global for all projects)", lines[^1]);
+        Assert.True(stdout.Length < 4000);
+    }
+
+    [Fact]
     public void PenPsShowsFields()
     {
         var d = Ps.Describe(["run" + Esc + "[2J", "a\nb"]);

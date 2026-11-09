@@ -9,13 +9,14 @@ public class SeedSyncTests
         File.WriteAllText(path, text);
     }
 
-    private static void Sync(TempDir t)
+    private static string Sync(TempDir t)
     {
         Assert.SkipWhen(Proc.Capture("sh", ["-c", "command -v jq"]).ExitStatus.ExitCode != 0, "seed JSON checks need jq");
         var script = Path.Combine(t.Path, "sync-seed.sh");
         File.WriteAllText(script, Embedded.Text("image/sync-seed.sh"));
         var result = Proc.Capture("bash", [script, t.Sub("seed"), t.Sub("sandbox"), "/project"]);
         Assert.True(result.ExitStatus.ExitCode == 0, result.StandardError);
+        return result.StandardError;
     }
 
     [Fact]
@@ -90,5 +91,49 @@ public class SeedSyncTests
         Sync(t);
         Assert.Equal("ours", File.ReadAllText(Path.Combine(t.Path, "sandbox/.claude/projects/-project/memory/MEMORY.md")));
         Assert.False(Directory.Exists(Path.Combine(t.Path, "sandbox/.claude/projects/-elsewhere")));
+    }
+
+    [Fact]
+    public void ASeedDirectoryWhoseTargetIsSomethingElseIsSkippedWithAWarning()
+    {
+        using var t = new TempDir();
+        var seed = t.Sub("seed");
+        var home = t.Sub("sandbox");
+        var outside = t.Sub("outside");
+        Write(seed, ".codex/config.toml", "seed");
+        Write(seed, ".claude/CLAUDE.md", "seed");
+        Write(seed, ".gitconfig", "seed");
+        // The agent replaced one seed directory with a file and another with a symlink out of $HOME.
+        Write(home, ".codex", "a file");
+        File.CreateSymbolicLink(Path.Combine(home, ".claude"), outside);
+        var stderr = Sync(t);
+        Assert.Equal("a file", File.ReadAllText(Path.Combine(home, ".codex")));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(outside));
+        Assert.Contains("skipping .codex from the home seed", stderr);
+        Assert.Contains("skipping .claude from the home seed", stderr);
+        // The rest of the seed still syncs.
+        Assert.Equal("seed", File.ReadAllText(Path.Combine(home, ".gitconfig")));
+    }
+
+    [Fact]
+    public void ASeedFileTargetIsReplacedNotWrittenThroughASymlink()
+    {
+        using var t = new TempDir();
+        var seed = t.Sub("seed");
+        var home = t.Sub("sandbox");
+        var outside = Path.Combine(t.Sub("outside"), "victim");
+        File.WriteAllText(outside, "outside");
+        Write(seed, ".codex/config.toml", "seed");
+        Write(seed, ".claude/CLAUDE.md", "seed");
+        Directory.CreateDirectory(Path.Combine(home, ".codex"));
+        File.CreateSymbolicLink(Path.Combine(home, ".codex/config.toml"), outside);
+        Directory.CreateDirectory(Path.Combine(home, ".claude/CLAUDE.md"));
+        var stderr = Sync(t);
+        Assert.Equal("outside", File.ReadAllText(outside));
+        var target = new FileInfo(Path.Combine(home, ".codex/config.toml"));
+        Assert.Null(target.LinkTarget);
+        Assert.Equal("seed", File.ReadAllText(target.FullName));
+        Assert.True(Directory.Exists(Path.Combine(home, ".claude/CLAUDE.md")));
+        Assert.Contains("skipping .claude/CLAUDE.md from the home seed", stderr);
     }
 }

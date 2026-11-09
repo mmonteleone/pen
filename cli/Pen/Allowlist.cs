@@ -105,12 +105,29 @@ internal static partial class Allowlist
         return url.ToLowerInvariant();
     }
 
-    /// <summary>The session-end line, or null when nothing was blocked.</summary>
+    /// <summary>
+    /// How many blocked hosts a listing shows. The agent decides how many there
+    /// are, and a listing that long would push earlier warnings out of sight.
+    /// </summary>
+    internal const int MaxListed = 20;
+    private const int MaxHostShown = 80;
+
+    /// <summary>A blocked host as listed: sanitized, and cut short if it's long (the agent chose it).</summary>
+    internal static string ShownHost(string host) =>
+        host.Length <= MaxHostShown ? Out.Field(host) : Out.Field(host[..(MaxHostShown - 1)]) + "…";
+
+    /// <summary>
+    /// The session-end line for <paramref name="hosts"/> (first blocked first), or
+    /// null when nothing was blocked: the <see cref="MaxListed"/> most recent ones,
+    /// how many more there were, and the pen allow line for the ones shown.
+    /// </summary>
     public static string? BlockedLine(IReadOnlyList<string> hosts)
     {
         if (hosts.Count == 0) return null;
-        var line = "blocked: " + string.Join(", ", hosts.Select(Out.Field));
-        var allowable = hosts.Where(IsValidDomain).ToList();
+        var shown = hosts.Skip(Math.Max(0, hosts.Count - MaxListed)).ToList();
+        var line = "blocked: " + string.Join(", ", shown.Select(ShownHost));
+        if (hosts.Count > shown.Count) line += $" and {hosts.Count - shown.Count} more (pen allow lists the latest)";
+        var allowable = shown.Where(IsValidDomain).ToList();
         if (allowable.Count > 0)
             line += $" → pen allow {string.Join(' ', allowable)} (add --global for all projects)";
         return line;
