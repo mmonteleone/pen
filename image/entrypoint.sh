@@ -28,6 +28,12 @@ if [ "$(id -u)" = 0 ] && [ "${PEN_PHASE:-}" != agent ]; then
     [ "$PEN_GID" = 0 ] || die "under rootless Docker PEN_GID must be 0 too"
     # Claude Code refuses skip-permissions as root unless told it's sandboxed.
     export IS_SANDBOX=1
+    # Java takes user.home from passwd, where root's home is /root on the
+    # read-only root filesystem, so Maven, Gradle and the rest couldn't write
+    # their caches. (The other tools go by $HOME, and passwd can't be changed
+    # here.) A JAVA_TOOL_OPTIONS from the user's [env] comes after, so its own
+    # -Duser.home wins. Every JVM prints this setting to stderr when it starts.
+    export JAVA_TOOL_OPTIONS="-Duser.home=$HOME${JAVA_TOOL_OPTIONS:+ $JAVA_TOOL_OPTIONS}"
     # noroot: UID 0 gets no capabilities from execve; locked, so it can't be
     # undone. With the bounding set empty and no-new-privileges, the agent
     # has no capabilities at all, ever. The root filesystem is read-only

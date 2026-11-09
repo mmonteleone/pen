@@ -2180,14 +2180,16 @@ layer2=$(session_image --tool "$A2")
 check "another tool set in the project is another image" bash -c '[ "$1" != "$2" ] && [[ $2 == "$3":* ]]' _ "$layer1" "$layer2" "$KEY"
 check "...with that set's tool" test "$(in_image "$layer2" 'cat /etc/pen-smoke-tool')" = "$((V + 1))"
 check "...leaving the first as it was" test "$(in_image "$layer1" 'cat /etc/pen-smoke-tool')" = "$V"
-id1=$(docker image inspect --format '{{.Id}}' "$layer1")
-check "building the first again gives the same image" \
-  test "$(docker image inspect --format '{{.Id}}' "$(session_image --tool "$A1")")" = "$id1"
+# The image's creation time and layers, not its ID: on the containerd image store a
+# fully cached build gets a new ID, while a step that really runs again makes a new layer.
+built() { docker image inspect --format '{{.Created}} {{json .RootFS.Layers}}' "$1"; }
+id1=$(built "$layer1")
+check "building the first again gives the same image" test "$(built "$(session_image --tool "$A1")")" = "$id1"
 
 printf 'FROM pen:latest\nRUN pen-test >/etc/pen-smoke-tool; echo changed >/etc/pen-smoke-changed\n' >.pen/Dockerfile
 rc=0; out=$("$PEN" --tool "$A1" run true 2>&1 </dev/null) || rc=$?
 check "a changed Dockerfile isn't built on tools until approved" bash -c '[ "$1" != 0 ] && grep -qF ".pen/ asks for things you haven'"'"'t approved" <<<"$2"' _ "$rc" "$out"
-check "...leaving the image as it was" test "$(docker image inspect --format '{{.Id}}' "$layer1")" = "$id1"
+check "...leaving the image as it was" test "$(built "$layer1")" = "$id1"
 "$PEN" trust --yes </dev/null >/dev/null 2>&1
 check "once approved, it keeps the same tag" test "$(session_image --tool "$A1")" = "$layer1"
 check "...which now holds the new layer, not the old one" test "$(in_image "$layer1" 'cat /etc/pen-smoke-changed')" = changed
@@ -2246,9 +2248,11 @@ printf 'package hi;\npublic class Hi { public static void main(String[] a) { Sys
 out=$(tool_run java '
   mvn=https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.16/apache-maven-3.9.16-bin.tar.gz
   curl -fsSL "$mvn" | tar -xz -C /tmp && cd jv && /tmp/apache-maven-3.9.16/bin/mvn -B -q package &&
-  java -cp "target/hi-1.jar:$(ls ~/.m2/repository/org/apache/commons/commons-lang3/3.17.0/*.jar)" hi.Hi && java -version' || true)
+  java -cp "target/hi-1.jar:$(ls ~/.m2/repository/org/apache/commons/commons-lang3/3.17.0/*.jar)" hi.Hi && java -version &&
+  java -XshowSettings:properties -version 2>&1 | grep -E "^ +user\.home = "' || true)
 check "java: a Maven project with a dependency builds and runs" contains "Hello java" "$out"
 check "...with the recipe's default, JDK 21" grep -qE '^openjdk version "21\.' <<<"$out"
+check "...with Java's user.home the home volume, even as rootless Docker's root" grep -qE '^ +user\.home = /home/agent$' <<<"$out"
 check "...with nothing blocked" not contains "blocked:" "$out"
 rm -rf jv
 
