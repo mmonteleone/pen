@@ -6,7 +6,7 @@ Detailed settings and workflows. For installation and a first session, see the
 - [Commands](#commands)
 - [Configuration](#configuration): [network](#network), [GitHub](#github),
   [logins and API keys](#logins-and-api-keys), [agent config](#agent-config-the-home-seed),
-  [project settings](#project-settings)
+  [tools](#tools), [project settings](#project-settings)
 - [Git](#git-in-the-sandbox): [worktrees](#worktrees), [submodules](#submodules),
   [commit signing](#commit-signing)
 - [Dev servers](#dev-servers) and [Docker-in-Docker](#docker-in-docker)
@@ -19,10 +19,11 @@ Detailed settings and workflows. For installation and a first session, see the
 ```
 pen claude | codex | opencode | pi
                                 start an agent in this project's sandbox
-pen [--docker] [--port <n>]… [<cmd…>]
-                                shell or command in the sandbox (--docker, --port: see below)
-pen [--docker] [--port <n>]… run <cmd…>
+pen [--docker] [--port <n>]… [--tool <spec>]… [<cmd…>]
+                                shell or command in the sandbox (--docker, --port, --tool: see below)
+pen [--docker] [--port <n>]… [--tool <spec>]… run <cmd…>
                                 same, for a command that clashes with a subcommand name
+pen --tool list                 list the tools pen can install
 pen allow <domain…> [--global]  allow domains for this project (or all projects)
 pen allow                       list recently blocked domains
 pen allow --defaults            list the domains pen allows out of the box
@@ -47,6 +48,7 @@ errors so a typo doesn't go unnoticed.
 allow = [
   "example.com",
 ]
+tools = ["dotnet:10"]
 
 [github]
 my-org = "github_pat_…"
@@ -63,10 +65,11 @@ allow = [
 github_owner = "my-org"
 docker = true
 ports = [5173]
+tools = ["go", "rust"]
 ```
 
-Each key belongs to one file, except `allow`: a project's list adds to yours, which adds to pen's
-defaults. Changes apply to the next session, once [approved](#project-settings). `pen allow` also
+Each key belongs to one file, except `allow` and `tools`: a project's list adds to yours (and
+`allow` to pen's defaults). Changes apply to the next session, once [approved](#project-settings). `pen allow` also
 applies to running ones.
 
 ### Network
@@ -122,11 +125,20 @@ history and session state belong in each project's home volume. Credential files
 `.pi/agent/auth.json`) and `.docker/` are excluded from seed copying. Docker sessions set the
 proxy in the project's Docker client config separately, preserving its other fields.
 
-Claude's `.claude.json` mixes MCP settings with login state. Only its `mcpServers` map comes
-from the seed, replacing that map completely while keeping all other sandbox fields. Remove a
-server from that map in the seed to remove it from subsequent sessions. To keep sandbox-added
-servers instead, remove `.claude.json` from the seed. Only the current project's
-`.claude/projects/<slug>/` seed directory is copied; other projects' memory is excluded.
+Claude's `.claude.json` mixes MCP settings with login state. A new seed has none, so each
+project keeps the MCP servers added in its sandbox. Once you add a `.claude.json` with an
+`mcpServers` map to the seed, only that map comes from the seed, replacing the sandbox's map
+completely while keeping all other sandbox fields. Remove a server from that map in the seed to
+remove it from subsequent sessions. To keep sandbox-added servers again, remove `.claude.json` from
+the seed. Only the current project's `.claude/projects/<slug>/` seed directory is copied; other
+projects' memory is excluded.
+
+pen creates the seed once and never rewrites it, so a seed from an earlier pen keeps what that
+version put there. Seeds created before tools existed register a CodeGraph MCP server (in
+`.claude.json` and `.codex/config.toml`) and turn off Claude's commit and PR attribution
+(`attribution` in `.claude/settings.json`). Edit or delete those yourself: a CodeGraph server only
+works with `tools = ["codegraph"]` in your config, and new seeds leave attribution at Claude's
+default.
 
 The paths below are relative to `~/.config/pen/home/` in the seed (and to `$HOME`
 inside the sandbox). Agent changes to seed-managed files can be overwritten at the next start.
@@ -142,13 +154,91 @@ Project-specific agent files can instead live in the project, according to each 
 Agents run in skip-permissions mode by default. The container is the boundary. Edit
 `.gitconfig` in the seed to change the identity used for sandbox commits.
 
+### Tools
+
+The base image has Node, Python, the agents and common command-line tools. Language toolchains
+come from tool recipes built into pen. Name them with `--tool`, or with `tools` in either
+`config.toml` (the lists add up). `pen --tool list` shows them.
+
+```
+pen --tool dotnet:8 --tool dotnet:10 claude
+```
+
+A tool is `name`, for its default version, or `name:version`. Versions are used as written:
+`go:1.27` and `go:1.27.0` are different (and only the first is accepted). Order and repeats don't
+matter: `--tool dotnet:8 --tool go` and `--tool go --tool dotnet:8` use the same image. A session
+can reach the domains its tools need, on top of the allowlist. `tools` in a project's
+`.pen/config.toml` asks for [approval](#project-settings) first, with the domains each brings.
+
+| Tool | Default | Versions | Several at once | Domains it adds |
+|---|---|---|---|---|
+| `dotnet` | `10` | `6` to `11` (SDK major version) | yes | `.nuget.org`, `builds.dotnet.microsoft.com`, `aka.ms`, `www.microsoft.com`, `crl3.digicert.com`, `ocsp.digicert.com` |
+| `go` | `1.27` | `1.21` to `1.27` | no | `proxy.golang.org`, `sum.golang.org`, `storage.googleapis.com` |
+| `rust` | `stable` | `stable`, a minor version from `1.49` to `1.99` (`1.85` or `1.85.0`), or a patch release the recipe lists (`1.85.1`) | yes | `index.crates.io`, `static.crates.io` |
+| `java` | `21` | `8`, `11`, `17`, `21`, `25` | yes | `repo.maven.apache.org`, `repo1.maven.org`, `services.gradle.org`, `downloads.gradle.org`, `plugins.gradle.org`, `plugins-artifacts.gradle.org` |
+| `codegraph` | `1` | `1` (major version) | no | none (npm is a default) |
+
+Each version installs the newest release that matches it, when the image is built. A release newer
+than a recipe knows (a new Go minor version, Rust release, .NET major version or JDK) needs a recipe
+update in a newer pen.
+
+- **`dotnet`:** the latest SDK of each major version in `/usr/share/dotnet`, and PowerShell
+  (`pwsh`, a version pinned in the recipe). Sets `ASPNETCORE_HTTP_PORTS=8080`,
+  `DOTNET_RUNNING_IN_CONTAINER=true`, `DOTNET_GENERATE_ASPNET_CERTIFICATE=false`,
+  `DOTNET_USE_POLLING_FILE_WATCHER=true`, `NUGET_XMLDOC_MODE=skip`,
+  `POWERSHELL_DISTRIBUTION_CHANNEL`, `DOTNET_NOLOGO=1` and `DOTNET_CLI_TELEMETRY_OPTOUT=1`.
+  .NET 6 and 7 are out of support, and 11 is a preview until it ships. The NuGet cache is the
+  project's own volume, at your host's `NUGET_PACKAGES` path, with or without this tool.
+- **`go`:** the official tarball of the newest patch release, in `/usr/local/go`. A module that
+  asks for a newer Go downloads that toolchain through the module proxy into the home volume.
+  The proxy redirects toolchains and large modules to `storage.googleapis.com`, which is all of
+  Google Cloud Storage, so sessions with Go can reach any bucket there.
+- **`rust`:** rustup in `/usr/local/rustup`, each toolchain with clippy and rustfmt. The default
+  toolchain is `stable` if listed, otherwise the newest. Cargo's cache and `cargo install` go to
+  `~/.cargo` in the home volume. A toolchain that isn't in the image (asked for by
+  `rust-toolchain.toml`, say) fails in a session rather than installing: add it as a tool.
+- **`java`:** Ubuntu's headless JDK. `java` and `javac` are the newest one's; the others are in
+  `/usr/lib/jvm`. Maven and Gradle aren't installed: use the project's wrappers (`mvnw`,
+  `gradlew`). Java ignores `HTTPS_PROXY`, so the recipe points each JDK at the session's proxy
+  (`proxy:3128`), and sets `MAVEN_OPTS` so Maven uses that. A `.pen/Dockerfile` step builds without
+  a proxy, so a `RUN` step that downloads with Java needs
+  `JAVA_TOOL_OPTIONS="-Dhttp.proxyHost= -Dhttps.proxyHost="` to connect directly.
+- **`codegraph`:** [CodeGraph](https://www.npmjs.com/package/@colbymchenry/codegraph) from npm.
+  Git ignores `.codegraph/` in every session. To use it from an agent, add its MCP server to the
+  [seed](#agent-config-the-home-seed), and use `tools = ["codegraph"]` in your own config so it's in
+  every project. Without the tool, the agent can't start the server. For Claude, in `.claude.json`:
+
+  ```json
+  { "mcpServers": { "codegraph": { "type": "stdio", "command": "codegraph", "args": ["serve", "--mcp"] } } }
+  ```
+
+  For Codex, in `.codex/config.toml`:
+
+  ```toml
+  [mcp_servers.codegraph]
+  command = "codegraph"
+  args = ["serve", "--mcp"]
+  ```
+
+Tools are built once, on top of `pen:latest`, and shared. `pen upgrade` rebuilds the base image,
+and with it the tools in your config and the approved ones in the current project. The image a
+session runs depends on what the project has:
+
+| Project has | Image | Shared? |
+|---|---|---|
+| Nothing | `pen:latest` | All projects |
+| Tools | `pen-tools:<hash>` | Any project with the same tools |
+| `.pen/Dockerfile` | `<key>:latest`, or `<key>-<dirhash>:latest` in a linked worktree | This project or worktree |
+| Tools and `.pen/Dockerfile` | `<key>:<hash>`, or `<key>-<dirhash>:<hash>` in a linked worktree | This project or worktree |
+
 ### Project settings
 
 Optional, in the project's `.pen/` directory (read-only inside the sandbox):
 
 - **`.pen/config.toml`:** the keys shown above. Secrets (`[github]`, `[env]`) aren't allowed here.
-- **`.pen/Dockerfile`:** extra SDKs or tools on top of the base image (which pen keeps tagged
-  locally as `pen:latest`):
+- **`.pen/Dockerfile`:** anything else on top of the base image (which pen keeps tagged
+  locally as `pen:latest`). With [tools](#tools), `FROM pen:latest` builds on the tools image, so
+  a `RUN` step can use them:
 
   ```dockerfile
   FROM pen:latest

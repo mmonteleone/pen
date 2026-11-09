@@ -54,11 +54,6 @@ for v in $(printf '%s\n' "$@" | sort -n); do
   hash=$(jq -r --arg sdk "$sdk" --arg name "dotnet-sdk-linux-$arch.tar.gz" \
     'first(.releases[] | (.sdks // [.sdk])[] | select(.version == $sdk) | .files[] | select(.name == $name) | .hash) // empty' <<<"$meta")
   [[ $hash =~ ^[0-9a-f]{128}$ ]] || { echo "dotnet: no checksum for SDK $sdk on $arch" >&2; exit 1; }
-  if [ -d "$ROOT/sdk/$sdk" ]; then
-    # Only possible when the base image already has this SDK.
-    echo "dotnet: SDK $sdk is already in the base image"
-    continue
-  fi
   # The kept archive is the one extracted: checked before anything from it runs.
   bash "$work/dotnet-install.sh" --version "$sdk" --install-dir "$ROOT" --architecture "$arch" --os linux \
     --no-path --zip-path "$work/sdk.tar.gz" --keep-zip

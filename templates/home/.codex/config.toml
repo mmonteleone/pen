@@ -2,7 +2,3 @@
 # work inside it, so Codex runs without approvals or its own sandbox.
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
-
-[mcp_servers.codegraph]
-command = "codegraph"
-args = ["serve", "--mcp"]

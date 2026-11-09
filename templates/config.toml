@@ -1,6 +1,7 @@
 # pen user config (TOML: https://toml.io). Settings here apply to every
-# project. A project's .pen/config.toml takes allow, github_owner and docker (no
-# tokens or env, since it's usually committed); its allow adds to this one.
+# project. A project's .pen/config.toml takes allow, tools, github_owner, docker
+# and ports (no tokens or env, since it's usually committed); its allow and tools
+# add to these.
 # Changes apply to the next session. Keep this file private (mode 600): it
 # holds secrets.
 
@@ -13,6 +14,12 @@ allow = [
   # "example.com",
   # ".example.org",
 ]
+
+# --- Tools -------------------------------------------------------------------------
+# Toolchains for every project's sandbox, as name or name:version (dotnet:10).
+# `pen --tool list` shows them; a project's tools and --tool add to these.
+
+# tools = ["dotnet:10", "go"]
 
 # --- GitHub (read-only) --------------------------------------------------------
 # One fine-grained, read-only PAT per owner (your account or an org):

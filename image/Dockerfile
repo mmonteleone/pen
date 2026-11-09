@@ -5,10 +5,9 @@
 ARG UV_VERSION=latest
 FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0-noble
+FROM ubuntu:24.04
 
 ARG TARGETARCH
-ARG EXTRA_DOTNET_CHANNELS=""
 ARG NODE_VERSION=lts
 
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
@@ -16,7 +15,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Remove every regular user (and group) with an ID in 1000–60000, so none can
 # collide with the host UID/GID the entrypoint creates at start. Matches by ID,
-# not name: today that's `ubuntu` (1000) and `app` (1654).
+# not name: today that's `ubuntu` (1000).
 RUN in_range() { awk -F: '$3 >= 1000 && $3 <= 60000 { print $1 }' "$1"; }; \
     for u in $(in_range /etc/passwd); do userdel -r "$u" 2>/dev/null || userdel "$u"; done; \
     for g in $(in_range /etc/group); do groupdel "$g"; done; \
@@ -25,8 +24,8 @@ RUN in_range() { awk -F: '$3 >= 1000 && $3 <= 60000 { print $1 }' "$1"; }; \
 # Base tools.
 RUN apt-get update; \
     apt-get install -y --no-install-recommends \
-      ca-certificates curl gnupg git less vim unzip jq ripgrep fd-find \
-      build-essential python3 python3-venv tini libcap2-bin bash-completion socat; \
+      ca-certificates curl wget gnupg git less vim unzip xz-utils jq ripgrep fd-find \
+      tzdata netbase openssl build-essential python3 python3-venv tini libcap2-bin bash-completion socat; \
     ln -s /usr/bin/fdfind /usr/local/bin/fd; \
     rm -rf /var/lib/apt/lists/*
 
@@ -57,16 +56,6 @@ RUN case "${TARGETARCH}" in amd64) arch=x64 ;; arm64) arch=arm64 ;; *) echo "uns
           --exclude='*/CHANGELOG.md' --exclude='*/LICENSE' --exclude='*/README.md'; \
     node --version; npm --version
 
-# Extra .NET SDK channels next to the base image's SDK, e.g. "8.0 11.0".
-RUN if [ -n "${EXTRA_DOTNET_CHANNELS}" ]; then \
-      curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh; \
-      for channel in ${EXTRA_DOTNET_CHANNELS}; do \
-        bash /tmp/dotnet-install.sh --channel "${channel}" --install-dir "${DOTNET_ROOT:-/usr/share/dotnet}" --no-path; \
-      done; \
-      rm /tmp/dotnet-install.sh; \
-    fi; \
-    dotnet --list-sdks
-
 # System git config. Git authenticates to GitHub through gh (GH_TOKEN), SSH
 # remotes are rewritten to https (inside the sandbox only), bind-mount
 # ownership never triggers "dubious ownership", and .codegraph/ is ignored.
@@ -91,8 +80,6 @@ ENV GIT_CONFIG_COUNT=2 \
 # Node tarball (/usr/local/include/node) instead of downloading them.
 ENV NODE_USE_ENV_PROXY=1 \
     npm_config_nodedir=/usr/local \
-    DOTNET_CLI_TELEMETRY_OPTOUT=1 \
-    DOTNET_NOLOGO=1 \
     GIT_TERMINAL_PROMPT=0 \
     GH_PROMPT_DISABLED=1 \
     GH_NO_UPDATE_NOTIFIER=1
@@ -101,7 +88,7 @@ COPY --chmod=0755 entrypoint.sh /usr/local/bin/pen-entrypoint
 COPY --chmod=0755 sync-seed.sh docker-proxy.sh /usr/local/lib/pen/
 
 # ---------------------------------------------------------------------------
-# Agents and CodeGraph: always the last layers. `pen upgrade` sets PEN_REFRESH
+# Agents: always the last layers. `pen upgrade` sets PEN_REFRESH
 # to the current time so these reinstall even when the base image is cached.
 # All go into npm's global prefix (/usr/local), never $HOME, and auto-updaters
 # are off: the only upgrade path is rebuilding the image. (The agent user can't
@@ -111,7 +98,6 @@ ARG CLAUDE_CODE_VERSION=latest
 ARG CODEX_VERSION=latest
 ARG OPENCODE_VERSION=latest
 ARG PI_VERSION=latest
-ARG CODEGRAPH_VERSION=latest
 
 ENV DISABLE_AUTOUPDATER=1 \
     CLAUDE_CODE_DISABLE_AUTOUPDATE=1 \
@@ -126,8 +112,7 @@ RUN echo "refresh ${PEN_REFRESH}"; \
       "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
       "@openai/codex@${CODEX_VERSION}" \
       "opencode-ai@${OPENCODE_VERSION}" \
-      "@earendil-works/pi-coding-agent@${PI_VERSION}" \
-      "@colbymchenry/codegraph@${CODEGRAPH_VERSION}"; \
+      "@earendil-works/pi-coding-agent@${PI_VERSION}"; \
     npm cache clean --force; \
     rm -rf /root/.npm /root/.cache
 

@@ -33,7 +33,8 @@ Logins and caches persist per project. No `pen`-specific files are required in y
   image rebuilds. Share agent instructions and settings through one
   [configuration directory](docs/usage.md#agent-config-the-home-seed).
 - **Parallel work:** run several sessions or agents at once, including in separate git worktrees.
-- **Development tools:** .NET, Node and Python are built in. Add tools with a
+- **Development tools:** Node and Python are built in. Add .NET, Go, Rust, Java or CodeGraph as
+  [tools](docs/usage.md#tools) (`pen --tool dotnet claude`), anything else with a
   [`.pen/Dockerfile`](docs/usage.md#project-settings),
   forward dev-server ports, or enable Docker-in-Docker when needed.
 
@@ -149,7 +150,8 @@ Options go before the agent name. Dev servers must listen on `0.0.0.0` inside th
 Several sessions can run at once. Linked worktrees share the repo's logins and caches.
 
 For a new project, try its restore or build through `pen` first. Missing domains appear on exit.
-Add them with `pen allow`. Missing tools go in a [`.pen/Dockerfile`](docs/usage.md#project-settings).
+Add them with `pen allow`. Toolchains come from [`--tool` or `tools`](docs/usage.md#tools), anything
+else from a [`.pen/Dockerfile`](docs/usage.md#project-settings).
 
 ## Limitations
 

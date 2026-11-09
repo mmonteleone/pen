@@ -6,7 +6,7 @@ public class SeedTests
 {
     private static readonly string[] Expected =
     [
-        ".claude.json", ".claude/CLAUDE.md", ".claude/settings.json",
+        ".claude/CLAUDE.md", ".claude/settings.json",
         ".codex/AGENTS.md", ".codex/config.toml", ".gitconfig",
     ];
 
@@ -55,24 +55,25 @@ public class SeedTests
         Assert.Equal("# mine\n", File.ReadAllText(host.UserConfigPath));
 
         File.WriteAllText(Path.Combine(host.SeedDir, ".gitconfig"), "mine");
-        File.Delete(Path.Combine(host.SeedDir, ".claude.json"));
+        File.Delete(Path.Combine(host.SeedDir, ".codex", "config.toml"));
         Config.EnsureUserConfig(host, () => throw new InvalidOperationException("not asked again"));
         Assert.Equal("mine", File.ReadAllText(Path.Combine(host.SeedDir, ".gitconfig")));
-        Assert.False(File.Exists(Path.Combine(host.SeedDir, ".claude.json")));
+        Assert.False(File.Exists(Path.Combine(host.SeedDir, ".codex", "config.toml")));
     }
 
     [Fact]
-    public void TheJsonTemplatesParse_AndCarryTheDefaultAgentSettings()
+    public void TheTemplatesCarryTheSandboxSettings_AndNoPersonalDefaults()
     {
         using var settings = JsonDocument.Parse(Embedded.Text("templates/home/.claude/settings.json"));
         var root = settings.RootElement;
-        Assert.Equal("", root.GetProperty("attribution").GetProperty("commit").GetString());
-        Assert.Equal("", root.GetProperty("attribution").GetProperty("pr").GetString());
         Assert.Equal("bypassPermissions", root.GetProperty("permissions").GetProperty("defaultMode").GetString());
+        Assert.False(root.TryGetProperty("attribution", out _));
 
-        using var claudeJson = JsonDocument.Parse(Embedded.Text("templates/home/.claude.json"));
-        Assert.Equal(["mcpServers"], claudeJson.RootElement.EnumerateObject().Select(p => p.Name));
-        Assert.Equal("codegraph", claudeJson.RootElement.GetProperty("mcpServers").GetProperty("codegraph").GetProperty("command").GetString());
+        // No MCP servers: a CodeGraph entry needs the codegraph tool, which a new seed can't assume.
+        var codex = Embedded.Text("templates/home/.codex/config.toml");
+        Assert.Contains("approval_policy = \"never\"", codex);
+        Assert.DoesNotContain("mcp_servers", codex);
+        Assert.DoesNotContain("codegraph", codex);
     }
 
     [Fact]

@@ -220,8 +220,14 @@ check "signing off via GIT_CONFIG_* (commit.gpgsign, tag.gpgsign = false)" \
   docker run --rm --entrypoint bash "$IMAGE" -c '[ "$(git config commit.gpgsign)" = false ] && [ "$(git config tag.gpgsign)" = false ]'
 check "SSH remote rewritten to https" \
   docker run --rm --entrypoint bash "$IMAGE" -c '[ "$(git ls-remote --get-url git@github.com:octo/repo.git)" = https://github.com/octo/repo.git ]'
-check "tools present (git gh rg fd jq curl less vim unzip make python3 uv node npm tini capsh docker 'docker compose' dotnet)" \
-  docker run --rm --entrypoint bash "$IMAGE" -c 'for c in git gh rg fd jq curl less vim unzip make gcc python3 uv uvx node npm tini capsh setpriv docker dotnet; do command -v $c >/dev/null || { echo "missing $c" >&2; exit 1; }; done; docker compose version >/dev/null'
+check "tools present (git gh rg fd jq curl wget xz openssl less vim unzip make python3 uv node npm tini capsh docker 'docker compose')" \
+  docker run --rm --entrypoint bash "$IMAGE" -c 'for c in git gh rg fd jq curl wget xz openssl less vim unzip make gcc python3 uv uvx node npm tini capsh setpriv docker; do command -v $c >/dev/null || { echo "missing $c" >&2; exit 1; }; done; docker compose version >/dev/null'
+check "time zone data and /etc/services (tzdata, netbase)" \
+  docker run --rm --entrypoint bash "$IMAGE" -c 'test -f /usr/share/zoneinfo/Europe/Berlin && grep -q "^https" /etc/services'
+check "no .NET, PowerShell or CodeGraph in the base (they're tools)" \
+  docker run --rm --entrypoint bash "$IMAGE" -c '! command -v dotnet && ! command -v pwsh && ! command -v codegraph && ! test -e /usr/share/dotnet'
+check "no .NET settings in the base's environment" \
+  docker run --rm --entrypoint bash "$IMAGE" -c '! env | grep -E "^(DOTNET|ASPNETCORE|NUGET_XMLDOC|POWERSHELL)_"'
 fi
 
 if want 2; then
@@ -340,14 +346,14 @@ fi
 
 if want 4; then
 # ==============================================================================
-section "4. Agents and CodeGraph"
+section "4. Agents"
 
-out=$(in_sandbox 'for c in claude codex opencode pi codegraph; do printf "%s=" $c; timeout 30 $c --version </dev/null 2>&1 | tail -1; done')
-for c in claude codex opencode pi codegraph; do
+out=$(in_sandbox 'for c in claude codex opencode pi; do printf "%s=" $c; timeout 30 $c --version </dev/null 2>&1 | tail -1; done')
+for c in claude codex opencode pi; do
   check "$c --version works as agent ($(grep "^$c=" <<<"$out" | cut -d= -f2-))" grep -qE "^$c=.*[0-9]+\.[0-9]+" <<<"$out"
 done
 check "agents live in system paths, not \$HOME" \
-  in_sandbox 'for c in claude codex opencode pi codegraph; do case $(readlink -f "$(command -v $c)") in /usr/local/*|/opt/*) ;; *) exit 1 ;; esac; done'
+  in_sandbox 'for c in claude codex opencode pi; do case $(readlink -f "$(command -v $c)") in /usr/local/*|/opt/*) ;; *) exit 1 ;; esac; done'
 check "agent user can't write the agents' install dir" \
   in_sandbox '! touch /usr/local/lib/node_modules/.x 2>/dev/null'
 check "auto-updaters off (env)" \
@@ -569,7 +575,7 @@ check "...mode 600" test "$(mode_of "$cfg")" = 600
 check "...with every value commented out" not grep -qvE '^[[:space:]]*(#|$|\[[a-z]+\]$|allow = \[$|\]$)' "$cfg"
 check "...and says so in one line" test "$(grep -c 'created ~/.config/pen/' <<<"$out")" = 1
 seed=$FAKE_HOME/.config/pen/home
-check "...and creates home/ (the seed)" has_all "$(cd "$seed" && find . -type f | sort)" ./.gitconfig ./.claude.json ./.claude/CLAUDE.md ./.claude/settings.json ./.codex/AGENTS.md ./.codex/config.toml
+check "...and creates home/ (the seed)" test "$(cd "$seed" && find . -type f | sort | tr '\n' ' ')" = "./.claude/CLAUDE.md ./.claude/settings.json ./.codex/AGENTS.md ./.codex/config.toml ./.gitconfig "
 check "...whose .gitconfig has the host's user.name/user.email" \
   test "$(git config --file "$seed/.gitconfig" user.name) <$(git config --file "$seed/.gitconfig" user.email)>" = "Smoke Host <smoke-host@example.invalid>"
 sum=$(cksum <"$cfg") seedsum=$(cd "$seed" && find . -type f -exec cksum {} + | sort)
@@ -704,9 +710,17 @@ section "11. .NET and NuGet, with --tool dotnet (step 7)"
 dn_sandbox() { local script=${*: -1}; "$PEN" --tool dotnet "${@:1:$#-1}" run bash -c "$script" </dev/null; }
 majors() { awk '{ split($1, v, "."); print v[1] }' | sort -n | uniq | tr '\n' ' '; }
 
-out=$(dn_sandbox 'pwsh -NoProfile -Command "\$PSVersionTable.PSVersion.Major"; dotnet --list-sdks' 2>/dev/null || true)
-check "the tool's pwsh runs" grep -qxE '[0-9]+' <<<"$(head -1 <<<"$out")"
-check "...and dotnet lists the SDK of the default version, 10" test "$(tail -n +2 <<<"$out" | majors)" = "10 "
+nuget() { curl -s -o /dev/null -w "%{http_code} %{http_connect}" -I https://api.nuget.org/v3/index.json; }
+out=$(in_sandbox "command -v dotnet pwsh || echo none; $(declare -f nuget); nuget" 2>/dev/null || true)
+check "without the tool there's no dotnet or pwsh, and NuGet is blocked" \
+  bash -c '[ "$(sed -n 1p <<<"$1")" = none ] && [ "$(sed -n 2p <<<"$1" | cut -d" " -f2)" = 403 ]' _ "$out"
+out=$("$PEN" --tool dotnet:8 run bash -c "readlink -f \$(command -v pwsh); pwsh -NoProfile -Command '\$PSVersionTable.PSVersion.Major'; dotnet --list-sdks" </dev/null 2>/dev/null || true)
+check "dotnet:8 alone: pwsh is the recipe's (/opt/microsoft/powershell/7) and runs" \
+  bash -c '[ "$(sed -n 1p <<<"$1")" = /opt/microsoft/powershell/7/pwsh ] && grep -qxE "[0-9]+" <<<"$(sed -n 2p <<<"$1")"' _ "$out"
+check "...and dotnet lists only SDK 8" test "$(tail -n +3 <<<"$out" | majors)" = "8 "
+check "with the tool, NuGet is reachable" test "$(dn_sandbox "$(declare -f nuget); nuget" 2>/dev/null | cut -d' ' -f1)" = 200
+out=$(dn_sandbox 'dotnet --list-sdks' 2>/dev/null || true)
+check "dotnet alone lists the SDK of the default version, 10" test "$(majors <<<"$out")" = "10 "
 check "dotnet:8 with dotnet:10 lists both SDKs" \
   test "$(dn_sandbox --tool dotnet:8 'dotnet --list-sdks' 2>/dev/null | majors)" = "8 10 "
 out=$(dn_sandbox 'env' 2>/dev/null || true)
@@ -1143,14 +1157,14 @@ if want 16; then
 # ==============================================================================
 section "16. pen allow with no arguments (step 2)"
 
-"$PEN" run bash -c 'curl -s -o /dev/null -I https://example.net; sleep 1.5; curl -s -o /dev/null -I https://example.org; echo READY; sleep 120' \
+"$PEN" run bash -c 'curl -s -o /dev/null -I https://example.edu; sleep 1.5; curl -s -o /dev/null -I https://example.org; echo READY; sleep 120' \
   </dev/null >"$SCRATCH/list.out" 2>&1 &
 p=$!
 for i in $(seq 300); do grep -q READY "$SCRATCH/list.out" 2>/dev/null && break; sleep 0.1; done
 out=$("$PEN" allow 2>/dev/null)
-check "lists blocked domains while the session runs" has_all "$out" example.org example.net
-check "...newest first" test "$(grep -oE 'example\.(org|net)' <<<"$out" | head -1)" = example.org
-check "...with the line to paste" contains "pen allow example.org example.net" "$out"
+check "lists blocked domains while the session runs" has_all "$out" example.org example.edu
+check "...newest first" test "$(grep -oE 'example\.(org|edu)' <<<"$out" | head -1)" = example.org
+check "...with the line to paste" contains "pen allow example.org example.edu" "$out"
 want 15 && check "...leaving out domains allowed since (example.com, by section 15)" not contains "example.com" "$out"
 kill -9 "$p"; wait "$p" 2>/dev/null || true
 out=$("$PEN" allow 2>&1)
@@ -1177,10 +1191,11 @@ seed_pen() { (cd "$SEEDP" && fake_pen run bash -c "$1" 2>&1); }
 out=$(seed_pen '
   grep -q "running in a pen sandbox" ~/.claude/CLAUDE.md && echo claude-note
   grep -q "running in a pen sandbox" ~/.codex/AGENTS.md && echo codex-note
-  echo "mcp=$(jq -c ".mcpServers | keys" ~/.claude.json)"
+  echo "mcp=$(jq -c ".mcpServers | keys" ~/.claude.json 2>/dev/null || echo none)"
   echo "mode=$(jq -r .permissions.defaultMode ~/.claude/settings.json)"
   echo "attribution=$(jq -c .attribution ~/.claude/settings.json)"
   grep -q "^approval_policy = \"never\"" ~/.codex/config.toml && echo codex-never
+  grep -q "mcp_servers" ~/.codex/config.toml || echo codex-no-mcp
   echo "projects=$(ls ~/.claude/projects | tr "\n" " ")"
   echo "memory=$(cat ~/.claude/projects/*/memory/MEMORY.md)"
   git commit -q --allow-empty -m "sandbox commit" && echo committed
@@ -1189,14 +1204,14 @@ out=$(seed_pen '
   touch -d "next year" ~/.claude/CLAUDE.md
   printf "%s" "project login" >~/.codex/auth.json
   printf "%s" "claude login" >~/.claude/.credentials.json
-  jq ".oauthAccount = {\"smoke\": true}" ~/.claude.json >/tmp/j && cat /tmp/j >~/.claude.json
-  claude mcp add -s user from-sandbox -- true >/dev/null 2>&1; true
+  echo "{\"oauthAccount\": {\"smoke\": true}, \"mcpServers\": {\"from-sandbox\": {\"command\": \"true\"}}}" >~/.claude.json
 ') || { printf '%s\n' "$out" >&2; fail "the first seeded session failed"; }
 has() { grep -qxF -- "$1" <<<"$out"; }
 check "a new project's first session has the seeded CLAUDE.md and AGENTS.md" bash -c 'grep -qx claude-note <<<"$1" && grep -qx codex-note <<<"$1"' _ "$out"
-check "...and the seeded CodeGraph mcpServers entry" has 'mcp=["codegraph"]'
+check "...and no MCP servers for Claude (no .claude.json in the seed)" has "mcp=none"
+check "...or Codex" has codex-no-mcp
 check "...Claude's default mode is bypassPermissions" has "mode=bypassPermissions"
-check "...with commit and PR attribution off" has 'attribution={"commit":"","pr":""}'
+check "...with Claude's own attribution defaults (none seeded)" has "attribution=null"
 check "...and Codex runs without approvals" has codex-never
 check "only this project's .claude/projects/<slug>/ is copied" has "projects=$slug "
 check "...with its memory" has "memory=seeded memory"
@@ -1209,7 +1224,7 @@ out=$(seed_pen 'tail -1 ~/.claude/CLAUDE.md; echo "mcp=$(jq -c ".mcpServers | ke
 check "seed settings overwrite sandbox edits even with a future mtime" not has "local edit"
 check "...without changing the seed" not grep -q "local edit" "$seed/.claude/CLAUDE.md"
 check "...or another project" not contains "local edit" "$(fake_pen run tail -1 /home/agent/.claude/CLAUDE.md 2>/dev/null)"
-check "the seed owns Claude's whole MCP map" has 'mcp=["codegraph"]'
+check "with no .claude.json in the seed, Claude's MCP servers are the sandbox's own" has 'mcp=["from-sandbox"]'
 check "Codex credentials survive synchronization" has 'project login'
 check "Claude credentials survive synchronization" has 'claude login'
 
@@ -1217,12 +1232,12 @@ check "Claude credentials survive synchronization" has 'claude login'
 # can look unchanged to a new container for several seconds.
 echo "added later" >"$seed/.added-later"
 { cat "$seed/.claude/CLAUDE.md"; echo "seed v2"; } >"$seed/.claude/CLAUDE.md.new" && mv "$seed/.claude/CLAUDE.md.new" "$seed/.claude/CLAUDE.md"
-python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); d["mcpServers"]["seeded-later"] = {"type": "stdio", "command": "true"}; json.dump(d, open(sys.argv[1] + ".new", "w"))' "$seed/.claude.json" \
-  && mv "$seed/.claude.json.new" "$seed/.claude.json" # (python3, not jq: the host may not have jq)
+printf '%s' '{"mcpServers": {"seeded-later": {"type": "stdio", "command": "true"}}}' >"$seed/.claude.json.new" \
+  && mv "$seed/.claude.json.new" "$seed/.claude.json"
 out=$(seed_pen 'cat ~/.added-later; tail -1 ~/.claude/CLAUDE.md; echo "mcp=$(jq -c ".mcpServers | keys" ~/.claude.json)"; echo "login=$(jq -c .oauthAccount ~/.claude.json)"')
 check "a file added to the seed later reaches the project's next session" has "added later"
 check "editing a seed file replaces the project's copy" has "seed v2"
-check "an MCP server added to the seed reaches an existing project" has 'mcp=["codegraph","seeded-later"]'
+check "a .claude.json added to the seed owns an existing project's whole MCP map" has 'mcp=["seeded-later"]'
 check "...and the project stays logged in (the rest of .claude.json is kept)" has 'login={"smoke":true}'
 seed_pen 'rm ~/.codex/auth.json ~/.claude/.credentials.json' >/dev/null
 
@@ -1230,8 +1245,7 @@ if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
   fake_config "[env]" "CLAUDE_CODE_OAUTH_TOKEN = \"$CLAUDE_CODE_OAUTH_TOKEN\""
   (cd "$SEEDP" && fake_pen run timeout 300 claude -p 'Create a file named perm-check.txt containing "ok", then commit it with git (message "perm check"). Reply "done".' >/dev/null 2>&1) || true
   check "claude starts in skip-permissions mode (wrote and committed without asking)" test -f "$SEEDP/perm-check.txt"
-  check "...and its commit has the seeded author and no co-author trailer" \
-    bash -c '[ "$(git -C "$1" log -1 --format="%an")" = "Smoke Host" ] && ! git -C "$1" log -1 --format=%B | grep -qi co-authored-by' _ "$SEEDP"
+  check "...and its commit has the seeded author" test "$(git -C "$SEEDP" log -1 --format="%an")" = "Smoke Host"
   out=$(cd "$SEEDP" && fake_pen run timeout 300 claude -p 'Fetch https://example.com and show me its title.' 2>&1 || true)
   check "claude reports the blocked domain" grep -qiE 'example\.com.*(block|allow|proxy|403)|(block|allow|proxy|403).*example\.com' <<<"$out"
 else
@@ -1244,7 +1258,7 @@ if [ -n "${OPENAI_API_KEY:-}" ]; then
 else
   note "codex blocked-domain check: skipped (set OPENAI_API_KEY)"
 fi
-note "after codegraph init, codegraph_explore from Claude in the sandbox is a manual check (needs a login)"
+note "with tools = [\"codegraph\"] and its MCP entry in the seed, codegraph_explore from Claude after codegraph init is a manual check (needs a login)"
 fi
 
 if want 18; then
