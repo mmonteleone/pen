@@ -10,6 +10,10 @@ public class ToolsTests
         ["tools/go/install.sh"] = "#!/bin/sh\n",
         ["tools/secret/tool.toml"] = "default = \"1\"\nversion = '^\\d+$'\nhidden = true\n",
         ["tools/secret/install.sh"] = "#!/bin/sh\n",
+        ["tools/helper/tool.toml"] = "default = \"latest\"\nversion = '^(latest|\\d+\\.\\d+\\.\\d+)$'\nkind = \"agent\"\n",
+        ["tools/helper/install.sh"] = "#!/bin/sh\n",
+        ["tools/ghost/tool.toml"] = "default = \"latest\"\nversion = '.*'\nkind = \"agent\"\nhidden = true\n",
+        ["tools/ghost/install.sh"] = "#!/bin/sh\n",
     });
 
     private static ToolSpec Tool(string spec)
@@ -26,6 +30,43 @@ public class ToolsTests
         Assert.Null(ToolSpec.TryCanonicalize(specs.Select(Tool), Catalog, out var canonical));
         return canonical.Select(t => t.ToString()).ToList();
     }
+
+    private static string? Implied(string[] command, params string[] named) =>
+        ToolSpec.ImpliedAgent(command, Catalog, named.Select(Tool))?.ToString();
+
+    [Fact]
+    public void ACommandNamingAnAgentImpliesItsDefault() =>
+        Assert.Equal("helper:latest", Implied(["helper", "--flag"]));
+
+    [Theory]
+    [InlineData("helper")]
+    [InlineData("helper:1.2.3")]
+    public void AnAgentAlreadyNamedAtAnyVersionImpliesNothing(string named)
+    {
+        Assert.Null(Implied(["helper"], named));
+        Assert.Null(Implied(["helper"], "go", named));
+    }
+
+    [Fact]
+    public void OtherToolsDontStopTheImplication() =>
+        Assert.Equal("helper:latest", Implied(["helper"], "go", "dotnet:10"));
+
+    [Theory]
+    [InlineData("bash")]
+    [InlineData("run")]
+    [InlineData("go")]
+    [InlineData("ghost")]
+    [InlineData("unknown")]
+    [InlineData("helper2")]
+    [InlineData("Helper")]
+    public void NothingElseImpliesAnAgent(string first) =>
+        Assert.Null(Implied([first]));
+
+    [Fact]
+    public void AnEmptyCommandImpliesNothing() => Assert.Null(Implied([]));
+
+    [Fact]
+    public void OnlyTheFirstWordCounts() => Assert.Null(Implied(["bash", "helper"]));
 
     [Fact]
     public void ANameMeansTheDefaultVersion()

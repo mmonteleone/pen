@@ -66,7 +66,7 @@ Before merging, run the suite on macOS arm64 and Linux amd64, with both rootful 
 
 Keep code AOT/trim-safe: use source-generated serialization rather than reflection-based APIs. Native calls belong in `Native.cs`. Tests access internals through `InternalsVisibleTo`; use the existing `TempDir` and `Git` helpers.
 
-Tool recipes pair a `tool.toml` (default version, accepted versions, domains and environment) with an `install.sh` that receives versions as separate arguments and runs as root during the image build. Recipes must work independently. To add one, create `tools/<name>/` with those two files, reinstall and try `pen --tool <name>`. `hidden = true` keeps a recipe out of listings, as for `pen-test` and `pen-test-b`, which the tests use. When adding or changing one, update the [tools reference](docs/usage.md#tools) and run smoke section 28 under rootful and rootless Docker.
+Tool recipes pair a `tool.toml` (default version, accepted versions, domains and environment) with an `install.sh` that receives versions as separate arguments and runs as root during the image build. Recipes must work independently. To add one, create `tools/<name>/` with those two files, reinstall and try `pen --tool <name>`. `kind = "agent"` marks a recipe that installs an AI agent: `pen --tool list` shows it apart from tools, and a command that starts with its name (`pen <name>`) brings it in at its default version. `hidden = true` keeps a recipe out of listings, as for `pen-test` and `pen-test-b`, which the tests use. When adding or changing one, update the [tools reference](docs/usage.md#tools) and run smoke section 28 under rootful and rootless Docker.
 
 ## Build and update options
 

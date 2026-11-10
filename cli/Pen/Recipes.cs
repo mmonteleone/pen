@@ -8,7 +8,8 @@ namespace Pen;
 /// A tool's recipe: tools/&lt;name&gt;/tool.toml, its settings, and tools/&lt;name&gt;/install.sh,
 /// which runs as root at image build, with the versions as separate arguments.
 /// Recipes are embedded and trusted, and can't depend on each other. A hidden one works
-/// but isn't offered in listings or messages.
+/// but isn't offered in listings or messages. <c>kind = "agent"</c> marks a recipe
+/// that installs an AI agent, which a command naming it implies (<see cref="ToolSpec.ImpliedAgent"/>).
 /// </summary>
 internal sealed class Recipe
 {
@@ -17,6 +18,8 @@ internal sealed class Recipe
     /// <summary>Whether several versions can be installed together.</summary>
     public bool Multiple { get; init; }
     public bool Hidden { get; init; }
+    /// <summary>Whether this installs an agent (kind = "agent") rather than a tool.</summary>
+    public bool IsAgent { get; init; }
     /// <summary>Domains the tool needs, in file order.</summary>
     public List<string> Allow { get; } = [];
     /// <summary>Environment for sessions with the tool, in file order: set in its image (<see cref="ToolsImage"/>).</summary>
@@ -48,11 +51,15 @@ internal sealed class Recipe
 
         foreach (var key in table.Keys)
         {
-            if (key is not ("default" or "version" or "multiple" or "hidden" or "allow" or "env"))
+            if (key is not ("default" or "version" or "multiple" or "hidden" or "kind" or "allow" or "env"))
                 throw Error($"unknown key \"{key}\"");
         }
         object Required(string key) => table.TryGetValue(key, out var v) ? v : throw Error($"{key} is missing");
         bool Flag(string key) => !table.TryGetValue(key, out var v) ? false : v as bool? ?? throw Error($"{key} must be true or false (unquoted)");
+
+        var isAgent = false;
+        if (table.TryGetValue("kind", out var kind))
+            isAgent = Config.String(kind, "kind", Error) == "agent" ? true : throw Error("kind must be \"agent\" or left out");
 
         Regex regex;
         try
@@ -71,6 +78,7 @@ internal sealed class Recipe
             Default = Config.String(Required("default"), "default", Error),
             Multiple = Flag("multiple"),
             Hidden = Flag("hidden"),
+            IsAgent = isAgent,
             Settings = text,
             Script = script,
             versionRegex = regex,
@@ -170,9 +178,17 @@ internal sealed partial class RecipeCatalog
     public string Listing()
     {
         if (!Offered.Any()) return "no tools are available yet\n";
-        var width = Offered.Max(r => r.Name.Length);
-        return string.Concat(Offered.Select(r =>
-            $"{r.Name.PadRight(width)}  default {r.Default}{(r.Multiple ? ", several versions can be installed together" : "")}\n"));
+        var agents = Offered.Where(r => r.IsAgent).ToList();
+        var tools = Offered.Where(r => !r.IsAgent).ToList();
+        string Group(List<Recipe> group)
+        {
+            var width = group.Max(r => r.Name.Length);
+            return string.Concat(group.Select(r =>
+                $"{r.Name.PadRight(width)}  default {r.Default}{(r.Multiple ? ", several versions can be installed together" : "")}\n"));
+        }
+        if (agents.Count == 0) return Group(tools);
+        if (tools.Count == 0) return $"agents:\n{Group(agents)}";
+        return $"agents:\n{Group(agents)}\ntools:\n{Group(tools)}";
     }
 
     [GeneratedRegex(@"^[a-z0-9][a-z0-9-]*\z")]

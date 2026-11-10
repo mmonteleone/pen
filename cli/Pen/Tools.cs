@@ -63,6 +63,18 @@ internal readonly partial record struct ToolSpec(string Name, string Version)
         return canonical;
     }
 
+    /// <summary>
+    /// The agent a command implies: its default version, when <c>command[0]</c> is exactly the
+    /// name of a visible agent recipe and none of <paramref name="named"/> (any version) is that
+    /// agent. Otherwise null. Only the command's first word counts.
+    /// </summary>
+    public static ToolSpec? ImpliedAgent(IReadOnlyList<string> command, RecipeCatalog catalog, IEnumerable<ToolSpec> named)
+    {
+        if (command.Count == 0 || !catalog.TryGet(command[0], out var recipe) || !recipe.IsAgent || recipe.Hidden)
+            return null;
+        return named.Any(t => t.Name == recipe.Name) ? null : new ToolSpec(recipe.Name, recipe.Default);
+    }
+
     /// <summary>The domains the tools' recipes bring, in order. A tool with no recipe (not one that's parsed) brings none.</summary>
     public static List<string> DomainsOf(IEnumerable<ToolSpec> tools, RecipeCatalog catalog) =>
         tools.Select(t => t.Name).Distinct(StringComparer.Ordinal)

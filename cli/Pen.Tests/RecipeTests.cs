@@ -312,6 +312,52 @@ public class RecipeTests
     }
 
     [Fact]
+    public void KindAgentIsAccepted_AndTheDefaultIsATool()
+    {
+        Assert.True(LoadToml(Good + "kind = \"agent\"\n").TryGet("x", out var agent) && agent.IsAgent);
+        Assert.True(LoadToml(Good).TryGet("x", out var tool) && !tool.IsAgent);
+    }
+
+    [Theory]
+    [InlineData("kind = \"tool\"\n")]
+    [InlineData("kind = \"\"\n")]
+    [InlineData("kind = \"Agent\"\n")]
+    [InlineData("kind = true\n")]
+    [InlineData("kind = 1\n")]
+    [InlineData("kind = [\"agent\"]\n")]
+    public void AnyOtherKindIsAnError(string line) =>
+        Assert.Contains("kind", Error(() => LoadToml(Good + line)));
+
+    [Fact]
+    public void TheListingGroupsAgentsApartFromTools()
+    {
+        var catalog = Load(
+            ("tools/ai/tool.toml", "default = \"latest\"\nversion = '.*'\nkind = \"agent\"\n"),
+            ("tools/ai/install.sh", "#!/bin/sh\n"),
+            ("tools/robot/tool.toml", "default = \"2\"\nversion = '.*'\nkind = \"agent\"\n"),
+            ("tools/robot/install.sh", "#!/bin/sh\n"),
+            ("tools/go/tool.toml", "default = \"1.24\"\nversion = '.*'\n"),
+            ("tools/go/install.sh", "#!/bin/sh\n"),
+            ("tools/hid/tool.toml", "default = \"1\"\nversion = '.*'\nkind = \"agent\"\nhidden = true\n"),
+            ("tools/hid/install.sh", "#!/bin/sh\n"));
+        Assert.Equal("agents:\nai     default latest\nrobot  default 2\n\ntools:\ngo  default 1.24\n", catalog.Listing());
+        Assert.Equal("available: ai, go, robot", catalog.Available());
+    }
+
+    [Fact]
+    public void AnEmptyGroupIsLeftOut()
+    {
+        var agents = LoadToml(Good + "kind = \"agent\"\n");
+        Assert.Equal("agents:\nx  default 10\n", agents.Listing());
+        var hiddenTools = Load(
+            ("tools/ai/tool.toml", "default = \"latest\"\nversion = '.*'\nkind = \"agent\"\n"),
+            ("tools/ai/install.sh", "#!/bin/sh\n"),
+            ("tools/hid/tool.toml", "default = \"1\"\nversion = '.*'\nhidden = true\n"),
+            ("tools/hid/install.sh", "#!/bin/sh\n"));
+        Assert.Equal("agents:\nai  default latest\n", hiddenTools.Listing());
+    }
+
+    [Fact]
     public void WithOnlyHiddenRecipesTheListingSaysSo()
     {
         var catalog = LoadToml(Good + "hidden = true\n");

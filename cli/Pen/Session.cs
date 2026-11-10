@@ -37,6 +37,9 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
             throw new PenException("not starting: deal with the warning above first");
 
         RepoGuard.CheckAtStart(project.Dir);
+        // A command naming an agent brings it, like --tool, unless a tool from user config, .pen/ or --tool already names it.
+        if (ToolSpec.ImpliedAgent(command, catalog, [.. user.Tools, .. projectConfig.Tools, .. flagTools ?? []]) is { } implied)
+            flagTools = [.. flagTools ?? [], implied];
         // Tools that can't go together stop the session, whatever's approved.
         var tools = ToolSpec.Merge(catalog, user.Tools, projectConfig.Tools, flagTools ?? []);
         // Before anything below uses a setting from .pen/.

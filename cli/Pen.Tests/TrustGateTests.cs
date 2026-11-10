@@ -65,8 +65,8 @@ public class TrustGateTests
         public string Seen(string name) => File.ReadAllText(Path.Combine(T.Path, name));
         public bool HasSeen(string name) => File.Exists(Path.Combine(T.Path, name));
 
-        public int Run(Answers answers, IReadOnlyList<ToolSpec>? flagTools = null, RecipeCatalog? recipes = null) =>
-            new Session(Host, Project, User, ProjectConfig).Run(["true"], docker: ProjectConfig.Docker == true, answers: answers, flagTools: flagTools, recipes: recipes);
+        public int Run(Answers answers, IReadOnlyList<ToolSpec>? flagTools = null, RecipeCatalog? recipes = null, string[]? command = null) =>
+            new Session(Host, Project, User, ProjectConfig).Run(command ?? ["true"], docker: ProjectConfig.Docker == true, answers: answers, flagTools: flagTools, recipes: recipes);
 
         public void AssertNothingReached()
         {
@@ -848,6 +848,44 @@ public class TrustGateTests
         var tag = tools.Split(' ')[4]["pen-tools:".Length..];
         Assert.Equal($"{f.Project.Key}:{tag}", f.Seen("image-seen"));
         Assert.Contains(f.Calls, c => c.Contains($"--build-context pen:latest=docker-image://pen-tools:{tag}"));
+    }
+
+    // The embedded pen-test recipe's name, as a visible agent that brings example.org.
+    private static readonly RecipeCatalog AgentCatalog = RecipeCatalog.FromFiles(new Dictionary<string, string>
+    {
+        ["tools/pen-test/tool.toml"] = "default = \"1\"\nversion = '^[12]$'\nkind = \"agent\"\nallow = [\"example.org\"]\n",
+        ["tools/pen-test/install.sh"] = "#!/bin/sh\n",
+    });
+
+    [Fact]
+    public void ACommandNamingAnAgentImpliesItWithoutAsking_AndItsDomainsArrive()
+    {
+        using var f = ToolsFixture(projectToml: "");
+        Assert.Equal(0, f.Run(NoTerminal, recipes: AgentCatalog, command: ["pen-test"]));
+        Assert.Matches("^pen-tools:[0-9a-f]{16}$", f.Seen("image-seen"));
+        Assert.Contains("example.org", f.Seen("allowlist-seen").Split('\n'));
+        Assert.Equal("example.org\n", f.Seen("tool-domains-seen"));
+        Assert.False(TrustStore.For(f.Host, f.Project).CoversTool(PenTest));
+    }
+
+    [Theory]
+    [InlineData("pen-test:1")]
+    [InlineData("pen-test:2")]
+    public void AProjectEntryForTheImpliedAgentStillNeedsApproval(string entry)
+    {
+        using var f = ToolsFixture(projectToml: $"tools = [\"{entry}\"]\n");
+        var e = Assert.Throws<PenException>(() => f.Run(NoTerminal, recipes: AgentCatalog, command: ["pen-test"]));
+        Assert.Contains($"tool {entry}", e.Message);
+        f.AssertNothingReached();
+    }
+
+    [Fact]
+    public void ACommandThatIsntAnAgentImpliesNothing()
+    {
+        using var f = ToolsFixture(projectToml: "");
+        Assert.Equal(0, f.Run(NoTerminal, recipes: AgentCatalog, command: ["bash"]));
+        Assert.DoesNotContain("example.org", f.Seen("allowlist-seen").Split('\n'));
+        Assert.Equal("pen:latest", f.Seen("image-seen"));
     }
 
     [Fact]
