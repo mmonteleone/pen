@@ -77,10 +77,11 @@ internal static class Cli
         ["upgrade"] = """
             usage: pen upgrade [--clean]
 
-            Rebuilds the base image, then pulls newer proxy and Docker-in-Docker images.
-            It rebuilds the tools and agents in your config, and run in a project, the
-            approved tools and .pen/Dockerfile there (see pen trust); any other set of
-            tools, such as an agent a command brings, is rebuilt on its next use. A rebuild
+            Rebuilds the base image, always as a new image, then pulls newer proxy and
+            Docker-in-Docker images. Agents and tools are built on the base, so all of them
+            are rebuilt: the tools and agents in your config right away, and run in a
+            project, the approved tools and .pen/Dockerfile there (see pen trust); any other
+            set of tools, such as an agent a command brings, on its next use. A rebuild
             installs an agent or tool at latest at its newest release, and a pinned one at
             the version given. Logins and config are kept.
 

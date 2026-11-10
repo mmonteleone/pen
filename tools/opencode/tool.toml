@@ -1,0 +1,25 @@
+# OpenCode, the agent, from npm: opencode:latest is the newest release when its tools
+# image is built (pen upgrade gives a new base, so it reinstalls on next use), or an exact
+# release from 1.15.1 on, opencode:1.19.0. Other providers than Anthropic and OpenAI need pen allow.
+kind = "agent"
+default = "latest"
+version = '^(latest|[0-9]+\.[0-9]+\.[0-9]+)$'
+multiple = false
+allow = [
+  # OpenCode's own services, and the models.dev catalog of providers and models
+  ".opencode.ai",
+  "models.dev",
+  # OpenCode installs its plugin package (@opencode-ai/plugin) from npm at run time.
+  "registry.npmjs.org",
+  # Anthropic: API and OAuth login
+  ".anthropic.com",
+  ".claude.ai",
+  ".claude.com",
+  # OpenAI: API, auth and ChatGPT login
+  ".openai.com",
+  ".chatgpt.com",
+]
+
+[env]
+# No auto-updates: the image is the only way to upgrade (and /opt/pen isn't writable).
+OPENCODE_DISABLE_AUTOUPDATE = "1"

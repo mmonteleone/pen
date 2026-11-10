@@ -250,9 +250,15 @@ check "no .NET, PowerShell or CodeGraph in the base (they're tools)" \
 check "no .NET settings in the base's environment" \
   docker run --rm --entrypoint bash "$IMAGE" -c '! env | grep -E "^(DOTNET|ASPNETCORE|NUGET_XMLDOC|POWERSHELL)_"'
 check "no Claude Code in the base, or its settings (it's the claude tool)" \
-  docker run --rm --entrypoint bash "$IMAGE" -c '! command -v claude && ! test -e /opt/pen/claude && ! test -e /opt/pen/agents/lib/node_modules/@anthropic-ai && ! env | grep -E "^(DISABLE_AUTOUPDATER|CLAUDE_CODE_)"'
+  docker run --rm --entrypoint bash "$IMAGE" -c '! command -v claude && ! test -e /opt/pen/claude && ! env | grep -E "^(DISABLE_AUTOUPDATER|CLAUDE_CODE_)"'
 check "no Codex or Pi in the base, or their settings (they're the codex and pi tools)" \
-  docker run --rm --entrypoint bash "$IMAGE" -c '! command -v codex && ! command -v pi && ! test -e /opt/pen/codex && ! test -e /opt/pen/pi && ! test -e /etc/codex && ! test -e /opt/pen/agents/lib/node_modules/@openai && ! test -e /opt/pen/agents/lib/node_modules/@earendil-works && ! env | grep -E "^PI_"'
+  docker run --rm --entrypoint bash "$IMAGE" -c '! command -v codex && ! command -v pi && ! test -e /opt/pen/codex && ! test -e /opt/pen/pi && ! test -e /etc/codex && ! env | grep -E "^PI_"'
+check "no agents at all in the base (claude codex opencode pi), or /opt/pen/agents, or their settings" \
+  docker run --rm --entrypoint bash "$IMAGE" -c 'for c in claude codex opencode pi; do ! command -v $c >/dev/null && ! test -e /opt/pen/$c || exit 1; done; ! test -e /opt/pen/agents && ! env | grep -E "^(OPENCODE_|NPM_CONFIG_)"'
+check "the base's build left nothing in /tmp or root's home (compile caches, agents' first runs)" \
+  docker run --rm --entrypoint bash "$IMAGE" -c 'test -z "$(find /tmp /root/.cache /root/.config /root/.local /root/.npm -mindepth 1 2>/dev/null)"'
+check "the base's last layer records PEN_REFRESH (/etc/pen/refresh)" \
+  docker run --rm --entrypoint test "$IMAGE" -s /etc/pen/refresh
 fi
 
 if want 2; then
@@ -343,6 +349,9 @@ gh_ip=$(dig +short github.com A 2>/dev/null | grep -E '^[0-9.]+$' | head -1 || t
 check "bare IP ($gh_ip) → 403 from the proxy" test "$(code "https://$gh_ip" | cut -d' ' -f2)" = 403
 check "--noproxy '*' fails (fail-closed)" \
   not pen_run curl -s -m 10 -o /dev/null --noproxy '*' https://github.com
+for d in api.anthropic.com api.openai.com opencode.ai registry.npmjs.org; do
+  check "$d → 403 in a session without agents or tools (they bring their domains)" test "$(code "https://$d" | cut -d' ' -f2)" = 403
+done
 check "port other than 443 refused for CONNECT" test "$(code https://github.com:8443 | cut -d' ' -f2)" = 403
 before=$(docker volume ls -q --filter dangling=true | sort)
 pen_run true >/dev/null 2>&1
@@ -372,8 +381,8 @@ if want 4; then
 # ==============================================================================
 section "4. Agents"
 
-# The agents that are tools come with --tool; OpenCode is in the base.
-AGENT_TOOLS=(--tool claude --tool codex --tool pi)
+# The agents are tools, so they come with --tool.
+AGENT_TOOLS=(--tool claude --tool codex --tool opencode --tool pi)
 # with_agents <bash script>: in_sandbox with the agent tools.
 with_agents() { "$PEN" "${AGENT_TOOLS[@]}" run bash -c "$1" </dev/null; }
 out=$(with_agents 'for c in claude codex opencode pi; do printf "%s=" $c; timeout 30 $c --version </dev/null 2>&1 | tail -1; done')
@@ -383,7 +392,9 @@ done
 check "agents live in system paths, not \$HOME" \
   with_agents 'for c in claude codex opencode pi; do case $(readlink -f "$(command -v $c)") in /usr/local/*|/opt/*) ;; *) exit 1 ;; esac; done'
 check "agent user can't write the agents' install dirs" \
-  with_agents 'for d in agents claude codex pi; do ! touch /opt/pen/$d/lib/node_modules/.x 2>/dev/null || exit 1; done; ! touch /usr/local/bin/.x 2>/dev/null && ! touch /etc/codex/.x 2>/dev/null'
+  with_agents 'for d in claude codex opencode pi; do ! touch /opt/pen/$d/lib/node_modules/.x 2>/dev/null || exit 1; done; ! touch /usr/local/bin/.x 2>/dev/null && ! touch /etc/codex/.x 2>/dev/null'
+check "the agents' recipes bring their domains (api.anthropic.com, api.openai.com, opencode.ai, models.dev, registry.npmjs.org)" \
+  with_agents 'for d in api.anthropic.com api.openai.com opencode.ai models.dev registry.npmjs.org; do [ "$(curl -s -o /dev/null -w "%{http_connect}" -I https://$d)" != 403 ] || { echo "$d blocked" >&2; exit 1; }; done'
 check "auto-updaters off (env)" \
   with_agents '[ "$DISABLE_AUTOUPDATER" = 1 ] && [ "$CLAUDE_CODE_DISABLE_AUTOUPDATE" = 1 ] && [ "$OPENCODE_DISABLE_AUTOUPDATE" = 1 ] && [ "$PI_SKIP_VERSION_CHECK" = 1 ] && grep -q "check_for_update_on_startup = false" /etc/codex/managed_config.toml'
 
@@ -393,12 +404,14 @@ rc=0; out=$("$PEN" claude --version </dev/null 2>&1) || rc=$?
 check "with an empty config, pen claude --version runs Claude Code (implied)" bash -c '[ "$1" = 0 ] && grep -qE "^[0-9]+\.[0-9]+\.[0-9]+ \(Claude Code\)" <<<"$2"' _ "$rc" "$out"
 rc=0; out=$("$PEN" run claude --version </dev/null 2>&1) || rc=$?
 check "...and so does pen run claude --version" bash -c '[ "$1" = 0 ] && grep -qE "^[0-9]+\.[0-9]+\.[0-9]+ \(Claude Code\)" <<<"$2"' _ "$rc" "$out"
-check "...but a shell doesn't have it (pen run bash -c 'command -v claude')" \
-  test "$("$PEN" run bash -c 'command -v claude || echo none' </dev/null 2>/dev/null)" = none
+check "...but a shell has no agents (pen run bash -c 'command -v claude codex opencode pi')" \
+  test "$("$PEN" run bash -c 'command -v claude codex opencode pi || echo none' </dev/null 2>/dev/null)" = none
 rc=0; out=$("$PEN" codex --version </dev/null 2>&1) || rc=$?
 check "with an empty config, pen codex --version runs Codex (implied)" bash -c '[ "$1" = 0 ] && grep -qE "^codex-cli [0-9]+\.[0-9]+\.[0-9]+$" <<<"$2"' _ "$rc" "$out"
 rc=0; out=$("$PEN" pi --version </dev/null 2>&1) || rc=$?
 check "...and pen pi --version runs Pi (implied)" bash -c '[ "$1" = 0 ] && grep -qE "^[0-9]+\.[0-9]+\.[0-9]+$" <<<"$2"' _ "$rc" "$out"
+rc=0; out=$("$PEN" opencode --version </dev/null 2>&1) || rc=$?
+check "...and pen opencode --version runs OpenCode (implied)" bash -c '[ "$1" = 0 ] && grep -qE "^[0-9]+\.[0-9]+\.[0-9]+$" <<<"$2"' _ "$rc" "$out"
 # claude mcp serve waits for requests on stdin, held open on fd 7, so the session stays up
 # until its agent container is removed.
 mkfifo "$SCRATCH/mcp-in"
@@ -435,10 +448,16 @@ prompt_check claude CLAUDE_CODE_OAUTH_TOKEN claude -p 'What is 2+2? Reply with j
 prompt_check codex OPENAI_API_KEY codex exec --skip-git-repo-check 'What is 2+2? Reply with just the digit.'
 
 if [ "${SMOKE_SLOW:-}" = 1 ]; then
-  v1=$(docker run --rm --entrypoint stat "$IMAGE" -c %Y /opt/pen/agents/lib/node_modules/opencode-ai/package.json)
+  # An agent's install time in a session's tools image: pen upgrade gives a new base ID
+  # (PEN_REFRESH), so the tools image rebuilds on next use, even with nothing else new.
+  installed_at() { "$PEN" --tool claude run stat -c %Y /opt/pen/claude/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe </dev/null 2>/dev/null | tail -1; }
+  base1=$(docker image inspect -f '{{.Id}}' "$IMAGE")
+  t1=$(installed_at)
   "$PEN" upgrade >"$SCRATCH/upgrade.log" 2>&1 || { tail -20 "$SCRATCH/upgrade.log" >&2; fail "pen upgrade"; }
-  v2=$(docker run --rm --entrypoint stat "$IMAGE" -c %Y /opt/pen/agents/lib/node_modules/opencode-ai/package.json)
-  check "pen upgrade reinstalls the agents (PEN_REFRESH), base image unchanged or not" test "$v1" != "$v2"
+  base2=$(docker image inspect -f '{{.Id}}' "$IMAGE")
+  t2=$(installed_at)
+  check "pen upgrade gives a new base image ID (PEN_REFRESH)" test "$base1" != "$base2"
+  check "...so a session's agent is reinstalled on next use ($t1 → $t2)" bash -c '[[ $1 =~ ^[0-9]+$ && $2 =~ ^[0-9]+$ && $1 != "$2" ]]' _ "$t1" "$t2"
   check "pen upgrade pulls the proxy image" grep -q 'ubuntu/squid' "$SCRATCH/upgrade.log"
 else
   note "pen upgrade check: skipped (SMOKE_SLOW=1 to run it)"
@@ -1229,6 +1248,9 @@ kill -9 "$p"; wait "$p" 2>/dev/null || true
 out=$("$PEN" allow 2>&1)
 check "...after a SIGKILL'd session (which it ends)" bash -c 'grep -q "example.org" <<<"$1" && grep -q "whose pen exited" <<<"$1"' _ "$out"
 check "...and once the session has exited normally" contains "example.org" "$(in_sandbox true 2>/dev/null; "$PEN" allow 2>/dev/null)"
+out=$("$PEN" allow --defaults 2>&1)
+check "pen allow --defaults lists GitHub but no AI providers or npm registry (agents and tools bring those)" \
+  bash -c 'grep -qx "github.com" <<<"$1" && ! grep -qiE "anthropic|openai|chatgpt|claude\.|opencode|models\.dev|registry\.npmjs|AI provider" <<<"$1"' _ "$out"
 fi
 
 if want 17; then
@@ -2329,11 +2351,11 @@ check "...and git ignores its .codegraph/" contains "!! cg/.codegraph/" "$out"
 check "...with nothing blocked" not contains "blocked:" "$out"
 rm -rf cg
 
-# registry.npmjs.org is still a default (OpenCode's plugin install); Yarn's registry isn't.
-yarn_registry() { curl -s -o /dev/null -w "%{http_code} %{http_connect}" -I https://registry.yarnpkg.com/ms; }
-out=$(in_sandbox "command -v node npm npx || echo none; $(declare -f yarn_registry); yarn_registry" 2>/dev/null || true)
-check "without the node tool there's no node, npm or npx, and Yarn's registry is blocked" \
-  bash -c '[ "$(sed -n 1p <<<"$1")" = none ] && [ "$(sed -n 2p <<<"$1" | cut -d" " -f2)" = 403 ]' _ "$out"
+# Without the node tool npm's registries are blocked (registry.npmjs.org comes with node or opencode).
+registries() { for r in registry.yarnpkg.com registry.npmjs.org; do curl -s -o /dev/null -w "%{http_code} %{http_connect}\n" -I "https://$r/ms"; done; }
+out=$(in_sandbox "command -v node npm npx || echo none; $(declare -f registries); registries" 2>/dev/null || true)
+check "without the node tool there's no node, npm or npx, and npm's and Yarn's registries are blocked" \
+  bash -c '[ "$(sed -n 1p <<<"$1")" = none ] && [ "$(sed -n 2p <<<"$1" | cut -d" " -f2)" = 403 ] && [ "$(sed -n 3p <<<"$1" | cut -d" " -f2)" = 403 ]' _ "$out"
 
 # A package from the registry, and a native addon that npm builds with node-gyp against
 # the tarball's headers (npm_config_nodedir).

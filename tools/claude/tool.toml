@@ -1,6 +1,6 @@
 # Claude Code, the agent, from npm: claude:latest is the newest release when its tools
 # image is built (pen upgrade gives a new base, so it reinstalls on next use), or an exact
-# release, claude:2.1.3.
+# release from 2.1.113 on, claude:2.1.300.
 kind = "agent"
 default = "latest"
 version = '^(latest|[0-9]+\.[0-9]+\.[0-9]+)$'

@@ -24,3 +24,5 @@ npm_config_nodedir = "/usr/local"
 # ignores NODE_USE_ENV_PROXY, accepts the flag too. A NODE_OPTIONS of the user's or
 # project's replaces this one.
 NODE_OPTIONS = "--disable-warning=UNDICI-EHPA"
+# No "new version of npm available" notices: npm comes with the image.
+NPM_CONFIG_UPDATE_NOTIFIER = "false"

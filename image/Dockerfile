@@ -42,7 +42,8 @@ RUN install -d -m 0755 /etc/apt/keyrings; \
 # Node (LTS by default) into /opt/pen/node: Pen's runtime for recipes distributed
 # through npm. It isn't on PATH, so sessions don't have node, npm or npx; recipes
 # run their programs on it through wrappers. The tarball must match nodejs.org's
-# SHASUMS256.txt for that release.
+# SHASUMS256.txt for that release. npm's check keeps Node's compile cache in the
+# temp dir, so nothing is left in /tmp.
 RUN case "${TARGETARCH}" in amd64) arch=x64 ;; arm64) arch=arm64 ;; *) echo "unsupported arch ${TARGETARCH}" >&2; exit 1 ;; esac; \
     if [ "${NODE_VERSION}" = lts ]; then \
       version=$(curl -fsSL https://nodejs.org/dist/index.json | jq -r '[.[] | select(.lts)][0].version'); \
@@ -59,8 +60,9 @@ RUN case "${TARGETARCH}" in amd64) arch=x64 ;; arm64) arch=arm64 ;; *) echo "uns
     install -d -m 0755 /opt/pen/node; \
     tar -xJf "${tmp}/${file}" -C /opt/pen/node --strip-components=1 --no-same-owner \
       --exclude='*/CHANGELOG.md' --exclude='*/LICENSE' --exclude='*/README.md'; \
-    rm -rf "${tmp}"; \
-    /opt/pen/node/bin/node --version; PATH=/opt/pen/node/bin:$PATH npm --version
+    /opt/pen/node/bin/node --version; \
+    TMPDIR="${tmp}" PATH=/opt/pen/node/bin:$PATH npm --version; \
+    rm -rf "${tmp}"
 
 # System git config. Git authenticates to GitHub through gh (GH_TOKEN), SSH
 # remotes are rewritten to https (inside the sandbox only), bind-mount
@@ -91,35 +93,21 @@ ENV NODE_USE_ENV_PROXY=1 \
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/pen-entrypoint
 COPY --chmod=0755 sync-seed.sh docker-proxy.sh /usr/local/lib/pen/
 
-# ---------------------------------------------------------------------------
-# Agents: always the last layers. `pen upgrade` sets PEN_REFRESH
-# to the current time so these reinstall even when the base image is cached.
-# OpenCode goes into /opt/pen/agents, never $HOME, and its auto-updater is off: the
-# only upgrade path is rebuilding the image. (The agent user can't write /opt/pen.)
-# It's a native binary. Claude Code, Codex and Pi aren't here: they're the claude,
-# codex and pi tools.
+# The image installs nothing into /home/agent and leaves nothing in /tmp or root's home,
+# Node stays off PATH, and Python, uv, build tools and the agents come only from tools that
+# need them (python, node, go, rust, claude, codex, opencode, pi); fail the build if any of
+# that changed.
+RUN test ! -e /home/agent && test ! -e /etc/codex && test ! -e /opt/pen/agents; \
+    leftover=$(find /tmp /root/.cache /root/.config /root/.local /root/.npm -mindepth 1 2>/dev/null || true); \
+    [ -z "${leftover}" ] || { echo "left behind: ${leftover}" >&2; exit 1; }; \
+    for c in node npm npx corepack python3 uv make gcc claude codex opencode pi; do ! command -v "$c" >/dev/null || { echo "$c is on PATH" >&2; exit 1; }; done
+
+# Always the last layer. pen upgrade sets PEN_REFRESH to the current time, so it gives a
+# new base image ID even when every other layer is cached, and every tools image (the
+# agents too, which are tools) rebuilds on its next use, installing latest anew. A
+# normal build leaves it at 0 and is cached.
 ARG PEN_REFRESH=0
-ARG OPENCODE_VERSION=latest
-
-ENV OPENCODE_DISABLE_AUTOUPDATE=1 \
-    NPM_CONFIG_UPDATE_NOTIFIER=false
-
-# opencode-ai needs its postinstall: it puts the native binary in place of the
-# bin stub.
-RUN echo "refresh ${PEN_REFRESH}"; \
-    export PATH=/opt/pen/node/bin:$PATH; \
-    npm install -g --prefix /opt/pen/agents --no-fund --no-audit --allow-scripts=opencode-ai \
-      "opencode-ai@${OPENCODE_VERSION}"; \
-    npm cache clean --force; \
-    rm -rf /root/.npm /root/.cache; \
-    ln -sf /opt/pen/agents/lib/node_modules/opencode-ai/bin/opencode.exe /usr/local/bin/opencode; \
-    test -x "$(readlink -f /usr/local/bin/opencode)"
-
-# The image installs nothing into /home/agent, Node stays off PATH, and Python, uv,
-# build tools, Claude Code, Codex and Pi come only from tools that need them (python,
-# node, go, rust, claude, codex, pi); fail the build if any of that changed.
-RUN test ! -e /home/agent && test ! -e /etc/codex; \
-    for c in node npm npx corepack python3 uv make gcc claude codex pi; do ! command -v "$c" >/dev/null || { echo "$c is on PATH" >&2; exit 1; }; done
+RUN echo "${PEN_REFRESH}" >/etc/pen/refresh
 
 ENTRYPOINT ["/usr/local/bin/pen-entrypoint"]
 CMD ["bash", "-l"]

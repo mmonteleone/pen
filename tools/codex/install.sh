@@ -18,13 +18,18 @@ v=$1
 [[ $v =~ ^(latest|[0-9]+\.[0-9]+\.[0-9]+)$ ]] || { echo "codex: \"$v\" isn't latest or a release (0.167.0)" >&2; exit 1; }
 [ -x "$NODE_BIN/node" ] && [ -x "$NODE_BIN/npm" ] || { echo "codex: Pen's Node ($NODE_BIN) isn't in the base image" >&2; exit 1; }
 
-export PATH="$NODE_BIN:$PATH" NPM_CONFIG_UPDATE_NOTIFIER=false
-npm install -g --prefix "$PREFIX" --no-fund --no-audit "$PACKAGE@$v"
-npm cache clean --force
-rm -rf /root/.npm /root/.cache
+# A throwaway HOME and TMPDIR for the install and the check: npm's cache, Node's compile
+# cache and what Codex writes on its first run go there, so they leave nothing in the
+# image. HOME isn't under TMPDIR or /tmp: Codex won't set up its PATH helpers in a
+# temporary dir, and warns.
+check_home=$(mktemp -d /root/pen-check.XXXXXX)
+mkdir "$check_home/home" "$check_home/tmp"
+run() { env HOME="$check_home/home" TMPDIR="$check_home/tmp" NPM_CONFIG_UPDATE_NOTIFIER=false "$@"; }
+
+run PATH="$NODE_BIN:$PATH" npm install -g --prefix "$PREFIX" --no-fund --no-audit "$PACKAGE@$v"
 
 launcher="$PREFIX/lib/node_modules/$PACKAGE/bin/codex.js"
-[ -f "$launcher" ] || { echo "codex: $launcher is missing" >&2; exit 1; }
+[ -f "$launcher" ] || { echo "codex: releases before 0.1.2504211509 aren't supported (no bin/codex.js)" >&2; exit 1; }
 printf '#!/bin/sh\nexec %s/node %s "$@"\n' "$NODE_BIN" "$launcher" >/usr/local/bin/codex
 chmod 0755 /usr/local/bin/codex
 
@@ -36,12 +41,7 @@ check_for_update_on_startup = false
 EOF
 chmod 0644 /etc/codex/managed_config.toml
 
-# A throwaway HOME and TMPDIR (Node's compile cache goes there), so the check leaves
-# nothing in the image. HOME isn't under TMPDIR or /tmp: Codex won't set up its PATH
-# helpers in a temporary dir, and warns.
-check_home=$(mktemp -d /root/pen-check.XXXXXX)
-mkdir "$check_home/home" "$check_home/tmp"
-installed=$(env HOME="$check_home/home" TMPDIR="$check_home/tmp" PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin codex --version)
+installed=$(run PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin codex --version)
 rm -rf "$check_home"
 installed=${installed##* }
 [[ $installed =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "codex: codex --version gives \"$installed\"" >&2; exit 1; }

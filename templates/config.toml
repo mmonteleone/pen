@@ -6,8 +6,9 @@
 # holds secrets.
 
 # --- Network -----------------------------------------------------------------------
-# Extra domains the sandbox may reach, on top of Pen's defaults (AI providers,
-# GitHub, package registries). A leading dot also allows subdomains.
+# Extra domains the sandbox may reach, on top of Pen's defaults (GitHub, container
+# registries, docs) and the ones agents and tools bring (AI providers, package
+# registries). A leading dot also allows subdomains.
 # `pen allow --global <domain>` adds entries here.
 
 allow = [

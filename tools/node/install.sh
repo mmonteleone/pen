@@ -75,4 +75,5 @@ tar -xJf "$work/$file" -C /usr/local --strip-components=1 --no-same-owner \
 [ "$(command -v node)" = /usr/local/bin/node ] || { echo "node: node on PATH is $(command -v node), not /usr/local/bin/node" >&2; exit 1; }
 installed=$(node --version)
 [ "$installed" = "$release" ] || { echo "node: installed $installed, not $release" >&2; exit 1; }
-echo "node $installed, npm $(npm --version)"
+# npm keeps Node's compile cache in TMPDIR, so it goes with the work dir.
+echo "node $installed, npm $(TMPDIR="$work" npm --version)"

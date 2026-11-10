@@ -1,6 +1,6 @@
 # Codex, the agent, from npm: codex:latest is the newest release when its tools image is
 # built (pen upgrade gives a new base, so it reinstalls on next use), or an exact release,
-# codex:0.167.0.
+# codex:0.167.0 (0.1.2504211509 or later).
 kind = "agent"
 default = "latest"
 version = '^(latest|[0-9]+\.[0-9]+\.[0-9]+)$'

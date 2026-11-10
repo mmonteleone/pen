@@ -193,7 +193,7 @@ public class RecipeTests
         Assert.False(recipe.IsAgent);
         Assert.Equal(["registry.npmjs.org", "registry.yarnpkg.com", "repo.yarnpkg.com", "nodejs.org"], recipe.Allow);
         Assert.Equal(
-            [new KeyValuePair<string, string>("npm_config_nodedir", "/usr/local"), new KeyValuePair<string, string>("NODE_OPTIONS", "--disable-warning=UNDICI-EHPA")],
+            [new KeyValuePair<string, string>("npm_config_nodedir", "/usr/local"), new KeyValuePair<string, string>("NODE_OPTIONS", "--disable-warning=UNDICI-EHPA"), new KeyValuePair<string, string>("NPM_CONFIG_UPDATE_NOTIFIER", "false")],
             recipe.Env);
     }
 
@@ -217,12 +217,10 @@ public class RecipeTests
         Assert.Equal(accepted, Get("node").AcceptsVersion(version));
 
     [Fact]
-    public void NpmsDomainsComeWithTheNodeRecipe_ExceptTheRegistryOpenCodeNeeds()
+    public void NpmsDomainsComeWithTheNodeRecipe_NotTheDefaults()
     {
         var defaults = Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")).ToList();
-        // OpenCode, in the base, installs its plugin package from the npm registry at run time.
-        Assert.Contains("registry.npmjs.org", defaults);
-        foreach (var domain in Get("node").Allow.Where(d => d != "registry.npmjs.org"))
+        foreach (var domain in Get("node").Allow)
             Assert.DoesNotContain(domain, defaults);
         Assert.Contains("docs.npmjs.com", defaults);
         Assert.Contains("www.npmjs.com", defaults);
@@ -333,6 +331,29 @@ public class RecipeTests
         Assert.Equal([new KeyValuePair<string, string>("PI_SKIP_VERSION_CHECK", "1")], recipe.Env);
     }
 
+    [Fact]
+    public void TheOpenCodeRecipeIsAnAgentWithItsOwnAndTheProvidersDomains_AndNoAutoUpdates()
+    {
+        var recipe = Get("opencode");
+        Assert.True(recipe.IsAgent);
+        Assert.Equal("latest", recipe.Default);
+        Assert.False(recipe.Multiple);
+        // registry.npmjs.org: OpenCode installs its plugin package from npm at run time.
+        Assert.Equal(
+            [".opencode.ai", "models.dev", "registry.npmjs.org", ".anthropic.com", ".claude.ai", ".claude.com", ".openai.com", ".chatgpt.com"],
+            recipe.Allow);
+        Assert.Equal([new KeyValuePair<string, string>("OPENCODE_DISABLE_AUTOUPDATE", "1")], recipe.Env);
+    }
+
+    [Fact]
+    public void AgentsDomainsComeWithTheirRecipes_NotTheDefaults()
+    {
+        var defaults = Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")).ToList();
+        foreach (var agent in RecipeCatalog.Embedded.Recipes.Where(r => r.IsAgent))
+            foreach (var domain in agent.Allow)
+                Assert.DoesNotContain(domain, defaults);
+    }
+
     [Theory]
     [InlineData("latest", true)]
     [InlineData("2.1.3", true)]
@@ -349,7 +370,7 @@ public class RecipeTests
     public void AgentRecipesAcceptLatestOrAnExactRelease(string version, bool accepted)
     {
         var agents = RecipeCatalog.Embedded.Recipes.Where(r => r.IsAgent && !r.Hidden).ToList();
-        foreach (var name in new[] { "claude", "codex", "pi" })
+        foreach (var name in new[] { "claude", "codex", "opencode", "pi" })
             Assert.Contains(agents, r => r.Name == name);
         foreach (var agent in agents)
             Assert.True(accepted == agent.AcceptsVersion(version), agent.Name);

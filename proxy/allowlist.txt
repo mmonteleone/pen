@@ -1,23 +1,10 @@
 # Pen default egress allowlist (Squid dstdomain). One domain per line.
 # A leading dot covers the domain and all its subdomains (.example.com).
 # Don't list a domain that a wildcard here already covers: Squid warns about
-# overlapping entries. Extra domains go in `allow = [...]` in config.toml (user or
-# project); Pen merges them with these into each session's copy of this file.
-
-# --- AI providers -----------------------------------------------------------
-# Anthropic (API, OAuth login, Claude Code telemetry/feature flags)
-.anthropic.com
-.claude.ai
-.claude.com
-# OpenAI (API, auth, ChatGPT login for Codex)
-.openai.com
-.chatgpt.com
-# OpenCode
-.opencode.ai
-models.dev
-# OpenCode installs its plugin package (@opencode-ai/plugin) from npm at run time.
-# Other npm use comes with the node tool.
-registry.npmjs.org
+# overlapping entries. Agents and tools bring their own domains (AI providers come with
+# the agents, npm with node), so a session has them only when it has that recipe.
+# Extra domains go in `allow = [...]` in config.toml (user or project); Pen merges them
+# with these into each session's copy of this file.
 
 # --- GitHub -----------------------------------------------------------------
 github.com

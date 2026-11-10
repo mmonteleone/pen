@@ -21,18 +21,23 @@ v=$1
 [[ $v =~ ^[1-9][0-9]*$ ]] || { echo "codegraph: \"$v\" isn't a major version" >&2; exit 1; }
 [ -x "$NODE_BIN/npm" ] || { echo "codegraph: Pen's npm ($NODE_BIN/npm) isn't in the base image" >&2; exit 1; }
 
-export PATH="$NODE_BIN:$PATH" NPM_CONFIG_UPDATE_NOTIFIER=false
-npm install -g --prefix "$PREFIX" --ignore-scripts --no-fund --no-audit "$PACKAGE@$v"
-npm cache clean --force
-rm -rf /root/.npm /root/.cache
+# A throwaway HOME and TMPDIR for the install and the check: npm's cache, Node's compile
+# cache and what CodeGraph writes on its first run go there, so they leave nothing in
+# the image.
+check_home=$(mktemp -d /root/pen-check.XXXXXX)
+mkdir "$check_home/home" "$check_home/tmp"
+run() { env HOME="$check_home/home" TMPDIR="$check_home/tmp" NPM_CONFIG_UPDATE_NOTIFIER=false "$@"; }
+
+run PATH="$NODE_BIN:$PATH" npm install -g --prefix "$PREFIX" --ignore-scripts --no-fund --no-audit "$PACKAGE@$v"
 
 main="$PREFIX/lib/node_modules/$PACKAGE"
-platform="$PACKAGE-$(node -p 'process.platform + "-" + process.arch')"
-launcher=$(node -p 'require.resolve(process.argv[1] + "/bin/codegraph", { paths: [process.argv[2]] })' "$platform" "$main") \
+platform="$PACKAGE-$(run "$NODE_BIN/node" -p 'process.platform + "-" + process.arch')"
+launcher=$(run "$NODE_BIN/node" -p 'require.resolve(process.argv[1] + "/bin/codegraph", { paths: [process.argv[2]] })' "$platform" "$main") \
   || { echo "codegraph: $platform didn't install" >&2; exit 1; }
 [ -x "$launcher" ] || { echo "codegraph: $launcher isn't executable" >&2; exit 1; }
 ln -sf "$launcher" /usr/local/bin/codegraph
 
-installed=$(env PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin codegraph --version)
+installed=$(run PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin codegraph --version)
+rm -rf "$check_home"
 [[ $installed =~ ^$v\.[0-9]+\.[0-9]+$ ]] || { echo "codegraph: installed \"$installed\", not a $v.x release" >&2; exit 1; }
 echo "codegraph $installed"

@@ -148,7 +148,7 @@ public class AllowCommandTests
     public void DefaultsListsEveryDefaultDomain_WithSectionComments_WithoutTheFileHeader()
     {
         var text = AllowCommand.Defaults();
-        Assert.StartsWith("# --- AI providers", text);
+        Assert.StartsWith("# --- GitHub", text);
         Assert.DoesNotContain("Squid", text.Split('\n')[0]);
         Assert.Equal(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), Allowlist.ParseList(text));
         Assert.EndsWith("\n", text);

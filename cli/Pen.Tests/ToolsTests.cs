@@ -90,7 +90,7 @@ public class ToolsTests
     [Theory]
     [InlineData("run", "bash", "-c", "command -v claude")]
     [InlineData("run", "timeout", "30", "claude")]
-    [InlineData("--tool", "claude:2.1.3", "claude")]
+    [InlineData("--tool", "claude:2.1.300", "claude")]
     public void ClaudeOnlyLaterInTheCommand_OrAlreadyNamed_ImpliesNothing(params string[] args) =>
         Assert.Null(ImpliedBy(args));
 

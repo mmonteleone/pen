@@ -205,9 +205,9 @@ internal static class Image
     }
 
     /// <summary>
-    /// pen upgrade: a newer base image, the agents reinstalled (PEN_REFRESH
-    /// busts their cached layers), the tools from config on it (a new base means a new
-    /// tools image), and newer sidecar images.
+    /// pen upgrade: a newer base image, always with a new ID (PEN_REFRESH sets its last
+    /// layer), so every tools image, the agents' included, rebuilds on it: the ones from
+    /// config here, any other on its next use. Then newer sidecar images.
     /// </summary>
     public static void Upgrade(HostEnv host, Config user, bool clean)
     {

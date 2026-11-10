@@ -58,7 +58,8 @@ public class TrustTests
         Assert.Equal(["new.example"], f.Requested("allow = [\"new.example\"]\n").Domains);
         Assert.Empty(f.Requested("allow = [\"new.example\"]\n", "allow = [\"new.example\"]\n").Domains);
         Assert.Empty(f.Requested("allow = [\"a.new.example\"]\n", "allow = [\".new.example\"]\n").Domains);
-        Assert.Empty(f.Requested("allow = [\"api.anthropic.com\"]\n").Domains); // the defaults have .anthropic.com
+        Assert.Empty(f.Requested("allow = [\"api.github.com\"]\n").Domains); // a default
+        Assert.Empty(f.Requested("allow = [\"x.stackexchange.com\"]\n").Domains); // the defaults have .stackexchange.com
         Assert.Equal([".new.example"], f.Requested("allow = [\".new.example\"]\n", "allow = [\"new.example\"]\n").Domains);
     }
 
