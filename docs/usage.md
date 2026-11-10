@@ -121,6 +121,8 @@ Paths below are relative to `~/.config/pen/home/` (and `$HOME` in the sandbox). 
 | OpenCode | `.config/opencode/AGENTS.md` | `mcp` in `.config/opencode/opencode.json` |
 | Pi | `.pi/agent/AGENTS.md` | `.pi/agent/mcp.json` |
 
+The base image has no `npx` or `uvx`, so an MCP server started with `npx` needs the [`node` tool](#tools), and one started with `uvx` the `python` tool, in every project that uses it: add `tools = ["node"]` or `tools = ["python"]` to your own config. The seed Pen creates registers no MCP servers.
+
 Agents run in skip-permissions mode by default. The container is the boundary. Edit `.gitconfig` in the seed to change the identity used for sandbox commits.
 
 ### Agents
@@ -129,7 +131,7 @@ Agents are recipes built into Pen, like [tools](#tools): `pen --tool list` shows
 
 ```
 pen --tool claude                 # a shell with claude in it
-pen --tool claude:2.1.300 claude    # a pinned release
+pen --tool claude:2.1.300 claude  # a pinned release
 ```
 
 | Agent | Command | Default | Versions | Domains it adds |
@@ -143,7 +145,7 @@ An agent installs into `/opt/pen/<agent>`, which the session can't write, with i
 
 ### Tools
 
-The base image has no agents (they're [recipes](#agents)). It has `git`, `gh`, the Docker CLI (with the buildx and compose plugins) and common command-line tools: `curl`, `wget`, `jq`, `ripgrep`, `fd`, `vim`, `less`, `unzip`, `xz`, `bzip2`, `patch`, `gnupg`, `openssl` and `socat`. It has no Python, uv or build tools (`make`, `gcc`): the `python` tool brings Python and uv, and the tools that need a C toolchain bring one (`python`, `node` and `rust` bring Ubuntu's `build-essential`, `go` its `gcc`; `node` also brings Ubuntu's `python3` for node-gyp). It has no Node on `PATH` (no `node`, `npm` or `npx`): Pen keeps a private Node in `/opt/pen/node` that only runs the agents and recipes installed through npm, and isn't for your own use: for Node in a session, use the `node` tool. Language toolchains come from tool recipes built into Pen. Name them with `--tool`, or with `tools` in either `config.toml` (the lists add up). `pen --tool list` shows them.
+The base image has no agents (they're [recipes](#agents)). It has `git`, `gh`, the Docker CLI (with the buildx and compose plugins) and common command-line tools: `curl`, `wget`, `jq`, `ripgrep`, `fd`, `vim`, `less`, `unzip`, `xz`, `bzip2`, `patch`, `gnupg`, `openssl` and `socat`. It has no Python, uv or build tools (`make`, `gcc`): the `python` tool brings Python and uv, and the tools that need a C toolchain bring one (`python`, `node` and `rust` bring Ubuntu's `build-essential`, `go` its `gcc`; `node` also brings Ubuntu's `python3` for node-gyp). It has no Node on `PATH` (no `node`, `npm` or `npx`): Pen keeps a private Node in `/opt/pen/node` that installs the recipes distributed through npm and runs Codex and Pi (CodeGraph runs on the Node it bundles), and isn't for your own use: for Node in a session, use the `node` tool. Language toolchains come from tool recipes built into Pen. Name them with `--tool`, or with `tools` in either `config.toml` (the lists add up). `pen --tool list` shows them.
 
 ```
 pen --tool dotnet:8 --tool dotnet:10 claude

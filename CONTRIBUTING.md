@@ -78,7 +78,7 @@ cli/install.sh --container --out DIR  # build a Linux binary in a container, eve
 
 Container builds target the host machine's architecture. To install on another machine, build there or copy a binary built for the same OS and architecture to its `~/.local/bin/pen`.
 
-The first session builds `pen:latest` locally from the embedded Dockerfile and supporting files. Run `pen upgrade` to build it ahead of time or rebuild with fresh agents and configured tools. In a project, it also rebuilds approved project tools and the approved `.pen/Dockerfile`. Logins and config persist across image rebuilds.
+The first session builds `pen:latest` locally from the embedded Dockerfile and supporting files. Agents and tools are recipes built on top of it, in `pen-tools:<hash>` images. Run `pen upgrade` to build it ahead of time or rebuild it: the base always gets a new ID, so the tools and agents in your config are rebuilt right away (in a project, also its approved tools and `.pen/Dockerfile`), and any other set of tools, such as the agent `pen claude` brings, on its next use. Logins and config persist across image rebuilds.
 
 To update a source installation, pull this repo and reinstall:
 

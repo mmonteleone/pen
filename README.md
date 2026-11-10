@@ -65,7 +65,7 @@ cd ~/source/repos/myproject
 pen claude  # or: pen codex, pen opencode, pen pi
 ```
 
-The first session builds `pen:latest` locally from the Dockerfile bundled in the CLI. This may take a few minutes. Later sessions reuse it until the bundled image files change or you run `pen upgrade`.
+The first session builds `pen:latest` locally from the Dockerfile bundled in the CLI, then installs the agent on top of it. This may take a few minutes. Later sessions reuse them until the bundled image files change or you run `pen upgrade`.
 
 The first run also creates `~/.config/pen/`. Log in to your agent inside the sandbox; each project keeps its own login. Shared instructions and settings go in [`~/.config/pen/home/`](docs/usage.md#agent-config-the-home-seed), using their usual home-directory paths.
 
@@ -91,14 +91,14 @@ pen run make test            # run a command in the sandbox
 pen --tool node run npm ci   # ...with Node and npm installed
 pen allow                    # show recently blocked domains
 pen allow example.com        # allow a domain, including in running sessions
-pen --tool list              # list available development tools
+pen --tool list              # list the agents and tools pen can install
 pen --tool dotnet:10 claude  # add a toolchain for this session
 pen --port 5173 claude       # reach a sandbox dev server at localhost:5173
 pen --docker claude          # give the session its own Docker daemon
 pen trust                    # review what this project's .pen/ asks for
 pen ps                       # list running sessions across projects
 pen sign                     # sign unpushed commits on the host
-pen upgrade                  # rebuild with current agents and configured tools
+pen upgrade                  # rebuild the base image, agents and tools
 pen reset                    # wipe this project's logins and caches
 pen prune                    # remove unused project state and old tools images
 ```

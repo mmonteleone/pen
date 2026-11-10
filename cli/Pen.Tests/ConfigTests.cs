@@ -180,13 +180,15 @@ public class ConfigTests
         Assert.Empty(empty.Env);
         Assert.Empty(empty.GitHubTokens);
         Assert.Empty(empty.Allow);
-        foreach (var example in new[] { "\"example.com\",", "my-user = \"github_pat_", "ANTHROPIC_API_KEY = ", "OPENAI_API_KEY = ", "CLAUDE_CODE_OAUTH_TOKEN = " })
+        Assert.Empty(empty.Tools);
+        foreach (var example in new[] { "\"example.com\",", "tools = [", "my-user = \"github_pat_", "ANTHROPIC_API_KEY = ", "OPENAI_API_KEY = ", "CLAUDE_CODE_OAUTH_TOKEN = " })
             Assert.Contains("# " + example, text);
         // Uncommented, the examples parse.
-        string[] examples = ["  # \"", "# my-", "# ANTHROPIC", "# OPENAI", "# CLAUDE_CODE"];
+        string[] examples = ["  # \"", "# tools = ", "# my-", "# ANTHROPIC", "# OPENAI", "# CLAUDE_CODE"];
         var uncommented = string.Join('\n', text.Split('\n').Select(l => examples.Any(l.StartsWith) ? l.Replace("# ", "") : l));
         var full = User(uncommented);
         Assert.Equal(["example.com", ".example.org"], full.Allow);
+        Assert.Equal(["claude", "codex", "go"], full.Tools.Select(t => t.Name));
         Assert.Equal(2, full.GitHubTokens.Count);
         Assert.Equal(3, full.Env.Count);
     }
