@@ -1,6 +1,6 @@
 namespace Pen;
 
-/// <summary>Facts about the host user that pen's logic depends on. Tests build their own.</summary>
+/// <summary>Facts about the host user that Pen's logic depends on. Tests build their own.</summary>
 internal sealed record HostEnv(string Home, uint Uid, uint Gid, string NuGetPackages)
 {
     public string ConfigDir => System.IO.Path.Combine(Home, ".config", "pen");

@@ -392,7 +392,7 @@ public class ConfigWorktreeQuarantineTests
         var b = StartedAt(t, repo, git, "bbbbbbbb", 5, a);
         Assert.Empty(GitCheck.RunAtSessionEnd(repo, a).Moved);
         File.AppendAllText(config, Fsmonitor(hook));
-        Assert.Null(GitCheck.RunAtSessionEnd(repo, b).Failure); // what the next pen does first for a killed session
+        Assert.Null(GitCheck.RunAtSessionEnd(repo, b).Failure); // what the next Pen does first for a killed session
 
         var c = StartedAt(t, repo, git, "cccccccc", 0, a);
         File.AppendAllText(config, Fsmonitor(hook)); // c's agent
@@ -603,7 +603,7 @@ public class ConfigWorktreeQuarantineTests
         try
         {
             var check = GitCheck.RunAtSessionEnd(repo, s);
-            // 000 stops the restore of what's inside until the mode is fixed, and pen retries.
+            // 000 stops the restore of what's inside until the mode is fixed, and Pen retries.
             if (mode == 0) check = GitCheck.RunAtSessionEnd(repo, s);
             Assert.Null(check.Failure);
             Assert.False(File.Exists(file), "still where git would read it");

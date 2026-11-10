@@ -14,7 +14,7 @@ public class TrustGateTests
     /// Succeeds at everything; compose run records the session's allowlist and
     /// token. A project-layer build keeps a copy of what it was given, and first
     /// puts the file "swap-in", if there is one, over .pen/Dockerfile: a swap
-    /// after pen's last look.
+    /// after Pen's last look.
     /// </summary>
     private const string RecordingDocker = """
         if [ "$1" = build ]; then
@@ -345,7 +345,7 @@ public class TrustGateTests
         Assert.False(Path.Exists(f.Seen("context-path")));
     }
 
-    /// <summary>What a pen that died mid-build leaves, read-only directory and all.</summary>
+    /// <summary>What a Pen that died mid-build leaves, read-only directory and all.</summary>
     private static string StaleContext(Fixture f)
     {
         Session.EnsureRuntimeDir(f.Host, f.Project);
@@ -961,14 +961,14 @@ public class TrustGateTests
         Assert.Contains("--build-context pen:latest=docker-image://pen-tools:0123456789abcdef", build);
     }
 
-    /// <summary>pen-test as a later pen's recipe might have it.</summary>
+    /// <summary>pen-test as a later Pen's recipe might have it.</summary>
     private static RecipeCatalog Recipe(params string[] domains) => RecipeCatalog.FromFiles(new Dictionary<string, string>
     {
         ["tools/pen-test/tool.toml"] = $"default = \"1\"\nversion = '^\\d+$'\nallow = [{string.Join(", ", domains.Select(d => $"\"{d}\""))}]\n",
         ["tools/pen-test/install.sh"] = "#!/bin/sh\n",
     });
 
-    // Approve a tool, then a pen whose recipe brings one more domain, with no terminal to ask on.
+    // Approve a tool, then a Pen whose recipe brings one more domain, with no terminal to ask on.
     [Fact]
     public void ADomainARecipeAddsAfterApprovalIsRefusedWithoutATerminal_AndNothingOfTheEntryTakesEffect()
     {

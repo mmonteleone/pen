@@ -1,8 +1,8 @@
-# pen default egress allowlist (Squid dstdomain). One domain per line.
+# Pen default egress allowlist (Squid dstdomain). One domain per line.
 # A leading dot covers the domain and all its subdomains (.example.com).
 # Don't list a domain that a wildcard here already covers: Squid warns about
 # overlapping entries. Extra domains go in `allow = [...]` in config.toml (user or
-# project); pen merges them with these into each session's copy of this file.
+# project); Pen merges them with these into each session's copy of this file.
 
 # --- AI providers -----------------------------------------------------------
 # Anthropic (API, OAuth login, Claude Code telemetry/feature flags)

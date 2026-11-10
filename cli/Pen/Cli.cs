@@ -169,7 +169,7 @@ internal static class Cli
 
     /// <summary>
     /// A first argument that's a subcommand selects it; any other first argument
-    /// is the command to run. Options before the command are pen's: --docker,
+    /// is the command to run. Options before the command are Pen's: --docker,
     /// --port and --tool (for running), help and version. Any other one is an error.
     /// </summary>
     public static Command Parse(IReadOnlyList<string> args)

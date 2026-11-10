@@ -1,4 +1,4 @@
-# pen session stack: one compose project per session ("<project key>-<session>").
+# Pen session stack: one compose project per session ("<project key>-<session>").
 # The CLI copies this file into the session's dir next to squid.conf,
 # allowlist.txt and proxy.log, so the relative paths below resolve there.
 #

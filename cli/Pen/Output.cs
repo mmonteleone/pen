@@ -10,7 +10,7 @@ internal sealed class PenException(string message, int exitCode = 1) : Exception
 }
 
 /// <summary>
-/// Messages to stderr, and pen's own stdout. Writes never throw: after a hangup
+/// Messages to stderr, and Pen's own stdout. Writes never throw: after a hangup
 /// the terminal is gone, and the end-of-session path must still run to completion.
 /// Everything is sanitized on the way out (<see cref="Clean"/>), since messages
 /// carry names and text the agent chose, and those could otherwise rewrite the
@@ -47,7 +47,7 @@ internal static class Out
     /// <summary>
     /// A value the agent can influence (a path, branch, host, subject), for
     /// putting in a message: control characters show as escapes, newlines among
-    /// them, so the value can't forge a line of pen's output. Not for text a
+    /// them, so the value can't forge a line of Pen's output. Not for text a
     /// shell will read, which has to keep the real name.
     /// </summary>
     public static string Field(string value)
@@ -68,7 +68,7 @@ internal static class Out
 
     /// <summary>
     /// An exception as text for the user. The AOT build (UseSystemResourceKeys)
-    /// has framework exceptions' messages as raw resource keys, so only pen's
+    /// has framework exceptions' messages as raw resource keys, so only Pen's
     /// own are shown as they are.
     /// </summary>
     public static string Describe(Exception e) => e switch

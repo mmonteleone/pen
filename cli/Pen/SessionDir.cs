@@ -58,7 +58,7 @@ internal sealed class SessionDir(string projectKey, string path)
     /// <summary>
     /// The domains its tools brought, one per line, so rewriting its allowlist keeps them,
     /// whether they came from a flag no later command knows about or from a recipe a later
-    /// pen has changed. Only what the session started with, never read again from .pen/.
+    /// Pen has changed. Only what the session started with, never read again from .pen/.
     /// </summary>
     public string ToolDomainsFile => File("tool-domains");
     /// <summary>Marks a docker session: its compose calls all pass --profile docker.</summary>
@@ -84,14 +84,14 @@ internal sealed class SessionDir(string projectKey, string path)
     public void WriteCommand(IReadOnlyList<string> command) =>
         System.IO.File.WriteAllText(CommandFile, string.Concat(command.Select(a => a + "\0")));
 
-    /// <summary>The command, or null for a session started by a pen that didn't record it.</summary>
+    /// <summary>The command, or null for a session started by a Pen that didn't record it.</summary>
     public string[]? ReadCommand() =>
         System.IO.File.Exists(CommandFile) ? System.IO.File.ReadAllText(CommandFile).Split('\0')[..^1] : null;
 
     public void WriteModules(IEnumerable<string> repos) =>
         System.IO.File.WriteAllText(ModulesFile, string.Concat(repos.Select(r => r + "\0")));
 
-    /// <summary>The module repos at the start, or null for a session started by a pen that didn't record them.</summary>
+    /// <summary>The module repos at the start, or null for a session started by a Pen that didn't record them.</summary>
     public string[]? ReadModules() =>
         System.IO.File.Exists(ModulesFile) ? System.IO.File.ReadAllText(ModulesFile).Split('\0')[..^1] : null;
 
@@ -101,7 +101,7 @@ internal sealed class SessionDir(string projectKey, string path)
     public void WritePorts(IReadOnlyList<int> ports) =>
         System.IO.File.WriteAllText(PortsFile, string.Concat(ports.Select(p => p.ToString(CultureInfo.InvariantCulture) + "\n")));
 
-    /// <summary>The forwarded ports; none for a session started by a pen that didn't record them.</summary>
+    /// <summary>The forwarded ports; none for a session started by a Pen that didn't record them.</summary>
     public List<int> ReadPorts() =>
         System.IO.File.Exists(PortsFile)
             ? System.IO.File.ReadAllLines(PortsFile).Select(l => int.TryParse(l, CultureInfo.InvariantCulture, out var p) ? p : 0).Where(p => p > 0).ToList()
@@ -113,10 +113,10 @@ internal sealed class SessionDir(string projectKey, string path)
         System.IO.File.WriteAllText(ToolDomainsFile, string.Concat(domains.Select(d => d + "\n")));
     }
 
-    /// <summary>The tools; none for a session started by a pen that didn't record them.</summary>
+    /// <summary>The tools; none for a session started by a Pen that didn't record them.</summary>
     public string[] ReadTools() => System.IO.File.Exists(ToolsFile) ? System.IO.File.ReadAllLines(ToolsFile) : [];
 
-    /// <summary>The domains its tools brought; none for a session started by a pen that didn't record them.</summary>
+    /// <summary>The domains its tools brought; none for a session started by a Pen that didn't record them.</summary>
     public string[] ReadToolDomains() => System.IO.File.Exists(ToolDomainsFile) ? System.IO.File.ReadAllLines(ToolDomainsFile) : [];
 
     /// <summary>The common git dir the session started with, or null when it didn't start in a repo.</summary>

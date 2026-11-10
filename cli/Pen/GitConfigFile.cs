@@ -6,7 +6,7 @@ namespace Pen;
 /// Reads git config files directly, never by running git (which could run
 /// whatever the file names). This is git's own grammar, from config.c, byte by
 /// byte: whatever git would read from a file is what's returned, and a file git
-/// would reject, or read in a way pen can't represent, is a refusal naming its
+/// would reject, or read in a way Pen can't represent, is a refusal naming its
 /// line. A best-effort reading would let a file mean one thing here and another
 /// to git. The one thing git accepts that's refused is a NUL in a value or
 /// subsection, where git silently cuts the string short.

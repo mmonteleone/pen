@@ -21,7 +21,7 @@ internal sealed record ModeChange(string Path, UnixFileMode Was, UnixFileMode No
 /// The session-end .git check. It reads
 /// files directly and never runs git, and it renames whatever would make host
 /// git read config or hooks the agent could write, before the shell prompt
-/// or an IDE runs git there. It runs before pen's own git calls.
+/// or an IDE runs git there. It runs before Pen's own git calls.
 /// </summary>
 internal static class GitCheck
 {
@@ -79,7 +79,7 @@ internal static class GitCheck
                 restoreDone = ProtectedFiles.Restore(session, dir, commonGitDir, moved, restored, opened, blocked);
                 if (!Directory.Exists(dir))
                     throw new PenException($"{Out.Field(dir)} isn't there any more or can't be reached, so pen couldn't check it. If it was moved, inspect its .git by hand before running git in it");
-                // A session from a pen that didn't record its module repos keeps none.
+                // A session from a Pen that didn't record its module repos keeps none.
                 Check(dir, startedWithGit, commonGitDir, session.ReadModules() ?? [], atStart, moved, unlistable, badNames, paused, OpenToRead, OpenToWrite);
             });
         });
@@ -239,7 +239,7 @@ internal static class GitCheck
 
     /// <summary>
     /// Runs the check. If it stops early, what a shell prompt would run still has
-    /// to go, since the prompt reads through a git dir pen can't list and doesn't
+    /// to go, since the prompt reads through a git dir Pen can't list and doesn't
     /// wait for the failure to be read: every known name is tried directly. If
     /// even that stops, the check's own failure stands and says not to run git.
     /// </summary>
@@ -367,12 +367,12 @@ internal static class GitCheck
     /// <summary>
     /// What to do about a session whose protected files couldn't all be put back
     /// and which keeps its copies: first the way that uses them, in one command so
-    /// that nothing (a shell prompt) runs git between it and pen's retry. Only
+    /// that nothing (a shell prompt) runs git between it and Pen's retry. Only
     /// then the way that gives them up.
     /// </summary>
     public static string KeptCopiesAdvice(SessionDir session, IReadOnlyList<string>? blocked)
     {
-        // A linked worktree's key is its main checkout's, and only there is pen sure to find this session.
+        // A linked worktree's key is its main checkout's, and only there is Pen sure to find this session.
         var repoDir = session.ReadRepoDir();
         var retry = (repoDir == null ? "" : $"cd {Quote(repoDir)} && ") + RetryCommand;
         var fix = blocked is { Count: > 0 }

@@ -866,7 +866,7 @@ public class ProtectedFilesTests
         Assert.False(Assert.Single(ProtectedFiles.Read(second)!.Files, f => f.Path == file).Adopted);
     }
 
-    // ---- Includes pen must not miss ----
+    // ---- Includes Pen must not miss ----
 
     /// <summary>The review's replay: running in a worktree, the main checkout's submodule includes a file the sandbox can write.</summary>
     [Fact]
@@ -930,7 +930,7 @@ public class ProtectedFilesTests
 
     /// <summary>
     /// The review's replay on Linux: git reads the file named by these bytes, while
-    /// pen would decode them to U+FFFD and protect a file of another name.
+    /// Pen would decode them to U+FFFD and protect a file of another name.
     /// </summary>
     [Fact]
     public void AnIncludePathThatIsntValidUtf8_IsRefused()

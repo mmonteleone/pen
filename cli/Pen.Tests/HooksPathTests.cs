@@ -32,7 +32,7 @@ public class HooksPathTests
             return HooksPath.Warning(new Project(dir, "key", common, repoDir), T.Host(Home), name => Env.GetValueOrDefault(name));
         }
 
-        /// <summary>Real git's hooks dir here, so a test can hold pen's reading against it.</summary>
+        /// <summary>Real git's hooks dir here, so a test can hold Pen's reading against it.</summary>
         public string GitSays(string? dir = null)
         {
             dir ??= Dir;

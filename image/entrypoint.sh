@@ -1,5 +1,5 @@
 #!/bin/bash
-# pen entrypoint. One script, run twice:
+# Pen entrypoint. One script, run twice:
 #   1. as root (with only CHOWN, SETUID, SETGID, SETPCAP): create the runtime
 #      user from PEN_UID/PEN_GID, fix ownership of the volume mount points, then
 #      drop to that user with every capability cleared and re-run this script

@@ -10,7 +10,7 @@ internal enum ConfigKind { User, Project }
 
 /// <summary>
 /// config.toml in a config directory (~/.config/pen/ or a project's .pen/),
-/// which may be missing. TOML errors name the file and line; pen's own checks
+/// which may be missing. TOML errors name the file and line; Pen's own checks
 /// name the file and key. Keys are either user-only or project-only, except
 /// allow and tools, whose lists are appended (defaults, user, project; user, project, --tool).
 /// </summary>
@@ -37,7 +37,7 @@ internal sealed partial class Config
 
     public static Config Empty { get; } = new();
 
-    // Names pen sets itself, or that would steer the sandbox around its proxy.
+    // Names Pen sets itself, or that would steer the sandbox around its proxy.
     private static readonly HashSet<string> ReservedEnv = new(StringComparer.OrdinalIgnoreCase)
     {
         "PROJECT_DIR", "NUGET_PACKAGES", "GH_TOKEN", "GITHUB_TOKEN", "HOME", "USER", "LOGNAME",
@@ -254,7 +254,7 @@ internal sealed partial class Config
         }
         catch (IOException) when (File.Exists(path))
         {
-            // Another pen created it first.
+            // Another Pen created it first.
         }
     }
 

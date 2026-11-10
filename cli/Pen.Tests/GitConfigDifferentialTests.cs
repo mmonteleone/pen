@@ -36,7 +36,7 @@ public class GitConfigDifferentialTests
         return list;
     }
 
-    /// <summary>What pen reads from a file, in git's terms; null if it refuses the file.</summary>
+    /// <summary>What Pen reads from a file, in git's terms; null if it refuses the file.</summary>
     private static List<(string Name, string Value)>? PenReads(string file)
     {
         try
@@ -63,7 +63,7 @@ public class GitConfigDifferentialTests
         }
         if (pen == null)
         {
-            // The one thing pen refuses that git takes, so real configs can't be refused for anything else.
+            // The one thing Pen refuses that git takes, so real configs can't be refused for anything else.
             Assert.True(File.ReadAllBytes(file).Contains((byte)0), $"pen refuses this though git reads it: {describe}");
             return Outcome.RefusedThoughGitAccepts;
         }
@@ -231,7 +231,7 @@ public class GitConfigDifferentialTests
     [Fact]
     public void AnIncludeNamingOwnUserHome_IsRefused()
     {
-        // git would expand this into the project; pen doesn't look users up.
+        // git would expand this into the project; Pen doesn't look users up.
         using var t = new TempDir();
         var dir = Git.Repo(t.Sub("project"));
         File.WriteAllText(Path.Combine(dir, "inc"), "");

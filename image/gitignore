@@ -1,4 +1,4 @@
-# Global excludes for git inside the pen sandbox (core.excludesFile in /etc/gitconfig).
+# Global excludes for git inside the Pen sandbox (core.excludesFile in /etc/gitconfig).
 # The sandbox never sees the host's global gitignore.
 # CodeGraph's index, from the codegraph tool. Ignored in every session, not only those
 # with the tool: sessions with and without it share the project.

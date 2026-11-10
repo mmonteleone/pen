@@ -1,5 +1,5 @@
-# Git identity for commits made in pen sandboxes, filled in from your host's
-# global git identity when pen created this seed. Change it (e.g. to
+# Git identity for commits made in Pen sandboxes, filled in from your host's
+# global git identity when Pen created this seed. Change it (e.g. to
 # "Your Name (agent)") if you want sandbox commits to stand out in history.
 [user]
 	name = @NAME@

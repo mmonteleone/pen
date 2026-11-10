@@ -1,4 +1,4 @@
-# pen user config (TOML: https://toml.io). Settings here apply to every
+# Pen user config (TOML: https://toml.io). Settings here apply to every
 # project. A project's .pen/config.toml takes allow, tools, github_owner, docker
 # and ports (no tokens or env, since it's usually committed); its allow and tools
 # add to these.
@@ -6,7 +6,7 @@
 # holds secrets.
 
 # --- Network -----------------------------------------------------------------------
-# Extra domains the sandbox may reach, on top of pen's defaults (AI providers,
+# Extra domains the sandbox may reach, on top of Pen's defaults (AI providers,
 # GitHub, package registries). A leading dot also allows subdomains.
 # `pen allow --global <domain>` adds entries here.
 
@@ -26,7 +26,7 @@ allow = [
 # Contents and Metadata read (optionally Issues and Pull requests read). Pick
 # "Only select repositories" if you can. The owner comes from the project's
 # origin URL, or from github_owner in its .pen/config.toml.
-# pen passes the token through; read-only access depends on its permissions.
+# Pen passes the token through; read-only access depends on its permissions.
 
 [github]
 # my-user = "github_pat_…"

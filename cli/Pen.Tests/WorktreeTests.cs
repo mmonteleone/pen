@@ -402,7 +402,7 @@ public class WorktreeTests
         using var t = new TempDir();
         var s = new SessionDir("pen-x-00000000", t.Sub("s"));
         Assert.Equal((false, null), s.ReadGit());
-        File.WriteAllText(s.StartedWithGit, ""); // written by an older pen
+        File.WriteAllText(s.StartedWithGit, ""); // written by an older Pen
         Assert.Equal((true, null), s.ReadGit());
         File.WriteAllText(s.StartedWithGit, "/r/.git\n");
         Assert.Equal((true, "/r/.git"), s.ReadGit());

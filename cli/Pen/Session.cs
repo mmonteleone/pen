@@ -75,7 +75,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         using var signals = new SessionSignals();
 
         // Past the refusals, so a session that won't start doesn't warn, and with
-        // signals held, so Ctrl-C can't end pen between the probe's create and delete.
+        // signals held, so Ctrl-C can't end Pen between the probe's create and delete.
         RepoGuard.WarnIfCaseMayFold(project, Out.Line);
         HooksPath.WarnIfWritable(project, host, Out.Line);
 
@@ -298,7 +298,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         return result;
     }
 
-    /// <summary>Runs pen's own git call (the unsigned-commit count), so only once no check has failed.</summary>
+    /// <summary>Runs Pen's own git call (the unsigned-commit count), so only once no check has failed.</summary>
     private static void Remind(SessionEndResult result)
     {
         if (result.ReminderDir == null) return;
@@ -322,7 +322,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
 
     /// <summary>
     /// Runs the end path for every session that still has a compose.yaml but
-    /// whose lock nobody holds (its pen crashed or was killed), and deletes
+    /// whose lock nobody holds (its Pen crashed or was killed), and deletes
     /// ended sessions' dirs after <see cref="KeepEndedSessions"/>. Returns false
     /// if one's .git check didn't finish: the caller must not run git then, and
     /// neither does this. These sessions may share a repo, so their reminders

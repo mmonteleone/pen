@@ -19,7 +19,7 @@ internal sealed record PromptHazard(string Path, string? StateDir, string Why);
 /// sandbox can write. Continuing it runs commands on this machine, but it may be
 /// the user's own, so it's reported and left in place, apart from what
 /// <see cref="PromptHazards"/> finds. Reads files directly
-/// and never runs git. Every file is hostile input: anything pen can't read is
+/// and never runs git. Every file is hostile input: anything Pen can't read is
 /// reported as such, so a planted file can't hang this or silence it.
 ///
 /// What git does with these files, checked against git 2.56: an exec line runs
@@ -75,7 +75,7 @@ internal static class PausedGit
     /// The files and state directories to quarantine because a shell prompt would
     /// run them, each with why, in the same git dirs as <see cref="Find"/>. A real
     /// rebase's own files always pass: see <see cref="IsCount"/> and <see cref="IsHeadName"/>.
-    /// A planted symlink counts whatever it points to, and a state directory pen
+    /// A planted symlink counts whatever it points to, and a state directory Pen
     /// can't enter counts too, since the prompt reads it once the user fixes its mode.
     /// Every known name is tried directly, so a directory that can be searched but
     /// not listed (git and the prompt can read through one too) hides nothing. A

@@ -46,7 +46,7 @@ public class ConfigTests
     {
         Assert.StartsWith($"{UserFile}:4:", Error(() => User("# x\n\n[env]\nX = ")));
         Assert.StartsWith($"{UserFile}:2:", Error(() => User("[env]\nX = unquoted")));
-        // TOML forbids defining a key or table twice; pen doesn't let the last one win.
+        // TOML forbids defining a key or table twice; Pen doesn't let the last one win.
         Assert.StartsWith($"{UserFile}:3:", Error(() => User("[env]\nX = \"a\"\nX = \"b\"")));
         Assert.StartsWith($"{UserFile}:3:", Error(() => User("[env]\nX = \"a\"\n[env]\nY = \"b\"")));
     }

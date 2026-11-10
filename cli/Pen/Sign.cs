@@ -381,7 +381,7 @@ internal static class Sign
         $"  {sha[..12]} {Out.Field(commit.Subject)}{(verified ? " (signed)" : "")}";
 
     /// <summary>
-    /// How to fix it when commits pen just signed don't verify, or null when
+    /// How to fix it when commits Pen just signed don't verify, or null when
     /// they do. Until it's fixed, each pen sign re-signs them. Never throws:
     /// the signing is done by now, and this is advice.
     /// </summary>

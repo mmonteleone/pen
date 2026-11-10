@@ -8,14 +8,14 @@ namespace Pen;
 internal readonly record struct PenDirHashResult(string? Hash, string? Problem);
 
 /// <summary>
-/// A hash of what docker build reads from .pen/ (all but config.toml, which pen
+/// A hash of what docker build reads from .pen/ (all but config.toml, which Pen
 /// allow edits and which holds only settings approved one by one). Every entry
 /// counts by type, permission bits (COPY keeps them all), full relative path and
 /// content or link target, each with its length first, so moving bytes between a
 /// name and a content can't produce the same input. Entries come in a fixed order.
 /// <para>
 /// The agent may have written everything here. Whatever the hash wouldn't pin
-/// down, or that could hang or exhaust pen, means no hash: special files, names
+/// down, or that could hang or exhaust Pen, means no hash: special files, names
 /// that aren't valid UTF-8, trees over the limits, anything unreadable, and
 /// symlinks other than a relative one through real directories to a real file
 /// or directory in .pen/. Others could read content from outside, or be repointed
@@ -59,7 +59,7 @@ internal sealed class PenDirHash : IDisposable
 
     /// <summary>
     /// Copies <paramref name="penDir"/> to <paramref name="copy"/> (which must not
-    /// exist, in a directory only pen can reach) under the same refusals, keeping
+    /// exist, in a directory only Pen can reach) under the same refusals, keeping
     /// types, modes and modification times. config.toml stays out: it isn't hashed,
     /// so a build must not read it. Never follows a symlink, and reads each file
     /// through one descriptor. Returns the hash of the copy, which can't change afterwards,
@@ -243,7 +243,7 @@ internal sealed class PenDirHash : IDisposable
 /// dir, which <see cref="Project.CheckAllowed"/> keeps out of every sandbox, in a
 /// directory only this user can enter. The path stays the same for a directory,
 /// since BuildKit keeps a cache record per context path; so builds in one directory
-/// take turns, by a lock. One left by a pen that died is removed by the next, or
+/// take turns, by a lock. One left by a Pen that died is removed by the next, or
 /// by pen prune.
 /// </summary>
 internal sealed class LayerContext : IDisposable
@@ -288,7 +288,7 @@ internal sealed class LayerContext : IDisposable
     /// <summary>
     /// A copy to show the user and approve the hash of, kept until they've answered.
     /// Not locked, since a prompt can wait for hours, and with a path of its own.
-    /// One abandoned by a killed pen goes when the next review finds it old, or by pen prune.
+    /// One abandoned by a killed Pen goes when the next review finds it old, or by pen prune.
     /// </summary>
     public static LayerContext Review(HostEnv host, Project project)
     {

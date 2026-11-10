@@ -402,7 +402,7 @@ internal sealed class TrustStore
     public TrustStore ApproveDomains(IEnumerable<string> domains) => Written(domains, null, false, null);
 
     /// <summary>
-    /// Adds to what the file holds now, since another pen may have approved
+    /// Adds to what the file holds now, since another Pen may have approved
     /// something since this store was read (losing that would only ask again), and
     /// replaces it by rename, so it's never seen half-written. A value that isn't
     /// a strict shape refuses the whole write.

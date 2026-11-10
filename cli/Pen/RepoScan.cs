@@ -26,7 +26,7 @@ internal sealed record NestedRepo(string Path, NestedKind Kind)
 /// listing has U+FFFD in place of the bad bytes, so that string names nothing
 /// (or another entry), while git on this machine can still enter it. Shown is
 /// its path for messages, with the name exact (<see cref="UndecodableEntry.Escaped"/>).
-/// EndsInNewline: no command pen could print would name it.
+/// EndsInNewline: no command Pen could print would name it.
 /// </summary>
 internal sealed record BadName(string Shown, bool EndsInNewline)
 {
@@ -271,7 +271,7 @@ internal static class RepoScan
         }
         catch (IOException) { return null; }
         catch (UnauthorizedAccessException) { return null; }
-        catch (PenException) { return null; } // an unreadable config: not a checkout pen can vouch for
+        catch (PenException) { return null; } // an unreadable config: not a checkout Pen can vouch for
     }
 
     /// <summary>
@@ -282,7 +282,7 @@ internal static class RepoScan
     /// submodules). A git dir is a directory with HEAD plus objects/ and refs/,
     /// or HEAD plus commondir (which callers refuse). Any symlink met along the
     /// way is listed as is and not followed: git would follow it to a repo
-    /// elsewhere, so callers refuse it too. A directory pen quarantined
+    /// elsewhere, so callers refuse it too. A directory Pen quarantined
     /// (named …<see cref="GitCheck.Suffix"/>…) isn't walked: repos nested in a
     /// quarantined one are no submodule's. Parents come before their nested
     /// repos; siblings in ordinal order. Reads directories only; never runs git.

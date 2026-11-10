@@ -1,6 +1,6 @@
 using System.Reflection;
 
-// pen drives Docker on macOS and Linux only.
+// Pen drives Docker on macOS and Linux only.
 [assembly: System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
 
 namespace Pen;
@@ -12,7 +12,7 @@ internal static class Program
     /// <summary>
     /// Runs <paramref name="run"/>, showing expected failures as one line. Only
     /// what no caller handled gets here; a session it interrupts is finished by
-    /// the next run, as when pen dies. Other exceptions are pen's bugs and keep
+    /// the next run, as when Pen dies. Other exceptions are Pen's bugs and keep
     /// their stack traces.
     /// </summary>
     internal static int Guarded(Func<int> run)

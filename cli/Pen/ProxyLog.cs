@@ -34,7 +34,7 @@ internal sealed class ProxyLogTrimmer : IDisposable
     {
         _session = session;
         _tailAndTruncate = tailAndTruncate;
-        // A thread-pool timer: it never keeps pen running, and Dispose stops it.
+        // A thread-pool timer: it never keeps Pen running, and Dispose stops it.
         _timer = new Timer(_ => Tick(), null, interval, interval);
     }
 
@@ -69,7 +69,7 @@ internal sealed class ProxyLogTrimmer : IDisposable
             int nl = Array.IndexOf(tail, (byte)'\n');
             start = nl < 0 ? tail.Length : nl + 1;
         }
-        // Written aside and renamed, so a reader or a pen that dies mid-write
+        // Written aside and renamed, so a reader or a Pen that dies mid-write
         // never sees half a file. proxy.log.1 isn't mounted anywhere.
         var previous = _session.PreviousProxyLog;
         var tmp = previous + ".tmp";

@@ -1,7 +1,7 @@
 namespace Pen.Tests;
 
 /// <summary>
-/// Paths in a git dir that pen can't read (an agent's chmod 000) are refused at
+/// Paths in a git dir that Pen can't read (an agent's chmod 000) are refused at
 /// the start, quarantined at the end, and never leave a project stuck.
 /// </summary>
 [Collection(nameof(LockAndProcessTests))]

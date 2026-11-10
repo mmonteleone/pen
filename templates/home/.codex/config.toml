@@ -1,4 +1,4 @@
-# Seeded by pen. The container is the boundary, and Codex's own sandbox doesn't
+# Seeded by Pen. The container is the boundary, and Codex's own sandbox doesn't
 # work inside it, so Codex runs without approvals or its own sandbox.
 approval_policy = "never"
 sandbox_mode = "danger-full-access"

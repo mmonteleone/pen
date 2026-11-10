@@ -276,7 +276,7 @@ public class PruneTests
             "pen-foo-0123abcd-89abcdef:0123456789abcdef",
             "pen-tools-0123abcd:0123456789abcdef", // a project named tools
             "pen-tools-0123abcd:latest",
-            "pen-tools:latest", // not a name pen gives
+            "pen-tools:latest", // not a name Pen gives
             "other/pen-tools:0123456789abcdef",
         ];
         Assert.Equal([OldTools], Prune.StaleToolsImages(images, CurrentBase, _ => OldBase));

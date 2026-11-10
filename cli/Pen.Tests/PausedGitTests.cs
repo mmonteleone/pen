@@ -72,7 +72,7 @@ public class PausedGitTests
         Assert.Equal(before, File.ReadAllText(todo));
         Assert.False(File.Exists(marker));
         Git.Run(repo, "rebase", "--continue");
-        Assert.True(File.Exists(marker)); // the line pen listed is one git really runs
+        Assert.True(File.Exists(marker)); // the line Pen listed is one git really runs
     }
 
     [Fact]
@@ -885,7 +885,7 @@ public class PausedGitTests
                 var m = ModuleRepo(t, ".git", "modules", "sub");
                 return (m, PlantState(m, "rebase-merge/msgnum"), [m]);
             }
-            default: // a level of a module's name with "/" in it: pen moves the level, plant and all
+            default: // a level of a module's name with "/" in it: Pen moves the level, plant and all
             {
                 var m = ModuleRepo(t, ".git", "modules", "a", "b");
                 return (Path.GetDirectoryName(m)!, PlantState(m, "rebase-merge/msgnum"), [m]);

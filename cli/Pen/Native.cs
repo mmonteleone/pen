@@ -42,7 +42,7 @@ internal sealed record UndecodableEntry(byte[] Name, bool CouldHoldRepo)
 /// <summary>A regular file's exact bytes and mode, read through one descriptor.</summary>
 internal sealed record RegularFile(byte[] Bytes, UnixFileMode Mode);
 
-/// <summary>The few libc calls pen needs. Same signatures on macOS and Linux.</summary>
+/// <summary>The few libc calls Pen needs. Same signatures on macOS and Linux.</summary>
 internal static partial class Native
 {
     private const string Libc = "libc";
@@ -129,7 +129,7 @@ internal static partial class Native
 
     private const byte DT_UNKNOWN = 0, DT_DIR = 4, DT_LNK = 10;
 
-    /// <summary>Where struct dirent keeps d_type and d_name, on the 64-bit layouts pen knows.</summary>
+    /// <summary>Where struct dirent keeps d_type and d_name, on the 64-bit layouts Pen knows.</summary>
     private static (int Type, int Name)? DirentLayout =>
         OperatingSystem.IsLinux() && nint.Size == 8 ? (18, 19)
         : OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? (20, 21)
@@ -180,7 +180,7 @@ internal static partial class Native
     /// <summary>
     /// A regular file's text, or null if it's anything else or over
     /// <see cref="MaxTextFile"/>: opening a FIFO for reading blocks until a writer
-    /// comes, and a sparse file costs nothing to make and runs pen out of memory.
+    /// comes, and a sparse file costs nothing to make and runs Pen out of memory.
     /// The non-blocking open returns at once, and the size check and read use that
     /// same descriptor.
     /// </summary>

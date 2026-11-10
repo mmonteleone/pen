@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# pen base image. Builds natively on arm64 (Mac/OrbStack) and amd64 (server).
+# Pen base image. Builds natively on arm64 (Mac/OrbStack) and amd64 (server).
 # Nothing is installed into /home/agent: all of $HOME is a per-project volume.
 
 ARG UV_VERSION=latest

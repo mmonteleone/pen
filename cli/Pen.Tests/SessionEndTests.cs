@@ -219,7 +219,7 @@ public class SessionEndTests
         Assert.Equal(original, File.ReadAllText(config));
     }
 
-    /// <summary>The way out pen prints, run as printed (with pen's retry, which is what pen true does first), after chmod 000 and a plant.</summary>
+    /// <summary>The way out Pen prints, run as printed (with Pen's retry, which is what pen true does first), after chmod 000 and a plant.</summary>
     [Fact]
     public void Replay_ThePrintedWayOutAfterChmod000_RestoresTheOriginal()
     {
@@ -513,7 +513,7 @@ public class SessionEndTests
         var ok = false;
         var output = CapturingStderr(() => ok = Session.EndAndRemind(session).CheckFinished);
 
-        Assert.True(ok); // it doesn't stop pen's own git, which continues nothing
+        Assert.True(ok); // it doesn't stop Pen's own git, which continues nothing
         Assert.Contains(".git/rebase-merge: a paused rebase", output);
         Assert.Contains("exec evil", output);
         Assert.Equal("exec evil\n", File.ReadAllText(todo));

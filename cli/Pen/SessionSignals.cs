@@ -5,8 +5,8 @@ namespace Pen;
 
 /// <summary>
 /// While a session runs: SIGINT and SIGQUIT are ignored (the terminal delivers
-/// them to the agent). SIGHUP and SIGTERM don't stop pen either: the child is
-/// stopped, and pen then runs the normal end path.
+/// them to the agent). SIGHUP and SIGTERM don't stop Pen either: the child is
+/// stopped, and Pen then runs the normal end path.
 /// </summary>
 internal sealed class SessionSignals : IDisposable
 {

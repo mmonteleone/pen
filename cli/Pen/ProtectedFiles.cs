@@ -128,7 +128,7 @@ internal static class ProtectedFiles
 
     /// <summary>
     /// What the session-end check goes by: a session with no readable record
-    /// vouches for no config.worktree, as one from a pen that didn't record its
+    /// vouches for no config.worktree, as one from a Pen that didn't record its
     /// module repos keeps none of them.
     /// </summary>
     public static ProtectedManifest AtStart(SessionDir session) => ReadRecord(session) ?? new([], []);
@@ -328,7 +328,7 @@ internal static class ProtectedFiles
         return true;
     }
 
-    /// <summary>The first directory on the way to <paramref name="path"/> this user can't enter: changing that one is what lets pen get further.</summary>
+    /// <summary>The first directory on the way to <paramref name="path"/> this user can't enter: changing that one is what lets Pen get further.</summary>
     private static string TopmostShut(string path)
     {
         var chain = new Stack<string>();
@@ -370,7 +370,7 @@ internal static class ProtectedFiles
             if (manifest == null)
             {
                 // Its record goes after its compose.yaml, so one that's still open with
-                // no record is from an older pen or damaged: its agent could write.
+                // no record is from an older Pen or damaged: its agent could write.
                 unrecorded |= s.IsOpen;
                 continue;
             }

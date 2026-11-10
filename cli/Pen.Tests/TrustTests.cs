@@ -607,7 +607,7 @@ public class TrustTests
         Assert.False(f.Store.CoversToolDomain(Tool1, "evil.example"));
     }
 
-    /// <summary>The embedded pen-test tool, as a pen whose recipe brings these domains would have it.</summary>
+    /// <summary>The embedded pen-test tool, as a Pen whose recipe brings these domains would have it.</summary>
     private static RecipeCatalog Bringing(params string[] domains) => RecipeCatalog.FromFiles(new Dictionary<string, string>
     {
         ["tools/pen-test/tool.toml"] = $"default = \"1\"\nversion = '^\\d+$'\nallow = [{string.Join(", ", domains.Select(d => $"\"{d}\""))}]\n",

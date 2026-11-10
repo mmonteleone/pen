@@ -146,7 +146,7 @@ internal static partial class Prune
         return current == key ? (Status.Live, null) : (Status.Moved, current);
     }
 
-    /// <summary>The project key a pen volume (&lt;key&gt;_home, _nuget or _dind) belongs to, or null for any other volume.</summary>
+    /// <summary>The project key a Pen volume (&lt;key&gt;_home, _nuget or _dind) belongs to, or null for any other volume.</summary>
     internal static string? KeyOfVolume(string volume)
     {
         foreach (var s in Reset.VolumeSuffixes)

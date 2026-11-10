@@ -4,7 +4,7 @@ using System.Text;
 namespace Pen;
 
 /// <summary>
-/// The project pen runs in: the current directory, by its real path. Its key,
+/// The project Pen runs in: the current directory, by its real path. Its key,
 /// pen-&lt;dir&gt;-&lt;hash&gt;, names the project's volumes, image and runtime dir.
 /// It comes from <see cref="RepoDir"/>, so all worktrees of a repo share one
 /// key (logins, caches, sessions and locks), while each keeps its own
@@ -17,8 +17,8 @@ namespace Pen;
 /// </para>
 /// </summary>
 /// <summary>
-/// Where pen was started, and moving away from there. The project dir is the
-/// agent's to chmod or the user's to remove while pen runs, and pen's children
+/// Where Pen was started, and moving away from there. The project dir is the
+/// agent's to chmod or the user's to remove while Pen runs, and Pen's children
 /// (git, docker) need a working directory they can use, so the end of a session
 /// mustn't depend on it. Nothing uses the process's cwd after <see cref="Leave"/>.
 /// </summary>
@@ -27,14 +27,14 @@ internal static class StartDir
     private static bool _left;
     private static string? _dir;
 
-    /// <summary>The directory pen started in, or a refusal saying why it can't be used.</summary>
+    /// <summary>The directory Pen started in, or a refusal saying why it can't be used.</summary>
     public static string Get()
     {
         var dir = _left ? _dir : Read();
         return dir ?? throw new PenException("pen can't read the current directory: it was removed, or its permissions or a parent's were changed. Fix that (chmod u+rwx . if it's only this directory's) or cd to the project, then rerun");
     }
 
-    /// <summary>Changes to pen's state dir, or / if that can't be used.</summary>
+    /// <summary>Changes to Pen's state dir, or / if that can't be used.</summary>
     public static void Leave(HostEnv host)
     {
         _dir = Read();
@@ -113,7 +113,7 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
 
     /// <summary>
     /// Refuses directories whose read-write mount would hand the agent the host
-    /// user's home, pen's own config and state, or a repo it can't see the root of.
+    /// user's home, Pen's own config and state, or a repo it can't see the root of.
     /// </summary>
     internal static void CheckAllowed(string dir, HostEnv host)
     {

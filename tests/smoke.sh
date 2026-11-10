@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Container smoke checks for pen, accumulated chunk by chunk. Run on both the
-# Mac (OrbStack/arm64) and the server (Docker/amd64), against the installed pen
+# Container smoke checks for Pen, accumulated chunk by chunk. Run on both the
+# Mac (OrbStack/arm64) and the server (Docker/amd64), against the installed Pen
 # (cli/install.sh). Exits non-zero on the first failure.
 #
 #   tests/smoke.sh                 all checks
@@ -13,8 +13,8 @@
 #   CLAUDE_CODE_OAUTH_TOKEN, OPENAI_API_KEY   trivial prompts in claude / codex, and
 #                                             the seeded-behavior checks (section 17)
 #
-# Config-dependent checks run pen with a throwaway HOME, so your own
-# ~/.config/pen is never changed. Everything else uses your real HOME (pen
+# Config-dependent checks run Pen with a throwaway HOME, so your own
+# ~/.config/pen is never changed. Everything else uses your real HOME (Pen
 # creates ~/.config/pen/ on its first run, as it would anyway).
 set -euo pipefail
 
@@ -77,7 +77,7 @@ forget_key() {
   docker image ls -q --filter "reference=$k*" | xargs docker image rm -f >/dev/null 2>&1 || true
   rm -rf "$REAL_HOME/.local/state/pen/$k" "$FAKE_HOME/.local/state/pen/$k"
 }
-# forget <dir>: remove the state of any project key made for <dir>, by pen
+# forget <dir>: remove the state of any project key made for <dir>, by Pen
 # with either HOME.
 forget() {
   local h k
@@ -114,7 +114,7 @@ cd "$PROJECT_DIR"
 pen_run() { "$PEN" run "$@" </dev/null; }
 # in_sandbox <bash script>: run a script in a fresh session, as agent.
 in_sandbox() { pen_run bash -c "$1"; }
-# fake_pen <args…>: pen with the throwaway HOME (its config in $FAKE_HOME/.config/pen).
+# fake_pen <args…>: Pen with the throwaway HOME (its config in $FAKE_HOME/.config/pen).
 fake_pen() { HOME=$FAKE_HOME DOCKER_CONFIG=${DOCKER_CONFIG:-$REAL_HOME/.docker} "$PEN" "$@" </dev/null; }
 # fake_config <line…>: the throwaway config.toml, replacing it.
 fake_config() { mkdir -p "$FAKE_HOME/.config/pen"; printf '%s\n' "$@" >"$FAKE_HOME/.config/pen/config.toml"; chmod 600 "$FAKE_HOME/.config/pen/config.toml"; }
@@ -180,7 +180,7 @@ case " \$* " in *" run --rm "*) printf '%s\n' "\$PEN_IMAGE" >"$TOOLS_SHIM/image"
 exec "$(command -v docker)" "\$@"
 EOF
 chmod +x "$TOOLS_SHIM/docker"
-# session_image <pen options…>: starts a session with them, and prints the image it ran.
+# session_image <Pen options…>: starts a session with them, and prints the image it ran.
 session_image() {
   PATH="$TOOLS_SHIM:$PATH" "$PEN" "$@" run true </dev/null >/dev/null 2>&1 || fail "pen $* run true"
   cat "$TOOLS_SHIM/image"
@@ -721,7 +721,7 @@ if want 11; then
 section "11. .NET and NuGet, with --tool dotnet"
 tool_free # asserts what's there without the tool, and dotnet:8 alone
 
-# dn_sandbox [pen options…] <bash script>: in_sandbox with the dotnet tool (dotnet:10 unless options say).
+# dn_sandbox [Pen options…] <bash script>: in_sandbox with the dotnet tool (dotnet:10 unless options say).
 dn_sandbox() { local script=${*: -1}; "$PEN" --tool dotnet "${@:1:$#-1}" run bash -c "$script" </dev/null; }
 majors() { awk '{ split($1, v, "."); print v[1] }' | sort -n | uniq | tr '\n' ' '; }
 
@@ -821,8 +821,8 @@ check "a git worktree add worktree under .claude/worktrees/ starts normally" pen
 git worktree remove --force .claude/worktrees/x && rm -rf .claude
 
 # The scan with a 100k-file node_modules and obj/ trees: a repo planted at
-# the bottom makes pen refuse right after the scan, before any Docker call,
-# so the refusal's time is the scan's (plus pen's own startup).
+# the bottom makes Pen refuse right after the scan, before any Docker call,
+# so the refusal's time is the scan's (plus Pen's own startup).
 python3 - "$PROJECT_DIR" <<'PY'
 import os, sys
 root = sys.argv[1]
@@ -993,7 +993,7 @@ check "...with the warning" contains "pen: WARNING" "$out"
 check "...and takes the stack down" test "$(containers)" = 0
 rm -f .git/commondir.pen-quarantine
 
-# The agent shuts pen's own cwd along with a plant: the end must still run, and say what to do.
+# The agent shuts Pen's own cwd along with a plant: the end must still run, and say what to do.
 canary=$SCRATCH/shut-canary
 printf '#!/bin/sh\ntouch %q\n' "$canary" >"$SCRATCH/shut-hook"; chmod +x "$SCRATCH/shut-hook"
 out=$(in_sandbox "printf '[core]\\n fsmonitor = $SCRATCH/shut-hook\\n' >> .git/CONFIG; chmod 000 ." 2>&1 || true)
@@ -1089,7 +1089,7 @@ docker image tag pen:smoke-backup "$IMAGE" && docker rmi pen:smoke-backup >/dev/
 check "a FROM pen:latest layer picks up a base-image rebuild" \
   test "$(docker image inspect --format '{{ index .Config.Labels "smoke.base" }}' "$KEY:latest")" = rebuilt
 
-# What a build sees from .pen/, read through pen's private copy of it.
+# What a build sees from .pen/, read through Pen's private copy of it.
 printf 'FROM pen:latest\nCOPY . /etc/pen-ctx/\n' >.pen/Dockerfile
 printf 'secret\n' >.pen/.dockerignore
 echo s >.pen/secret
@@ -1372,7 +1372,7 @@ before=$(git rev-parse HEAD)
 check "running pen sign again changes nothing" contains "are signed" "$(fake_pen sign 2>&1)"
 check "...keeping the validly signed commits' hashes" test "$(git rev-parse HEAD)" = "$before"
 
-# A commit with any signature header, which is all pen used to look at.
+# A commit with any signature header, which is all Pen used to look at.
 forged=$(printf 'tree %s\nparent %s\nauthor Agent <agent@example.invalid> 1700000000 +0000\ncommitter Agent <agent@example.invalid> 1700000000 +0000\ngpgsig -----BEGIN SSH SIGNATURE-----\n Zm9v\n -----END SSH SIGNATURE-----\n\nforged\n' \
   "$(git rev-parse 'HEAD^{tree}')" "$before" | git hash-object -t commit -w --stdin)
 git update-ref HEAD "$forged"
@@ -1856,7 +1856,7 @@ section "24. Submodule repos protected"
 # A worktree inside the project with submodules of its own: their repos live
 # in .git/worktrees/<n>/modules/ (section 26 has the project's own). With
 # the checkout deinitialized, nothing in the tree points at the module repo, so
-# pen starts, and the repo must still be protected like .git itself.
+# Pen starts, and the repo must still be protected like .git itself.
 SMLIB=$SCRATCH/smlib
 git init -q "$SMLIB"
 git -C "$SMLIB" -c user.name=smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m lib
@@ -1902,7 +1902,7 @@ if want 25; then
 section "25. Submodule checkouts, and quarantining only new module repos"
 
 # As in section 24, but with the worktree's submodule checked out: its .git
-# file points at the module repo, whose core.worktree points back, so pen
+# file points at the module repo, whose core.worktree points back, so Pen
 # starts. At the end, only module repos made during the session (and .git
 # files not matching a known one) are quarantined.
 SMLIB=$SCRATCH/smlib

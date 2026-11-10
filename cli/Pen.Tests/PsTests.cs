@@ -73,7 +73,7 @@ public class PsTests
     {
         using var t = new TempDir();
         var s = new SessionDir("k", t.Sub("s"));
-        Assert.Empty(s.ReadPorts()); // a session from an older pen
+        Assert.Empty(s.ReadPorts()); // a session from an older Pen
         s.WritePorts([8765, 3000]);
         Assert.Equal("8765\n3000\n", File.ReadAllText(s.PortsFile));
         Assert.Equal([8765, 3000], s.ReadPorts());

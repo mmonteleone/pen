@@ -111,7 +111,7 @@ internal static class HooksPath
         return Decide(walk.Found, project, host, top, relativeKnown: top != null);
     }
 
-    /// <summary>GIT_CONFIG_COUNT and its keys and values, which outrank every file, in the environment pen was started from.</summary>
+    /// <summary>GIT_CONFIG_COUNT and its keys and values, which outrank every file, in the environment Pen was started from.</summary>
     private static void ReadEnvironmentConfig(Func<string, string?> env, Walk walk)
     {
         if (!int.TryParse(env("GIT_CONFIG_COUNT"), System.Globalization.CultureInfo.InvariantCulture, out int count)) return;
@@ -183,7 +183,7 @@ internal static class HooksPath
         if (value.Contains('\ufffd')) return Place.Unknown;
         if (value.StartsWith("%(prefix)/", StringComparison.Ordinal)) return Place.Unknown;
         if (value == "~" || value.StartsWith("~/", StringComparison.Ordinal)) return LocatePath(home + value[1..], project);
-        if (value.StartsWith('~')) return Place.Unknown; // ~user/: pen doesn't look up other users' homes
+        if (value.StartsWith('~')) return Place.Unknown; // ~user/: Pen doesn't look up other users' homes
         if (value.Length == 0) return LocatePath("/", project); // git looks for /pre-commit
         if (Path.IsPathRooted(value)) return LocatePath(value, project);
 
@@ -323,7 +323,7 @@ internal static class HooksPath
             }
         }
 
-        /// <summary>The file an include names, or null if pen can't tell.</summary>
+        /// <summary>The file an include names, or null if Pen can't tell.</summary>
         private string? IncludePath(string value, string from)
         {
             if (value.Contains('\ufffd') || value.StartsWith("%(prefix)/", StringComparison.Ordinal)) return null;

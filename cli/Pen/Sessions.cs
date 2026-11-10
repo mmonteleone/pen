@@ -5,7 +5,7 @@ internal static class Sessions
 {
     /// <summary>
     /// The project's running sessions: open (compose.yaml still there) with
-    /// their session.lock held by a live pen.
+    /// their session.lock held by a live Pen.
     /// </summary>
     public static List<SessionDir> Running(string projectKey, string runtimeDir)
     {

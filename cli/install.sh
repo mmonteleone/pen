@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the pen CLI natively for this machine (Native AOT) and installs it to
+# Builds the Pen CLI natively for this machine (Native AOT) and installs it to
 # ~/.local/bin/pen.
 #
 #   cli/install.sh                 build and install
@@ -72,7 +72,7 @@ if [ -n "$out" ]; then
 fi
 
 mkdir -p "$DEST"
-# Install by rename, so a running pen keeps its (old) binary.
+# Install by rename, so a running Pen keeps its (old) binary.
 install -m 0755 "$stage/pen" "$DEST/.pen.new"
 mv -f "$DEST/.pen.new" "$DEST/pen"
 "$DEST/pen" --version

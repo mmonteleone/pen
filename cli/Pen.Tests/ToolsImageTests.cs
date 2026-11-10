@@ -99,7 +99,7 @@ public class ToolsImageTests
     [InlineData("1\\")]
     public void AHostileVersionNeverReachesTheDockerfile(string version)
     {
-        // This recipe's own pattern accepts anything, so only pen's version syntax stops these.
+        // This recipe's own pattern accepts anything, so only Pen's version syntax stops these.
         ToolSpec[] tools = [new("anything", version)];
         Assert.Contains("isn't a valid version", Assert.Throws<PenException>(() => ToolsImage.Dockerfile(tools, Catalog())).Message);
         Assert.Throws<PenException>(() => ToolsImage.Tag(BaseId, tools, Catalog()));

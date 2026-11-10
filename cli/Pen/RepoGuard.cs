@@ -130,7 +130,7 @@ internal static class RepoGuard
     /// The common git dir of the linked worktree whose .git file is
     /// <paramref name="git"/>, refusing anything else: a .git file that doesn't
     /// validate (a submodule's checkout, or a forged one), or a worktree of a
-    /// bare repo, which has no main checkout to share pen's state with.
+    /// bare repo, which has no main checkout to share Pen's state with.
     /// </summary>
     private static string CheckWorktree(string dir, string git)
     {
@@ -421,7 +421,7 @@ internal static class RepoGuard
     /// dir is created empty; a missing one in the working tree is refused,
     /// since creating it would add a file to the project. A path that wasn't valid
     /// UTF-8 is refused: decoded, it has U+FFFD where git has other bytes, so
-    /// pen would protect a different file from the one git reads.
+    /// Pen would protect a different file from the one git reads.
     /// Returns whether any file in the walk sets extensions.worktreeConfig.
     /// <para>
     /// The agent can write some of these files, so each is walked only once, and
@@ -430,7 +430,7 @@ internal static class RepoGuard
     /// 10. Depth itself isn't limited, since a file first met deep down mustn't
     /// lose what it includes when it's met again higher up. Files are keyed by
     /// path as written, not real path: a relative include resolves from there.
-    /// A ~user or %(prefix) path is refused: pen can't tell where it leads.
+    /// A ~user or %(prefix) path is refused: Pen can't tell where it leads.
     /// </para>
     /// </summary>
     private static bool AddIncludes(string dir, string common, string configFile, string hostHome, List<Mount> mounts) =>
