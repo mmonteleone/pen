@@ -30,7 +30,7 @@ internal static class Cli
                                     (repeatable; or tools = […] in either config.toml); a
                                     command named after an agent brings it: pen claude
           pen --tool list           list the agents and tools pen can install
-          pen upgrade [--clean]     newer base image and agents; --clean skips the cache
+          pen upgrade [--clean]     rebuild the base image, agents and tools; --clean skips the cache
           pen allow <domain…> [--global]
                                     allow domains, applied to running sessions too
           pen allow                 list recently blocked domains
@@ -70,18 +70,19 @@ internal static class Cli
                          in either config.toml adds to these, and pen --tool list shows what's
                          available. The session runs with them installed, and can reach the
                          domains they need. A command named after an agent (pen claude, pen
-                         run claude) brings that agent at its default version unless one of
-                         these names it; to have an agent in a shell or behind another
-                         command, name it here or in tools
+                         run claude) brings that agent at its default version unless --tool
+                         or tools in either config.toml already names it; to have an agent in
+                         a shell or behind another command, name it here or in tools
             """,
         ["upgrade"] = """
             usage: pen upgrade [--clean]
 
-            Updates the base image and reinstalls the agents at their latest versions,
-            then pulls newer proxy and Docker-in-Docker images. It rebuilds the tools and
-            agents in your config, and run in a project, the approved tools and
-            .pen/Dockerfile there (see pen trust); any other set of tools, such as an agent
-            a command brings, is rebuilt on its next use. Logins and config are kept.
+            Rebuilds the base image, then pulls newer proxy and Docker-in-Docker images.
+            It rebuilds the tools and agents in your config, and run in a project, the
+            approved tools and .pen/Dockerfile there (see pen trust); any other set of
+            tools, such as an agent a command brings, is rebuilt on its next use. A rebuild
+            installs an agent or tool at latest at its newest release, and a pinned one at
+            the version given. Logins and config are kept.
 
               --clean    rebuild without the build cache
             """,

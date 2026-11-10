@@ -1,0 +1,12 @@
+# Codex, the agent, from npm: codex:latest is the newest release when its tools image is
+# built (pen upgrade gives a new base, so it reinstalls on next use), or an exact release,
+# codex:0.167.0.
+kind = "agent"
+default = "latest"
+version = '^(latest|[0-9]+\.[0-9]+\.[0-9]+)$'
+multiple = false
+allow = [
+  # API, auth and ChatGPT login
+  ".openai.com",
+  ".chatgpt.com",
+]

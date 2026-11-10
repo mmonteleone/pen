@@ -26,7 +26,7 @@ pen allow --defaults            list the domains pen allows out of the box
 pen trust [--yes | --list]      review and approve what this project's .pen/ asks for
 pen ps                          list running sessions, ports and tools across projects
 pen sign [<base>]               re-sign your unpushed commits with your own key
-pen upgrade [--clean]           update the base image and agents
+pen upgrade [--clean]           rebuild the base image, agents and tools
 pen reset                       wipe this project's sandbox state (logins, caches)
 pen prune                       remove what moved or deleted projects left behind
 ```
@@ -125,7 +125,7 @@ Agents run in skip-permissions mode by default. The container is the boundary. E
 
 ### Agents
 
-Agents are recipes built into Pen, like [tools](#tools): `pen --tool list` shows them apart from the tools. Codex, OpenCode and Pi are also still in the base image, so they need none of this yet. A command named after an agent brings it at its default version, with no config: `pen claude` and `pen run claude` install Claude Code in the session's image, and the session can reach its domains. Only the command's first word counts, so `pen run timeout 60 claude` or a shell (`pen`) doesn't have it. To have an agent there too, name it like a tool, with `--tool claude` or `tools = ["claude"]` in either `config.toml`; a project's `tools` need [approval](#project-settings) as usual, and when one of the lists names the agent, at any version, the command adds nothing.
+Agents are recipes built into Pen, like [tools](#tools): `pen --tool list` shows them apart from the tools. OpenCode is also still in the base image, so it needs none of this yet. A command named after an agent brings it at its default version, with no config: `pen claude` and `pen run claude` install Claude Code in the session's image (`pen codex` Codex, `pen pi` Pi), and the session can reach its domains. Only the command's first word counts, so `pen run timeout 60 claude` or a shell (`pen`) doesn't have it. To have an agent there too, name it like a tool, with `--tool claude` or `tools = ["claude"]` in either `config.toml`; a project's `tools` need [approval](#project-settings) as usual, and when one of the lists names the agent, at any version, the command adds nothing.
 
 ```
 pen --tool claude                 # a shell with claude in it
@@ -135,12 +135,14 @@ pen --tool claude:2.1.3 claude    # a pinned release
 | Agent | Command | Default | Versions | Domains it adds |
 |---|---|---|---|---|
 | `claude` | `claude` (Claude Code, from npm) | `latest` | `latest` or an exact release (`2.1.3`) | `.anthropic.com`, `.claude.ai`, `.claude.com` (also defaults for now) |
+| `codex` | `codex` (Codex, from npm) | `latest` | `latest` or an exact release (`0.167.0`) | `.openai.com`, `.chatgpt.com` (also defaults for now) |
+| `pi` | `pi` (Pi, from npm) | `latest` | `latest` or an exact release (`1.5.2`) | `.anthropic.com`, `.claude.ai`, `.claude.com`, `.openai.com`, `.chatgpt.com` (also defaults for now) |
 
-An agent installs into `/opt/pen/<agent>`, which the session can't write, with its auto-updater off (`claude` sets `DISABLE_AUTOUPDATER=1` and `CLAUDE_CODE_DISABLE_AUTOUPDATE=1`). `latest` is the newest release when the image is built: the image is kept and reused, so it doesn't change on its own. `pen upgrade` rebuilds the base image, which always gives it a new ID, so every image built on the old one is rebuilt with the agents' current releases: those in your config and the current project's approved `tools` right away, and any other set of tools, such as the agent `pen claude` brings, the next time a session uses it. A pinned version stays as it is.
+An agent installs into `/opt/pen/<agent>`, which the session can't write, with its auto-updater off (`claude` sets `DISABLE_AUTOUPDATER=1` and `CLAUDE_CODE_DISABLE_AUTOUPDATE=1`, `codex` writes `check_for_update_on_startup = false` to `/etc/codex/managed_config.toml`, and `pi` sets `PI_SKIP_VERSION_CHECK=1`). Codex and Pi run on Pen's private Node, so the `node` tool's version doesn't affect them. That Node's `npm` isn't on the session's `PATH`, so Pi packages from npm (`pi install npm:<pkg>`) need the `node` tool as well (`--tool node --tool pi`); without it, the install fails with `spawn npm ENOENT`. npm's domains come with the `node` tool. `latest` is the newest release when the image is built: the image is kept and reused, so it doesn't change on its own. `pen upgrade` rebuilds the base image, which always gives it a new ID, so every image built on the old one is rebuilt with the agents' current releases: those in your config and the current project's approved `tools` right away, and any other set of tools, such as the agent `pen claude` brings, the next time a session uses it. A pinned version stays as it is.
 
 ### Tools
 
-The base image has Codex, OpenCode and Pi, `git`, `gh`, the Docker CLI (with the buildx and compose plugins) and common command-line tools: `curl`, `wget`, `jq`, `ripgrep`, `fd`, `vim`, `less`, `unzip`, `xz`, `bzip2`, `patch`, `gnupg`, `openssl` and `socat`. It has no Python, uv or build tools (`make`, `gcc`): the `python` tool brings Python and uv, and the tools that need a C toolchain bring one (`python`, `node` and `rust` bring Ubuntu's `build-essential`, `go` its `gcc`; `node` also brings Ubuntu's `python3` for node-gyp). It has no Node on `PATH` (no `node`, `npm` or `npx`): Pen keeps a private Node in `/opt/pen/node` that only runs the agents and recipes installed through npm, and isn't for your own use: for Node in a session, use the `node` tool. Language toolchains come from tool recipes built into Pen. Name them with `--tool`, or with `tools` in either `config.toml` (the lists add up). `pen --tool list` shows them.
+The base image has OpenCode, `git`, `gh`, the Docker CLI (with the buildx and compose plugins) and common command-line tools: `curl`, `wget`, `jq`, `ripgrep`, `fd`, `vim`, `less`, `unzip`, `xz`, `bzip2`, `patch`, `gnupg`, `openssl` and `socat`. It has no Python, uv or build tools (`make`, `gcc`): the `python` tool brings Python and uv, and the tools that need a C toolchain bring one (`python`, `node` and `rust` bring Ubuntu's `build-essential`, `go` its `gcc`; `node` also brings Ubuntu's `python3` for node-gyp). It has no Node on `PATH` (no `node`, `npm` or `npx`): Pen keeps a private Node in `/opt/pen/node` that only runs the agents and recipes installed through npm, and isn't for your own use: for Node in a session, use the `node` tool. Language toolchains come from tool recipes built into Pen. Name them with `--tool`, or with `tools` in either `config.toml` (the lists add up). `pen --tool list` shows them.
 
 ```
 pen --tool dotnet:8 --tool dotnet:10 claude
@@ -296,7 +298,7 @@ Keep herdr's socket out of the sandbox: its API can run host commands. Pen doesn
 ## Upgrading and resetting
 
 - To update the CLI, run `git pull` and `cli/install.sh` from your Pen source checkout. If the embedded image files changed, the next session rebuilds the base image.
-- `pen upgrade` reinstalls the agents at their latest versions and pulls newer proxy and Docker images, without waiting for a Pen release (`--clean` skips the build cache). Run it in a project with approved `tools` or an approved `.pen/Dockerfile` to rebuild those too; `tools` in your own config are always rebuilt, and any other set of tools, such as the agent `pen claude` brings, is rebuilt on its next use (see [agents](#agents)). Logins and config are kept.
+- `pen upgrade` rebuilds the base image and pulls newer proxy and Docker images, without waiting for a Pen release (`--clean` skips the build cache). `tools` in your own config are rebuilt right away; run it in a project with approved `tools` or an approved `.pen/Dockerfile` to rebuild those too. Any other set of tools, such as the agent `pen claude` brings, is rebuilt on its next use (see [agents](#agents)). A rebuild installs agents and tools at `latest` at their newest releases, and pinned ones at the version given. Logins and config are kept.
 - `pen reset` wipes a project's sandbox state. Linked worktrees share it, so it refuses while a session or `pen sign` runs in the main checkout or any worktree of the repo.
 - `pen prune` finds the volumes, project layers and state of projects you've moved or deleted, and tools images on an old base image, and removes them after asking. Ones it can't place are listed with the commands to remove them by hand. A directory on a volume that isn't mounted looks deleted, so mount it first.
 

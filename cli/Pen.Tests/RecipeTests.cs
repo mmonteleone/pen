@@ -304,6 +304,35 @@ public class RecipeTests
             recipe.Env);
     }
 
+    [Fact]
+    public void TheCodexRecipeIsAnAgentWithOpenAIsDomains()
+    {
+        var recipe = Get("codex");
+        Assert.True(recipe.IsAgent);
+        Assert.Equal("latest", recipe.Default);
+        Assert.False(recipe.Multiple);
+        Assert.Equal([".openai.com", ".chatgpt.com"], recipe.Allow);
+        Assert.Empty(recipe.Env);
+    }
+
+    [Fact]
+    public void TheCodexRecipeTurnsOffItsUpdateCheckInItsManagedConfig() =>
+        Assert.Contains(
+            "cat >/etc/codex/managed_config.toml <<'EOF'\n# Managed Codex config for the Pen image. Codex is installed in a system path\n"
+            + "# and upgraded only by rebuilding the image, so don't check for updates.\ncheck_for_update_on_startup = false\nEOF\n",
+            Embedded.Text("tools/codex/install.sh"));
+
+    [Fact]
+    public void ThePiRecipeIsAnAgentWithAnthropicsAndOpenAIsDomains_AndNoVersionCheck()
+    {
+        var recipe = Get("pi");
+        Assert.True(recipe.IsAgent);
+        Assert.Equal("latest", recipe.Default);
+        Assert.False(recipe.Multiple);
+        Assert.Equal([".anthropic.com", ".claude.ai", ".claude.com", ".openai.com", ".chatgpt.com"], recipe.Allow);
+        Assert.Equal([new KeyValuePair<string, string>("PI_SKIP_VERSION_CHECK", "1")], recipe.Env);
+    }
+
     [Theory]
     [InlineData("latest", true)]
     [InlineData("2.1.3", true)]
@@ -320,7 +349,8 @@ public class RecipeTests
     public void AgentRecipesAcceptLatestOrAnExactRelease(string version, bool accepted)
     {
         var agents = RecipeCatalog.Embedded.Recipes.Where(r => r.IsAgent && !r.Hidden).ToList();
-        Assert.Contains(agents, r => r.Name == "claude");
+        foreach (var name in new[] { "claude", "codex", "pi" })
+            Assert.Contains(agents, r => r.Name == name);
         foreach (var agent in agents)
             Assert.True(accepted == agent.AcceptsVersion(version), agent.Name);
     }

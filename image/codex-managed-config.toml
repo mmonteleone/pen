@@ -1,3 +1,0 @@
-# Managed Codex config for the Pen image. Codex is installed in a system path
-# and upgraded only by rebuilding the image, so don't check for updates.
-check_for_update_on_startup = false

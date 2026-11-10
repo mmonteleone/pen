@@ -251,6 +251,8 @@ check "no .NET settings in the base's environment" \
   docker run --rm --entrypoint bash "$IMAGE" -c '! env | grep -E "^(DOTNET|ASPNETCORE|NUGET_XMLDOC|POWERSHELL)_"'
 check "no Claude Code in the base, or its settings (it's the claude tool)" \
   docker run --rm --entrypoint bash "$IMAGE" -c '! command -v claude && ! test -e /opt/pen/claude && ! test -e /opt/pen/agents/lib/node_modules/@anthropic-ai && ! env | grep -E "^(DISABLE_AUTOUPDATER|CLAUDE_CODE_)"'
+check "no Codex or Pi in the base, or their settings (they're the codex and pi tools)" \
+  docker run --rm --entrypoint bash "$IMAGE" -c '! command -v codex && ! command -v pi && ! test -e /opt/pen/codex && ! test -e /opt/pen/pi && ! test -e /etc/codex && ! test -e /opt/pen/agents/lib/node_modules/@openai && ! test -e /opt/pen/agents/lib/node_modules/@earendil-works && ! env | grep -E "^PI_"'
 fi
 
 if want 2; then
@@ -370,8 +372,8 @@ if want 4; then
 # ==============================================================================
 section "4. Agents"
 
-# The agents that are tools come with --tool; the rest are in the base.
-AGENT_TOOLS=(--tool claude)
+# The agents that are tools come with --tool; OpenCode is in the base.
+AGENT_TOOLS=(--tool claude --tool codex --tool pi)
 # with_agents <bash script>: in_sandbox with the agent tools.
 with_agents() { "$PEN" "${AGENT_TOOLS[@]}" run bash -c "$1" </dev/null; }
 out=$(with_agents 'for c in claude codex opencode pi; do printf "%s=" $c; timeout 30 $c --version </dev/null 2>&1 | tail -1; done')
@@ -381,7 +383,7 @@ done
 check "agents live in system paths, not \$HOME" \
   with_agents 'for c in claude codex opencode pi; do case $(readlink -f "$(command -v $c)") in /usr/local/*|/opt/*) ;; *) exit 1 ;; esac; done'
 check "agent user can't write the agents' install dirs" \
-  with_agents '! touch /opt/pen/agents/lib/node_modules/.x 2>/dev/null && ! touch /opt/pen/claude/lib/node_modules/.x 2>/dev/null && ! touch /usr/local/bin/.x 2>/dev/null'
+  with_agents 'for d in agents claude codex pi; do ! touch /opt/pen/$d/lib/node_modules/.x 2>/dev/null || exit 1; done; ! touch /usr/local/bin/.x 2>/dev/null && ! touch /etc/codex/.x 2>/dev/null'
 check "auto-updaters off (env)" \
   with_agents '[ "$DISABLE_AUTOUPDATER" = 1 ] && [ "$CLAUDE_CODE_DISABLE_AUTOUPDATE" = 1 ] && [ "$OPENCODE_DISABLE_AUTOUPDATE" = 1 ] && [ "$PI_SKIP_VERSION_CHECK" = 1 ] && grep -q "check_for_update_on_startup = false" /etc/codex/managed_config.toml'
 
@@ -393,6 +395,10 @@ rc=0; out=$("$PEN" run claude --version </dev/null 2>&1) || rc=$?
 check "...and so does pen run claude --version" bash -c '[ "$1" = 0 ] && grep -qE "^[0-9]+\.[0-9]+\.[0-9]+ \(Claude Code\)" <<<"$2"' _ "$rc" "$out"
 check "...but a shell doesn't have it (pen run bash -c 'command -v claude')" \
   test "$("$PEN" run bash -c 'command -v claude || echo none' </dev/null 2>/dev/null)" = none
+rc=0; out=$("$PEN" codex --version </dev/null 2>&1) || rc=$?
+check "with an empty config, pen codex --version runs Codex (implied)" bash -c '[ "$1" = 0 ] && grep -qE "^codex-cli [0-9]+\.[0-9]+\.[0-9]+$" <<<"$2"' _ "$rc" "$out"
+rc=0; out=$("$PEN" pi --version </dev/null 2>&1) || rc=$?
+check "...and pen pi --version runs Pi (implied)" bash -c '[ "$1" = 0 ] && grep -qE "^[0-9]+\.[0-9]+\.[0-9]+$" <<<"$2"' _ "$rc" "$out"
 # claude mcp serve waits for requests on stdin, held open on fd 7, so the session stays up
 # until its agent container is removed.
 mkfifo "$SCRATCH/mcp-in"
@@ -429,9 +435,9 @@ prompt_check claude CLAUDE_CODE_OAUTH_TOKEN claude -p 'What is 2+2? Reply with j
 prompt_check codex OPENAI_API_KEY codex exec --skip-git-repo-check 'What is 2+2? Reply with just the digit.'
 
 if [ "${SMOKE_SLOW:-}" = 1 ]; then
-  v1=$(docker run --rm --entrypoint stat "$IMAGE" -c %Y /opt/pen/agents/lib/node_modules/@openai/codex/package.json)
+  v1=$(docker run --rm --entrypoint stat "$IMAGE" -c %Y /opt/pen/agents/lib/node_modules/opencode-ai/package.json)
   "$PEN" upgrade >"$SCRATCH/upgrade.log" 2>&1 || { tail -20 "$SCRATCH/upgrade.log" >&2; fail "pen upgrade"; }
-  v2=$(docker run --rm --entrypoint stat "$IMAGE" -c %Y /opt/pen/agents/lib/node_modules/@openai/codex/package.json)
+  v2=$(docker run --rm --entrypoint stat "$IMAGE" -c %Y /opt/pen/agents/lib/node_modules/opencode-ai/package.json)
   check "pen upgrade reinstalls the agents (PEN_REFRESH), base image unchanged or not" test "$v1" != "$v2"
   check "pen upgrade pulls the proxy image" grep -q 'ubuntu/squid' "$SCRATCH/upgrade.log"
 else
@@ -1306,7 +1312,7 @@ else
 fi
 if [ -n "${OPENAI_API_KEY:-}" ]; then
   fake_config "[env]" "OPENAI_API_KEY = \"$OPENAI_API_KEY\""
-  out=$(cd "$SEEDP" && fake_pen run timeout 300 codex exec 'Fetch https://example.com and show me its title.' 2>&1 || true)
+  out=$(cd "$SEEDP" && fake_pen --tool codex run timeout 300 codex exec 'Fetch https://example.com and show me its title.' 2>&1 || true)
   check "codex reports the blocked domain" grep -qiE 'example\.com.*(block|allow|proxy|403)|(block|allow|proxy|403).*example\.com' <<<"$out"
 else
   note "codex blocked-domain check: skipped (set OPENAI_API_KEY)"
@@ -2364,14 +2370,16 @@ rm -rf nodehi
 
 # Node 22 warns that the proxy agent NODE_USE_ENV_PROXY turns on is experimental,
 # unless the recipe's NODE_OPTIONS turns that warning off.
-out=$("$PEN" --tool node:22 --tool codegraph run bash -c '
+out=$("$PEN" --tool node:22 --tool codegraph --tool codex --tool pi run bash -c '
   node -v; node -e "fetch(\"https://registry.yarnpkg.com/ms\").then(r => console.log(\"fetch \" + r.status))"; npm -v >/dev/null
-  codex --version; codegraph --version' </dev/null 2>"$SCRATCH/node22.err" || true)
+  codex --version; echo "pi=$(pi --version)"; codegraph --version
+  head -2 /usr/local/bin/codex /usr/local/bin/pi | grep -c "^exec /opt/pen/node/bin/node " | sed "s/^/private-node=/"' </dev/null 2>"$SCRATCH/node22.err" || true)
 err=$(cat "$SCRATCH/node22.err")
 check "node:22: node -v is 22, and fetch goes through the proxy" bash -c 'grep -qE "^v22\.[0-9]+\.[0-9]+$" <<<"$1" && grep -qx "fetch 200" <<<"$1"' _ "$out"
 check "...without Node's experimental proxy agent warning" bash -c '! grep -qE "UNDICI-EHPA|EnvHttpProxyAgent" <<<"$1"' _ "$err"
-check "...and codex and codegraph still run, unaffected by it" \
-  bash -c 'grep -q "^codex-cli " <<<"$1" && grep -qE "^1\.[0-9]+\.[0-9]+$" <<<"$1"' _ "$out"
+check "...and codex, pi and codegraph still run, unaffected by it" \
+  bash -c 'grep -q "^codex-cli " <<<"$1" && grep -qE "^pi=[0-9]+\.[0-9]+\.[0-9]+$" <<<"$1" && grep -qE "^1\.[0-9]+\.[0-9]+$" <<<"$1"' _ "$out"
+check "...codex and pi on Pen's private Node" grep -qx "private-node=2" <<<"$out"
 check "...with nothing blocked" not contains "blocked:" "$out$err"
 
 # These check the recipe's interpreters are the ones used, by path, version and

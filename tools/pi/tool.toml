@@ -1,0 +1,20 @@
+# Pi, the agent, from npm: pi:latest is the newest release when its tools image is built
+# (pen upgrade gives a new base, so it reinstalls on next use), or an exact release,
+# pi:1.5.2. Other providers than Anthropic and OpenAI need pen allow.
+kind = "agent"
+default = "latest"
+version = '^(latest|[0-9]+\.[0-9]+\.[0-9]+)$'
+multiple = false
+allow = [
+  # Anthropic: API and OAuth login
+  ".anthropic.com",
+  ".claude.ai",
+  ".claude.com",
+  # OpenAI: API, auth and ChatGPT login
+  ".openai.com",
+  ".chatgpt.com",
+]
+
+[env]
+# No update check: the image is the only way to upgrade (and /opt/pen isn't writable).
+PI_SKIP_VERSION_CHECK = "1"

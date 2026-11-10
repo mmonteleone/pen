@@ -26,9 +26,10 @@ binary="$PREFIX/lib/node_modules/$PACKAGE/bin/claude.exe"
 [ -x "$binary" ] || { echo "claude: $binary isn't executable (did the package's install script run?)" >&2; exit 1; }
 ln -sf "$binary" /usr/local/bin/claude
 
-# A throwaway HOME, so the check leaves nothing in the image.
-check_home=$(mktemp -d)
-installed=$(env HOME="$check_home" DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_AUTOUPDATE=1 \
+# A throwaway HOME and TMPDIR, so the check leaves nothing in the image.
+check_home=$(mktemp -d /root/pen-check.XXXXXX)
+mkdir "$check_home/home" "$check_home/tmp"
+installed=$(env HOME="$check_home/home" TMPDIR="$check_home/tmp" DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_AUTOUPDATE=1 \
   PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin claude --version)
 rm -rf "$check_home"
 installed=${installed%% *}
