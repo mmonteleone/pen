@@ -1,6 +1,7 @@
 #!/bin/bash
 # Installs the latest release of the Go minor version given (1.27) from the official
-# tarball into /usr/local/go, and links go and gofmt into /usr/local/bin. The tarball is
+# tarball into /usr/local/go, and links go and gofmt into /usr/local/bin, with Ubuntu's gcc
+# and libc6-dev so cgo is on and `go test -race` works. The tarball is
 # checked against Google's signature by the pinned key and against go.dev's checksum,
 # and any failure fails the build.
 set -euo pipefail
@@ -19,7 +20,7 @@ case $(dpkg --print-architecture) in
 esac
 
 apt-get update
-apt-get install -y --no-install-recommends ca-certificates curl gnupg jq
+apt-get install -y --no-install-recommends ca-certificates curl gnupg jq gcc libc6-dev
 rm -rf /var/lib/apt/lists/*
 
 work=$(mktemp -d)
@@ -55,4 +56,6 @@ ln -sfn "$ROOT/bin/go" /usr/local/bin/go
 ln -sfn "$ROOT/bin/gofmt" /usr/local/bin/gofmt
 installed=$(go env GOVERSION)
 [ "$installed" = "$release" ] || { echo "go: installed $installed, not $release" >&2; exit 1; }
+# Go turns cgo off when it finds no C compiler.
+[ "$(go env CGO_ENABLED)" = 1 ] || { echo "go: cgo is off" >&2; exit 1; }
 go version

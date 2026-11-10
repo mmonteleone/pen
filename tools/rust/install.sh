@@ -1,8 +1,8 @@
 #!/bin/bash
 # Installs rustup, pinned below, into /usr/local/rustup (RUSTUP_HOME) with its commands
-# in /usr/local/bin, and each toolchain given (stable 1.85 1.85.1 …) with clippy and
-# rustfmt. CARGO_HOME stays unset, so cargo's registry cache and `cargo install` go to
-# ~/.cargo in the home volume. rustup-init is checked against the pinned checksums, and
+# in /usr/local/bin, each toolchain given (stable 1.85 1.85.1 …) with clippy and rustfmt,
+# and Ubuntu's build-essential. CARGO_HOME stays unset, so cargo's registry cache and
+# `cargo install` go to ~/.cargo in the home volume. rustup-init is checked against the pinned checksums, and
 # rustup checks each component against its channel's manifest. Any failure fails the build.
 set -euo pipefail
 
@@ -22,9 +22,10 @@ case $(dpkg --print-architecture) in
   *) echo "rust: unsupported architecture $(dpkg --print-architecture)" >&2; exit 1 ;;
 esac
 
-# What rustup and this script use; a C compiler and linker for cargo builds.
+# What rustup and this script use; Ubuntu's build-essential (cc, c++, make) for linking
+# and for crates' build scripts.
 apt-get update
-apt-get install -y --no-install-recommends ca-certificates curl gcc libc6-dev
+apt-get install -y --no-install-recommends ca-certificates curl build-essential
 rm -rf /var/lib/apt/lists/*
 
 work=$(mktemp -d)
@@ -59,6 +60,7 @@ installed=$(rustup toolchain list)
 for v in "$@"; do
   grep -q "^$v-$target" <<<"$installed" || { echo "rust: toolchain $v didn't install" >&2; exit 1; }
 done
+for c in cc c++ make; do command -v "$c" >/dev/null || { echo "rust: no $c" >&2; exit 1; }; done
 rustup show
 cargo --version
 rustc --version

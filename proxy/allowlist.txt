@@ -25,10 +25,6 @@ api.github.com
 codeload.github.com
 .githubusercontent.com
 
-# --- PyPI -------------------------------------------------------------------
-pypi.org
-files.pythonhosted.org
-
 # --- Docs -------------------------------------------------------------------
 # Read-only for an agent without credentials. Sites anyone can write to
 # anonymously (wikis, pastebins) don't belong here: they're exfiltration routes.

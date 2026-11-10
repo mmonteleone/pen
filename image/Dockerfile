@@ -2,9 +2,6 @@
 # Pen base image. Builds natively on arm64 (Mac/OrbStack) and amd64 (server).
 # Nothing is installed into /home/agent: all of $HOME is a per-project volume.
 
-ARG UV_VERSION=latest
-FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
-
 FROM ubuntu:24.04
 
 ARG TARGETARCH
@@ -21,11 +18,12 @@ RUN in_range() { awk -F: '$3 >= 1000 && $3 <= 60000 { print $1 }' "$1"; }; \
     for g in $(in_range /etc/group); do groupdel "$g"; done; \
     test -z "$(in_range /etc/passwd)$(in_range /etc/group)"
 
-# Base tools.
+# Base tools. No compilers, make or Python: tools bring those. Pen's Node (nodejs.org's
+# build) needs libatomic1.
 RUN apt-get update; \
     apt-get install -y --no-install-recommends \
-      ca-certificates curl wget gnupg git less vim unzip xz-utils jq ripgrep fd-find \
-      tzdata netbase openssl build-essential python3 python3-venv tini libcap2-bin bash-completion socat; \
+      ca-certificates curl wget gnupg git less vim unzip xz-utils bzip2 patch jq ripgrep fd-find \
+      tzdata netbase openssl tini libcap2-bin bash-completion socat libatomic1; \
     ln -s /usr/bin/fdfind /usr/local/bin/fd; \
     rm -rf /var/lib/apt/lists/*
 
@@ -40,9 +38,6 @@ RUN install -d -m 0755 /etc/apt/keyrings; \
     apt-get update; \
     apt-get install -y --no-install-recommends gh docker-ce-cli docker-buildx-plugin docker-compose-plugin; \
     rm -rf /var/lib/apt/lists/*
-
-# uv / uvx.
-COPY --from=uv /uv /uvx /usr/local/bin/
 
 # Node (LTS by default) into /opt/pen/node: Pen's runtime for recipes distributed
 # through npm. It isn't on PATH, so sessions don't have node, npm or npx; recipes
@@ -136,10 +131,11 @@ RUN echo "refresh ${PEN_REFRESH}"; \
 
 COPY codex-managed-config.toml /etc/codex/managed_config.toml
 
-# The image installs nothing into /home/agent, and Node stays off PATH; fail the
-# build if either changed.
+# The image installs nothing into /home/agent, Node stays off PATH, and Python, uv
+# and build tools come only from tools that need them (python, node, go, rust); fail
+# the build if any of that changed.
 RUN test ! -e /home/agent; \
-    for c in node npm npx corepack; do ! command -v "$c" >/dev/null || { echo "$c is on PATH" >&2; exit 1; }; done
+    for c in node npm npx corepack python3 uv make gcc; do ! command -v "$c" >/dev/null || { echo "$c is on PATH" >&2; exit 1; }; done
 
 ENTRYPOINT ["/usr/local/bin/pen-entrypoint"]
 CMD ["bash", "-l"]

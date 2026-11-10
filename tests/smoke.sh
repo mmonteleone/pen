@@ -235,8 +235,10 @@ check "signing off via GIT_CONFIG_* (commit.gpgsign, tag.gpgsign = false)" \
   docker run --rm --entrypoint bash "$IMAGE" -c '[ "$(git config commit.gpgsign)" = false ] && [ "$(git config tag.gpgsign)" = false ]'
 check "SSH remote rewritten to https" \
   docker run --rm --entrypoint bash "$IMAGE" -c '[ "$(git ls-remote --get-url git@github.com:octo/repo.git)" = https://github.com/octo/repo.git ]'
-check "tools present (git gh rg fd jq curl wget xz openssl less vim unzip make python3 uv tini capsh docker 'docker compose')" \
-  docker run --rm --entrypoint bash "$IMAGE" -c 'for c in git gh rg fd jq curl wget xz openssl less vim unzip make gcc python3 uv uvx tini capsh setpriv docker; do command -v $c >/dev/null || { echo "missing $c" >&2; exit 1; }; done; docker compose version >/dev/null'
+check "tools present (git gh rg fd jq curl wget xz openssl less vim unzip bzip2 patch socat tini capsh docker 'docker compose')" \
+  docker run --rm --entrypoint bash "$IMAGE" -c 'for c in git gh rg fd jq curl wget xz openssl less vim unzip bzip2 patch socat tini capsh setpriv docker; do command -v $c >/dev/null || { echo "missing $c" >&2; exit 1; }; done; docker compose version >/dev/null'
+check "no Python, uv or build tools in the base (python3 python uv uvx make gcc cc)" \
+  docker run --rm --entrypoint bash "$IMAGE" -c 'for c in python3 python uv uvx make gcc cc; do ! command -v $c >/dev/null || { echo "found $c" >&2; exit 1; }; done'
 check "no node, npm or npx on PATH in the base" \
   docker run --rm --entrypoint bash "$IMAGE" -c '! command -v node && ! command -v npm && ! command -v npx && ! command -v corepack'
 check "Pen's private Node runs (/opt/pen/node/bin/node)" \
@@ -1709,12 +1711,22 @@ sid_of() { local n=${1#"$KEY"-}; echo "${n%-agent}"; }
 DISP="~${PROJECT_DIR#"$HOME"}" # how pen ps shows the project
 port_open() { python3 -c 'import socket, sys; s = socket.socket(); s.settimeout(2); sys.exit(s.connect_ex(("127.0.0.1", int(sys.argv[1]))))' "$1"; }
 port_open "$P" && fail "port $P is already in use on this machine: free it to run this section"
+# serve_hello <port>: a sandbox command serving /tmp/srv/hello.txt over HTTP on <port>,
+# for any path, with socat (the base has no Python). The responder reads the request's
+# headers first, so closing doesn't reset the connection before curl reads the reply.
+RESPOND='#!/bin/sh
+while IFS= read -r l && [ -n "${l%?}" ]; do :; done
+printf "HTTP/1.0 200 OK\r\n\r\n"
+cat /tmp/srv/hello.txt'
+serve_hello() {
+  printf 'printf %%s %q >/tmp/srv/respond && chmod +x /tmp/srv/respond && socat TCP-LISTEN:%s,fork,reuseaddr EXEC:/tmp/srv/respond' "$RESPOND" "$1"
+}
 rm -rf .pen
 
 # One session serves on $P and checks the network from inside, then waits.
 "$PEN" --port "$P" run bash -c "
   mkdir -p /tmp/srv && echo served-from-sandbox >/tmp/srv/hello.txt
-  python3 -m http.server $P --bind 0.0.0.0 --directory /tmp/srv >/dev/null 2>&1 &
+  $(serve_hello "$P") >/dev/null 2>&1 &
   for i in \$(seq 100); do curl -s --noproxy '*' -o /dev/null localhost:$P && break; sleep 0.1; done
   t() { if eval \"\$1\" >/dev/null 2>&1; then echo \"ok: \$2\"; else echo \"fail: \$2\"; fi; }
   t \"curl -s -m 5 --noproxy '*' https://github.com\" direct
@@ -1775,7 +1787,7 @@ check "the forwarder goes with its session" bash -c '! docker inspect "$1" >/dev
 check "...as does its network" test -z "$(docker network ls -q --filter "name=^$KEY-")"
 check "...and the port is free again" not port_open "$P"
 
-"$PEN" run bash -c "echo config-port >/tmp/hello.txt; cd /tmp && python3 -m http.server $P --bind 0.0.0.0 >/dev/null 2>&1 & sleep 120" </dev/null >/dev/null 2>&1 &
+"$PEN" run bash -c "mkdir -p /tmp/srv && echo config-port >/tmp/srv/hello.txt && $(serve_hello "$P") >/dev/null 2>&1 & sleep 120" </dev/null >/dev/null 2>&1 &
 p=$!
 ok=
 for i in $(seq 300); do contains config-port "$(curl -s -m 2 "http://127.0.0.1:$P/hello.txt")" && { ok=1; break; }; sleep 0.1; done
@@ -2227,12 +2239,26 @@ check "...with the recipe's default, the newest Go 1.27" grep -qE '^go version g
 check "...with nothing blocked" not contains "blocked:" "$out"
 rm -rf gohi
 
+# The base has no C compiler: the recipe's gcc keeps cgo on, which -race needs too.
+out=$(tool_run go '
+  mkdir -p gocgo && cd gocgo && go mod init example.com/cgo >/dev/null 2>&1 &&
+  printf "package cgo\n\n// int twice(int x) { return 2 * x; }\nimport \"C\"\n\nfunc Twice(x int) int { return int(C.twice(C.int(x))) }\n" >cgo.go &&
+  printf "package cgo\n\nimport \"testing\"\n\nfunc TestTwice(t *testing.T) {\n\tdone := make(chan int)\n\tgo func() { done <- Twice(21) }()\n\tif <-done != 42 {\n\t\tt.Fatal(\"twice\")\n\t}\n}\n" >cgo_test.go &&
+  echo "cgo=$(go env CGO_ENABLED)" && go test -race . && echo race-ok' || true)
+check "go: cgo is on, and a package that imports \"C\" passes go test -race" \
+  bash -c 'grep -qx cgo=1 <<<"$1" && grep -qx race-ok <<<"$1"' _ "$out"
+rm -rf gocgo
+
 out=$(tool_run rust '
-  cargo new --quiet rshi && cd rshi && cargo add --quiet itoa@1 &&
-  printf "fn main() {\n    println!(\"hello rust {}\", itoa::Buffer::new().format(42));\n}\n" >src/main.rs &&
-  cargo run --quiet && cargo clippy --quiet && cargo fmt --check &&
+  cargo new --quiet rshi && cd rshi && cargo add --quiet itoa@1 && cargo add --quiet --build cc@1 &&
+  printf "#include <string>\nextern \"C\" int hi_len() { return std::string(\"hello\").size(); }\n" >hi.cpp &&
+  printf "fn main() {\n    cc::Build::new().cpp(true).file(\"hi.cpp\").compile(\"hi\");\n}\n" >build.rs &&
+  printf "unsafe extern \"C\" {\n    fn hi_len() -> i32;\n}\n\nfn main() {\n    let n = unsafe { hi_len() };\n    println!(\"hello rust {} {}\", itoa::Buffer::new().format(42), n);\n}\n" >src/main.rs &&
+  cargo run --quiet && cargo clippy --quiet && cargo fmt --check && make --version | head -1 &&
   echo "RUSTUP_HOME=$RUSTUP_HOME CARGO_HOME=${CARGO_HOME-unset}" && ls ~/.cargo/registry/cache/*/ | grep -c "^itoa-"' || true)
 check "rust: a crate with a dependency builds, runs and passes clippy and rustfmt" contains "hello rust 42" "$out"
+check "...and its build script compiles C++ with the cc crate, and make is there (the base has neither)" \
+  bash -c 'grep -qx "hello rust 42 5" <<<"$1" && grep -q "^GNU Make " <<<"$1"' _ "$out"
 check "...with rustup in the image and cargo's cache in the home volume" \
   bash -c 'grep -qxF "RUSTUP_HOME=/usr/local/rustup CARGO_HOME=unset" <<<"$1" && grep -v "^pen:" <<<"$1" | tail -1 | grep -qx 1' _ "$out"
 check "...with nothing blocked" not contains "blocked:" "$out"
@@ -2319,8 +2345,8 @@ check "...and codex and codegraph still run, unaffected by it" \
   bash -c 'grep -q "^codex-cli " <<<"$1" && grep -qE "^1\.[0-9]+\.[0-9]+$" <<<"$1"' _ "$out"
 check "...with nothing blocked" not contains "blocked:" "$out$err"
 
-# The base has Ubuntu's python3 (3.12, in /usr/bin) for now: these check the recipe's
-# interpreters are the ones used, by path, version and sys.base_prefix.
+# These check the recipe's interpreters are the ones used, by path, version and
+# sys.base_prefix.
 out=$(tool_run python '
   echo "python3=$(command -v python3) python=$(command -v python)"; python3 --version
   uv init -q pyhi && cd pyhi && uv add -q six &&

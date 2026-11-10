@@ -240,6 +240,16 @@ public class RecipeTests
         Assert.Equal([new KeyValuePair<string, string>("UV_LINK_MODE", "copy")], recipe.Env);
     }
 
+    [Fact]
+    public void PyPIDomainsComeWithThePythonRecipe_NotTheDefaults()
+    {
+        var defaults = Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")).ToList();
+        foreach (var domain in Get("python").Allow)
+            Assert.DoesNotContain(domain, defaults);
+        Assert.Contains("docs.python.org", defaults);
+        Assert.Contains("docs.astral.sh", defaults);
+    }
+
     [Theory]
     [InlineData("3.9", true)]
     [InlineData("3.10", true)]
