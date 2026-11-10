@@ -2319,6 +2319,37 @@ check "...and codex and codegraph still run, unaffected by it" \
   bash -c 'grep -q "^codex-cli " <<<"$1" && grep -qE "^1\.[0-9]+\.[0-9]+$" <<<"$1"' _ "$out"
 check "...with nothing blocked" not contains "blocked:" "$out$err"
 
+# The base has Ubuntu's python3 (3.12, in /usr/bin) for now: these check the recipe's
+# interpreters are the ones used, by path, version and sys.base_prefix.
+out=$(tool_run python '
+  echo "python3=$(command -v python3) python=$(command -v python)"; python3 --version
+  uv init -q pyhi && cd pyhi && uv add -q six &&
+  uv run python -c "import six, sys; print(\"hello six\", six.__version__); print(\"base=\" + sys.base_prefix)" && cd .. &&
+  python3 -m venv pyvenv && pyvenv/bin/pip install -q --disable-pip-version-check six &&
+  pyvenv/bin/python -c "import six; print(\"venv six\", six.__version__)" &&
+  { [ -e ~/.local/share/uv/python ] || echo no-python-download; } &&
+  printf "#include <Python.h>\nint main(void) { return PY_MINOR_VERSION; }\n" >pyhdr.c &&
+  gcc $(python3-config --includes) -o pyhdr pyhdr.c && { ./pyhdr; echo "minor=$?"; }' || true)
+check "python: python3 and python are the recipe's, its default, Python 3.15" \
+  bash -c 'grep -qxF "python3=/usr/local/bin/python3 python=/usr/local/bin/python" <<<"$1" && grep -qE "^Python 3\.15\.[0-9]+$" <<<"$1"' _ "$out"
+check "...uv adds a package from PyPI and runs it on that interpreter, downloading none" \
+  bash -c 'grep -q "^hello six 1\." <<<"$1" && grep -qE "^base=/usr/local/share/uv/python/cpython-3\.15[.0-9]*-linux-" <<<"$1" && grep -qx no-python-download <<<"$1"' _ "$out"
+check "...and pip installs into a venv from python3 -m venv" grep -q "^venv six 1\." <<<"$out"
+check "...and python3-config gives its headers to build a C program against" grep -qx "minor=15" <<<"$out"
+check "...with nothing blocked" not contains "blocked:" "$out"
+rm -rf pyhi pyvenv pyhdr pyhdr.c
+
+out=$("$PEN" --tool python:3.12 --tool python:3.13 run bash -c '
+  echo "python3.12=$(command -v python3.12)"; python3 --version; python3.12 --version
+  uv venv -q -p 3.12 v12 && v12/bin/python -c "import sys; print(\"v12=\" + sys.base_prefix)"
+  uv venv -q -p 3.14 v14 && v14/bin/python -c "import sys; print(\"v14=\" + sys.base_prefix)"; uv python uninstall -q 3.14
+  rm -rf v12 v14' </dev/null 2>&1 || true)
+check "python:3.12 with python:3.13: python3 is 3.13, and python3.12 is the recipe's" \
+  bash -c 'grep -qE "^Python 3\.13\.[0-9]+$" <<<"$1" && grep -qE "^Python 3\.12\.[0-9]+$" <<<"$1" && grep -qxF python3.12=/usr/local/bin/python3.12 <<<"$1"' _ "$out"
+check "...which uv venv uses for 3.12, and a Python not in the image downloads into the home volume" \
+  bash -c 'grep -qE "^v12=/usr/local/share/uv/python/cpython-3\.12" <<<"$1" && grep -qE "^v14=/home/agent/\.local/share/uv/python/cpython-3\.14" <<<"$1"' _ "$out"
+check "...with nothing blocked" not contains "blocked:" "$out"
+
 rc=0; out=$("$PEN" --tool "$A" --build-tools-image 2>&1 </dev/null) || rc=$?
 check "there's no build option any more: real sessions build" bash -c '[ "$1" = 2 ] && grep -qF "unknown option" <<<"$2"' _ "$rc" "$out"
 real_home

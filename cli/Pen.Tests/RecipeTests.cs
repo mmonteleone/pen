@@ -229,6 +229,35 @@ public class RecipeTests
     }
 
     [Fact]
+    public void ThePythonRecipeIsSeveralMinorVersionsWithPyPI()
+    {
+        var recipe = Get("python");
+        Assert.Equal("3.15", recipe.Default);
+        Assert.True(recipe.Multiple);
+        Assert.False(recipe.IsAgent);
+        Assert.Equal(["pypi.org", "files.pythonhosted.org", "releases.astral.sh"], recipe.Allow);
+        // No UV_PYTHON_INSTALL_DIR: uv's default, in the home volume, is writable in a session.
+        Assert.Equal([new KeyValuePair<string, string>("UV_LINK_MODE", "copy")], recipe.Env);
+    }
+
+    [Theory]
+    [InlineData("3.9", true)]
+    [InlineData("3.10", true)]
+    [InlineData("3.13", true)]
+    [InlineData("3.15", true)]
+    [InlineData("3", false)]
+    [InlineData("3.8", false)]
+    [InlineData("3.16", false)]
+    [InlineData("3.13.1", false)]
+    [InlineData("3.013", false)]
+    [InlineData("py3.13", false)]
+    [InlineData("2.7", false)]
+    [InlineData("3.13\n", false)]
+    [InlineData("latest", false)]
+    public void ThePythonRecipeAcceptsOnlyMinorVersionsUvBuilds(string version, bool accepted) =>
+        Assert.Equal(accepted, Get("python").AcceptsVersion(version));
+
+    [Fact]
     public void TheCodegraphRecipeIsOneMajorVersionFromNpm()
     {
         var recipe = Get("codegraph");
