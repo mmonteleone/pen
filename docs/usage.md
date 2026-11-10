@@ -3,7 +3,7 @@
 Commands, settings and workflows. Start with the [README](../README.md) for installation and a first session, and [limitations](limitations.md) for host precautions.
 
 - [Commands](#commands)
-- [Configuration](#configuration): [network](#network), [GitHub](#github), [logins and API keys](#logins-and-api-keys), [agent config](#agent-config-the-home-seed), [tools](#tools), [project settings](#project-settings)
+- [Configuration](#configuration): [network](#network), [GitHub](#github), [logins and API keys](#logins-and-api-keys), [agent config](#agent-config-the-home-seed), [agents](#agents), [tools](#tools), [project settings](#project-settings)
 - [Git](#git-in-the-sandbox): [worktrees](#worktrees), [submodules](#submodules), [commit signing](#commit-signing)
 - [Dev servers](#dev-servers) and [Docker-in-Docker](#docker-in-docker)
 - [Running in herdr](#running-in-herdr)
@@ -19,7 +19,7 @@ pen [--docker] [--port <n>]… [--tool <spec>]… [<cmd…>]
                                 shell or command in the sandbox
 pen [--docker] [--port <n>]… [--tool <spec>]… run <cmd…>
                                 same, for a command that clashes with a subcommand name
-pen --tool list                 list the tools pen can install
+pen --tool list                 list the agents and tools pen can install
 pen allow <domain…> [--global]  allow domains for this project (or all projects)
 pen allow                       list recently blocked domains
 pen allow --defaults            list the domains pen allows out of the box
@@ -91,7 +91,7 @@ Add it under `[github]` in `~/.config/pen/config.toml` as `<owner> = "…"`. Pen
 
 ### Logins and API keys
 
-Log in to each agent inside the sandbox (`claude`, `codex login --device-auth`, etc.), once per project. Logins aren't shared between projects.
+Log in to each agent inside the sandbox (start `pen claude` and follow its prompts, `pen codex login --device-auth`, etc.), once per project. Logins aren't shared between projects.
 
 API keys go under `[env]` in `~/.config/pen/config.toml` as `<NAME> = "<value>"`. To skip Claude's per-project login, run `claude setup-token` and add the result as `CLAUDE_CODE_OAUTH_TOKEN = "…"`.
 
@@ -123,9 +123,24 @@ Paths below are relative to `~/.config/pen/home/` (and `$HOME` in the sandbox). 
 
 Agents run in skip-permissions mode by default. The container is the boundary. Edit `.gitconfig` in the seed to change the identity used for sandbox commits.
 
+### Agents
+
+Agents are recipes built into Pen, like [tools](#tools): `pen --tool list` shows them apart from the tools. Codex, OpenCode and Pi are also still in the base image, so they need none of this yet. A command named after an agent brings it at its default version, with no config: `pen claude` and `pen run claude` install Claude Code in the session's image, and the session can reach its domains. Only the command's first word counts, so `pen run timeout 60 claude` or a shell (`pen`) doesn't have it. To have an agent there too, name it like a tool, with `--tool claude` or `tools = ["claude"]` in either `config.toml`; a project's `tools` need [approval](#project-settings) as usual, and when one of the lists names the agent, at any version, the command adds nothing.
+
+```
+pen --tool claude                 # a shell with claude in it
+pen --tool claude:2.1.3 claude    # a pinned release
+```
+
+| Agent | Command | Default | Versions | Domains it adds |
+|---|---|---|---|---|
+| `claude` | `claude` (Claude Code, from npm) | `latest` | `latest` or an exact release (`2.1.3`) | `.anthropic.com`, `.claude.ai`, `.claude.com` (also defaults for now) |
+
+An agent installs into `/opt/pen/<agent>`, which the session can't write, with its auto-updater off (`claude` sets `DISABLE_AUTOUPDATER=1` and `CLAUDE_CODE_DISABLE_AUTOUPDATE=1`). `latest` is the newest release when the image is built: the image is kept and reused, so it doesn't change on its own. `pen upgrade` rebuilds the base image, which always gives it a new ID, so every image built on the old one is rebuilt with the agents' current releases: those in your config and the current project's approved `tools` right away, and any other set of tools, such as the agent `pen claude` brings, the next time a session uses it. A pinned version stays as it is.
+
 ### Tools
 
-The base image has the agents, `git`, `gh`, the Docker CLI (with the buildx and compose plugins) and common command-line tools: `curl`, `wget`, `jq`, `ripgrep`, `fd`, `vim`, `less`, `unzip`, `xz`, `bzip2`, `patch`, `gnupg`, `openssl` and `socat`. It has no Python, uv or build tools (`make`, `gcc`): the `python` tool brings Python and uv, and the tools that need a C toolchain bring one (`python`, `node` and `rust` bring Ubuntu's `build-essential`, `go` its `gcc`; `node` also brings Ubuntu's `python3` for node-gyp). It has no Node on `PATH` (no `node`, `npm` or `npx`): Pen keeps a private Node in `/opt/pen/node` that only runs the agents and recipes installed through npm, and isn't for your own use: for Node in a session, use the `node` tool. Language toolchains come from tool recipes built into Pen. Name them with `--tool`, or with `tools` in either `config.toml` (the lists add up). `pen --tool list` shows them.
+The base image has Codex, OpenCode and Pi, `git`, `gh`, the Docker CLI (with the buildx and compose plugins) and common command-line tools: `curl`, `wget`, `jq`, `ripgrep`, `fd`, `vim`, `less`, `unzip`, `xz`, `bzip2`, `patch`, `gnupg`, `openssl` and `socat`. It has no Python, uv or build tools (`make`, `gcc`): the `python` tool brings Python and uv, and the tools that need a C toolchain bring one (`python`, `node` and `rust` bring Ubuntu's `build-essential`, `go` its `gcc`; `node` also brings Ubuntu's `python3` for node-gyp). It has no Node on `PATH` (no `node`, `npm` or `npx`): Pen keeps a private Node in `/opt/pen/node` that only runs the agents and recipes installed through npm, and isn't for your own use: for Node in a session, use the `node` tool. Language toolchains come from tool recipes built into Pen. Name them with `--tool`, or with `tools` in either `config.toml` (the lists add up). `pen --tool list` shows them.
 
 ```
 pen --tool dotnet:8 --tool dotnet:10 claude
@@ -281,7 +296,7 @@ Keep herdr's socket out of the sandbox: its API can run host commands. Pen doesn
 ## Upgrading and resetting
 
 - To update the CLI, run `git pull` and `cli/install.sh` from your Pen source checkout. If the embedded image files changed, the next session rebuilds the base image.
-- `pen upgrade` reinstalls the agents at their latest versions and pulls newer proxy and Docker images, without waiting for a Pen release (`--clean` skips the build cache). Run it in a project with approved `tools` or an approved `.pen/Dockerfile` to rebuild those too; `tools` in your own config are always rebuilt. Logins and config are kept.
+- `pen upgrade` reinstalls the agents at their latest versions and pulls newer proxy and Docker images, without waiting for a Pen release (`--clean` skips the build cache). Run it in a project with approved `tools` or an approved `.pen/Dockerfile` to rebuild those too; `tools` in your own config are always rebuilt, and any other set of tools, such as the agent `pen claude` brings, is rebuilt on its next use (see [agents](#agents)). Logins and config are kept.
 - `pen reset` wipes a project's sandbox state. Linked worktrees share it, so it refuses while a session or `pen sign` runs in the main checkout or any worktree of the repo.
 - `pen prune` finds the volumes, project layers and state of projects you've moved or deleted, and tools images on an old base image, and removes them after asking. Ones it can't place are listed with the commands to remove them by hand. A directory on a volume that isn't mounted looks deleted, so mount it first.
 

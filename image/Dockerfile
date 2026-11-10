@@ -96,46 +96,42 @@ COPY --chmod=0755 sync-seed.sh docker-proxy.sh /usr/local/lib/pen/
 # to the current time so these reinstall even when the base image is cached.
 # All go into /opt/pen/agents, never $HOME, and auto-updaters are off: the only
 # upgrade path is rebuilding the image. (The agent user can't write /opt/pen.)
-# Claude Code and OpenCode are native binaries; Codex and Pi run on Pen's Node.
+# OpenCode is a native binary; Codex and Pi run on Pen's Node. Claude Code isn't
+# here: it's the claude tool.
 ARG PEN_REFRESH=0
-ARG CLAUDE_CODE_VERSION=latest
 ARG CODEX_VERSION=latest
 ARG OPENCODE_VERSION=latest
 ARG PI_VERSION=latest
 
-ENV DISABLE_AUTOUPDATER=1 \
-    CLAUDE_CODE_DISABLE_AUTOUPDATE=1 \
-    OPENCODE_DISABLE_AUTOUPDATE=1 \
+ENV OPENCODE_DISABLE_AUTOUPDATE=1 \
     PI_SKIP_VERSION_CHECK=1 \
     NPM_CONFIG_UPDATE_NOTIFIER=false
 
-# claude-code and opencode-ai need their postinstall: it puts the native binary
-# in place of the bin stub.
+# opencode-ai needs its postinstall: it puts the native binary in place of the
+# bin stub.
 RUN echo "refresh ${PEN_REFRESH}"; \
     export PATH=/opt/pen/node/bin:$PATH; \
-    npm install -g --prefix /opt/pen/agents --no-fund --no-audit --allow-scripts=@anthropic-ai/claude-code,opencode-ai \
-      "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+    npm install -g --prefix /opt/pen/agents --no-fund --no-audit --allow-scripts=opencode-ai \
       "@openai/codex@${CODEX_VERSION}" \
       "opencode-ai@${OPENCODE_VERSION}" \
       "@earendil-works/pi-coding-agent@${PI_VERSION}"; \
     npm cache clean --force; \
     rm -rf /root/.npm /root/.cache; \
     lib=/opt/pen/agents/lib/node_modules; \
-    ln -sf "${lib}/@anthropic-ai/claude-code/bin/claude.exe" /usr/local/bin/claude; \
     ln -sf "${lib}/opencode-ai/bin/opencode.exe" /usr/local/bin/opencode; \
     wrap() { printf '#!/bin/sh\nexec /opt/pen/node/bin/node %s "$@"\n' "$2" > "/usr/local/bin/$1"; chmod 0755 "/usr/local/bin/$1"; }; \
     wrap codex "${lib}/@openai/codex/bin/codex.js"; \
     wrap pi "${lib}/@earendil-works/pi-coding-agent/dist/bundle/cli.js"; \
-    for c in claude opencode codex pi; do test -x "$(readlink -f "/usr/local/bin/${c}")"; done; \
+    for c in opencode codex pi; do test -x "$(readlink -f "/usr/local/bin/${c}")"; done; \
     for f in "${lib}/@openai/codex/bin/codex.js" "${lib}/@earendil-works/pi-coding-agent/dist/bundle/cli.js"; do test -f "${f}"; done
 
 COPY codex-managed-config.toml /etc/codex/managed_config.toml
 
-# The image installs nothing into /home/agent, Node stays off PATH, and Python, uv
-# and build tools come only from tools that need them (python, node, go, rust); fail
-# the build if any of that changed.
+# The image installs nothing into /home/agent, Node stays off PATH, and Python, uv,
+# build tools and Claude Code come only from tools that need them (python, node, go,
+# rust, claude); fail the build if any of that changed.
 RUN test ! -e /home/agent; \
-    for c in node npm npx corepack python3 uv make gcc; do ! command -v "$c" >/dev/null || { echo "$c is on PATH" >&2; exit 1; }; done
+    for c in node npm npx corepack python3 uv make gcc claude; do ! command -v "$c" >/dev/null || { echo "$c is on PATH" >&2; exit 1; }; done
 
 ENTRYPOINT ["/usr/local/bin/pen-entrypoint"]
 CMD ["bash", "-l"]

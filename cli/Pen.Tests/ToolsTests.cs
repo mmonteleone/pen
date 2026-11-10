@@ -68,6 +68,32 @@ public class ToolsTests
     [Fact]
     public void OnlyTheFirstWordCounts() => Assert.Null(Implied(["bash", "helper"]));
 
+    /// <summary>What a pen command line implies, as Session.Run sees its command.</summary>
+    private static string? ImpliedBy(params string[] args)
+    {
+        var command = Cli.Parse(args);
+        Assert.Equal(CommandKind.Run, command.Kind);
+        return ToolSpec.ImpliedAgent(command.Args, RecipeCatalog.Embedded, command.Tools)?.ToString();
+    }
+
+    [Theory]
+    [InlineData("claude")]
+    [InlineData("claude", "--version")]
+    [InlineData("run", "claude", "--version")]
+    [InlineData("run", "--", "claude")]
+    [InlineData("--", "claude")]
+    [InlineData("--tool", "go", "claude")]
+    [InlineData("--tool", "go", "run", "claude", "--version")]
+    public void PenClaudeAndPenRunClaudeImplyTheClaudeAgent(params string[] args) =>
+        Assert.Equal("claude:latest", ImpliedBy(args));
+
+    [Theory]
+    [InlineData("run", "bash", "-c", "command -v claude")]
+    [InlineData("run", "timeout", "30", "claude")]
+    [InlineData("--tool", "claude:2.1.3", "claude")]
+    public void ClaudeOnlyLaterInTheCommand_OrAlreadyNamed_ImpliesNothing(params string[] args) =>
+        Assert.Null(ImpliedBy(args));
+
     [Fact]
     public void ANameMeansTheDefaultVersion()
     {

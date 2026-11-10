@@ -292,6 +292,40 @@ public class RecipeTests
         Assert.Equal(accepted, Get("codegraph").AcceptsVersion(version));
 
     [Fact]
+    public void TheClaudeRecipeIsAnAgentWithAnthropicsDomains_AndNoAutoUpdates()
+    {
+        var recipe = Get("claude");
+        Assert.True(recipe.IsAgent);
+        Assert.Equal("latest", recipe.Default);
+        Assert.False(recipe.Multiple);
+        Assert.Equal([".anthropic.com", ".claude.ai", ".claude.com"], recipe.Allow);
+        Assert.Equal(
+            [new KeyValuePair<string, string>("DISABLE_AUTOUPDATER", "1"), new KeyValuePair<string, string>("CLAUDE_CODE_DISABLE_AUTOUPDATE", "1")],
+            recipe.Env);
+    }
+
+    [Theory]
+    [InlineData("latest", true)]
+    [InlineData("2.1.3", true)]
+    [InlineData("10.20.30", true)]
+    [InlineData("v2.1.3", false)]
+    [InlineData("2.1", false)]
+    [InlineData("2", false)]
+    [InlineData("2.1.3.4", false)]
+    [InlineData("2.1.3-beta", false)]
+    [InlineData("latest-1", false)]
+    [InlineData("stable", false)]
+    [InlineData("latest\n", false)]
+    [InlineData("2.1.3\n", false)]
+    public void AgentRecipesAcceptLatestOrAnExactRelease(string version, bool accepted)
+    {
+        var agents = RecipeCatalog.Embedded.Recipes.Where(r => r.IsAgent && !r.Hidden).ToList();
+        Assert.Contains(agents, r => r.Name == "claude");
+        foreach (var agent in agents)
+            Assert.True(accepted == agent.AcceptsVersion(version), agent.Name);
+    }
+
+    [Fact]
     public void TheCodegraphIndexIsIgnoredInEverySession() =>
         Assert.Contains(".codegraph/", Embedded.Text("image/gitignore").Split('\n'));
 

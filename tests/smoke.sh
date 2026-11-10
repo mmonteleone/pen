@@ -249,6 +249,8 @@ check "no .NET, PowerShell or CodeGraph in the base (they're tools)" \
   docker run --rm --entrypoint bash "$IMAGE" -c '! command -v dotnet && ! command -v pwsh && ! command -v codegraph && ! test -e /usr/share/dotnet'
 check "no .NET settings in the base's environment" \
   docker run --rm --entrypoint bash "$IMAGE" -c '! env | grep -E "^(DOTNET|ASPNETCORE|NUGET_XMLDOC|POWERSHELL)_"'
+check "no Claude Code in the base, or its settings (it's the claude tool)" \
+  docker run --rm --entrypoint bash "$IMAGE" -c '! command -v claude && ! test -e /opt/pen/claude && ! test -e /opt/pen/agents/lib/node_modules/@anthropic-ai && ! env | grep -E "^(DISABLE_AUTOUPDATER|CLAUDE_CODE_)"'
 fi
 
 if want 2; then
@@ -368,16 +370,43 @@ if want 4; then
 # ==============================================================================
 section "4. Agents"
 
-out=$(in_sandbox 'for c in claude codex opencode pi; do printf "%s=" $c; timeout 30 $c --version </dev/null 2>&1 | tail -1; done')
+# The agents that are tools come with --tool; the rest are in the base.
+AGENT_TOOLS=(--tool claude)
+# with_agents <bash script>: in_sandbox with the agent tools.
+with_agents() { "$PEN" "${AGENT_TOOLS[@]}" run bash -c "$1" </dev/null; }
+out=$(with_agents 'for c in claude codex opencode pi; do printf "%s=" $c; timeout 30 $c --version </dev/null 2>&1 | tail -1; done')
 for c in claude codex opencode pi; do
   check "$c --version works as agent ($(grep "^$c=" <<<"$out" | cut -d= -f2-))" grep -qE "^$c=.*[0-9]+\.[0-9]+" <<<"$out"
 done
 check "agents live in system paths, not \$HOME" \
-  in_sandbox 'for c in claude codex opencode pi; do case $(readlink -f "$(command -v $c)") in /usr/local/*|/opt/*) ;; *) exit 1 ;; esac; done'
-check "agent user can't write the agents' install dir" \
-  in_sandbox '! touch /opt/pen/agents/lib/node_modules/.x 2>/dev/null'
+  with_agents 'for c in claude codex opencode pi; do case $(readlink -f "$(command -v $c)") in /usr/local/*|/opt/*) ;; *) exit 1 ;; esac; done'
+check "agent user can't write the agents' install dirs" \
+  with_agents '! touch /opt/pen/agents/lib/node_modules/.x 2>/dev/null && ! touch /opt/pen/claude/lib/node_modules/.x 2>/dev/null && ! touch /usr/local/bin/.x 2>/dev/null'
 check "auto-updaters off (env)" \
-  in_sandbox '[ "$DISABLE_AUTOUPDATER" = 1 ] && [ "$OPENCODE_DISABLE_AUTOUPDATE" = 1 ] && [ "$PI_SKIP_VERSION_CHECK" = 1 ] && grep -q "check_for_update_on_startup = false" /etc/codex/managed_config.toml'
+  with_agents '[ "$DISABLE_AUTOUPDATER" = 1 ] && [ "$CLAUDE_CODE_DISABLE_AUTOUPDATE" = 1 ] && [ "$OPENCODE_DISABLE_AUTOUPDATE" = 1 ] && [ "$PI_SKIP_VERSION_CHECK" = 1 ] && grep -q "check_for_update_on_startup = false" /etc/codex/managed_config.toml'
+
+# A command named after an agent brings it, with no config at all.
+tool_free
+rc=0; out=$("$PEN" claude --version </dev/null 2>&1) || rc=$?
+check "with an empty config, pen claude --version runs Claude Code (implied)" bash -c '[ "$1" = 0 ] && grep -qE "^[0-9]+\.[0-9]+\.[0-9]+ \(Claude Code\)" <<<"$2"' _ "$rc" "$out"
+rc=0; out=$("$PEN" run claude --version </dev/null 2>&1) || rc=$?
+check "...and so does pen run claude --version" bash -c '[ "$1" = 0 ] && grep -qE "^[0-9]+\.[0-9]+\.[0-9]+ \(Claude Code\)" <<<"$2"' _ "$rc" "$out"
+check "...but a shell doesn't have it (pen run bash -c 'command -v claude')" \
+  test "$("$PEN" run bash -c 'command -v claude || echo none' </dev/null 2>/dev/null)" = none
+# claude mcp serve waits for requests on stdin, held open on fd 7, so the session stays up
+# until its agent container is removed.
+mkfifo "$SCRATCH/mcp-in"
+"$PEN" claude mcp serve <"$SCRATCH/mcp-in" >/dev/null 2>&1 &
+implied=$!
+exec 7>"$SCRATCH/mcp-in"
+wait_for "^$KEY-.*-agent$" || fail "the session for pen ps didn't start"
+out=$("$PEN" ps)
+check "pen ps shows claude:latest for an implied agent" \
+  grep -qE "^(~${PROJECT_DIR#"$REAL_HOME"}|$PROJECT_DIR) +[0-9a-f]{8} +claude:latest +[0-9]+[smh][0-9m]* +claude mcp serve$" <<<"$out"
+docker rm -f "$(docker ps --format '{{.Names}}' | grep -E "^$KEY-.*-agent$" | head -1)" >/dev/null 2>&1 || true
+wait "$implied" || true
+exec 7>&-
+real_home
 
 # Trivial prompts, only when credentials are in the environment (otherwise log
 # in inside a session by hand). They reach the agent as [env] entries in a
@@ -387,7 +416,7 @@ prompt_check() { # prompt_check <agent> <env var> <cmd…>
   if [ -z "${!var:-}" ]; then note "$agent prompt: skipped (set $var to run it)"; return; fi
   fake_config "[env]" "$var = \"${!var}\""
   local out
-  out=$(fake_pen run timeout 180 "$@" 2>&1 || true)
+  out=$(fake_pen "${AGENT_TOOLS[@]}" run timeout 180 "$@" 2>&1 || true)
   check "$agent answers a trivial prompt through the proxy" grep -q 4 <<<"$out"
   local log; log=$(ls -td "$FAKE_HOME"/.local/state/pen/"$KEY"/sessions/*/ | head -1)proxy.log
   if grep -q TCP_DENIED "$log"; then
@@ -400,9 +429,9 @@ prompt_check claude CLAUDE_CODE_OAUTH_TOKEN claude -p 'What is 2+2? Reply with j
 prompt_check codex OPENAI_API_KEY codex exec --skip-git-repo-check 'What is 2+2? Reply with just the digit.'
 
 if [ "${SMOKE_SLOW:-}" = 1 ]; then
-  v1=$(docker run --rm --entrypoint stat "$IMAGE" -c %Y /opt/pen/agents/lib/node_modules/@anthropic-ai/claude-code/package.json)
+  v1=$(docker run --rm --entrypoint stat "$IMAGE" -c %Y /opt/pen/agents/lib/node_modules/@openai/codex/package.json)
   "$PEN" upgrade >"$SCRATCH/upgrade.log" 2>&1 || { tail -20 "$SCRATCH/upgrade.log" >&2; fail "pen upgrade"; }
-  v2=$(docker run --rm --entrypoint stat "$IMAGE" -c %Y /opt/pen/agents/lib/node_modules/@anthropic-ai/claude-code/package.json)
+  v2=$(docker run --rm --entrypoint stat "$IMAGE" -c %Y /opt/pen/agents/lib/node_modules/@openai/codex/package.json)
   check "pen upgrade reinstalls the agents (PEN_REFRESH), base image unchanged or not" test "$v1" != "$v2"
   check "pen upgrade pulls the proxy image" grep -q 'ubuntu/squid' "$SCRATCH/upgrade.log"
 else
@@ -1267,10 +1296,10 @@ seed_pen 'rm ~/.codex/auth.json ~/.claude/.credentials.json' >/dev/null
 
 if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
   fake_config "[env]" "CLAUDE_CODE_OAUTH_TOKEN = \"$CLAUDE_CODE_OAUTH_TOKEN\""
-  (cd "$SEEDP" && fake_pen run timeout 300 claude -p 'Create a file named perm-check.txt containing "ok", then commit it with git (message "perm check"). Reply "done".' >/dev/null 2>&1) || true
+  (cd "$SEEDP" && fake_pen --tool claude run timeout 300 claude -p 'Create a file named perm-check.txt containing "ok", then commit it with git (message "perm check"). Reply "done".' >/dev/null 2>&1) || true
   check "claude starts in skip-permissions mode (wrote and committed without asking)" test -f "$SEEDP/perm-check.txt"
   check "...and its commit has the seeded author" test "$(git -C "$SEEDP" log -1 --format="%an")" = "Smoke Host"
-  out=$(cd "$SEEDP" && fake_pen run timeout 300 claude -p 'Fetch https://example.com and show me its title.' 2>&1 || true)
+  out=$(cd "$SEEDP" && fake_pen --tool claude run timeout 300 claude -p 'Fetch https://example.com and show me its title.' 2>&1 || true)
   check "claude reports the blocked domain" grep -qiE 'example\.com.*(block|allow|proxy|403)|(block|allow|proxy|403).*example\.com' <<<"$out"
 else
   note "claude skip-permissions, co-author and blocked-domain checks: skipped (set CLAUDE_CODE_OAUTH_TOKEN)"

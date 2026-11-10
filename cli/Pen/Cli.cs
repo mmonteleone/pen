@@ -26,9 +26,10 @@ internal static class Cli
                                     --docker: with Docker-in-Docker (or docker = true in .pen/config.toml)
                                     --port <n>: forward localhost:<n> to the sandbox (repeatable;
                                     or ports = [<n>, …] in .pen/config.toml)
-                                    --tool <spec>: a tool, as name or name:version (repeatable;
-                                    or tools = […] in either config.toml)
-          pen --tool list           list the tools pen can install
+                                    --tool <spec>: a tool or agent, as name or name:version
+                                    (repeatable; or tools = […] in either config.toml); a
+                                    command named after an agent brings it: pen claude
+          pen --tool list           list the agents and tools pen can install
           pen upgrade [--clean]     newer base image and agents; --clean skips the cache
           pen allow <domain…> [--global]
                                     allow domains, applied to running sessions too
@@ -65,18 +66,22 @@ internal static class Cli
                          this for every session. A server in the sandbox must listen on
                          0.0.0.0, not only localhost
               --tool <spec>
-                         a tool, as name or name:version (repeatable); tools = […] in
-                         either config.toml adds to these, and pen --tool list shows what's
+                         a tool or agent, as name or name:version (repeatable); tools = […]
+                         in either config.toml adds to these, and pen --tool list shows what's
                          available. The session runs with them installed, and can reach the
-                         domains they need
+                         domains they need. A command named after an agent (pen claude, pen
+                         run claude) brings that agent at its default version unless one of
+                         these names it; to have an agent in a shell or behind another
+                         command, name it here or in tools
             """,
         ["upgrade"] = """
             usage: pen upgrade [--clean]
 
             Updates the base image and reinstalls the agents at their latest versions,
-            then pulls newer proxy and Docker-in-Docker images. It rebuilds the tools in your
-            config, and run in a project, the approved tools and .pen/Dockerfile there (see
-            pen trust). Logins and config are kept.
+            then pulls newer proxy and Docker-in-Docker images. It rebuilds the tools and
+            agents in your config, and run in a project, the approved tools and
+            .pen/Dockerfile there (see pen trust); any other set of tools, such as an agent
+            a command brings, is rebuilt on its next use. Logins and config are kept.
 
               --clean    rebuild without the build cache
             """,
