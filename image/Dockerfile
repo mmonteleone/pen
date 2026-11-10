@@ -92,15 +92,20 @@ ENV NODE_USE_ENV_PROXY=1 \
 
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/pen-entrypoint
 COPY --chmod=0755 sync-seed.sh docker-proxy.sh /usr/local/lib/pen/
+# The install helper for agent recipes from npm (claude, codex, opencode, pi). It uses
+# Pen's Node, so it's next to it, off PATH and root's like the rest of /opt/pen. Changing it
+# gives the base a new ID and so every tools image a new tag (ToolsImage.Tag covers that ID),
+# so the agents reinstall with it.
+COPY --chmod=0755 npm-agent.sh /opt/pen/lib/npm-agent.sh
 
 # The image installs nothing into /home/agent and leaves nothing in /tmp or root's home,
-# Node stays off PATH, and Python, uv, build tools and the agents come only from tools that
-# need them (python, node, go, rust, claude, codex, opencode, pi); fail the build if any of
-# that changed.
+# Node and the npm agent helper stay off PATH, and Python, uv, build tools and the agents
+# come only from tools that need them (python, node, go, rust, claude, codex, opencode, pi);
+# fail the build if any of that changed.
 RUN test ! -e /home/agent && test ! -e /etc/codex && test ! -e /opt/pen/agents; \
     leftover=$(find /tmp /root/.cache /root/.config /root/.local /root/.npm -mindepth 1 2>/dev/null || true); \
     [ -z "${leftover}" ] || { echo "left behind: ${leftover}" >&2; exit 1; }; \
-    for c in node npm npx corepack python3 uv make gcc claude codex opencode pi; do ! command -v "$c" >/dev/null || { echo "$c is on PATH" >&2; exit 1; }; done
+    for c in node npm npx corepack python3 uv make gcc claude codex opencode pi npm-agent.sh; do ! command -v "$c" >/dev/null || { echo "$c is on PATH" >&2; exit 1; }; done
 
 # Always the last layer. pen upgrade sets PEN_REFRESH to the current time, so it gives a
 # new base image ID even when every other layer is cached, and every tools image (the

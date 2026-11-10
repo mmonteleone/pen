@@ -376,6 +376,19 @@ public class RecipeTests
             Assert.True(accepted == agent.AcceptsVersion(version), agent.Name);
     }
 
+    [Theory]
+    [InlineData("claude")]
+    [InlineData("codex")]
+    [InlineData("opencode")]
+    [InlineData("pi")]
+    public void AgentRecipesFromNpmInstallWithTheBasesHelper(string name)
+    {
+        Assert.Contains($"\nexec /opt/pen/lib/npm-agent.sh {name} ", Embedded.Text($"tools/{name}/install.sh"));
+        Assert.StartsWith("#!/bin/bash\n", Embedded.Text("image/npm-agent.sh"));
+        // Off PATH: in /opt/pen, next to Pen's Node, rather than a bin directory.
+        Assert.Contains("\nCOPY --chmod=0755 npm-agent.sh /opt/pen/lib/npm-agent.sh\n", Embedded.Text("image/Dockerfile"));
+    }
+
     [Fact]
     public void TheCodegraphIndexIsIgnoredInEverySession() =>
         Assert.Contains(".codegraph/", Embedded.Text("image/gitignore").Split('\n'));

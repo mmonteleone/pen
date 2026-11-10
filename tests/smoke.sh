@@ -243,6 +243,8 @@ check "no node, npm or npx on PATH in the base" \
   docker run --rm --entrypoint bash "$IMAGE" -c '! command -v node && ! command -v npm && ! command -v npx && ! command -v corepack'
 check "Pen's private Node runs (/opt/pen/node/bin/node)" \
   docker run --rm --entrypoint /opt/pen/node/bin/node "$IMAGE" -e 'process.exit(process.version.startsWith("v") ? 0 : 1)'
+check "the npm agent helper is in the base, root's and off PATH (/opt/pen/lib/npm-agent.sh)" \
+  docker run --rm --entrypoint bash "$IMAGE" -c 'test -x /opt/pen/lib/npm-agent.sh && [ "$(stat -c %U:%a /opt/pen/lib /opt/pen/lib/npm-agent.sh | sort -u)" = root:755 ] && ! command -v npm-agent.sh'
 check "time zone data and /etc/services (tzdata, netbase)" \
   docker run --rm --entrypoint bash "$IMAGE" -c 'test -f /usr/share/zoneinfo/Europe/Berlin && grep -q "^https" /etc/services'
 check "no .NET, PowerShell or CodeGraph in the base (they're tools)" \
