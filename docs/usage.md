@@ -125,7 +125,7 @@ Agents run in skip-permissions mode by default. The container is the boundary. E
 
 ### Tools
 
-The base image has Node, Python, the agents and common command-line tools. Language toolchains come from tool recipes built into Pen. Name them with `--tool`, or with `tools` in either `config.toml` (the lists add up). `pen --tool list` shows them.
+The base image has Python, the agents and common command-line tools. It has no Node on `PATH` (no `node`, `npm` or `npx`): Pen keeps a private Node in `/opt/pen/node` that only runs the agents and recipes installed through npm, and isn't for your own use. Language toolchains come from tool recipes built into Pen. Name them with `--tool`, or with `tools` in either `config.toml` (the lists add up). `pen --tool list` shows them.
 
 ```
 pen --tool dotnet:8 --tool dotnet:10 claude
@@ -150,7 +150,7 @@ Each version installs the newest release that matches it, when the image is buil
 - **`go`:** the official tarball of the newest patch release, in `/usr/local/go`. A module that asks for a newer Go downloads that toolchain through the module proxy into the home volume. The proxy redirects toolchains and large modules to `storage.googleapis.com`, which is all of Google Cloud Storage, so sessions with Go can reach any bucket there. `go install` puts programs in `~/go/bin`, which isn't on `PATH`: run them by path, or add it to `PATH` in your shell config.
 - **`rust`:** rustup in `/usr/local/rustup`, each toolchain with clippy and rustfmt. The default toolchain is `stable` if listed, otherwise the newest. Cargo's cache and `cargo install` go to `~/.cargo` in the home volume. `~/.cargo/bin` isn't on `PATH`, so run what `cargo install` puts there by path, or add it to `PATH` in your shell config. A toolchain that isn't in the image (asked for by `rust-toolchain.toml`, say) fails in a session rather than installing: add it as a tool.
 - **`java`:** Ubuntu's headless JDK. `java` and `javac` are the newest one's; the others are in `/usr/lib/jvm`. Maven and Gradle aren't installed: use the project's wrappers (`mvnw`, `gradlew`). Java ignores `HTTPS_PROXY`, so the recipe points each JDK at the session's proxy (`proxy:3128`), and sets `MAVEN_OPTS` so Maven uses that. A `.pen/Dockerfile` step builds without a proxy, so a `RUN` step that downloads with Java needs `JAVA_TOOL_OPTIONS="-Dhttp.proxyHost= -Dhttps.proxyHost="` to connect directly.
-- **`codegraph`:** [CodeGraph](https://www.npmjs.com/package/@colbymchenry/codegraph) from npm. Git ignores `.codegraph/` in every session. To use it from an agent, add its MCP server to the [seed](#agent-config-the-home-seed), and use `tools = ["codegraph"]` in your own config so it's in every project. Without the tool, the agent can't start the server. For Claude, in `.claude.json`:
+- **`codegraph`:** [CodeGraph](https://www.npmjs.com/package/@colbymchenry/codegraph) from npm, in `/opt/pen/codegraph`, running on the Node it bundles. Git ignores `.codegraph/` in every session. To use it from an agent, add its MCP server to the [seed](#agent-config-the-home-seed), and use `tools = ["codegraph"]` in your own config so it's in every project. Without the tool, the agent can't start the server. For Claude, in `.claude.json`:
 
   ```json
   { "mcpServers": { "codegraph": { "type": "stdio", "command": "codegraph", "args": ["serve", "--mcp"] } } }

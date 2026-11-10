@@ -235,8 +235,12 @@ check "signing off via GIT_CONFIG_* (commit.gpgsign, tag.gpgsign = false)" \
   docker run --rm --entrypoint bash "$IMAGE" -c '[ "$(git config commit.gpgsign)" = false ] && [ "$(git config tag.gpgsign)" = false ]'
 check "SSH remote rewritten to https" \
   docker run --rm --entrypoint bash "$IMAGE" -c '[ "$(git ls-remote --get-url git@github.com:octo/repo.git)" = https://github.com/octo/repo.git ]'
-check "tools present (git gh rg fd jq curl wget xz openssl less vim unzip make python3 uv node npm tini capsh docker 'docker compose')" \
-  docker run --rm --entrypoint bash "$IMAGE" -c 'for c in git gh rg fd jq curl wget xz openssl less vim unzip make gcc python3 uv uvx node npm tini capsh setpriv docker; do command -v $c >/dev/null || { echo "missing $c" >&2; exit 1; }; done; docker compose version >/dev/null'
+check "tools present (git gh rg fd jq curl wget xz openssl less vim unzip make python3 uv tini capsh docker 'docker compose')" \
+  docker run --rm --entrypoint bash "$IMAGE" -c 'for c in git gh rg fd jq curl wget xz openssl less vim unzip make gcc python3 uv uvx tini capsh setpriv docker; do command -v $c >/dev/null || { echo "missing $c" >&2; exit 1; }; done; docker compose version >/dev/null'
+check "no node, npm or npx on PATH in the base" \
+  docker run --rm --entrypoint bash "$IMAGE" -c '! command -v node && ! command -v npm && ! command -v npx && ! command -v corepack'
+check "Pen's private Node runs (/opt/pen/node/bin/node)" \
+  docker run --rm --entrypoint /opt/pen/node/bin/node "$IMAGE" -e 'process.exit(process.version.startsWith("v") ? 0 : 1)'
 check "time zone data and /etc/services (tzdata, netbase)" \
   docker run --rm --entrypoint bash "$IMAGE" -c 'test -f /usr/share/zoneinfo/Europe/Berlin && grep -q "^https" /etc/services'
 check "no .NET, PowerShell or CodeGraph in the base (they're tools)" \
@@ -369,7 +373,7 @@ done
 check "agents live in system paths, not \$HOME" \
   in_sandbox 'for c in claude codex opencode pi; do case $(readlink -f "$(command -v $c)") in /usr/local/*|/opt/*) ;; *) exit 1 ;; esac; done'
 check "agent user can't write the agents' install dir" \
-  in_sandbox '! touch /usr/local/lib/node_modules/.x 2>/dev/null'
+  in_sandbox '! touch /opt/pen/agents/lib/node_modules/.x 2>/dev/null'
 check "auto-updaters off (env)" \
   in_sandbox '[ "$DISABLE_AUTOUPDATER" = 1 ] && [ "$OPENCODE_DISABLE_AUTOUPDATE" = 1 ] && [ "$PI_SKIP_VERSION_CHECK" = 1 ] && grep -q "check_for_update_on_startup = false" /etc/codex/managed_config.toml'
 
@@ -394,9 +398,9 @@ prompt_check claude CLAUDE_CODE_OAUTH_TOKEN claude -p 'What is 2+2? Reply with j
 prompt_check codex OPENAI_API_KEY codex exec --skip-git-repo-check 'What is 2+2? Reply with just the digit.'
 
 if [ "${SMOKE_SLOW:-}" = 1 ]; then
-  v1=$(docker run --rm --entrypoint stat "$IMAGE" -c %Y /usr/local/lib/node_modules/@anthropic-ai/claude-code/package.json)
+  v1=$(docker run --rm --entrypoint stat "$IMAGE" -c %Y /opt/pen/agents/lib/node_modules/@anthropic-ai/claude-code/package.json)
   "$PEN" upgrade >"$SCRATCH/upgrade.log" 2>&1 || { tail -20 "$SCRATCH/upgrade.log" >&2; fail "pen upgrade"; }
-  v2=$(docker run --rm --entrypoint stat "$IMAGE" -c %Y /usr/local/lib/node_modules/@anthropic-ai/claude-code/package.json)
+  v2=$(docker run --rm --entrypoint stat "$IMAGE" -c %Y /opt/pen/agents/lib/node_modules/@anthropic-ai/claude-code/package.json)
   check "pen upgrade reinstalls the agents (PEN_REFRESH), base image unchanged or not" test "$v1" != "$v2"
   check "pen upgrade pulls the proxy image" grep -q 'ubuntu/squid' "$SCRATCH/upgrade.log"
 else

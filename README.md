@@ -18,7 +18,7 @@ Pen is a Docker container, an egress proxy and some git and credential handling,
 - Mounts repo config and `.git/hooks` read-only and checks git metadata at session end for known ways to make host git run code. [Limitations apply.](docs/limitations.md)
 - Takes a read-only GitHub token per repo owner. Your host SSH and signing keys stay outside.
 - Keeps agent logins, settings and caches between sessions. Several agents can run at once, including in linked worktrees.
-- Has Node and Python preinstalled. Add [toolchains](docs/usage.md#tools), a [project Dockerfile](docs/usage.md#project-settings), [dev-server ports](docs/usage.md#dev-servers) or [Docker-in-Docker](docs/usage.md#docker-in-docker) as needed.
+- Has Python preinstalled. Add [toolchains](docs/usage.md#tools), a [project Dockerfile](docs/usage.md#project-settings), [dev-server ports](docs/usage.md#dev-servers) or [Docker-in-Docker](docs/usage.md#docker-in-docker) as needed.
 
 If your agent's sandbox or a dev container already does what you need, you're probably all set. Pen adds a shared setup for terminal agents, network restrictions and some host git protections. It uses containers, with a shared kernel; use a VM if you need a separate kernel.
 

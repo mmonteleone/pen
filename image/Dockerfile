@@ -44,17 +44,28 @@ RUN install -d -m 0755 /etc/apt/keyrings; \
 # uv / uvx.
 COPY --from=uv /uv /uvx /usr/local/bin/
 
-# Node (LTS by default) into /usr/local, so npm's global prefix is a system path.
+# Node (LTS by default) into /opt/pen/node: Pen's runtime for recipes distributed
+# through npm. It isn't on PATH, so sessions don't have node, npm or npx; recipes
+# run their programs on it through wrappers. The tarball must match nodejs.org's
+# SHASUMS256.txt for that release.
 RUN case "${TARGETARCH}" in amd64) arch=x64 ;; arm64) arch=arm64 ;; *) echo "unsupported arch ${TARGETARCH}" >&2; exit 1 ;; esac; \
     if [ "${NODE_VERSION}" = lts ]; then \
       version=$(curl -fsSL https://nodejs.org/dist/index.json | jq -r '[.[] | select(.lts)][0].version'); \
     else \
       version="v${NODE_VERSION#v}"; \
     fi; \
-    curl -fsSL "https://nodejs.org/dist/${version}/node-${version}-linux-${arch}.tar.xz" \
-      | tar -xJ -C /usr/local --strip-components=1 --no-same-owner \
-          --exclude='*/CHANGELOG.md' --exclude='*/LICENSE' --exclude='*/README.md'; \
-    node --version; npm --version
+    file="node-${version}-linux-${arch}.tar.xz"; \
+    tmp=$(mktemp -d); \
+    curl -fsSL -o "${tmp}/${file}" "https://nodejs.org/dist/${version}/${file}"; \
+    curl -fsSL -o "${tmp}/SHASUMS256.txt" "https://nodejs.org/dist/${version}/SHASUMS256.txt"; \
+    sums=$(awk -v f="${file}" '$2 == f' "${tmp}/SHASUMS256.txt"); \
+    [ "$(wc -l <<<"${sums}")" = 1 ] && [ -n "${sums}" ] || { echo "no checksum for ${file}" >&2; exit 1; }; \
+    (cd "${tmp}" && sha256sum -c --strict - <<<"${sums}"); \
+    install -d -m 0755 /opt/pen/node; \
+    tar -xJf "${tmp}/${file}" -C /opt/pen/node --strip-components=1 --no-same-owner \
+      --exclude='*/CHANGELOG.md' --exclude='*/LICENSE' --exclude='*/README.md'; \
+    rm -rf "${tmp}"; \
+    /opt/pen/node/bin/node --version; PATH=/opt/pen/node/bin:$PATH npm --version
 
 # System git config. Git authenticates to GitHub through gh (GH_TOKEN), SSH
 # remotes are rewritten to https (inside the sandbox only), bind-mount
@@ -76,10 +87,8 @@ ENV GIT_CONFIG_COUNT=2 \
 # Proxy env (HTTP(S)_PROXY, NO_PROXY, both cases) is set by compose.yaml on the
 # agent service rather than here: ENV would also apply to RUN steps of a
 # project layer (FROM pen:latest), which build without a proxy.
-# npm_config_nodedir: node-gyp builds native modules against the headers in the
-# Node tarball (/usr/local/include/node) instead of downloading them.
+# NODE_USE_ENV_PROXY: Node's own fetch honours those proxy variables.
 ENV NODE_USE_ENV_PROXY=1 \
-    npm_config_nodedir=/usr/local \
     GIT_TERMINAL_PROMPT=0 \
     GH_PROMPT_DISABLED=1 \
     GH_NO_UPDATE_NOTIFIER=1
@@ -90,9 +99,9 @@ COPY --chmod=0755 sync-seed.sh docker-proxy.sh /usr/local/lib/pen/
 # ---------------------------------------------------------------------------
 # Agents: always the last layers. `pen upgrade` sets PEN_REFRESH
 # to the current time so these reinstall even when the base image is cached.
-# All go into npm's global prefix (/usr/local), never $HOME, and auto-updaters
-# are off: the only upgrade path is rebuilding the image. (The agent user can't
-# write /usr/local anyway.)
+# All go into /opt/pen/agents, never $HOME, and auto-updaters are off: the only
+# upgrade path is rebuilding the image. (The agent user can't write /opt/pen.)
+# Claude Code and OpenCode are native binaries; Codex and Pi run on Pen's Node.
 ARG PEN_REFRESH=0
 ARG CLAUDE_CODE_VERSION=latest
 ARG CODEX_VERSION=latest
@@ -108,18 +117,29 @@ ENV DISABLE_AUTOUPDATER=1 \
 # claude-code and opencode-ai need their postinstall: it puts the native binary
 # in place of the bin stub.
 RUN echo "refresh ${PEN_REFRESH}"; \
-    npm install -g --no-fund --no-audit --allow-scripts=@anthropic-ai/claude-code,opencode-ai \
+    export PATH=/opt/pen/node/bin:$PATH; \
+    npm install -g --prefix /opt/pen/agents --no-fund --no-audit --allow-scripts=@anthropic-ai/claude-code,opencode-ai \
       "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
       "@openai/codex@${CODEX_VERSION}" \
       "opencode-ai@${OPENCODE_VERSION}" \
       "@earendil-works/pi-coding-agent@${PI_VERSION}"; \
     npm cache clean --force; \
-    rm -rf /root/.npm /root/.cache
+    rm -rf /root/.npm /root/.cache; \
+    lib=/opt/pen/agents/lib/node_modules; \
+    ln -sf "${lib}/@anthropic-ai/claude-code/bin/claude.exe" /usr/local/bin/claude; \
+    ln -sf "${lib}/opencode-ai/bin/opencode.exe" /usr/local/bin/opencode; \
+    wrap() { printf '#!/bin/sh\nexec /opt/pen/node/bin/node %s "$@"\n' "$2" > "/usr/local/bin/$1"; chmod 0755 "/usr/local/bin/$1"; }; \
+    wrap codex "${lib}/@openai/codex/bin/codex.js"; \
+    wrap pi "${lib}/@earendil-works/pi-coding-agent/dist/bundle/cli.js"; \
+    for c in claude opencode codex pi; do test -x "$(readlink -f "/usr/local/bin/${c}")"; done; \
+    for f in "${lib}/@openai/codex/bin/codex.js" "${lib}/@earendil-works/pi-coding-agent/dist/bundle/cli.js"; do test -f "${f}"; done
 
 COPY codex-managed-config.toml /etc/codex/managed_config.toml
 
-# The image installs nothing into /home/agent; fail the build if anything did.
-RUN test ! -e /home/agent
+# The image installs nothing into /home/agent, and Node stays off PATH; fail the
+# build if either changed.
+RUN test ! -e /home/agent; \
+    for c in node npm npx corepack; do ! command -v "$c" >/dev/null || { echo "$c is on PATH" >&2; exit 1; }; done
 
 ENTRYPOINT ["/usr/local/bin/pen-entrypoint"]
 CMD ["bash", "-l"]
