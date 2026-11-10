@@ -87,7 +87,8 @@ pen claude               # retry
 
 ```sh
 pen                          # shell in the sandbox
-pen run npm ci               # run a command in the sandbox
+pen run make test            # run a command in the sandbox
+pen --tool node run npm ci   # ...with Node and npm installed
 pen allow                    # show recently blocked domains
 pen allow example.com        # allow a domain, including in running sessions
 pen --tool list              # list available development tools

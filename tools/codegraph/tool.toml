@@ -4,7 +4,7 @@ default = "1"
 # Major versions that install on Linux from npm. A new major version needs this recipe updated.
 version = '^1$'
 multiple = false
-# From the npm registry, which the default allowlist has.
+# No domains: it installs from npm when the image is built, and needs none in a session.
 
 [env]
 # No usage statistics, and no update check: the image is the only way to upgrade.

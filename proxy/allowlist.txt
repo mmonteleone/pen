@@ -15,20 +15,15 @@
 # OpenCode
 .opencode.ai
 models.dev
+# OpenCode installs its plugin package (@opencode-ai/plugin) from npm at run time.
+# Other npm use comes with the node tool.
+registry.npmjs.org
 
 # --- GitHub -----------------------------------------------------------------
 github.com
 api.github.com
 codeload.github.com
 .githubusercontent.com
-
-# --- npm --------------------------------------------------------------------
-registry.npmjs.org
-registry.yarnpkg.com
-# Yarn 2+ releases, fetched by corepack
-repo.yarnpkg.com
-# Node headers for node-gyp, if it ignores npm_config_nodedir; also the API docs
-nodejs.org
 
 # --- PyPI -------------------------------------------------------------------
 pypi.org

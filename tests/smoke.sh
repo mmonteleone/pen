@@ -2099,6 +2099,7 @@ if want 28; then
 # ==============================================================================
 section "28. Tools image"
 tool_free # each check names the tools its session has
+rm -rf .pen # section 15 leaves an allow that the throwaway HOME hasn't approved
 
 # Versions are unique to this run, so no earlier image or build cache can stand in.
 : >"$TOOLS_SHIM/builds"
@@ -2266,6 +2267,57 @@ check "codegraph: indexes a project and finds a symbol" bash -c 'grep -q "greet"
 check "...and git ignores its .codegraph/" contains "!! cg/.codegraph/" "$out"
 check "...with nothing blocked" not contains "blocked:" "$out"
 rm -rf cg
+
+# registry.npmjs.org is still a default (OpenCode's plugin install); Yarn's registry isn't.
+yarn_registry() { curl -s -o /dev/null -w "%{http_code} %{http_connect}" -I https://registry.yarnpkg.com/ms; }
+out=$(in_sandbox "command -v node npm npx || echo none; $(declare -f yarn_registry); yarn_registry" 2>/dev/null || true)
+check "without the node tool there's no node, npm or npx, and Yarn's registry is blocked" \
+  bash -c '[ "$(sed -n 1p <<<"$1")" = none ] && [ "$(sed -n 2p <<<"$1" | cut -d" " -f2)" = 403 ]' _ "$out"
+
+# A package from the registry, and a native addon that npm builds with node-gyp against
+# the tarball's headers (npm_config_nodedir).
+mkdir -p nodehi/addon
+printf '{ "name": "addon", "version": "1.0.0", "main": "build/Release/hello.node" }\n' >nodehi/addon/package.json
+printf "{ 'targets': [ { 'target_name': 'hello', 'sources': [ 'hello.c' ] } ] }\n" >nodehi/addon/binding.gyp
+cat >nodehi/addon/hello.c <<'EOF'
+#include <node_api.h>
+static napi_value Hello(napi_env env, napi_callback_info info) {
+  napi_value s;
+  napi_create_string_utf8(env, "hello addon", NAPI_AUTO_LENGTH, &s);
+  return s;
+}
+NAPI_MODULE_INIT() {
+  napi_value fn;
+  napi_create_function(env, "hello", NAPI_AUTO_LENGTH, Hello, NULL, &fn);
+  napi_set_named_property(env, exports, "hello", fn);
+  return exports;
+}
+EOF
+out=$(tool_run node '
+  cd nodehi && npm init -y >/dev/null && npm install --no-fund --no-audit ms@2 >/dev/null &&
+  node -e "console.log(\"hello node \" + require(\"ms\")(60000))" &&
+  rm -rf ~/.cache/node-gyp && (cd addon && npm install --no-fund --no-audit >/dev/null) &&
+  node -e "console.log(require(\"./addon\").hello())" && { [ -e ~/.cache/node-gyp ] || echo no-header-download; } &&
+  echo "nodedir=$(npm config get nodedir) node=$(command -v node)" && node -v' || true)
+check "node: a package from the registry installs and runs" contains "hello node 1m" "$out"
+check "...and npm builds a native addon with node-gyp" contains "hello addon" "$out"
+check "...against the tarball's headers, with node in /usr/local" \
+  bash -c 'grep -qxF no-header-download <<<"$1" && grep -qxF "nodedir=/usr/local node=/usr/local/bin/node" <<<"$1"' _ "$out"
+check "...with the recipe's default, Node 26" grep -qE '^v26\.[0-9]+\.[0-9]+$' <<<"$out"
+check "...with nothing blocked" not contains "blocked:" "$out"
+rm -rf nodehi
+
+# Node 22 warns that the proxy agent NODE_USE_ENV_PROXY turns on is experimental,
+# unless the recipe's NODE_OPTIONS turns that warning off.
+out=$("$PEN" --tool node:22 --tool codegraph run bash -c '
+  node -v; node -e "fetch(\"https://registry.yarnpkg.com/ms\").then(r => console.log(\"fetch \" + r.status))"; npm -v >/dev/null
+  codex --version; codegraph --version' </dev/null 2>"$SCRATCH/node22.err" || true)
+err=$(cat "$SCRATCH/node22.err")
+check "node:22: node -v is 22, and fetch goes through the proxy" bash -c 'grep -qE "^v22\.[0-9]+\.[0-9]+$" <<<"$1" && grep -qx "fetch 200" <<<"$1"' _ "$out"
+check "...without Node's experimental proxy agent warning" bash -c '! grep -qE "UNDICI-EHPA|EnvHttpProxyAgent" <<<"$1"' _ "$err"
+check "...and codex and codegraph still run, unaffected by it" \
+  bash -c 'grep -q "^codex-cli " <<<"$1" && grep -qE "^1\.[0-9]+\.[0-9]+$" <<<"$1"' _ "$out"
+check "...with nothing blocked" not contains "blocked:" "$out$err"
 
 rc=0; out=$("$PEN" --tool "$A" --build-tools-image 2>&1 </dev/null) || rc=$?
 check "there's no build option any more: real sessions build" bash -c '[ "$1" = 2 ] && grep -qF "unknown option" <<<"$2"' _ "$rc" "$out"

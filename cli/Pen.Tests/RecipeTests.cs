@@ -185,6 +185,50 @@ public class RecipeTests
         Assert.Equal(accepted, Get("java").AcceptsVersion(version));
 
     [Fact]
+    public void TheNodeRecipeIsOneMajorVersionWithNpmsRegistries()
+    {
+        var recipe = Get("node");
+        Assert.Equal("26", recipe.Default);
+        Assert.False(recipe.Multiple);
+        Assert.False(recipe.IsAgent);
+        Assert.Equal(["registry.npmjs.org", "registry.yarnpkg.com", "repo.yarnpkg.com", "nodejs.org"], recipe.Allow);
+        Assert.Equal(
+            [new KeyValuePair<string, string>("npm_config_nodedir", "/usr/local"), new KeyValuePair<string, string>("NODE_OPTIONS", "--disable-warning=UNDICI-EHPA")],
+            recipe.Env);
+    }
+
+    [Theory]
+    [InlineData("20", true)]
+    [InlineData("22", true)]
+    [InlineData("24", true)]
+    [InlineData("26", true)]
+    [InlineData("18", false)]
+    [InlineData("21", false)]
+    [InlineData("25", false)]
+    [InlineData("28", false)]
+    [InlineData("v22", false)]
+    [InlineData("22.1", false)]
+    [InlineData("22.1.0", false)]
+    [InlineData("022", false)]
+    [InlineData("22\n", false)]
+    [InlineData("lts", false)]
+    [InlineData("latest", false)]
+    public void TheNodeRecipeAcceptsOnlyLtsMajorVersions(string version, bool accepted) =>
+        Assert.Equal(accepted, Get("node").AcceptsVersion(version));
+
+    [Fact]
+    public void NpmsDomainsComeWithTheNodeRecipe_ExceptTheRegistryOpenCodeNeeds()
+    {
+        var defaults = Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")).ToList();
+        // OpenCode, in the base, installs its plugin package from the npm registry at run time.
+        Assert.Contains("registry.npmjs.org", defaults);
+        foreach (var domain in Get("node").Allow.Where(d => d != "registry.npmjs.org"))
+            Assert.DoesNotContain(domain, defaults);
+        Assert.Contains("docs.npmjs.com", defaults);
+        Assert.Contains("www.npmjs.com", defaults);
+    }
+
+    [Fact]
     public void TheCodegraphRecipeIsOneMajorVersionFromNpm()
     {
         var recipe = Get("codegraph");

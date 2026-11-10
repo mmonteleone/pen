@@ -125,7 +125,7 @@ Agents run in skip-permissions mode by default. The container is the boundary. E
 
 ### Tools
 
-The base image has Python, the agents and common command-line tools. It has no Node on `PATH` (no `node`, `npm` or `npx`): Pen keeps a private Node in `/opt/pen/node` that only runs the agents and recipes installed through npm, and isn't for your own use. Language toolchains come from tool recipes built into Pen. Name them with `--tool`, or with `tools` in either `config.toml` (the lists add up). `pen --tool list` shows them.
+The base image has Python, the agents and common command-line tools. It has no Node on `PATH` (no `node`, `npm` or `npx`): Pen keeps a private Node in `/opt/pen/node` that only runs the agents and recipes installed through npm, and isn't for your own use: for Node in a session, use the `node` tool. Language toolchains come from tool recipes built into Pen. Name them with `--tool`, or with `tools` in either `config.toml` (the lists add up). `pen --tool list` shows them.
 
 ```
 pen --tool dotnet:8 --tool dotnet:10 claude
@@ -139,9 +139,10 @@ Use `name` for the default version or `name:version`. Versions are taken literal
 | `go` | `1.27` | `1.21` to `1.27` | no | `proxy.golang.org`, `sum.golang.org`, `storage.googleapis.com` |
 | `rust` | `stable` | `stable`, a minor version from `1.49` to `1.99` (`1.85` or `1.85.0`), or a patch release the recipe lists (`1.85.1`) | yes | `index.crates.io`, `static.crates.io` |
 | `java` | `21` | `8`, `11`, `17`, `21`, `25` | yes | `repo.maven.apache.org`, `repo1.maven.org`, `services.gradle.org`, `downloads.gradle.org`, `plugins.gradle.org`, `plugins-artifacts.gradle.org` |
-| `codegraph` | `1` | `1` (major version) | no | none (npm is a default) |
+| `node` | `26` | `20`, `22`, `24`, `26` (major version) | no | `registry.npmjs.org` (also a default, for OpenCode), `registry.yarnpkg.com`, `repo.yarnpkg.com`, `nodejs.org` |
+| `codegraph` | `1` | `1` (major version) | no | none |
 
-Each version installs the newest release that matches it, when the image is built. A release newer than a recipe knows (a new Go minor version, Rust release, .NET major version or JDK) needs a recipe update in a newer Pen.
+Each version installs the newest release that matches it, when the image is built. A release newer than a recipe knows (a new Go minor version, Rust release, .NET or Node major version, or JDK) needs a recipe update in a newer Pen.
 
 <details>
 <summary>Tool-specific paths, environment and setup</summary>
@@ -150,6 +151,7 @@ Each version installs the newest release that matches it, when the image is buil
 - **`go`:** the official tarball of the newest patch release, in `/usr/local/go`. A module that asks for a newer Go downloads that toolchain through the module proxy into the home volume. The proxy redirects toolchains and large modules to `storage.googleapis.com`, which is all of Google Cloud Storage, so sessions with Go can reach any bucket there. `go install` puts programs in `~/go/bin`, which isn't on `PATH`: run them by path, or add it to `PATH` in your shell config.
 - **`rust`:** rustup in `/usr/local/rustup`, each toolchain with clippy and rustfmt. The default toolchain is `stable` if listed, otherwise the newest. Cargo's cache and `cargo install` go to `~/.cargo` in the home volume. `~/.cargo/bin` isn't on `PATH`, so run what `cargo install` puts there by path, or add it to `PATH` in your shell config. A toolchain that isn't in the image (asked for by `rust-toolchain.toml`, say) fails in a session rather than installing: add it as a tool.
 - **`java`:** Ubuntu's headless JDK. `java` and `javac` are the newest one's; the others are in `/usr/lib/jvm`. Maven and Gradle aren't installed: use the project's wrappers (`mvnw`, `gradlew`). Java ignores `HTTPS_PROXY`, so the recipe points each JDK at the session's proxy (`proxy:3128`), and sets `MAVEN_OPTS` so Maven uses that. A `.pen/Dockerfile` step builds without a proxy, so a `RUN` step that downloads with Java needs `JAVA_TOOL_OPTIONS="-Dhttp.proxyHost= -Dhttps.proxyHost="` to connect directly.
+- **`node`:** the official tarball of the newest release of the major version, in `/usr/local`, with `npm` and `npx` (and `corepack` up to Node 24; Node 25 and later don't bundle it). npm's global prefix is `/usr/local`, in the image, so `npm install -g` doesn't work in a session: use `npx` or a project dependency, or a `.pen/Dockerfile`. Sets `npm_config_nodedir=/usr/local`, so node-gyp builds native modules against the tarball's headers rather than downloading them, and installs Ubuntu's `python3` and `build-essential` for it. Sets `NODE_OPTIONS=--disable-warning=UNDICI-EHPA`, which silences only Node 22's warning that its proxy support is experimental; a `NODE_OPTIONS` of your own replaces it. Node 20 is out of support, and its `fetch()` ignores the proxy (it has no `NODE_USE_ENV_PROXY`), so it can't reach the network from a session; npm itself works. MCP servers in the [seed](#agent-config-the-home-seed) started with `npx` need this tool in every project: use `tools = ["node"]` in your own config.
 - **`codegraph`:** [CodeGraph](https://www.npmjs.com/package/@colbymchenry/codegraph) from npm, in `/opt/pen/codegraph`, running on the Node it bundles. Git ignores `.codegraph/` in every session. To use it from an agent, add its MCP server to the [seed](#agent-config-the-home-seed), and use `tools = ["codegraph"]` in your own config so it's in every project. Without the tool, the agent can't start the server. For Claude, in `.claude.json`:
 
   ```json
@@ -231,7 +233,7 @@ Turning on "Require signed commits" on GitHub catches a forgotten `pen sign` at 
 
 ## Dev servers
 
-To open a server running in the sandbox (`npm run dev`, `dotnet watch`) from a browser on the host, forward its port: `pen --port 5173 claude`, or `ports = [5173]` in `.pen/config.toml` for every session. `localhost:5173` on the host then reaches port 5173 in the sandbox. The port number is the same on both sides, and only the host's `127.0.0.1` listens.
+To open a server running in the sandbox (`npm run dev` with the `node` tool, `dotnet watch` with `dotnet`) from a browser on the host, forward its port: `pen --port 5173 --tool node claude`, or `ports = [5173]` in `.pen/config.toml` for every session. `localhost:5173` on the host then reaches port 5173 in the sandbox. The port number is the same on both sides, and only the host's `127.0.0.1` listens.
 
 - The server must listen on `0.0.0.0`, not only `localhost`: e.g. `vite --host`, `ASPNETCORE_URLS=http://0.0.0.0:5000`.
 - A port that's already in use on the host isn't remapped: `--port` fails, and a port from `.pen/config.toml` is skipped with a warning. `pen ps` shows which session has it.

@@ -50,9 +50,10 @@ internal static class Cli
                    pen [--docker] [--port <n>]… [--tool <spec>]… run [--] <cmd…>
 
             Runs a command in this project's sandbox, or an interactive shell when there's
-            none, e.g. pen claude, pen codex, pen run npm ci. Everything after the command's
-            name is passed to it unchanged, including options like --help. Use pen run when
-            the command's name is also one of pen's subcommands (pen run reset).
+            none, e.g. pen claude, pen codex, pen --tool node run npm ci. Everything after
+            the command's name is passed to it unchanged, including options like --help.
+            Use pen run when the command's name is also one of pen's subcommands (pen run
+            reset).
 
             Run it from a repo root. Ctrl-C goes to the command; the session ends when it
             exits, and pen then lists any domains the proxy blocked.
