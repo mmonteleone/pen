@@ -158,5 +158,5 @@ internal static class Program
 
     /// <summary>Runs pen sign, against the base given or the default one.</summary>
     private static int RunSign(HostEnv host, Project project, Command command) =>
-        Sign.Run(host, project, command.Args.Count > 0 ? command.Args[0] : null);
+        new SignCommand(host, project).Run(command.Args.Count > 0 ? command.Args[0] : null);
 }

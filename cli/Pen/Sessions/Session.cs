@@ -576,7 +576,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     {
         if (result.ReminderDir == null)
             return;
-        var reminder = Sign.Reminder(result.ReminderDir);
+        var reminder = BranchSigner.FormatReminderIn(result.ReminderDir);
         if (reminder != null)
             Out.WriteLine(reminder);
     }

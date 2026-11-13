@@ -583,7 +583,7 @@ public class SessionEndTests
         Directory.CreateDirectory(Path.GetDirectoryName(moved)!);
         Directory.Move(session.Path, moved);
 
-        var error = Assert.Throws<PenException>(() => Sign.Run(host, project, null));
+        var error = Assert.Throws<PenException>(() => new SignCommand(host, project).Run(null));
 
         Assert.Contains("not signing: deal with the warning", error.Message);
         Assert.False(File.Exists(gitCalls));
@@ -605,7 +605,7 @@ public class SessionEndTests
         try
         {
             PenException? error = null;
-            var output = CapturingStderr(() => error = Assert.Throws<PenException>(() => Sign.Run(host, project, null)));
+            var output = CapturingStderr(() => error = Assert.Throws<PenException>(() => new SignCommand(host, project).Run(null)));
             Assert.Contains("not signing: deal with the files", error!.Message);
             Assert.Contains("git wasn't checked", output);
             Assert.Contains("sub", output);

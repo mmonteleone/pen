@@ -8,9 +8,9 @@ public class HostGitTests
     public void EveryCallStartsWithTheOverrides()
     {
         Assert.Equal(["-C", "/r", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "--no-pager", "status"],
-            new HostGit("/r").Args(["status"]));
+            new HostGit("/r").BuildArgs(["status"]));
         Assert.Equal(["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "--no-pager", "-c", "a.b=c", "log"],
-            HostGit.Global.With(["-c", "a.b=c"]).Args(["log"]));
+            HostGit.Global.WithConfig(["-c", "a.b=c"]).BuildArgs(["log"]));
     }
 
     [Fact]
@@ -33,10 +33,10 @@ public class HostGitTests
         Git.Run(repo, "config", "core.pager", script);
 
         var git = new HostGit(repo);
-        var head = git.Out("rev-parse", "HEAD");
-        git.Out("status");
-        git.Out("log", "-1");
-        git.Out("update-ref", "refs/heads/other", head);
+        var head = git.ReadOutput("rev-parse", "HEAD");
+        git.ReadOutput("status");
+        git.ReadOutput("log", "-1");
+        git.ReadOutput("update-ref", "refs/heads/other", head);
         Assert.False(File.Exists(marker), File.Exists(marker) ? File.ReadAllText(marker) : "");
     }
 
@@ -76,7 +76,7 @@ public class SignTests
         public string AgentKey { get; }
         public string Signers { get; }
         public HostGit Git { get; }
-        public HostGit Signing => Git.With(Sign.SigningConfig(Git));
+        public HostGit Signing => Git.WithConfig(SignatureConfig.BuildForSigning(Git));
         public Dictionary<string, string> Env { get; }
         private readonly string _globalConfig;
 
@@ -118,7 +118,7 @@ public class SignTests
 
         /// <summary>Re-creates what the range needs, as pen sign would.</summary>
         public Dictionary<string, string> Rewrite(IReadOnlyList<string> commits) =>
-            Sign.Rewrite(Signing, commits, Sign.Verified(Git, commits));
+            new CommitRewriter(Signing).Rewrite(commits, new SignatureVerifier(Git).FindVerified(commits));
 
         /// <summary>The branch moves to a new empty commit signed with <paramref name="key"/>.</summary>
         public string SignedBy(string key, string message)
@@ -166,8 +166,8 @@ public class SignTests
             return Head();
         }
 
-        public string Head() => Git.Out("rev-parse", "HEAD");
-        public string Tree(string c) => Git.Out("rev-parse", c + "^{tree}");
+        public string Head() => Git.ReadOutput("rev-parse", "HEAD");
+        public string Tree(string c) => Git.ReadOutput("rev-parse", c + "^{tree}");
         public CommitObject Obj(string c) => CommitObject.Parse(Git.Run("cat-file", "commit", c).Stdout);
         public bool HasSignatureHeader(string c) => Git.Run("cat-file", "commit", c).Text.Contains("\ngpgsig ");
 
@@ -196,7 +196,7 @@ public class SignTests
         var b = f.Head();
         var c1 = f.Commit("a", "1", "Ann <ann@example.invalid>", "2026-01-02T03:04:05+0130", "first\n\nbody with  spaces  \n\n");
         var c2 = f.Commit("a", "2", "Bob <bob@example.invalid>", "2026-02-03T04:05:06-0700", "second");
-        var range = Sign.Range(f.Git, b, f.Head());
+        var range = new BranchSigner(f.Git).ListRange(b, f.Head());
         Assert.Equal([c1, c2], range);
 
         var map = f.Rewrite(range);
@@ -206,10 +206,10 @@ public class SignTests
         Assert.Equal([map[c1]], f.Obj(map[c2]).Parents);
         Assert.Equal(f.Head(), c2); // Rewrite touches no ref
 
-        Sign.UpdateBranch(f.Git, "refs/heads/main", map[c2], c2);
+        new BranchSigner(f.Git).UpdateBranch("refs/heads/main", map[c2], c2);
         Assert.Equal(map[c2], f.Head());
-        Assert.Equal(0, Sign.CountUnsigned(f.Git, Sign.Range(f.Git, b, f.Head())));
-        Assert.Equal("", f.Git.Out("status", "--porcelain")); // index and worktree still match
+        Assert.Equal(0, new SignatureVerifier(f.Git).CountUnsigned(new BranchSigner(f.Git).ListRange(b, f.Head())));
+        Assert.Equal("", f.Git.ReadOutput("status", "--porcelain")); // index and worktree still match
         Assert.Contains("Good \"git\" signature", Verify(f, map[c2]));
     }
 
@@ -217,7 +217,7 @@ public class SignTests
     {
         var signers = Path.Combine(f.T.Path, "allowed");
         File.WriteAllText(signers, "signer@example.invalid " + File.ReadAllText(f.Key + ".pub"));
-        var r = f.Git.With(["-c", "gpg.format=ssh", "-c", $"gpg.ssh.allowedSignersFile={signers}"]).Run("verify-commit", "-v", commit);
+        var r = f.Git.WithConfig(["-c", "gpg.format=ssh", "-c", $"gpg.ssh.allowedSignersFile={signers}"]).Run("verify-commit", "-v", commit);
         return r.Stderr;
     }
 
@@ -237,7 +237,7 @@ public class SignTests
         Tests.Git.Run(f.Repo, "commit", "-q", "--no-edit");
         var merge = f.Head();
 
-        var range = Sign.Range(f.Git, b, merge);
+        var range = new BranchSigner(f.Git).ListRange(b, merge);
         Assert.Equal(4, range.Count);
         Assert.Equal(merge, range[^1]);
         var map = f.Rewrite(range);
@@ -245,7 +245,7 @@ public class SignTests
         var newMerge = f.Obj(map[merge]);
         Assert.Equal(f.Obj(merge).Parents.Select(p => map[p]), newMerge.Parents);
         Assert.Equal(f.Tree(merge), newMerge.Tree);
-        Assert.Contains("resolved by hand", f.Git.Out("show", map[merge] + ":x"));
+        Assert.Contains("resolved by hand", f.Git.ReadOutput("show", map[merge] + ":x"));
         _ = s1;
     }
 
@@ -256,31 +256,31 @@ public class SignTests
         var origin = Git.Repo(t.Sub("origin"));
         Git.Run(t.Path, "clone", "-q", origin, Path.Combine(t.Path, "clone"));
         var clone = Path.Combine(t.Path, "clone");
-        var git = new HostGit(clone, ["-c", "user.name=S", "-c", "user.email=s@x.io"]);
-        var oldBase = git.Out("rev-parse", "HEAD");
+        var git = new HostGit(clone, ["-c", "user.name=S", "-c", "user.email=s@x.io"], null);
+        var oldBase = git.ReadOutput("rev-parse", "HEAD");
         File.WriteAllText(Path.Combine(clone, "mine"), "m");
         Git.Run(clone, "add", "mine");
         Git.Run(clone, "commit", "-q", "-m", "mine");
-        var mine = git.Out("rev-parse", "HEAD");
+        var mine = git.ReadOutput("rev-parse", "HEAD");
 
         File.WriteAllText(Path.Combine(origin, "theirs"), "t");
         Git.Run(origin, "add", "theirs");
         Git.Run(origin, "commit", "-q", "-m", "theirs");
         Git.Run(clone, "fetch", "-q");
 
-        var b = Sign.ResolveBase(git, null)!.Value;
+        var b = new BranchSigner(git).ResolveBase(null)!;
         Assert.Equal("origin/main", b.Name);
         Assert.NotEqual(oldBase, b.Commit);
-        var range = Sign.Range(git, b.Commit, mine);
+        var range = new BranchSigner(git).ListRange(b.Commit, mine);
         Assert.Equal([mine], range);
-        Assert.Empty(Sign.OnARemote(git, b.Commit, mine, range));
+        Assert.Empty(new BranchSigner(git).FindOnARemote(b.Commit, mine, range));
 
         var key = Path.Combine(t.Path, "key");
         Process.RunAndCaptureText(new ProcessStartInfo("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", key]) { RedirectStandardOutput = true, RedirectStandardError = true });
-        var map = Sign.Rewrite(git.With(["-c", "gpg.format=ssh", "-c", $"user.signingkey={key}", "-c", "gpg.ssh.program=ssh-keygen"]), range, new HashSet<string>());
+        var map = new CommitRewriter(git.WithConfig(["-c", "gpg.format=ssh", "-c", $"user.signingkey={key}", "-c", "gpg.ssh.program=ssh-keygen"])).Rewrite(range, new HashSet<string>());
         var signed = CommitObject.Parse(git.Run("cat-file", "commit", map[mine]).Stdout);
         Assert.Equal([oldBase], signed.Parents); // no rebase onto the new upstream
-        Assert.Equal(git.Out("rev-parse", mine + "^{tree}"), signed.Tree);
+        Assert.Equal(git.ReadOutput("rev-parse", mine + "^{tree}"), signed.Tree);
     }
 
     [Fact]
@@ -289,10 +289,10 @@ public class SignTests
         using var f = new Fixture();
         var b = f.Head();
         var c1 = f.Commit("a", "1", "A <a@x.io>", "2026-01-01T00:00:00Z", "one");
-        var map = f.Rewrite(Sign.Range(f.Git, b, c1));
+        var map = f.Rewrite(new BranchSigner(f.Git).ListRange(b, c1));
         var moved = f.Commit("a", "2", "A <a@x.io>", "2026-01-02T00:00:00Z", "two, meanwhile");
 
-        var e = Assert.Throws<PenException>(() => Sign.UpdateBranch(f.Git, "refs/heads/main", map[c1], c1));
+        var e = Assert.Throws<PenException>(() => new BranchSigner(f.Git).UpdateBranch("refs/heads/main", map[c1], c1));
         Assert.Contains("moved while signing", e.Message);
         Assert.Equal(moved, f.Head());
     }
@@ -304,10 +304,10 @@ public class SignTests
         var b = f.Head();
         var c1 = f.Commit("a", "1", "A <a@x.io>", "2026-01-01T00:00:00Z", "one");
         var c2 = f.Commit("a", "2", "A <a@x.io>", "2026-01-02T00:00:00Z", "two");
-        var range = Sign.Range(f.Git, b, c2);
-        Assert.Empty(Sign.OnARemote(f.Git, b, c2, range));
-        f.Git.Out("update-ref", "refs/remotes/fork/feature", c1);
-        Assert.Equal([c1], Sign.OnARemote(f.Git, b, c2, range));
+        var range = new BranchSigner(f.Git).ListRange(b, c2);
+        Assert.Empty(new BranchSigner(f.Git).FindOnARemote(b, c2, range));
+        f.Git.ReadOutput("update-ref", "refs/remotes/fork/feature", c1);
+        Assert.Equal([c1], new BranchSigner(f.Git).FindOnARemote(b, c2, range));
     }
 
     [Fact]
@@ -317,12 +317,12 @@ public class SignTests
         var b = f.Head();
         var c1 = f.Commit("a", "1", "A <a@x.io>", "2026-01-01T00:00:00Z", "one");
         var signedHead = f.Rewrite([c1])[c1];
-        f.Git.Out("update-ref", "refs/heads/main", signedHead);
+        f.Git.ReadOutput("update-ref", "refs/heads/main", signedHead);
         Tests.Git.Run(f.Repo, "reset", "-q", "--hard", signedHead);
         var c2 = f.Commit("a", "2", "A <a@x.io>", "2026-01-02T00:00:00Z", "two");
 
-        var range = Sign.Range(f.Git, b, c2);
-        Assert.Equal(1, Sign.CountUnsigned(f.Git, range));
+        var range = new BranchSigner(f.Git).ListRange(b, c2);
+        Assert.Equal(1, new SignatureVerifier(f.Git).CountUnsigned(range));
         var map = f.Rewrite(range);
         Assert.Equal(signedHead, map[signedHead]);
         Assert.Equal([signedHead], f.Obj(map[c2]).Parents);
@@ -332,13 +332,13 @@ public class SignTests
     public void ResolveBase_FallsBackToOriginHead_AndRejectsNonCommits()
     {
         using var f = new Fixture();
-        Assert.Null(Sign.ResolveBase(f.Git, null));
+        Assert.Null(new BranchSigner(f.Git).ResolveBase(null));
         var head = f.Head();
-        f.Git.Out("update-ref", "refs/remotes/origin/main", head);
-        f.Git.Out("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
-        Assert.Equal(("refs/remotes/origin/HEAD", head), Sign.ResolveBase(f.Git, null));
-        Assert.Equal(head, Sign.ResolveBase(f.Git, "HEAD")!.Value.Commit);
-        Assert.Throws<PenException>(() => Sign.ResolveBase(f.Git, "no-such-ref"));
+        f.Git.ReadOutput("update-ref", "refs/remotes/origin/main", head);
+        f.Git.ReadOutput("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+        Assert.Equal(new ResolvedBase("refs/remotes/origin/HEAD", head), new BranchSigner(f.Git).ResolveBase(null));
+        Assert.Equal(head, new BranchSigner(f.Git).ResolveBase("HEAD")!.Commit);
+        Assert.Throws<PenException>(() => new BranchSigner(f.Git).ResolveBase("no-such-ref"));
     }
 
     [Fact]
@@ -357,12 +357,12 @@ public class SignTests
     }
     private static readonly string[] Armors = ["SSH SIGNATURE", "PGP SIGNATURE", "SIGNED MESSAGE"];
 
-    /// <summary>Sets the branch's base here, so <see cref="Sign.SignBranch"/> and the reminder have a range.</summary>
+    /// <summary>Sets the branch's base here, so <see cref="BranchSigner.Sign"/> and the reminder have a range.</summary>
     private static string SetBase(Fixture f)
     {
         var b = f.Head();
-        f.Git.Out("update-ref", "refs/remotes/origin/main", b);
-        f.Git.Out("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+        f.Git.ReadOutput("update-ref", "refs/remotes/origin/main", b);
+        f.Git.ReadOutput("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
         return b;
     }
 
@@ -375,14 +375,14 @@ public class SignTests
         using var f = new Fixture();
         var b = SetBase(f);
         var forged = f.Forged(armor);
-        Assert.Empty(Sign.Verified(f.Git, [forged]));
+        Assert.Empty(new SignatureVerifier(f.Git).FindVerified([forged]));
 
-        Sign.SignBranch(f.Git, null);
+        new BranchSigner(f.Git).Sign(null);
 
         var head = f.Head();
         Assert.NotEqual(forged, head);
         Assert.Equal([b], f.Obj(head).Parents);
-        Assert.Equal([head], Sign.Verified(f.Git, [head]));
+        Assert.Equal([head], new SignatureVerifier(f.Git).FindVerified([head]));
     }
 
     [Fact]
@@ -392,7 +392,7 @@ public class SignTests
         SetBase(f);
         var valid = f.SignedBy(f.Key, "valid");
 
-        Sign.SignBranch(f.Git, null);
+        new BranchSigner(f.Git).Sign(null);
 
         Assert.Equal(valid, f.Head());
     }
@@ -405,16 +405,16 @@ public class SignTests
         var valid = f.SignedBy(f.Key, "valid");
         var forged = f.Forged("SSH SIGNATURE");
         var aboveForged = f.SignedBy(f.Key, "valid, above the forged one");
-        Assert.Equal(new HashSet<string> { valid, aboveForged }, Sign.Verified(f.Git, [valid, forged, aboveForged]));
+        Assert.Equal(new HashSet<string> { valid, aboveForged }, new SignatureVerifier(f.Git).FindVerified([valid, forged, aboveForged]));
 
-        Sign.SignBranch(f.Git, null);
+        new BranchSigner(f.Git).Sign(null);
 
         var head = f.Head();
         Assert.NotEqual(aboveForged, head);
         var newForged = f.Obj(head).Parents.Single();
         Assert.NotEqual(forged, newForged);
         Assert.Equal([valid], f.Obj(newForged).Parents);
-        Assert.Equal(2, Sign.Verified(f.Git, [head, newForged]).Count);
+        Assert.Equal(2, new SignatureVerifier(f.Git).FindVerified([head, newForged]).Count);
     }
 
     /// <summary>The repo's own config trusts the agent's key, set directly, through an include or in config.worktree.</summary>
@@ -442,13 +442,13 @@ public class SignTests
             Tests.Git.Run(f.Repo, "config", "--worktree", "gpg.ssh.allowedSignersFile", agentSigners);
         }
         var forged = f.SignedBy(f.AgentKey, "signed by the agent");
-        Assert.Equal("G", f.Git.Out("log", "-1", "--format=%G?", forged)); // what trusting the repo's config would say
+        Assert.Equal("G", f.Git.ReadOutput("log", "-1", "--format=%G?", forged)); // what trusting the repo's config would say
 
-        Assert.Empty(Sign.Verified(f.Git, [forged]));
-        Sign.SignBranch(f.Git, null);
+        Assert.Empty(new SignatureVerifier(f.Git).FindVerified([forged]));
+        new BranchSigner(f.Git).Sign(null);
 
         Assert.NotEqual(forged, f.Head());
-        Assert.Equal([f.Head()], Sign.Verified(f.Git, [f.Head()]));
+        Assert.Equal([f.Head()], new SignatureVerifier(f.Git).FindVerified([f.Head()]));
     }
 
     /// <summary>pen sign doesn't quarantine a config.worktree (it has no record of a start), so what it runs must not take its settings.</summary>
@@ -465,7 +465,7 @@ public class SignTests
         var planted = Path.Combine(f.Repo, ".git", "config.worktree");
         File.WriteAllText(planted, $"[core]\n\tfsmonitor = {hook}\n");
 
-        Sign.SignBranch(f.Git, null);
+        new BranchSigner(f.Git).Sign(null);
 
         Assert.False(File.Exists(marker), "the planted fsmonitor ran");
         Assert.True(File.Exists(planted));
@@ -477,11 +477,11 @@ public class SignTests
         using var f = new Fixture(trustKey: false);
         File.WriteAllText(Path.Combine(f.Repo, "signers"), "agent@example.invalid " + File.ReadAllText(f.AgentKey + ".pub"));
         var forged = f.SignedBy(f.AgentKey, "signed by the agent");
-        Assert.Empty(Sign.Verified(f.Git, [forged]));
+        Assert.Empty(new SignatureVerifier(f.Git).FindVerified([forged]));
 
         f.Global("gpg.ssh.allowedSignersFile", "signers");
-        Assert.Equal("G", f.Git.Out("log", "-1", "--format=%G?", forged)); // what git makes of that path
-        Assert.Empty(Sign.Verified(f.Git, [forged]));
+        Assert.Equal("G", f.Git.ReadOutput("log", "-1", "--format=%G?", forged)); // what git makes of that path
+        Assert.Empty(new SignatureVerifier(f.Git).FindVerified([forged]));
     }
 
     /// <summary>To verify, git picks the program by the signature's armor, whatever gpg.format says.</summary>
@@ -508,14 +508,14 @@ public class SignTests
         Tests.Git.Run(f.Repo, "config", "gpg.format", "x509");
         Tests.Git.Run(f.Repo, "config", "gpg.ssh.allowedSignersFile", Path.Combine(f.T.Path, "allowed_signers"));
         var forged = f.Forged(armor);
-        f.Git.Out("log", "-1", "--format=%G?", forged);
+        f.Git.ReadOutput("log", "-1", "--format=%G?", forged);
         Assert.True(File.Exists(marker)); // git runs it, left to the repo's config
         File.Delete(marker);
 
-        Assert.Empty(Sign.Verified(f.Git, [forged]));
+        Assert.Empty(new SignatureVerifier(f.Git).FindVerified([forged]));
         Assert.False(File.Exists(marker));
 
-        Sign.SignBranch(f.Git, null);
+        new BranchSigner(f.Git).Sign(null);
         Assert.False(File.Exists(marker));
         Assert.NotEqual(forged, f.Head());
     }
@@ -532,7 +532,7 @@ public class SignTests
         Tests.Git.Run(f.Repo, "config", "gpg.ssh.defaultKeyCommand", evil);
         foreach (var armor in Armors) f.Forged(armor, armor);
 
-        Sign.SignBranch(f.Git, null);
+        new BranchSigner(f.Git).Sign(null);
 
         Assert.False(File.Exists(marker));
     }
@@ -548,8 +548,8 @@ public class SignTests
         Tests.Git.Run(f.Repo, "config", "core.useReplaceRefs", "true");
         Assert.Equal("G", Tests.Git.Run(f.Repo, "-c", "gpg.ssh.allowedSignersFile=" + f.Signers, "log", "-1", "--format=%G?", forged).Trim());
 
-        Assert.DoesNotContain(forged, Sign.Verified(f.Git, [forged]));
-        Sign.SignBranch(f.Git, null);
+        Assert.DoesNotContain(forged, new SignatureVerifier(f.Git).FindVerified([forged]));
+        new BranchSigner(f.Git).Sign(null);
 
         var head = f.Head();
         Assert.NotEqual(forged, head);
@@ -565,7 +565,7 @@ public class SignTests
         Tests.Git.Run(f.Repo, "config", "log.showSignature", "true");
         Tests.Git.Run(f.Repo, "config", "gpg.minTrustLevel", "ultimate");
         Tests.Git.Run(f.Repo, "config", "gpg.ssh.revocationFile", Path.Combine(f.T.Path, "no-such-file"));
-        Assert.Equal([valid], Sign.Verified(f.Git, [valid]));
+        Assert.Equal([valid], new SignatureVerifier(f.Git).FindVerified([valid]));
     }
 
     [Fact]
@@ -573,18 +573,18 @@ public class SignTests
     {
         using var f = new Fixture();
         var valid = f.SignedBy(f.Key, "valid");
-        Assert.Equal([valid], Sign.Verified(f.Git, [valid]));
+        Assert.Equal([valid], new SignatureVerifier(f.Git).FindVerified([valid]));
 
         f.Global("gpg.minTrustLevel", "ultimate"); // SSH signers only reach "fully"
-        Assert.Empty(Sign.Verified(f.Git, [valid]));
+        Assert.Empty(new SignatureVerifier(f.Git).FindVerified([valid]));
         f.Global("gpg.minTrustLevel", "fully");
-        Assert.Equal([valid], Sign.Verified(f.Git, [valid]));
+        Assert.Equal([valid], new SignatureVerifier(f.Git).FindVerified([valid]));
 
         var krl = Path.Combine(f.T.Path, "krl");
         var psi = new ProcessStartInfo("ssh-keygen", ["-k", "-f", krl, f.Key + ".pub"]) { RedirectStandardOutput = true, RedirectStandardError = true };
         Assert.Equal(0, Process.RunAndCaptureText(psi).ExitStatus.ExitCode);
         f.Global("gpg.ssh.revocationFile", krl);
-        Assert.Empty(Sign.Verified(f.Git, [valid]));
+        Assert.Empty(new SignatureVerifier(f.Git).FindVerified([valid]));
     }
 
     [Fact]
@@ -593,11 +593,11 @@ public class SignTests
         using var f = new Fixture();
         SetBase(f);
         f.Global("commit.gpgsign", "true");
-        Assert.Null(Sign.Reminder(f.Git));
+        Assert.Null(new BranchSigner(f.Git).FormatReminder());
         f.SignedBy(f.Key, "valid");
-        Assert.Null(Sign.Reminder(f.Git));
+        Assert.Null(new BranchSigner(f.Git).FormatReminder());
         f.Forged("SSH SIGNATURE");
-        Assert.Equal("1 unsigned commit; review, then run pen sign", Sign.Reminder(f.Git));
+        Assert.Equal("1 unsigned commit; review, then run pen sign", new BranchSigner(f.Git).FormatReminder());
     }
 
     [Fact]
@@ -607,19 +607,19 @@ public class SignTests
         SetBase(f);
         var first = f.Commit("a", "1", "A <a@x.io>", "2026-01-01T00:00:00Z", "one");
 
-        Sign.SignBranch(f.Git, null);
+        new BranchSigner(f.Git).Sign(null);
         var signed = f.Head();
         Assert.NotEqual(first, signed);
         Assert.True(f.HasSignatureHeader(signed));
-        var hint = Sign.VerificationHint(f.Git, [signed]);
+        var hint = new SignatureVerifier(f.Git).FormatHint([signed]);
         Assert.Contains("re-sign", hint);
         Assert.Contains("gpg.ssh.allowedSignersFile isn't set", hint);
         Assert.Contains("git config --global gpg.ssh.allowedSignersFile", hint);
 
-        Assert.Empty(Sign.Verified(f.Git, [signed])); // so the next pen sign re-signs it
+        Assert.Empty(new SignatureVerifier(f.Git).FindVerified([signed])); // so the next pen sign re-signs it
 
         f.Global("gpg.ssh.allowedSignersFile", f.Signers);
-        Assert.Null(Sign.VerificationHint(f.Git, [f.Head()]));
+        Assert.Null(new SignatureVerifier(f.Git).FormatHint([f.Head()]));
     }
 
     [Fact]
@@ -629,12 +629,12 @@ public class SignTests
         var signed = f.SignedBy(f.Key, "signed");
 
         f.Global("gpg.ssh.allowedSignersFile", "signers");
-        Assert.Contains("relative path", Sign.VerificationHint(f.Git, [signed]));
+        Assert.Contains("relative path", new SignatureVerifier(f.Git).FormatHint([signed]));
 
         var other = Path.Combine(f.T.Path, "other_signers");
         File.WriteAllText(other, "someone@example.invalid " + File.ReadAllText(f.AgentKey + ".pub"));
         f.Global("gpg.ssh.allowedSignersFile", other);
-        var hint = Sign.VerificationHint(f.Git, [signed]);
+        var hint = new SignatureVerifier(f.Git).FormatHint([signed]);
         Assert.Contains($"may not be listed in \"{other}\"", hint);
         Assert.Contains(">> \"$(git config --global --type=path gpg.ssh.allowedSignersFile)\"", hint);
     }
@@ -643,7 +643,7 @@ public class SignTests
     public void TheHintDoesntThrow_OnAnObjectGitCantRead()
     {
         using var f = new Fixture(trustKey: false);
-        Assert.Null(Sign.VerificationHint(f.Git, [new string('1', 40)]));
+        Assert.Null(new SignatureVerifier(f.Git).FormatHint([new string('1', 40)]));
     }
 
     public static TheoryData<string> KeyForms() => new("private", "public", "key::", "ssh-");
@@ -665,9 +665,9 @@ public class SignTests
         f.Global("user.email", "signer@example.invalid");
         f.Global("user.signingkey", KeyInForm(f, form));
 
-        f.RunHintCommands(Sign.VerificationHint(f.Git, [signed])!);
+        f.RunHintCommands(new SignatureVerifier(f.Git).FormatHint([signed])!);
 
-        Assert.Equal([signed], Sign.Verified(f.Git, [signed]));
+        Assert.Equal([signed], new SignatureVerifier(f.Git).FindVerified([signed]));
     }
 
     /// <summary>A path git expands, which a shell wouldn't in double quotes.</summary>
@@ -681,9 +681,9 @@ public class SignTests
         f.Global("gpg.ssh.allowedSignersFile", "~/signers with space");
         f.Global("user.signingkey", KeyInForm(f, form)); // and no user.email
 
-        f.RunHintCommands(Sign.VerificationHint(f.Git, [signed])!);
+        f.RunHintCommands(new SignatureVerifier(f.Git).FormatHint([signed])!);
 
-        Assert.Equal([signed], Sign.Verified(f.Git, [signed]));
+        Assert.Equal([signed], new SignatureVerifier(f.Git).FindVerified([signed]));
     }
 
     [Fact]
@@ -693,7 +693,7 @@ public class SignTests
         var signed = f.SignedBy(f.Key, "signed");
         Tests.Git.Run(f.T.Path, "config", "--file", f.Env["GIT_CONFIG_GLOBAL"], "--unset", "user.signingkey");
         f.Global("gpg.ssh.defaultKeyCommand", "ssh-add -L");
-        Assert.Contains("<your public key>", Sign.VerificationHint(f.Git, [signed]));
+        Assert.Contains("<your public key>", new SignatureVerifier(f.Git).FormatHint([signed]));
     }
 
     /// <summary>ssh-keygen gives up on these before reading the message, and git dies of the SIGPIPE.</summary>
@@ -706,15 +706,15 @@ public class SignTests
         var valid = f.SignedBy(f.Key, "valid");
         var forged = f.Forged("SSH SIGNATURE", new string('x', 2_000_000));
 
-        Assert.Equal("1 unsigned commit; review, then run pen sign", Sign.Reminder(f.Git));
-        Assert.Equal([valid], Sign.Verified(f.Git, [valid, forged]));
+        Assert.Equal("1 unsigned commit; review, then run pen sign", new BranchSigner(f.Git).FormatReminder());
+        Assert.Equal([valid], new SignatureVerifier(f.Git).FindVerified([valid, forged]));
 
-        Sign.SignBranch(f.Git, null);
+        new BranchSigner(f.Git).Sign(null);
 
         var head = f.Head();
         Assert.NotEqual(forged, head);
         Assert.Equal([valid], f.Obj(head).Parents);
-        Assert.Equal([head], Sign.Verified(f.Git, [head]));
+        Assert.Equal([head], new SignatureVerifier(f.Git).FindVerified([head]));
     }
 
     /// <summary>Headers git itself refuses: its exit code can't tell these from a broken repo.</summary>
@@ -728,9 +728,9 @@ public class SignTests
         var valid = f.SignedBy(f.Key, "valid");
         var forged = f.ForgedHeader(header);
 
-        Assert.Equal([valid], Sign.Verified(f.Git, [valid, forged]));
+        Assert.Equal([valid], new SignatureVerifier(f.Git).FindVerified([valid, forged]));
 
-        Sign.SignBranch(f.Git, null);
+        new BranchSigner(f.Git).Sign(null);
 
         Assert.NotEqual(forged, f.Head());
         Assert.Equal([valid], f.Obj(f.Head()).Parents);
@@ -749,10 +749,10 @@ public class SignTests
         File.Delete(path);
         if (garbled) File.WriteAllText(path, "not a git object");
 
-        var e = Assert.Throws<PenException>(() => Sign.Verified(f.Git, [valid, broken]));
+        var e = Assert.Throws<PenException>(() => new SignatureVerifier(f.Git).FindVerified([valid, broken]));
         Assert.Contains($"can't read commit {broken[..12]}", e.Message);
-        Assert.Null(Sign.Reminder(f.Git)); // advice only: it says nothing, rather than miscounting
-        Assert.Throws<PenException>(() => Sign.SignBranch(f.Git, null));
+        Assert.Null(new BranchSigner(f.Git).FormatReminder()); // advice only: it says nothing, rather than miscounting
+        Assert.Throws<PenException>(() => new BranchSigner(f.Git).Sign(null));
         Assert.Equal(broken, Tests.Git.Run(f.Repo, "rev-parse", "HEAD").Trim());
     }
 
@@ -765,7 +765,7 @@ public class SignTests
         var tree = f.Tree(commit);
         File.Delete(f.ObjectPath(tree));
 
-        var e = Assert.Throws<PenException>(() => Sign.SignBranch(f.Git, null));
+        var e = Assert.Throws<PenException>(() => new BranchSigner(f.Git).Sign(null));
 
         Assert.Contains($"its tree {tree} isn't in this repo", e.Message);
         Assert.Contains($"git cat-file -e {tree}", e.Message);
@@ -780,9 +780,9 @@ public class SignTests
         var valid = f.SignedBy(f.Key, "valid");
         var untrusted = f.SignedBy(f.AgentKey, "good signature, key not trusted"); // U
         var forged = f.Forged("SSH SIGNATURE"); // N or a failed read
-        Assert.Equal("U", f.Git.With(Sign.VerificationConfig(f.Git)).Out("log", "-1", "--format=%G?", untrusted));
+        Assert.Equal("U", f.Git.WithConfig(SignatureConfig.BuildForVerifying(f.Git)).ReadOutput("log", "-1", "--format=%G?", untrusted));
 
-        Assert.Equal([valid], Sign.Verified(f.Git, [valid, untrusted, forged]));
+        Assert.Equal([valid], new SignatureVerifier(f.Git).FindVerified([valid, untrusted, forged]));
     }
 
     [Fact]
@@ -796,7 +796,7 @@ public class SignTests
         Tests.Git.Run(f.Repo, "config", "gpg.ssh.revocationFile", krl);
         Assert.Equal("B", Tests.Git.Run(f.Repo, "-c", "gpg.ssh.program=ssh-keygen", "-c", "gpg.ssh.allowedSignersFile=" + f.Signers, "log", "-1", "--format=%G?", valid).Trim());
 
-        Assert.Equal([valid], Sign.Verified(f.Git, [valid]));
+        Assert.Equal([valid], new SignatureVerifier(f.Git).FindVerified([valid]));
     }
 
     private const string Tree1 = "1111111111111111111111111111111111111111";
@@ -871,7 +871,7 @@ public class SignTests
         var commit = written.Text.Trim();
         Tests.Git.Run(f.Repo, "update-ref", "HEAD", commit);
 
-        var e = Assert.Throws<PenException>(() => Sign.SignBranch(f.Git, null));
+        var e = Assert.Throws<PenException>(() => new BranchSigner(f.Git).Sign(null));
 
         Assert.Equal($"refusing commit {commit[..12]}: its author name isn't valid UTF-8, and pen can't pass that to git unchanged, so it can't be re-created with the same author name", e.Message);
         Assert.Equal(commit, f.Head());
@@ -916,7 +916,7 @@ public class SignTests
         var forged = WriteRaw(f, $"tree {goodTree}\nparent {good}\n{Author}\n{Committer}\n{extra}\n\nreviewed content\n");
         Assert.Equal(goodTree, f.Tree(forged)); // what the user reviews
 
-        var e = Assert.Throws<PenException>(() => Sign.SignBranch(f.Git, null));
+        var e = Assert.Throws<PenException>(() => new BranchSigner(f.Git).Sign(null));
 
         Assert.Contains($"refusing commit {forged[..12]}", e.Message);
         Assert.Equal(forged, f.Head());
@@ -931,10 +931,10 @@ public class SignTests
         using var f = new Fixture();
         var head = f.Commit("a", "1", "A <a@x.io>", "2026-01-01T00:00:00Z", "one");
         var c = f.Obj(head);
-        Sign.MatchesGit(f.Git, [head], new Dictionary<string, CommitObject> { [head] = c });
+        new CommitReader(f.Git).CheckMatchesGit([head], new Dictionary<string, CommitObject> { [head] = c });
 
         var other = wrongTree ? c with { Tree = Tree1 } : c with { Parents = [Tree1] };
-        var e = Assert.Throws<PenException>(() => Sign.MatchesGit(f.Git, [head], new Dictionary<string, CommitObject> { [head] = other }));
+        var e = Assert.Throws<PenException>(() => new CommitReader(f.Git).CheckMatchesGit([head], new Dictionary<string, CommitObject> { [head] = other }));
         Assert.Contains($"refusing commit {head[..12]}", e.Message);
     }
 
@@ -949,8 +949,8 @@ public class SignTests
         File.WriteAllText(Path.Combine(f.Repo, ".git", "info", "grafts"), $"{c2} {b}\n");
         File.WriteAllText(Path.Combine(f.Repo, ".git", "shallow"), $"{c1}\n");
 
-        Assert.Equal([c1], Sign.Read(f.Git, [c2])[c2].Parents);
-        Assert.Equal([b], Sign.Read(f.Git, [c1])[c1].Parents);
+        Assert.Equal([c1], new CommitReader(f.Git).Read([c2])[c2].Parents);
+        Assert.Equal([b], new CommitReader(f.Git).Read([c1])[c1].Parents);
     }
 
     [Fact]
@@ -965,7 +965,7 @@ public class SignTests
         Tests.Git.Run(f.Repo, "-c", "i18n.commitEncoding=ISO-8859-1", "commit", "-q", "-F", message);
         var old = f.Head();
 
-        Sign.SignBranch(f.Git, null);
+        new BranchSigner(f.Git).Sign(null);
 
         var head = f.Head();
         Assert.NotEqual(old, head);
@@ -989,7 +989,7 @@ public class SignTests
         var merge = f.Head();
         Assert.Contains("\nmergetag ", f.Git.Run("cat-file", "commit", merge).Text);
 
-        Sign.SignBranch(f.Git, null);
+        new BranchSigner(f.Git).Sign(null);
 
         var head = f.Head();
         Assert.NotEqual(merge, head);
@@ -1004,7 +1004,7 @@ public class SignTests
         var b = SetBase(f);
         var extra = WriteRaw(f, $"tree {f.Tree("HEAD")}\nparent {b}\n{Author}\n{Committer}\nchange-id abc\n\nmessage\n");
 
-        Sign.SignBranch(f.Git, null);
+        new BranchSigner(f.Git).Sign(null);
 
         Assert.NotEqual(extra, f.Head());
         Assert.Equal(f.Tree(extra), f.Tree("HEAD"));

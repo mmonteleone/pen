@@ -9,5 +9,5 @@ internal sealed record GitIdentity(string? Name, string? Email)
 {
     /// <summary>Reads the identity from the host's global git config.</summary>
     public static GitIdentity ReadFromHost() =>
-        new(HostGit.GlobalConfig("user.name"), HostGit.GlobalConfig("user.email"));
+        new(HostGit.Global.ReadGlobalValue("user.name"), HostGit.Global.ReadGlobalValue("user.email"));
 }

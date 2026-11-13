@@ -129,7 +129,7 @@ public class OutputSanitizingTests
     public void ACommitSubjectIsAField()
     {
         var c = CommitObject.Parse(System.Text.Encoding.UTF8.GetBytes($"tree {new string('1', 40)}\nauthor a <a@b> 1 +0000\ncommitter a <a@b> 1 +0000\n\nsub" + Esc + "[2Jject\n"));
-        var line = Sign.Listing(new string('a', 40), c, verified: false);
+        var line = BranchSigner.FormatListing(new string('a', 40), c, verified: false);
         Assert.Equal("  aaaaaaaaaaaa sub\\x1b[2Jject", line);
     }
 
