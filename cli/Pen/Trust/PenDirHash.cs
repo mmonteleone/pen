@@ -162,7 +162,7 @@ internal sealed class PenDirHash : IDisposable
         {
             // Left out of the hash, so it must really be the file that's meant:
             // a directory or a link by this name would be an unhashed way in.
-            HashFile(relativePath, hashed: false);
+            CheckUnhashedFile(relativePath);
         }
         else if (entry.LinkTarget is { } target)
         {
@@ -179,16 +179,26 @@ internal sealed class PenDirHash : IDisposable
         }
         else
         {
-            HashFile(relativePath, hashed: true);
+            HashFile(relativePath);
         }
     }
 
+    /// <summary>Hashes, and copies, the regular file at <paramref name="relativePath"/>.</summary>
+    /// <exception cref="PenException">When it isn't a regular file, is over the limit or changes meanwhile.</exception>
+    private void HashFile(string relativePath) => ReadFile(relativePath, hashAndCopy: true);
+
     /// <summary>
-    /// Reads the regular file at <paramref name="relativePath"/>, hashing and copying it when
-    /// <paramref name="hashed"/>.
+    /// Reads the regular file at <paramref name="relativePath"/> through, neither hashing nor copying it.
     /// </summary>
     /// <exception cref="PenException">When it isn't a regular file, is over the limit or changes meanwhile.</exception>
-    private void HashFile(string relativePath, bool hashed)
+    private void CheckUnhashedFile(string relativePath) => ReadFile(relativePath, hashAndCopy: false);
+
+    /// <summary>
+    /// Reads the regular file at <paramref name="relativePath"/>, hashing and copying it when
+    /// <paramref name="hashAndCopy"/>.
+    /// </summary>
+    /// <exception cref="PenException">When it isn't a regular file, is over the limit or changes meanwhile.</exception>
+    private void ReadFile(string relativePath, bool hashAndCopy)
     {
         using var file = Native.OpenRegularNoFollow(GetFullPath(relativePath))
             ?? throw new PenException($"{Describe(relativePath)} isn't a regular file pen can read");
@@ -198,19 +208,19 @@ internal sealed class PenDirHash : IDisposable
         _bytes += length;
 
         var mode = File.GetUnixFileMode(file);
-        if (hashed)
+        if (hashAndCopy)
         {
             AppendHead(FileEntry, mode, relativePath);
             AppendLength(length);
         }
-        using var copy = _copy == null || !hashed ? null : CreateCopyFile(relativePath);
+        using var copy = _copy == null || !hashAndCopy ? null : CreateCopyFile(relativePath);
         var buffer = new byte[64 * 1024];
         long offset = 0;
         for (int read; (read = RandomAccess.Read(file, buffer, offset)) > 0; offset += read)
         {
             if (read > length - offset)
                 throw new PenException($"{Describe(relativePath)} changed while pen read it");
-            if (hashed)
+            if (hashAndCopy)
                 _hash.AppendData(buffer, 0, read);
             copy?.Write(buffer, 0, read);
         }

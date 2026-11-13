@@ -37,7 +37,8 @@ internal sealed record CommitObject
         }
     }
 
-    /// <summary>Parses the raw bytes of <c>git cat-file commit</c>, refusing any header shape git doesn't write.
+    /// <summary>
+    /// Parses the raw bytes of <c>git cat-file commit</c>, refusing any header shape git doesn't write.
     /// </summary>
     /// <returns>The parsed commit.</returns>
     /// <exception cref="PenException">A header git doesn't write; the message says what the commit has.</exception>
@@ -101,7 +102,8 @@ internal sealed record CommitObject
         return parents;
     }
 
-    /// <summary>Checks the headers after the committer, refusing a core header or a repeat git doesn't write.
+    /// <summary>
+    /// Checks the headers after the committer, refusing a core header or a repeat git doesn't write.
     /// </summary>
     /// <returns>The encoding header's value, or null if there's none.</returns>
     private static string? ReadExtraHeaders(IEnumerable<string> lines)

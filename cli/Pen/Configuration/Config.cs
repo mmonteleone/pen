@@ -119,7 +119,10 @@ internal sealed partial class Config
         }
     }
 
-    /// <summary>Parses config.toml text. <paramref name="displayPath"/> names the file in errors.</summary>
+    /// <summary>Parses config.toml text.</summary>
+    /// <param name="text">The TOML text.</param>
+    /// <param name="displayPath">Names the file in errors.</param>
+    /// <param name="kind">Which keys the file may hold.</param>
     /// <remarks>Keys are checked in file order, each fully before the next, so the first problem is reported.</remarks>
     public static Config Parse(string text, string displayPath, ConfigKind kind)
     {

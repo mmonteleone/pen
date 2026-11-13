@@ -33,7 +33,7 @@ internal static class Out
     /// Checks whether a terminal could act on this character: C0, DEL, C1, or one that reorders or
     /// breaks lines of text.
     /// </summary>
-    internal static bool IsControl(char c) => c is < ' ' or (>= '\x7f' and <= '\x9f')
+    internal static bool IsControl(char character) => character is < ' ' or (>= '\x7f' and <= '\x9f')
         or '\u061c' or '\u200e' or '\u200f' or (>= '\u2028' and <= '\u202e') or (>= '\u2066' and <= '\u2069');
 
     /// <summary>Removes a whole message's control characters. Its own newlines and tabs stay.</summary>
@@ -42,10 +42,10 @@ internal static class Out
         if (!text.Any(c => IsControl(c) && c is not ('\n' or '\t')))
             return text;
         var builder = new StringBuilder(text.Length);
-        foreach (var c in text)
+        foreach (var character in text)
         {
-            if (!IsControl(c) || c is '\n' or '\t')
-                builder.Append(c);
+            if (!IsControl(character) || character is '\n' or '\t')
+                builder.Append(character);
         }
 
         return builder.ToString();
@@ -64,20 +64,20 @@ internal static class Out
         if (!value.Any(IsControl))
             return value;
         var builder = new StringBuilder(value.Length + 8);
-        foreach (var c in value)
+        foreach (var character in value)
         {
-            if (!IsControl(c))
-                builder.Append(c);
-            else if (c == '\n')
+            if (!IsControl(character))
+                builder.Append(character);
+            else if (character == '\n')
                 builder.Append("\\n");
-            else if (c == '\t')
+            else if (character == '\t')
                 builder.Append("\\t");
-            else if (c == '\r')
+            else if (character == '\r')
                 builder.Append("\\r");
-            else if (c <= '\xff')
-                builder.Append("\\x").Append(((int)c).ToString("x2", CultureInfo.InvariantCulture));
+            else if (character <= '\xff')
+                builder.Append("\\x").Append(((int)character).ToString("x2", CultureInfo.InvariantCulture));
             else
-                builder.Append("\\u").Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
+                builder.Append("\\u").Append(((int)character).ToString("x4", CultureInfo.InvariantCulture));
         }
         return builder.ToString();
     }
@@ -87,11 +87,11 @@ internal static class Out
     /// The AOT build (UseSystemResourceKeys) has framework exceptions' messages as raw resource
     /// keys, so only Pen's own are shown as they are.
     /// </remarks>
-    public static string Describe(Exception e) => e switch
+    public static string Describe(Exception exception) => exception switch
     {
-        PenException => e.Message,
+        PenException => exception.Message,
         UnauthorizedAccessException denied => DescribePermissionDenied(denied),
-        _ => e.GetType().Name,
+        _ => exception.GetType().Name,
     };
 
     /// <summary>Describes a permission error for the user: the path, when it names one.</summary>
@@ -99,12 +99,12 @@ internal static class Out
     /// The exception's own text can't be shown, since the AOT build (UseSystemResourceKeys)
     /// has it as "UnauthorizedAccess_IODenied_Path, /the/path".
     /// </remarks>
-    public static string DescribePermissionDenied(UnauthorizedAccessException e)
+    public static string DescribePermissionDenied(UnauthorizedAccessException exception)
     {
-        var pathStart = e.Message.IndexOf('/', StringComparison.Ordinal);
+        var pathStart = exception.Message.IndexOf('/', StringComparison.Ordinal);
         if (pathStart < 0)
             return "permission denied";
-        var path = e.Message[pathStart..].Replace("' is denied.", "", StringComparison.Ordinal);
+        var path = exception.Message[pathStart..].Replace("' is denied.", "", StringComparison.Ordinal);
         return $"permission denied: {Field(path)}";
     }
 

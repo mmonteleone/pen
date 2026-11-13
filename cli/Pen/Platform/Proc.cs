@@ -75,13 +75,13 @@ internal static class Proc
         {
             return start();
         }
-        catch (Win32Exception e) when (e.NativeErrorCode == 2) // ENOENT
+        catch (Win32Exception exception) when (exception.NativeErrorCode == 2) // ENOENT
         {
             throw new PenException($"{file} not found: is it installed and on PATH?");
         }
-        catch (Win32Exception e)
+        catch (Win32Exception exception)
         {
-            throw new PenException($"can't run {file}: {e.Message}");
+            throw new PenException($"can't run {file}: {exception.Message}");
         }
     }
 }

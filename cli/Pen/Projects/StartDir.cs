@@ -34,7 +34,7 @@ internal static class StartDir
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             Environment.CurrentDirectory = host.StateRoot;
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             Environment.CurrentDirectory = "/";
         }
@@ -48,7 +48,7 @@ internal static class StartDir
         {
             return Environment.CurrentDirectory;
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return null;
         }

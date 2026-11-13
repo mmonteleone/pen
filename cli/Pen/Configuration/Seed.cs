@@ -4,11 +4,11 @@ using Pen.Platform;
 
 namespace Pen.Configuration;
 
-/// <summary>
-/// The home seed, ~/.config/pen/home/: sandbox-wide agent config laid out like
-/// $HOME, mounted read-only at /etc/pen/seed and copied into each project's
+/// <summary>Creates the home seed, ~/.config/pen/home/: sandbox-wide agent config laid out like $HOME.</summary>
+/// <remarks>
+/// It's mounted read-only at /etc/pen/seed and copied into each project's
 /// home by sync-seed.sh. See docs/usage.md's agent config section for ownership.
-/// </summary>
+/// </remarks>
 internal static class Seed
 {
     private const string Prefix = "templates/home/";

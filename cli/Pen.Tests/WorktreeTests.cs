@@ -350,7 +350,7 @@ public class WorktreeTests
     {
         using var t = new TempDir();
         var (repo, wt, _) = RepoWithWorktree(t);
-        var yaml = SessionCompose.GenerateOverride(RepoGuard.PrepareMounts(wt, "/nonexistent-home"), dindContainer: "x-dind");
+        var yaml = SessionCompose.GenerateOverride(RepoGuard.PrepareMounts(wt, "/nonexistent-home"), readOnlyRoot: false, dindContainer: "x-dind", ports: null);
         var dind = yaml[yaml.IndexOf("\"dind\"", StringComparison.Ordinal)..];
         Assert.Contains($"\"source\": \"{Path.Combine(repo, ".git")}\"", dind);
         Assert.Contains($"\"source\": \"{Path.Combine(wt, ".git")}\"", dind);
@@ -415,9 +415,9 @@ public class WorktreeTests
         var (repo, wt, _) = RepoWithWorktree(t);
         var main = Project.Resolve(repo, t.Host());
         var w = Project.Resolve(wt, t.Host());
-        Assert.Equal($"{main.Key}:latest", Image.GetProjectLayerName(main));
-        Assert.Equal($"{main.Key}-{Project.HashPath(wt)}:latest", Image.GetProjectLayerName(w));
-        Assert.Equal($"{Project.ComputeKey(t.Sub("plain"))}:latest", Image.GetProjectLayerName(Project.Resolve(t.Sub("plain"), t.Host())));
+        Assert.Equal($"{main.Key}:latest", Image.GetProjectLayerName(main, Image.Name));
+        Assert.Equal($"{main.Key}-{Project.HashPath(wt)}:latest", Image.GetProjectLayerName(w, Image.Name));
+        Assert.Equal($"{Project.ComputeKey(t.Sub("plain"))}:latest", Image.GetProjectLayerName(Project.Resolve(t.Sub("plain"), t.Host()), Image.Name));
     }
 
     [Fact]

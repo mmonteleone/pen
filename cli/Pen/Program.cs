@@ -31,19 +31,19 @@ internal static class Program
         {
             return run();
         }
-        catch (PenException e)
+        catch (PenException exception)
         {
-            Out.WriteLine(e.Message);
-            return e.ExitCode;
+            Out.WriteLine(exception.Message);
+            return exception.ExitCode;
         }
-        catch (UnauthorizedAccessException e)
+        catch (UnauthorizedAccessException exception)
         {
-            Out.WriteLine(Out.DescribePermissionDenied(e));
+            Out.WriteLine(Out.DescribePermissionDenied(exception));
             return 1;
         }
-        catch (IOException e)
+        catch (IOException exception)
         {
-            Out.WriteLine(DescribeFileFailure(e));
+            Out.WriteLine(DescribeFileFailure(exception));
             return 1;
         }
     }
@@ -53,8 +53,8 @@ internal static class Program
     /// The exception's own text can't be shown: the AOT build (UseSystemResourceKeys)
     /// has it as a resource key.
     /// </remarks>
-    internal static string DescribeFileFailure(IOException e) =>
-        $"a file operation failed ({e.GetType().Name}): check that the disk has space " +
+    internal static string DescribeFileFailure(IOException exception) =>
+        $"a file operation failed ({exception.GetType().Name}): check that the disk has space " +
             "and the files under the project and ~/.config/pen are usable, then rerun";
 
     /// <summary>Runs the command <paramref name="args"/> ask for.</summary>

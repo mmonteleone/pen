@@ -95,8 +95,8 @@ internal static class Image
     public static string? EnsureProjectLayer(
         HostEnv host,
         Project project,
-        bool noCache = false,
-        string baseImage = Name)
+        string baseImage,
+        bool noCache = false)
     {
         var dockerfile = Path.Combine(project.PenDir, "Dockerfile");
         if (!File.Exists(dockerfile))
@@ -186,7 +186,7 @@ internal static class Image
     /// image's hash.
     /// </returns>
     /// <remarks>The tag keeps tool sets and bases from sharing a project layer.</remarks>
-    public static string GetProjectLayerName(Project project, string baseImage = Name)
+    public static string GetProjectLayerName(Project project, string baseImage)
     {
         var tag = baseImage == Name ? "latest" : baseImage[(baseImage.LastIndexOf(':') + 1)..];
         return project.Dir == project.RepoDir

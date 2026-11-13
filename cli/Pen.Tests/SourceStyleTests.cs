@@ -12,7 +12,7 @@ public class SourceStyleTests
     [Fact]
     public void NoLineInTheCliSourcesIsOverMaxLength()
     {
-        var root = SourceDir();
+        var root = FindSourceDir();
 
         var offenders = new List<string>();
         var files = Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
@@ -29,7 +29,7 @@ public class SourceStyleTests
                 // Lines that start inside a raw string (its text and closing line) are exempt.
                 if (closing == null && line.Length > MaxLineLength)
                     offenders.Add($"{Path.GetRelativePath(root, file)}:{i + 1}");
-                closing = RawStateAfter(line, closing);
+                closing = FindClosingAfter(line, closing);
             }
         }
 
@@ -37,26 +37,29 @@ public class SourceStyleTests
             $"lines over {MaxLineLength} characters in cli/Pen:\n" + string.Join("\n", offenders));
     }
 
-    /// <summary>Whether a line ends inside a raw string literal, given whether it started in one.</summary>
-    private static string? RawStateAfter(string line, string? closing)
+    /// <summary>Finds the raw string literal a line ends inside, given the one it starts inside.</summary>
+    /// <param name="line">The line.</param>
+    /// <param name="closing">The closing quotes of the raw string the line starts inside, or null if none.</param>
+    /// <returns>The closing quotes of the raw string the line ends inside, or null if it ends outside one.</returns>
+    private static string? FindClosingAfter(string line, string? closing)
     {
-        var pos = 0;
-        while (pos < line.Length)
+        var position = 0;
+        while (position < line.Length)
         {
             if (closing != null)
             {
-                var end = line.IndexOf(closing, pos, StringComparison.Ordinal);
+                var end = line.IndexOf(closing, position, StringComparison.Ordinal);
                 if (end < 0)
                     return closing;
-                pos = end + closing.Length;
+                position = end + closing.Length;
                 closing = null;
                 continue;
             }
-            var open = RawDelimiter.Match(line, pos);
+            var open = RawDelimiter.Match(line, position);
             if (!open.Success)
                 return null;
             closing = open.Groups[1].Value;
-            pos = open.Index + open.Length;
+            position = open.Index + open.Length;
         }
         return closing;
     }
@@ -67,8 +70,8 @@ public class SourceStyleTests
         return first is "bin" or "obj";
     }
 
-    /// <summary>cli/Pen, found by walking up from the test assembly (cli/Pen.Tests/bin/…).</summary>
-    private static string SourceDir()
+    /// <summary>Finds cli/Pen by walking up from the test assembly (cli/Pen.Tests/bin/…).</summary>
+    private static string FindSourceDir()
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
         {

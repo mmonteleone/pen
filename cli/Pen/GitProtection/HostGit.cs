@@ -13,7 +13,7 @@ namespace Pen.GitProtection;
 /// </remarks>
 internal sealed class HostGit
 {
-    /// <summary>The overrides that come first in every call, before any other setting or argument.</summary>
+    /// <summary>The overrides in every call, after any -C &lt;dir&gt; and before every other argument.</summary>
     public static readonly IReadOnlyList<string> Overrides =
         ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "--no-pager"];
 

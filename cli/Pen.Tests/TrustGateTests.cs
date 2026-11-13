@@ -156,7 +156,7 @@ public class TrustGateTests
         using var f = new Fixture(projectToml: "");
         new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded).Run(yes: true, list: false);
         File.WriteAllText(Path.Combine(f.Project.PenDir, "Dockerfile"), "FROM pen:latest\nRUN worse\n");
-        var e = Assert.Throws<PenException>(() => Image.EnsureProjectLayer(f.Host, f.Project));
+        var e = Assert.Throws<PenException>(() => Image.EnsureProjectLayer(f.Host, f.Project, baseImage: Image.Name));
         Assert.Contains("isn't what was approved", e.Message);
         Assert.Empty(f.Calls);
     }
@@ -187,7 +187,7 @@ public class TrustGateTests
         using var f = new Fixture(projectToml: "");
         Approve(f);
         var callsBefore = f.Calls.Length;
-        Assert.Equal($"{f.Project.Key}:latest", Image.EnsureProjectLayer(f.Host, f.Project));
+        Assert.Equal($"{f.Project.Key}:latest", Image.EnsureProjectLayer(f.Host, f.Project, baseImage: Image.Name));
         Assert.DoesNotContain("--build-context", Assert.Single(f.Calls.Skip(callsBefore)));
     }
 
@@ -246,7 +246,7 @@ public class TrustGateTests
         Approve(f);
         File.WriteAllText(Path.Combine(f.T.Path, "swap-in"), "FROM pen:latest\nRUN worse\n");
 
-        Assert.NotNull(Image.EnsureProjectLayer(f.Host, f.Project));
+        Assert.NotNull(Image.EnsureProjectLayer(f.Host, f.Project, baseImage: Image.Name));
 
         Assert.Contains("worse", File.ReadAllText(Path.Combine(f.Project.PenDir, "Dockerfile"))); // it did swap
         Assert.Equal(Approved, f.Seen("seen-context/Dockerfile"));
@@ -284,7 +284,7 @@ public class TrustGateTests
         {
             var seen = Path.Combine(f.T.Path, "seen-context");
             if (Directory.Exists(seen)) Directory.Delete(seen, recursive: true);
-            try { Image.EnsureProjectLayer(f.Host, f.Project); }
+            try { Image.EnsureProjectLayer(f.Host, f.Project, baseImage: Image.Name); }
             catch (PenException) { continue; } // refused: fine
             built.Add(f.Seen("seen-context/Dockerfile"));
         }
@@ -300,7 +300,7 @@ public class TrustGateTests
         using var f = new Fixture(projectToml: "");
         Approve(f);
         File.CreateSymbolicLink(Path.Combine(f.Project.PenDir, "out"), "/etc/passwd");
-        var e = Assert.Throws<PenException>(() => Image.EnsureProjectLayer(f.Host, f.Project));
+        var e = Assert.Throws<PenException>(() => Image.EnsureProjectLayer(f.Host, f.Project, baseImage: Image.Name));
         Assert.Contains("can't build from .pen/", e.Message);
         Assert.Empty(f.Calls);
     }
@@ -316,7 +316,7 @@ public class TrustGateTests
         File.CreateSymbolicLink(Path.Combine(f.Project.PenDir, "link"), "setup.sh");
         Approve(f);
 
-        Assert.NotNull(Image.EnsureProjectLayer(f.Host, f.Project));
+        Assert.NotNull(Image.EnsureProjectLayer(f.Host, f.Project, baseImage: Image.Name));
 
         var context = f.Seen("context-path");
         Assert.StartsWith(f.Host.GetRuntimeDir(f.Project.Key) + "/", context);
@@ -341,7 +341,7 @@ public class TrustGateTests
 
             """);
         Approve(f);
-        Assert.Throws<PenException>(() => Image.EnsureProjectLayer(f.Host, f.Project));
+        Assert.Throws<PenException>(() => Image.EnsureProjectLayer(f.Host, f.Project, baseImage: Image.Name));
         Assert.False(Path.Exists(f.Seen("context-path")));
     }
 
@@ -362,7 +362,7 @@ public class TrustGateTests
         using var f = new Fixture(projectToml: "");
         StaleContext(f);
         Approve(f);
-        Assert.NotNull(Image.EnsureProjectLayer(f.Host, f.Project));
+        Assert.NotNull(Image.EnsureProjectLayer(f.Host, f.Project, baseImage: Image.Name));
         Assert.False(Path.Exists(Path.Combine(f.T.Path, "seen-context", "ro")));
     }
 
@@ -384,7 +384,7 @@ public class TrustGateTests
         Approve(f);
         var lockFile = Path.Combine(f.Host.GetRuntimeDir(f.Project.Key), "layer-" + Project.HashPath(f.Project.Dir) + ".lock");
         var held = FileLock.TryTake(lockFile, exclusive: true)!;
-        var build = Task.Factory.StartNew(() => Image.EnsureProjectLayer(f.Host, f.Project), TaskCreationOptions.LongRunning);
+        var build = Task.Factory.StartNew(() => Image.EnsureProjectLayer(f.Host, f.Project, baseImage: Image.Name), TaskCreationOptions.LongRunning);
         await Task.Delay(TimeSpan.FromMilliseconds(500), TestContext.Current.CancellationToken);
         Assert.False(build.IsCompleted);
         Assert.Empty(f.Calls);
@@ -445,7 +445,7 @@ public class TrustGateTests
 
         // The evil file isn't approved: it's asked about again, and doesn't build.
         Assert.Contains(".pen/Dockerfile", Assert.Throws<PenException>(() => f.Run(NoTerminal)).Message);
-        Assert.Contains("isn't what was approved", Assert.Throws<PenException>(() => Image.EnsureProjectLayer(f.Host, f.Project)).Message);
+        Assert.Contains("isn't what was approved", Assert.Throws<PenException>(() => Image.EnsureProjectLayer(f.Host, f.Project, baseImage: Image.Name)).Message);
         Assert.Empty(f.Calls);
 
         // Swapped back, the approved bytes need no prompt.

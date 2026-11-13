@@ -33,9 +33,9 @@ internal static class SessionCompose
     /// </remarks>
     public static string GenerateOverride(
         IReadOnlyList<Mount> mounts,
-        bool readOnlyRoot = false,
-        string? dindContainer = null,
-        PortForward? ports = null)
+        bool readOnlyRoot,
+        string? dindContainer,
+        PortForward? ports)
     {
         if (ports is { Ports.Count: 0 })
             ports = null;

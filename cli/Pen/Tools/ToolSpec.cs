@@ -102,7 +102,7 @@ internal readonly partial record struct ToolSpec(string Name, string Version)
     }
 
     /// <summary>Checks whether <paramref name="version"/> has only characters any version may have.</summary>
-    /// <remarks>It holds whatever the recipe's own regex allows.</remarks>
+    /// <remarks>A version must pass this fixed check as well as the recipe's own regex, whatever that allows.</remarks>
     internal static bool IsVersionSyntax(string version) => VersionSyntaxRegex().IsMatch(version);
 
     [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}\z")]

@@ -68,9 +68,9 @@ internal sealed class UpgradeCommand(HostEnv host, Config user, RecipeCatalog ca
         {
             context = ProjectContext.Load(host, project, user);
         }
-        catch (PenException e)
+        catch (PenException exception)
         {
-            Out.WriteLine($"skipping this project's tools: {e.Message}");
+            Out.WriteLine($"skipping this project's tools: {exception.Message}");
             return user.Tools;
         }
         var store = TrustStore.For(host, project);

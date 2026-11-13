@@ -32,6 +32,7 @@ internal sealed class SessionSignals : IDisposable
                 StopChild();
         }
     }
+
     /// <summary>Sets the name of the agent's container, which a stop removes first.</summary>
     public string? Container { set => _container = value; }
 

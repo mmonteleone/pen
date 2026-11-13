@@ -6,19 +6,21 @@ using Pen.Platform;
 
 namespace Pen.Projects;
 
-/// <summary>
-/// The project Pen runs in: the current directory, by its real path. Its key,
-/// pen-&lt;dir&gt;-&lt;hash&gt;, names the project's volumes, image and runtime dir.
+/// <summary>The project Pen runs in: the current directory, by its real path.</summary>
+/// <remarks>
+/// <para>
+/// Its key, pen-&lt;dir&gt;-&lt;hash&gt;, names the project's volumes, image and runtime dir.
 /// It comes from <see cref="RepoDir"/>, so all worktrees of a repo share one
 /// key (logins, caches, sessions and locks), while each keeps its own
 /// <see cref="Dir"/> (mounted as the project, with its own .pen/).
+/// </para>
 /// <para>
 /// The repo is modeled apart from the dir: <see cref="CommonGitDir"/> is the
 /// git dir holding config, hooks and objects (the dir's own .git, or for a
 /// linked worktree the main checkout's), and <see cref="RepoDir"/> is the main
 /// checkout. For a plain directory both describe the dir itself.
 /// </para>
-/// </summary>
+/// </remarks>
 internal sealed record Project(string Dir, string Key, string? CommonGitDir, string RepoDir)
 {
     /// <summary>The dir's own .git path, which may not exist.</summary>
@@ -85,10 +87,10 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
     {
         var name = Path.GetFileName(realDir.TrimEnd('/')).ToLowerInvariant();
         var builder = new StringBuilder();
-        foreach (var c in name)
+        foreach (var character in name)
         {
-            if (c is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '_' or '-')
-                builder.Append(c);
+            if (character is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '_' or '-')
+                builder.Append(character);
             else if (builder.Length > 0 && builder[^1] != '-')
                 builder.Append('-');
         }
@@ -102,10 +104,12 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
     internal static string HashPath(string realDir) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(realDir)))[..8];
 
-    /// <summary>
-    /// Refuses directories whose read-write mount would hand the agent the host
-    /// user's home, Pen's own config and state, or a repo it can't see the root of.
-    /// </summary>
+    /// <summary>Refuses a directory Pen mustn't run in.</summary>
+    /// <exception cref="PenException"><paramref name="dir"/> is refused.</exception>
+    /// <remarks>
+    /// The project is mounted read-write, so running in such a directory would hand the agent the host user's home,
+    /// Pen's own config and state, or a repo it can't see the root of.
+    /// </remarks>
     internal static void CheckAllowed(string dir, HostEnv host)
     {
         if (dir == "/")
