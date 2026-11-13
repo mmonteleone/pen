@@ -1,4 +1,3 @@
-using Pen.Configuration;
 using Pen.Platform;
 using Pen.Projects;
 
@@ -60,17 +59,27 @@ internal static class HooksPath
         "/Applications/Xcode.app/Contents/Developer/usr/share/git-core/gitconfig",
     ];
 
-    /// <summary>A value the key may have, from <paramref name="File"/>; or, with a <paramref name="Problem"/>, why one can't be known.</summary>
+    /// <summary>
+    /// A value the key may have, from <paramref name="File"/>; or,
+    /// with a <paramref name="Problem"/>, why one can't be known.
+    /// </summary>
     private readonly record struct Candidate(string? Value, string File, string? Problem = null);
 
     private enum Place { Elsewhere, Writable, Unknown }
 
-    public static void WarnIfWritable(Project project, HostEnv host, Action<string> warn, Func<string, string?>? env = null)
+    public static void WarnIfWritable(
+        Project project,
+        HostEnv host,
+        Action<string> warn,
+        Func<string, string?>? env = null)
     {
-        if (Warning(project, host, env ?? Environment.GetEnvironmentVariable) is { } warning) warn(warning);
+        if (Warning(project, host, env ?? Environment.GetEnvironmentVariable) is { } warning)
+            warn(warning);
     }
 
-    /// <summary>The warning for this session, if there's one to give. Never more than one, however many values qualify.</summary>
+    /// <summary>
+    /// The warning for this session, if there's one to give. Never more than one, however many values qualify.
+    /// </summary>
     internal static string? Warning(Project project, HostEnv host, Func<string, string?> env)
     {
         var walk = new Walk(host.Home);
@@ -96,7 +105,8 @@ internal static class HooksPath
 
         var workTree = project.IsWorktree ? null : LastWorkTree(commonEntries);
         bool known = commonEntries != null;
-        var extension = commonEntries?.LastOrDefault(e => e.Section == "extensions" && e.Subsection == null && e.Key == "worktreeconfig").Value;
+        var extension = commonEntries
+            ?.LastOrDefault(e => e.Section == "extensions" && e.Subsection == null && e.Key == "worktreeconfig").Value;
         if (extension != null && GitConfigFile.IsTrue(extension))
         {
             var worktreeFile = Path.Combine(gitDir, "config.worktree");
@@ -115,16 +125,21 @@ internal static class HooksPath
         return Decide(walk.Found, project, host, top, relativeKnown: top != null);
     }
 
-    /// <summary>GIT_CONFIG_COUNT and its keys and values, which outrank every file, in the environment Pen was started from.</summary>
+    /// <summary>
+    /// GIT_CONFIG_COUNT and its keys and values, which outrank every file, in the environment Pen was started from.
+    /// </summary>
     private static void ReadEnvironmentConfig(Func<string, string?> env, Walk walk)
     {
-        if (!int.TryParse(env("GIT_CONFIG_COUNT"), System.Globalization.CultureInfo.InvariantCulture, out int count)) return;
+        if (!int.TryParse(env("GIT_CONFIG_COUNT"), System.Globalization.CultureInfo.InvariantCulture, out int count))
+            return;
         for (int i = 0; i < count && i < RepoGuard.MaxIncludeFiles; i++)
         {
             var key = env($"GIT_CONFIG_KEY_{i}") ?? "";
             var source = $"GIT_CONFIG_KEY_{i}";
-            if (key.Equals("core.hooksPath", StringComparison.OrdinalIgnoreCase)) walk.Set(env($"GIT_CONFIG_VALUE_{i}") ?? "", source);
-            else if (key.StartsWith("include", StringComparison.OrdinalIgnoreCase)) walk.Add(new(null, source, $"it won't follow an include in {source}"));
+            if (key.Equals("core.hooksPath", StringComparison.OrdinalIgnoreCase))
+                walk.Set(env($"GIT_CONFIG_VALUE_{i}") ?? "", source);
+            else if (key.StartsWith("include", StringComparison.OrdinalIgnoreCase))
+                walk.Add(new(null, source, $"it won't follow an include in {source}"));
         }
     }
 
@@ -132,8 +147,15 @@ internal static class HooksPath
     {
         if (!GitConfigFile.IsTrue(env("GIT_CONFIG_NOSYSTEM") ?? ""))
         {
-            if (env("GIT_CONFIG_SYSTEM") is { } system) walk.Read(FromEnv(system, project));
-            else foreach (var file in SystemConfigs) walk.Read(file, conditional: true);
+            if (env("GIT_CONFIG_SYSTEM") is { } system)
+            {
+                walk.Read(FromEnv(system, project));
+            }
+            else
+            {
+                foreach (var file in SystemConfigs)
+                    walk.Read(file, conditional: true);
+            }
         }
         if (env("GIT_CONFIG_GLOBAL") is { } global)
         {
@@ -145,7 +167,10 @@ internal static class HooksPath
         walk.Read(Path.Combine(home, ".gitconfig"));
     }
 
-    /// <summary>A config file named by the environment, relative to where git would run. Null for /dev/null and empty, which are no config at all.</summary>
+    /// <summary>
+    /// A config file named by the environment, relative to where git would
+    /// run. Null for /dev/null and empty, which are no config at all.
+    /// </summary>
     private static string? FromEnv(string value, Project project) =>
         value.Length == 0 || value == "/dev/null" ? null : Path.Combine(project.Dir, value);
 
@@ -155,11 +180,19 @@ internal static class HooksPath
 
     private static List<GitConfigFile.Entry>? TryParse(string file)
     {
-        try { return GitConfigFile.ParseFile(file); }
-        catch (PenException) { return null; }
+        try
+        {
+            return GitConfigFile.ParseFile(file);
+        }
+        catch (PenException)
+        {
+            return null;
+        }
     }
 
-    /// <summary>The warning for the most decisive candidate: the last one in reach, otherwise the last that can't be placed.</summary>
+    /// <summary>
+    /// The warning for the most decisive candidate: the last one in reach, otherwise the last that can't be placed.
+    /// </summary>
     private static string? Decide(List<Candidate> found, Project project, HostEnv host, string? top, bool relativeKnown)
     {
         Candidate? unknown = null;
@@ -167,12 +200,22 @@ internal static class HooksPath
         {
             var place = c.Value == null ? Place.Unknown : Locate(c.Value, project, host.Home, top, relativeKnown);
             if (place == Place.Writable)
-                return $"warning: core.hooksPath ({PausedGit.Shown(c.Value!)}, in {Out.Field(host.Display(c.File))}) is inside this {(project.IsWorktree ? "worktree or its repo's git dir" : "project")}: those hooks can be changed from the sandbox, and git on this machine will run them. Check them before running git here";
-            if (place == Place.Unknown) unknown ??= c;
+            {
+                return $"warning: core.hooksPath ({PausedGit.Shown(c.Value!)}, in {Out.Field(host.Display(c.File))}) " +
+                    $"is inside this {(project.IsWorktree ? "worktree or its repo's git dir" : "project")}: those " +
+                    "hooks can be changed from the sandbox, and git on this machine will run them. Check them before " +
+                    "running git here";
+            }
+
+            if (place == Place.Unknown)
+                unknown ??= c;
         }
-        if (unknown is not { } u) return null;
+        if (unknown is not { } u)
+            return null;
         var why = u.Problem ?? $"{PausedGit.Shown(u.Value!)}, in {Out.Field(host.Display(u.File))}";
-        return $"warning: pen can't tell where core.hooksPath leads ({why}): those hooks may be inside this project, where they can be changed from the sandbox, and git on this machine would run them. Check them before running git here";
+        return $"warning: pen can't tell where core.hooksPath leads ({why}): those hooks " +
+            "may be inside this project, where they can be changed from the sandbox, and " +
+            "git on this machine would run them. Check them before running git here";
     }
 
     /// <summary>
@@ -184,18 +227,31 @@ internal static class HooksPath
     private static Place Locate(string raw, Project project, string home, string? top, bool relativeKnown)
     {
         var value = raw.StartsWith(Optional, StringComparison.Ordinal) ? raw[Optional.Length..] : raw;
-        if (value.Contains('\ufffd')) return Place.Unknown;
-        if (value.StartsWith("%(prefix)/", StringComparison.Ordinal)) return Place.Unknown;
-        if (value == "~" || value.StartsWith("~/", StringComparison.Ordinal)) return LocatePath(home + value[1..], project);
-        if (value.StartsWith('~')) return Place.Unknown; // ~user/: Pen doesn't look up other users' homes
-        if (value.Length == 0) return LocatePath("/", project); // git looks for /pre-commit
-        if (Path.IsPathRooted(value)) return LocatePath(value, project);
+        if (value.Contains('\ufffd'))
+            return Place.Unknown;
+        if (value.StartsWith("%(prefix)/", StringComparison.Ordinal))
+            return Place.Unknown;
+        if (value == "~" || value.StartsWith("~/", StringComparison.Ordinal))
+            return LocatePath(home + value[1..], project);
+        if (value.StartsWith('~'))
+            return Place.Unknown; // ~user/: Pen doesn't look up other users' homes
+        if (value.Length == 0)
+            return LocatePath("/", project); // git looks for /pre-commit
+        if (Path.IsPathRooted(value))
+            return LocatePath(value, project);
 
-        var fromTop = !relativeKnown ? Place.Unknown : top == null ? Place.Elsewhere : LocatePath(top + "/" + value, project);
-        if (fromTop == Place.Writable || project.CommonGitDir is not { } common) return fromTop;
+        var fromTop = !relativeKnown ? Place.Unknown
+            : top == null ? Place.Elsewhere
+            : LocatePath(top + "/" + value, project);
+        if (fromTop == Place.Writable || project.CommonGitDir is not { } common)
+            return fromTop;
         // .git/hooks, as a work tree path: the read-only one is the one meant.
         if (top != null && RealPathWalk(top + "/" + value, _ => false, out _) is { } real
-            && RepoGuard.IsInside(Path.Combine(common, "hooks"), real)) return fromTop;
+            && RepoGuard.IsInside(Path.Combine(common, "hooks"), real))
+        {
+            return fromTop;
+        }
+
         var fromGitDir = LocatePath(common + "/" + value, project);
         return fromGitDir == Place.Elsewhere ? fromTop : fromGitDir;
     }
@@ -203,21 +259,29 @@ internal static class HooksPath
     private static Place LocatePath(string path, Project project)
     {
         var real = RealPathWalk(path, p => CanBeReplaced(p, project), out bool replaceable);
-        if (replaceable) return Place.Writable;
-        if (real == null) return Place.Unknown;
+        if (replaceable)
+            return Place.Writable;
+        if (real == null)
+            return Place.Unknown;
         // As written. Differing only by case is a folding file system's same path, which the walk has seen.
         var written = Path.GetFullPath(path);
-        if (!string.Equals(written, real, StringComparison.OrdinalIgnoreCase) && CanBeReplaced(written, project)) return Place.Writable;
+        if (!string.Equals(written, real, StringComparison.OrdinalIgnoreCase) && CanBeReplaced(written, project))
+            return Place.Writable;
         return CanBeReplaced(real, project) ? Place.Writable : Place.Elsewhere;
     }
 
-    /// <summary>Whether the sandbox can change what's at this path: it's below the project dir or git dir, and not in .git/hooks.</summary>
+    /// <summary>
+    /// Whether the sandbox can change what's at this path: it's
+    /// below the project dir or git dir, and not in .git/hooks.
+    /// </summary>
     private static bool CanBeReplaced(string path, Project project)
     {
         if (project.CommonGitDir is { } common)
         {
-            if (path == common || RepoGuard.IsInside(Path.Combine(common, "hooks"), path)) return false;
-            if (RepoGuard.IsInside(common, path)) return true;
+            if (path == common || RepoGuard.IsInside(Path.Combine(common, "hooks"), path))
+                return false;
+            if (RepoGuard.IsInside(common, path))
+                return true;
         }
         return path != project.Dir && RepoGuard.IsInside(project.Dir, path);
     }
@@ -241,13 +305,15 @@ internal static class HooksPath
         {
             while (pending.TryPop(out var name))
             {
-                if (name is "" or ".") continue;
+                if (name is "" or ".")
+                    continue;
                 if (name == "..")
                 {
                     current = Path.GetDirectoryName(current) ?? "/";
                     continue;
                 }
-                if (Directory.Exists(current) && !Native.CanEnter(current)) return null;
+                if (Directory.Exists(current) && !Native.CanEnter(current))
+                    return null;
                 var next = Path.Combine(current, name);
                 var target = new FileInfo(next).LinkTarget;
                 if (target == null)
@@ -257,9 +323,12 @@ internal static class HooksPath
                     continue;
                 }
                 replaceable |= canBeReplaced(Path.Combine(RepoGuard.ResolveExisting(current), name));
-                if (++links > MaxLinks || target.Contains('\ufffd')) return null;
-                if (Path.IsPathRooted(target)) current = "/";
-                foreach (var part in target.Split('/').Reverse()) pending.Push(part);
+                if (++links > MaxLinks || target.Contains('\ufffd'))
+                    return null;
+                if (Path.IsPathRooted(target))
+                    current = "/";
+                foreach (var part in target.Split('/').Reverse())
+                    pending.Push(part);
             }
             return RepoGuard.ResolveExisting(current);
         }
@@ -291,7 +360,8 @@ internal static class HooksPath
 
         private void Read(string? file, bool conditional, int depth)
         {
-            if (file == null) return;
+            if (file == null)
+                return;
             // Each read counts, as a file included twice applies twice: without a
             // limit, includes could fan out exponentially in the depth.
             if (depth > MaxIncludeDepth || ++_files > RepoGuard.MaxIncludeFiles)
@@ -301,7 +371,10 @@ internal static class HooksPath
             }
 
             List<GitConfigFile.Entry> entries;
-            try { entries = GitConfigFile.ParseFile(file); }
+            try
+            {
+                entries = GitConfigFile.ParseFile(file);
+            }
             catch (PenException)
             {
                 Found.Add(new(null, file, $"it can't read the config file {Out.Field(file)}"));
@@ -312,17 +385,24 @@ internal static class HooksPath
             {
                 if (e.Section == "core" && e.Subsection == null && e.Key == "hookspath")
                 {
-                    if (!conditional) Found.Clear();
+                    if (!conditional)
+                        Found.Clear();
                     Found.Add(new(e.Value, file));
                 }
                 else if (e.Key == "path" && e.Value.Length > 0
-                    && ((e.Section == "include" && e.Subsection == null) || (e.Section == "includeif" && e.Subsection != null)))
+                    && ((e.Section == "include" && e.Subsection == null)
+                        || (e.Section == "includeif" && e.Subsection != null)))
                 {
                     var included = IncludePath(e.Value, file);
                     if (included == null)
-                        Found.Add(new(null, file, $"it can't resolve the include {PausedGit.Shown(e.Value)} in {Out.Field(file)}"));
+                    {
+                        Found.Add(new(null, file, "it can't resolve the include " +
+                            $"{PausedGit.Shown(e.Value)} in {Out.Field(file)}"));
+                    }
                     else
+                    {
                         Read(included, conditional || e.Section == "includeif", depth + 1);
+                    }
                 }
             }
         }
@@ -330,9 +410,12 @@ internal static class HooksPath
         /// <summary>The file an include names, or null if Pen can't tell.</summary>
         private string? IncludePath(string value, string from)
         {
-            if (value.Contains('\ufffd') || value.StartsWith("%(prefix)/", StringComparison.Ordinal)) return null;
-            if (value == "~" || value.StartsWith("~/", StringComparison.Ordinal)) return home + value[1..];
-            if (value.StartsWith('~')) return null;
+            if (value.Contains('\ufffd') || value.StartsWith("%(prefix)/", StringComparison.Ordinal))
+                return null;
+            if (value == "~" || value.StartsWith("~/", StringComparison.Ordinal))
+                return home + value[1..];
+            if (value.StartsWith('~'))
+                return null;
             return Path.IsPathRooted(value) ? value : Path.Combine(Path.GetDirectoryName(from)!, value);
         }
     }

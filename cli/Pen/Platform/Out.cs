@@ -19,22 +19,32 @@ internal static class Out
     /// <summary>Text for stdout, as given: no newline is added.</summary>
     public static void Stdout(string text)
     {
-        try { Console.Out.Write(Clean(text)); }
+        try
+        {
+            Console.Out.Write(Clean(text));
+        }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
     }
 
-    /// <summary>Whether a terminal could act on this character: C0, DEL, C1, or one that reorders or breaks lines of text.</summary>
+    /// <summary>
+    /// Whether a terminal could act on this character: C0, DEL, C1, or one that reorders or breaks lines of text.
+    /// </summary>
     internal static bool IsControl(char c) => c is < ' ' or (>= '\x7f' and <= '\x9f')
         or '\u061c' or '\u200e' or '\u200f' or (>= '\u2028' and <= '\u202e') or (>= '\u2066' and <= '\u2069');
 
     /// <summary>A whole message, without its control characters. Its own newlines and tabs stay.</summary>
     internal static string Clean(string text)
     {
-        if (!text.Any(c => IsControl(c) && c is not ('\n' or '\t'))) return text;
+        if (!text.Any(c => IsControl(c) && c is not ('\n' or '\t')))
+            return text;
         var sb = new StringBuilder(text.Length);
         foreach (var c in text)
-            if (!IsControl(c) || c is '\n' or '\t') sb.Append(c);
+        {
+            if (!IsControl(c) || c is '\n' or '\t')
+                sb.Append(c);
+        }
+
         return sb.ToString();
     }
 
@@ -46,16 +56,23 @@ internal static class Out
     /// </summary>
     public static string Field(string value)
     {
-        if (!value.Any(IsControl)) return value;
+        if (!value.Any(IsControl))
+            return value;
         var sb = new StringBuilder(value.Length + 8);
         foreach (var c in value)
         {
-            if (!IsControl(c)) sb.Append(c);
-            else if (c == '\n') sb.Append("\\n");
-            else if (c == '\t') sb.Append("\\t");
-            else if (c == '\r') sb.Append("\\r");
-            else if (c <= '\xff') sb.Append("\\x").Append(((int)c).ToString("x2", CultureInfo.InvariantCulture));
-            else sb.Append("\\u").Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
+            if (!IsControl(c))
+                sb.Append(c);
+            else if (c == '\n')
+                sb.Append("\\n");
+            else if (c == '\t')
+                sb.Append("\\t");
+            else if (c == '\r')
+                sb.Append("\\r");
+            else if (c <= '\xff')
+                sb.Append("\\x").Append(((int)c).ToString("x2", CultureInfo.InvariantCulture));
+            else
+                sb.Append("\\u").Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
         }
         return sb.ToString();
     }
@@ -80,13 +97,18 @@ internal static class Out
     public static string PermissionDenied(UnauthorizedAccessException e)
     {
         var at = e.Message.IndexOf('/', StringComparison.Ordinal);
-        return at < 0 ? "permission denied" : $"permission denied: {Field(e.Message[at..].Replace("' is denied.", "", StringComparison.Ordinal))}";
+        return at < 0 ? "permission denied" : "permission denied: " +
+            $"{Field(e.Message[at..].Replace("' is denied.", "", StringComparison.Ordinal))}";
     }
 
     /// <summary>A question, with the cursor left after it.</summary>
     public static void Prompt(string question)
     {
-        try { Console.Error.Write(Clean(question)); Console.Error.Flush(); }
+        try
+        {
+            Console.Error.Write(Clean(question));
+            Console.Error.Flush();
+        }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
     }
@@ -100,9 +122,16 @@ internal static class Out
     {
         Prompt($"pen: {question} [y/N] ");
         string? answer;
-        try { answer = input.ReadLine(); }
-        catch (IOException) { answer = null; }
-        if (!Native.IsATty(0)) Raw(answer ?? "");
+        try
+        {
+            answer = input.ReadLine();
+        }
+        catch (IOException)
+        {
+            answer = null;
+        }
+        if (!Native.IsATty(0))
+            Raw(answer ?? "");
         return IsYes(answer);
     }
 
@@ -110,7 +139,10 @@ internal static class Out
 
     private static void Write(string text)
     {
-        try { Console.Error.WriteLine(Clean(text)); }
+        try
+        {
+            Console.Error.WriteLine(Clean(text));
+        }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
     }

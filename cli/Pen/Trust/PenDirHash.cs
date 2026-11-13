@@ -75,7 +75,8 @@ internal sealed class PenDirHash : IDisposable
     {
         try
         {
-            if (RepoGuard.IsLink(penDir)) return new(null, ".pen is a symlink");
+            if (RepoGuard.IsLink(penDir))
+                return new(null, ".pen is a symlink");
             using var walk = new PenDirHash(penDir, copy);
             walk._hash.AppendData("pen .pen/ hash 1\n"u8);
             var root = new DirectoryInfo(penDir);
@@ -83,8 +84,12 @@ internal sealed class PenDirHash : IDisposable
             walk.Directory("", root, depth: 0);
             return new(Convert.ToHexStringLower(walk._hash.GetHashAndReset()), null);
         }
-        catch (PenException e) { return new(null, e.Message); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException)
+        catch (PenException e)
+        {
+            return new(null, e.Message);
+        }
+        catch (Exception e)
+            when (e is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException)
         {
             return new(null, "part of .pen/ can't be read");
         }
@@ -94,18 +99,24 @@ internal sealed class PenDirHash : IDisposable
 
     private void Directory(string rel, FileSystemInfo self, int depth)
     {
-        if (depth > MaxDepth) throw new PenException($"{Show(rel)} is nested too deeply");
+        if (depth > MaxDepth)
+            throw new PenException($"{Show(rel)} is nested too deeply");
         var full = Full(rel);
         // Only readdir sees the real bytes; .NET's listing can't name a bad entry.
         if (Native.ListUndecodable(full) is not { Count: 0 })
             throw new PenException($"{Show(rel)} can't be listed, or has a name that isn't valid UTF-8");
         // Writable until its entries are in; its real mode comes last.
-        if (_copy != null) System.IO.Directory.CreateDirectory(CopyOf(rel), UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        if (_copy != null)
+        {
+            System.IO.Directory.CreateDirectory(CopyOf(rel),
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
 
         var entries = new List<FileSystemInfo>();
         foreach (var entry in new DirectoryInfo(full).EnumerateFileSystemInfos("*", Options))
         {
-            if (++_entries > MaxEntries) throw new PenException($".pen/ has over {MaxEntries} files");
+            if (++_entries > MaxEntries)
+                throw new PenException($".pen/ has over {MaxEntries} files");
             entries.Add(entry);
         }
         entries.Sort((a, b) => string.CompareOrdinal(a.Name, b.Name));
@@ -125,7 +136,8 @@ internal sealed class PenDirHash : IDisposable
                 CheckLink(path, target);
                 Head(LinkEntry, 0, path);
                 Frame(Encoding.UTF8.GetBytes(target));
-                if (_copy != null) File.CreateSymbolicLink(CopyOf(path), target);
+                if (_copy != null)
+                    File.CreateSymbolicLink(CopyOf(path), target);
             }
             else if ((entry.Attributes & FileAttributes.Directory) != 0)
             {
@@ -150,7 +162,8 @@ internal sealed class PenDirHash : IDisposable
         using var file = Native.OpenRegularNoFollow(Full(rel))
             ?? throw new PenException($"{Show(rel)} isn't a regular file pen can read");
         var length = RandomAccess.GetLength(file);
-        if (length > MaxBytes - _bytes) throw new PenException($".pen/ is over {MaxBytes / (1024 * 1024)} MiB, at {Show(rel)}");
+        if (length > MaxBytes - _bytes)
+            throw new PenException($".pen/ is over {MaxBytes / (1024 * 1024)} MiB, at {Show(rel)}");
         _bytes += length;
 
         var mode = File.GetUnixFileMode(file);
@@ -169,11 +182,14 @@ internal sealed class PenDirHash : IDisposable
         long offset = 0;
         for (int n; (n = RandomAccess.Read(file, buffer, offset)) > 0; offset += n)
         {
-            if (n > length - offset) throw new PenException($"{Show(rel)} changed while pen read it");
-            if (hashed) _hash.AppendData(buffer, 0, n);
+            if (n > length - offset)
+                throw new PenException($"{Show(rel)} changed while pen read it");
+            if (hashed)
+                _hash.AppendData(buffer, 0, n);
             copy?.Write(buffer, 0, n);
         }
-        if (offset != length) throw new PenException($"{Show(rel)} changed while pen read it");
+        if (offset != length)
+            throw new PenException($"{Show(rel)} changed while pen read it");
         if (copy != null)
         {
             copy.Flush();
@@ -190,26 +206,32 @@ internal sealed class PenDirHash : IDisposable
     /// </summary>
     private void CheckLink(string rel, string target)
     {
-        var refused = new PenException($"{Show(rel)} is a symlink that doesn't lead straight to a file or directory in .pen/");
+        var refused = new PenException($"{Show(rel)} is a symlink that " +
+            "doesn't lead straight to a file or directory in .pen/");
         // U+FFFD: a target that isn't valid UTF-8 can't be hashed for what it is.
-        if (target.Contains('\uFFFD') || target.StartsWith('/')) throw refused;
+        if (target.Contains('\uFFFD') || target.StartsWith('/'))
+            throw refused;
 
         var at = rel.Split('/')[..^1].ToList();
         foreach (var part in target.Split('/', StringSplitOptions.RemoveEmptyEntries))
         {
-            if (part == ".") continue;
+            if (part == ".")
+                continue;
             if (part == "..")
             {
-                if (at.Count == 0) throw refused;
+                if (at.Count == 0)
+                    throw refused;
                 at.RemoveAt(at.Count - 1);
                 continue;
             }
             at.Add(part);
             var path = Full(string.Join('/', at));
-            if (RepoGuard.IsLink(path) || !Path.Exists(path)) throw refused;
+            if (RepoGuard.IsLink(path) || !Path.Exists(path))
+                throw refused;
         }
         // config.toml isn't hashed, so a link to it (ignoring case, for macOS) could change unseen.
-        if (at.Count == 1 && at[0].Equals(Config.FileName, StringComparison.OrdinalIgnoreCase)) throw refused;
+        if (at.Count == 1 && at[0].Equals(Config.FileName, StringComparison.OrdinalIgnoreCase))
+            throw refused;
     }
 
     private string Full(string rel) => rel.Length == 0 ? _root : Path.Combine(_root, rel);

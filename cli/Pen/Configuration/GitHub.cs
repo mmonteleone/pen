@@ -22,7 +22,10 @@ internal static partial class GitHub
         return m.Success ? m.Groups[1].Value : null;
     }
 
-    [GeneratedRegex(@"^(?:(?:https?|ssh|git)://(?:[^@/]+@)?github\.com(?::\d+)?/|(?:[^@/:]+@)?github\.com:/?)([A-Za-z0-9][A-Za-z0-9-]*)/", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(
+        @"^(?:(?:https?|ssh|git)://(?:[^@/]+@)?github\.com(?::\d+)?/"
+        + @"|(?:[^@/:]+@)?github\.com:/?)([A-Za-z0-9][A-Za-z0-9-]*)/",
+        RegexOptions.IgnoreCase)]
     private static partial Regex OwnerRegex();
 
     /// <summary>The owner to use: github_owner from .pen/config.toml, else origin's.</summary>
@@ -32,9 +35,11 @@ internal static partial class GitHub
     /// <summary>The owner in origin's URL, from the repo's git config.</summary>
     public static string? OriginOwner(Project project)
     {
-        if (project.CommonGitDir == null) return null;
+        if (project.CommonGitDir == null)
+            return null;
         var gitConfig = Path.Combine(project.CommonGitDir, "config");
-        if (!File.Exists(gitConfig)) return null;
+        if (!File.Exists(gitConfig))
+            return null;
         var text = Native.ReadRegularFile(gitConfig);
         var url = text == null ? null : OriginUrl(text);
         return url == null ? null : OwnerFromUrl(url);
@@ -47,7 +52,8 @@ internal static partial class GitHub
     /// </summary>
     public static string? TokenFor(string? owner, Config userConfig, string runtimeDir, HostEnv host)
     {
-        if (owner == null) return null;
+        if (owner == null)
+            return null;
         var marker = Path.Combine(runtimeDir, "token-notice");
         if (userConfig.GitHubTokens.TryGetValue(owner.ToLowerInvariant(), out var token))
         {
@@ -56,7 +62,8 @@ internal static partial class GitHub
         }
         if (!File.Exists(marker))
         {
-            Out.Line($"no GitHub token for '{Out.Field(owner)}': add {Out.Field(owner)} = \"github_pat_…\" under [github] in {host.Display(host.UserConfigPath)}");
+            Out.Line($"no GitHub token for '{Out.Field(owner)}': add {Out.Field(owner)} = " +
+                $"\"github_pat_…\" under [github] in {host.Display(host.UserConfigPath)}");
             File.WriteAllText(marker, "");
         }
         return null;

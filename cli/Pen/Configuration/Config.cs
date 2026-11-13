@@ -1,14 +1,12 @@
 using System.Text.RegularExpressions;
-using Tomlyn;
-using Tomlyn.Model;
-using Tomlyn.Parsing;
-using Tomlyn.Serialization;
 using Pen.GitProtection;
 using Pen.Platform;
-using Pen.Projects;
 using Pen.Proxy;
 using Pen.Sessions;
 using Pen.Tools;
+using Tomlyn;
+using Tomlyn.Model;
+using Tomlyn.Parsing;
 
 namespace Pen.Configuration;
 
@@ -34,7 +32,9 @@ internal sealed partial class Config
     public string? GitHubOwner { get; private set; }
     /// <summary>docker = true|false: Docker-in-Docker for every session (project only); null when unset.</summary>
     public bool? Docker { get; private set; }
-    /// <summary>ports = [3000, …]: ports to forward from the host's 127.0.0.1, in file order without duplicates (project only).</summary>
+    /// <summary>
+    /// ports = [3000, …]: ports to forward from the host's 127.0.0.1, in file order without duplicates (project only).
+    /// </summary>
     public List<int> Ports { get; } = [];
     /// <summary>tools = ["name", "name:version", …], validated against the recipes and canonical (both).</summary>
     public IReadOnlyList<ToolSpec> Tools { get; private set; } = [];
@@ -55,23 +55,33 @@ internal sealed partial class Config
     public static Config Load(string dir, string displayDir, ConfigKind kind)
     {
         if (File.Exists(Path.Combine(dir, LegacyName)))
+        {
             throw new PenException(
-                $"{displayDir}/{LegacyName} is pen's old config format, which is no longer read: move its settings to " +
+                $"{displayDir}/{LegacyName} is pen's old config format, " +
+                    "which is no longer read: move its settings to " +
                 $"{displayDir}/{FileName} (see the README), then delete it");
+        }
 
         var path = Path.Combine(dir, FileName);
         var display = $"{displayDir}/{FileName}";
         return ReadText(path, display) is { } text ? Parse(text, display, kind) : new Config();
     }
 
-    /// <summary>A config.toml's text: an in-tree worktree's .pen/ is writable from a session, so it may be a FIFO or huge. Null if there's none.</summary>
+    /// <summary>
+    /// A config.toml's text: an in-tree worktree's .pen/ is writable from
+    /// a session, so it may be a FIFO or huge. Null if there's none.
+    /// </summary>
     internal static string? ReadText(string path, string displayPath)
     {
         try
         {
-            return Native.ReadRegularFile(path) ?? throw new PenException($"{displayPath} isn't a regular file of a reasonable size: remove it, then rerun");
+            return Native.ReadRegularFile(path) ?? throw new PenException(
+                $"{displayPath} isn't a regular file of a reasonable size: remove it, then rerun");
         }
-        catch (FileNotFoundException) { return null; }
+        catch (FileNotFoundException)
+        {
+            return null;
+        }
     }
 
     /// <summary>TOML text as its untyped table. <paramref name="displayPath"/> names the file in errors.</summary>
@@ -121,12 +131,17 @@ internal sealed partial class Config
                 case "ports" when kind == ConfigKind.User:
                     throw BelongsIn(projectFile, " (or use pen --port)");
                 case "allow":
-                    if (value is not TomlArray domains) throw Error("allow must be a list of domains, e.g. allow = [\"example.com\"]");
+                    if (value is not TomlArray domains)
+                        throw Error("allow must be a list of domains, e.g. allow = [\"example.com\"]");
                     foreach (var d in domains)
                     {
                         var domain = d is string ds ? ds.ToLowerInvariant() : null;
                         if (domain == null || !Allowlist.IsValidDomain(domain))
-                            throw Error($"allow: {(d is string ? $"\"{d}\"" : d?.ToString() ?? "null")} isn't a domain (use example.com, or .example.com to include its subdomains)");
+                        {
+                            throw Error($"allow: {(d is string ? $"\"{d}\"" : d?.ToString() ?? "null")} " +
+                                "isn't a domain (use example.com, or .example.com to include its subdomains)");
+                        }
+
                         config.Allow.Add(domain);
                     }
                     break;
@@ -134,16 +149,22 @@ internal sealed partial class Config
                 case "github":
                     foreach (var (owner, token) in Table(value, key, Error))
                     {
-                        if (!OwnerRegex().IsMatch(owner)) throw Error($"github.{owner}: \"{owner}\" isn't a GitHub owner name");
-                        if (!config.GitHubTokens.TryAdd(owner.ToLowerInvariant(), String(token, $"github.{owner}", Error)))
-                            throw Error($"github.{owner}: a token for \"{owner}\" is already set (owner names ignore case)");
+                        if (!OwnerRegex().IsMatch(owner))
+                            throw Error($"github.{owner}: \"{owner}\" isn't a GitHub owner name");
+                        if (!config.GitHubTokens.TryAdd(owner.ToLowerInvariant(),
+                            String(token, $"github.{owner}", Error)))
+                        {
+                            throw Error($"github.{owner}: a token for \"{owner}\" " +
+                                "is already set (owner names ignore case)");
+                        }
                     }
                     break;
 
                 case "env":
                     foreach (var (name, v) in Table(value, key, Error))
                     {
-                        if (!EnvNameRegex().IsMatch(name)) throw Error($"env.{name}: \"{name}\" isn't a valid environment variable name");
+                        if (!EnvNameRegex().IsMatch(name))
+                            throw Error($"env.{name}: \"{name}\" isn't a valid environment variable name");
                         if (IsReservedEnv(name))
                             throw Error($"env.{name}: {name} is set by pen and can't be overridden");
                         config.Env.Add(new(name, String(v, $"env.{name}", Error)));
@@ -152,7 +173,8 @@ internal sealed partial class Config
 
                 case "github_owner":
                     var o = String(value, key, Error);
-                    if (!OwnerRegex().IsMatch(o)) throw Error($"github_owner: \"{o}\" isn't a GitHub owner name");
+                    if (!OwnerRegex().IsMatch(o))
+                        throw Error($"github_owner: \"{o}\" isn't a GitHub owner name");
                     config.GitHubOwner = o;
                     break;
 
@@ -161,25 +183,39 @@ internal sealed partial class Config
                     break;
 
                 case "ports":
-                    if (value is not TomlArray ports) throw Error("ports must be a list of port numbers, e.g. ports = [3000, 5173]");
+                    if (value is not TomlArray ports)
+                        throw Error("ports must be a list of port numbers, e.g. ports = [3000, 5173]");
                     foreach (var p in ports)
                     {
                         if (p is not long n || !Port.IsValid(n))
-                            throw Error($"ports: {(p is string ? $"\"{p}\"" : p?.ToString() ?? "null")} isn't a port number (1 to 65535, unquoted)");
-                        if (!config.Ports.Contains((int)n)) config.Ports.Add((int)n);
+                        {
+                            throw Error($"ports: {(p is string ? $"\"{p}\"" : p?.ToString() ?? "null")} " +
+                                "isn't a port number (1 to 65535, unquoted)");
+                        }
+
+                        if (!config.Ports.Contains((int)n))
+                            config.Ports.Add((int)n);
                     }
                     break;
 
                 case "tools":
-                    if (value is not TomlArray toolSpecs) throw Error("tools must be a list of tools, e.g. tools = [\"name\", \"name:version\"]");
+                    if (value is not TomlArray toolSpecs)
+                        throw Error("tools must be a list of tools, e.g. tools = [\"name\", \"name:version\"]");
                     var parsed = new List<ToolSpec>();
                     foreach (var t in toolSpecs)
                     {
-                        if (t is not string spec) throw Error($"tools: {t?.ToString() ?? "null"} isn't a tool (use name or name:version, in quotes)");
-                        if (ToolSpec.TryParse(spec, RecipeCatalog.Embedded, out var tool) is { } invalid) throw Error($"tools: {invalid}");
+                        if (t is not string spec)
+                        {
+                            throw Error($"tools: {t?.ToString() ?? "null"} isn't " +
+                                "a tool (use name or name:version, in quotes)");
+                        }
+
+                        if (ToolSpec.TryParse(spec, RecipeCatalog.Embedded, out var tool) is { } invalid)
+                            throw Error($"tools: {invalid}");
                         parsed.Add(tool);
                     }
-                    if (ToolSpec.TryCanonicalize(parsed, RecipeCatalog.Embedded, out var canonical) is { } conflict) throw Error($"tools: {conflict}");
+                    if (ToolSpec.TryCanonicalize(parsed, RecipeCatalog.Embedded, out var canonical) is { } conflict)
+                        throw Error($"tools: {conflict}");
                     config.Tools = canonical;
                     break;
 
@@ -191,7 +227,9 @@ internal sealed partial class Config
     }
 
     internal static bool IsReservedEnv(string name) =>
-        ReservedEnv.Contains(name) || name.StartsWith("PEN_", StringComparison.OrdinalIgnoreCase) || name.StartsWith("GIT_CONFIG", StringComparison.OrdinalIgnoreCase);
+        ReservedEnv.Contains(name)
+            || name.StartsWith("PEN_", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("GIT_CONFIG", StringComparison.OrdinalIgnoreCase);
 
     internal static TomlTable Table(object value, string key, Func<string, PenException> error) =>
         value as TomlTable ?? throw error($"{key} must be a table ([{key}])");
@@ -218,14 +256,16 @@ internal sealed partial class Config
         bool createdDir = false;
         if (!Directory.Exists(host.ConfigDir))
         {
-            Directory.CreateDirectory(host.ConfigDir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            Directory.CreateDirectory(host.ConfigDir,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             createdDir = true;
         }
 
         bool createdConfig = false;
         if (!File.Exists(host.UserConfigPath) && !File.Exists(Path.Combine(host.ConfigDir, LegacyName)))
         {
-            CreateFromTemplate(host.UserConfigPath, "templates/" + FileName, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            CreateFromTemplate(host.UserConfigPath, "templates/" + FileName,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite);
             createdConfig = true;
         }
 
@@ -237,11 +277,19 @@ internal sealed partial class Config
         }
 
         if (createdDir)
-            Out.Line($"created {host.Display(host.ConfigDir)}/: add GitHub tokens to {host.Display(host.UserConfigPath)}");
+        {
+            Out.Line($"created {host.Display(host.ConfigDir)}/: add " +
+                $"GitHub tokens to {host.Display(host.UserConfigPath)}");
+        }
         else if (createdConfig)
+        {
             Out.Line($"created {host.Display(host.UserConfigPath)}: add GitHub tokens there");
+        }
         else if (createdSeed)
-            Out.Line($"created {host.Display(host.SeedDir)}/, the home seed: sandbox-wide agent config, copied into every project's sandbox home");
+        {
+            Out.Line($"created {host.Display(host.SeedDir)}/, the home seed: " +
+                "sandbox-wide agent config, copied into every project's sandbox home");
+        }
     }
 
     private static void CreateFromTemplate(string path, string template, UnixFileMode mode)

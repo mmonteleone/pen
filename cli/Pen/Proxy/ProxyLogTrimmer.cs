@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Pen.Platform;
 using Pen.Sessions;
 
@@ -27,11 +26,13 @@ internal sealed class ProxyLogTrimmer : IDisposable
     private readonly Lock _gate = new();
     private bool _disposed;
 
+    /// <param name="session">the session whose proxy.log is kept bounded</param>
     /// <param name="tailAndTruncate">
     /// Returns the log's last <see cref="Keep"/> bytes (or more, if it grew
     /// meanwhile) and truncates it right after reading them, or null if either
     /// failed, in which case the log was left alone or may be cut short.
     /// </param>
+    /// <param name="interval">how often the timer checks the log's size</param>
     internal ProxyLogTrimmer(SessionDir session, Func<byte[]?> tailAndTruncate, TimeSpan interval)
     {
         _session = session;
@@ -47,22 +48,32 @@ internal sealed class ProxyLogTrimmer : IDisposable
     private void Tick()
     {
         // One trim at a time; a tick during one is skipped.
-        if (!_gate.TryEnter()) return;
+        if (!_gate.TryEnter())
+            return;
         try
         {
-            if (!_disposed) TrimIfOver();
+            if (!_disposed)
+                TrimIfOver();
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or PenException) { } // tried again next tick
-        finally { _gate.Exit(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or PenException)
+        {
+            // tried again next tick
+        }
+        finally
+        {
+            _gate.Exit();
+        }
     }
 
     /// <summary>Trims the log if it's over <see cref="Limit"/>. Returns whether it did.</summary>
     internal bool TrimIfOver()
     {
         var log = new FileInfo(_session.ProxyLog);
-        if (!log.Exists || log.Length <= Limit) return false;
+        if (!log.Exists || log.Length <= Limit)
+            return false;
         var tail = _tailAndTruncate();
-        if (tail == null) return false;
+        if (tail == null)
+            return false;
 
         // The tail starts mid-file, so its first line is most likely cut: dropped.
         int start = 0;
@@ -95,7 +106,10 @@ internal sealed class ProxyLogTrimmer : IDisposable
         bool exited = p.WaitForExit(ExecTimeout);
         if (!exited || read.Wait(ExecTimeout) is false || read.Result == null)
         {
-            try { p.Kill(entireProcessTree: true); }
+            try
+            {
+                p.Kill(entireProcessTree: true);
+            }
             catch (InvalidOperationException) { }
             return null;
         }
@@ -110,7 +124,8 @@ internal sealed class ProxyLogTrimmer : IDisposable
         int n;
         while ((n = s.Read(chunk)) > 0)
         {
-            if (buf.Length + n > cap) return null;
+            if (buf.Length + n > cap)
+                return null;
             buf.Write(chunk, 0, n);
         }
         return buf.ToArray();
@@ -120,6 +135,7 @@ internal sealed class ProxyLogTrimmer : IDisposable
     public void Dispose()
     {
         _timer.Dispose();
-        lock (_gate) _disposed = true;
+        lock (_gate)
+            _disposed = true;
     }
 }

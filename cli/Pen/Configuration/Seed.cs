@@ -21,11 +21,13 @@ internal static class Seed
     public static bool EnsureExists(HostEnv host, string? name, string? email)
     {
         var seed = host.SeedDir;
-        if (Path.Exists(seed) || RepoGuard.IsLink(seed)) return false;
+        if (Path.Exists(seed) || RepoGuard.IsLink(seed))
+            return false;
 
         // Built next to it, then renamed, so a failure never leaves half a seed.
         var tmp = seed + ".tmp-" + Environment.ProcessId;
-        if (Directory.Exists(tmp)) Directory.Delete(tmp, recursive: true);
+        if (Directory.Exists(tmp))
+            Directory.Delete(tmp, recursive: true);
         Directory.CreateDirectory(tmp);
         foreach (var res in Embedded.Under(Prefix))
         {
@@ -44,14 +46,17 @@ internal static class Seed
     /// <summary>The seed's .gitconfig, with the identity filled in, or commented out where unknown.</summary>
     internal static string GitConfig(string template, string? name, string? email)
     {
-        string Line(string key, string placeholder, string? value, string example) =>
+        string Line(string key, string? value, string example) =>
             value is { Length: > 0 } ? $"\t{key} = {Quote(value)}" : $"#\t{key} = {example}";
         var sb = new StringBuilder();
         foreach (var line in template.Split('\n'))
         {
-            if (line.Contains("@NAME@")) sb.Append(Line("name", "@NAME@", name, "Your Name"));
-            else if (line.Contains("@EMAIL@")) sb.Append(Line("email", "@EMAIL@", email, "you@example.com"));
-            else sb.Append(line);
+            if (line.Contains("@NAME@"))
+                sb.Append(Line("name", name, "Your Name"));
+            else if (line.Contains("@EMAIL@"))
+                sb.Append(Line("email", email, "you@example.com"));
+            else
+                sb.Append(line);
             sb.Append('\n');
         }
         return sb.ToString().TrimEnd('\n') + "\n";
@@ -59,5 +64,7 @@ internal static class Seed
 
     /// <summary>A git config value, quoted, with \ and " escaped.</summary>
     internal static string Quote(string value) =>
-        "\"" + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+        "\""
+            + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal)
+            + "\"";
 }

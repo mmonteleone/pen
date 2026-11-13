@@ -1,5 +1,4 @@
 using System.Text;
-using Pen.CommandLine;
 using Pen.Platform;
 using Pen.Sessions;
 
@@ -27,7 +26,11 @@ internal static class GitCheck
     /// doesn't end a session) takes the ones there now. No config.worktree is
     /// touched: with no record of the start, one can't be told from the user's.
     /// </summary>
-    public static List<Quarantined> Run(string dir, bool startedWithGit, string? commonGitDir = null, IReadOnlyCollection<string>? modulesAtStart = null) =>
+    public static List<Quarantined> Run(
+        string dir,
+        bool startedWithGit,
+        string? commonGitDir = null,
+        IReadOnlyCollection<string>? modulesAtStart = null) =>
         RunWithoutOpening(dir, startedWithGit, commonGitDir, modulesAtStart).Moved;
 
     /// <summary>
@@ -35,10 +38,16 @@ internal static class GitCheck
     /// session may still be running in another worktree of the repo, so a
     /// directory that can't be listed is a Failure rather than something to open.
     /// </summary>
-    public static CheckResult RunWithoutOpening(string dir, bool startedWithGit, string? commonGitDir = null, IReadOnlyCollection<string>? modulesAtStart = null) =>
+    public static CheckResult RunWithoutOpening(
+        string dir,
+        bool startedWithGit,
+        string? commonGitDir = null,
+        IReadOnlyCollection<string>? modulesAtStart = null) =>
         Finish(dir, opened: null, (moved, unlistable, badNames, paused) =>
-            SweepingHazardsIfItStops(startedWithGit ? commonGitDir ?? Path.Combine(dir, ".git") : null, moved, unlistable, tryOpen: null, tryOpenForWriting: null, atStart: null,
-                () => Check(dir, startedWithGit, commonGitDir, modulesAtStart, null, moved, unlistable, badNames, paused, tryOpen: null, tryOpenForWriting: null)));
+            SweepingHazardsIfItStops(startedWithGit ? commonGitDir ?? Path.Combine(dir, ".git") : null, moved,
+                unlistable, tryOpen: null, tryOpenForWriting: null, atStart: null,
+                () => Check(dir, startedWithGit, commonGitDir, modulesAtStart, null, moved, unlistable, badNames,
+                    paused, tryOpen: null, tryOpenForWriting: null)));
 
     /// <summary>
     /// The check for a session that's ending, against what the session recorded
@@ -62,33 +71,62 @@ internal static class GitCheck
             bool OpenToRead(string p) => TryOpen(p, opened);
             bool OpenToWrite(string p) => TryOpen(p, opened, write: true);
             var atStart = ProtectedFiles.AtStart(session);
-            SweepingHazardsIfItStops(startedWithGit ? commonGitDir ?? Path.Combine(dir, ".git") : null, moved, unlistable, OpenToRead, OpenToWrite, atStart, () =>
+            SweepingHazardsIfItStops(startedWithGit ? commonGitDir ?? Path.Combine(dir, ".git") : null, moved,
+                unlistable, OpenToRead, OpenToWrite, atStart, () =>
             {
                 restoreDone = ProtectedFiles.Restore(session, dir, commonGitDir, moved, restored, opened, blocked);
                 if (!Directory.Exists(dir))
-                    throw new PenException($"{Out.Field(dir)} isn't there any more or can't be reached, so pen couldn't check it. If it was moved, inspect its .git by hand before running git in it");
+                {
+                    throw new PenException($"{Out.Field(dir)} isn't there any more or can't be reached, so pen " +
+                        "couldn't check it. If it was moved, inspect its .git by hand before running git in it");
+                }
                 // A session from a Pen that didn't record its module repos keeps none.
-                Check(dir, startedWithGit, commonGitDir, session.ReadModules() ?? [], atStart, moved, unlistable, badNames, paused, OpenToRead, OpenToWrite);
+                Check(dir, startedWithGit, commonGitDir, session.ReadModules() ?? [], atStart, moved, unlistable,
+                    badNames, paused, OpenToRead, OpenToWrite);
             });
         });
-        return result with { Restored = restored, RestoreIncomplete = !restoreDone, RestoreBlocked = blocked.Distinct(StringComparer.Ordinal).ToList() };
+        return result with
+        {
+            Restored = restored,
+            RestoreIncomplete = !restoreDone,
+            RestoreBlocked = blocked.Distinct(StringComparer.Ordinal).ToList()
+        };
     }
 
     /// <summary>Runs <paramref name="check"/> and states why the result can't be vouched for, if it can't.</summary>
-    private static CheckResult Finish(string dir, List<ModeChange>? opened, Action<List<Quarantined>, List<string>, List<BadName>, List<PausedOp>> check)
+    private static CheckResult Finish(
+        string dir,
+        List<ModeChange>? opened,
+        Action<List<Quarantined>, List<string>, List<BadName>, List<PausedOp>> check)
     {
         var moved = new List<Quarantined>();
         var unlistable = new List<string>();
         var badNames = new List<BadName>();
         var paused = new List<PausedOp>();
         var failures = new List<string>();
-        try { check(moved, unlistable, badNames, paused); }
-        catch (Exception e) { failures.Add(Out.Describe(e)); }
+        try
+        {
+            check(moved, unlistable, badNames, paused);
+        }
+        catch (Exception e)
+        {
+            failures.Add(Out.Describe(e));
+        }
         if (unlistable.Count > 0)
-            failures.Add("pen can't list these directories, so it can't see a repo inside one: " + string.Join(", ", unlistable.Take(RepoGuard.MaxListed).Select(u => RepoGuard.Rel(dir, u)))
-                + (unlistable.Count > RepoGuard.MaxListed ? $" and {unlistable.Count - RepoGuard.MaxListed} more" : ""));
+        {
+            failures.Add("pen can't list these directories, so it can't see a repo inside one: "
+                + string.Join(", ", unlistable.Take(RepoGuard.MaxListed).Select(u => RepoGuard.Rel(dir, u)))
+                + (unlistable.Count > RepoGuard.MaxListed
+                    ? $" and {unlistable.Count - RepoGuard.MaxListed} more"
+                    : ""));
+        }
+
         if (badNames.Count > 0)
-            failures.Add("these names aren't valid UTF-8, so pen can't look inside them or rename them, though git on this machine can still enter them and run what's there (shown with octal escapes): " + string.Join(", ", RepoGuard.ListedBadNames(dir, badNames)));
+        {
+            failures.Add("these names aren't valid UTF-8, so pen can't look inside them or rename them, though git on "
+                + "this machine can still enter them and run what's there (shown with octal escapes): "
+                + string.Join(", ", RepoGuard.ListedBadNames(dir, badNames)));
+        }
         if (moved.Any(q => q.To.Length == 0))
             failures.Add("a file named above couldn't be moved out of git's way or restored");
         return new(moved, failures.Count == 0 ? null : string.Join("; ", failures), opened, Paused: paused);
@@ -104,43 +142,76 @@ internal static class GitCheck
     {
         try
         {
-            if (RepoGuard.IsLink(path)) return false;
+            if (RepoGuard.IsLink(path))
+                return false;
             var was = File.GetUnixFileMode(path);
-            var now = was | UnixFileMode.UserRead | UnixFileMode.UserExecute | (write ? UnixFileMode.UserWrite : UnixFileMode.None);
-            if (now == was) return false; // the mode isn't why it can't be listed
+            var now = was | UnixFileMode.UserRead | UnixFileMode.UserExecute
+                | (write ? UnixFileMode.UserWrite : UnixFileMode.None);
+            if (now == was)
+                return false; // the mode isn't why it can't be listed
             File.SetUnixFileMode(path, now);
             opened.Add(new(path, was, now));
             return true;
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
-    private static void Check(string dir, bool startedWithGit, string? commonGitDir, IReadOnlyCollection<string>? modulesAtStart, ProtectedManifest? atStart, List<Quarantined> moved, List<string> unlistable, List<BadName> badNames, List<PausedOp> paused, Func<string, bool>? tryOpen, Func<string, bool>? tryOpenForWriting)
+    private static void Check(
+        string dir,
+        bool startedWithGit,
+        string? commonGitDir,
+        IReadOnlyCollection<string>? modulesAtStart,
+        ProtectedManifest? atStart,
+        List<Quarantined> moved,
+        List<string> unlistable,
+        List<BadName> badNames,
+        List<PausedOp> paused,
+        Func<string, bool>? tryOpen,
+        Func<string, bool>? tryOpenForWriting)
     {
-        if (!Directory.Exists(dir)) return;
+        if (!Directory.Exists(dir))
+            return;
         // The agent could do this to a mount's root too. The user will fix the
         // mode and then run git, so "host git can't get in" doesn't excuse it.
         if (!Native.CanEnter(dir))
-            throw new PenException($"pen can't enter {Out.Field(dir)}. Once its permissions are fixed, git can run whatever was planted there, until pen has checked it again");
+        {
+            throw new PenException($"pen can't enter {Out.Field(dir)}. Once its permissions are " +
+                "fixed, git can run whatever was planted there, until pen has checked it again");
+        }
 
         var git = Path.Combine(dir, ".git");
         HashSet<string> known = [];
         if (!startedWithGit)
         {
             if (RepoGuard.Exists(git))
-                Move(git, "a repo created during the session (git init): its config and hooks were writable from the sandbox", moved, breakLayout: true);
+            {
+                Move(git, "a repo created during the session (git init): " +
+                    "its config and hooks were writable from the sandbox", moved, breakLayout: true);
+            }
         }
         else
         {
             git = commonGitDir ?? git;
             // Likewise: nothing under it can be seen, and it's what git reads first.
             // One it can search, git and the shell prompt read through without listing it.
-            if (Native.CanEnter(git) && !Native.CanList(git)) tryOpen?.Invoke(git);
+            if (Native.CanEnter(git) && !Native.CanList(git))
+                tryOpen?.Invoke(git);
             if (Directory.Exists(git) && !Native.CanList(git))
-                throw new PenException($"pen can't read {Out.Field(git)}. Once its permissions are fixed, git can run whatever was planted there, until pen has checked it again");
+            {
+                throw new PenException($"pen can't read {Out.Field(git)}. Once its permissions are " +
+                    "fixed, git can run whatever was planted there, until pen has checked it again");
+            }
+
             var commondir = Path.Combine(git, "commondir");
             if (RepoGuard.Exists(commondir))
-                Move(commondir, "a normal repo never has one: it makes git read config and hooks from another directory", moved);
+            {
+                Move(commondir, "a normal repo never has one: it makes " +
+                    "git read config and hooks from another directory", moved);
+            }
+
             known = CheckModuleRepos(git, modulesAtStart, moved, badNames, tryOpen, tryOpenForWriting);
         }
 
@@ -151,8 +222,10 @@ internal static class GitCheck
         {
             var why = n.Kind switch
             {
-                NestedKind.Bare => "a bare repo: git takes this directory as one, with config and hooks from the sandbox",
-                NestedKind.GitFile => "a .git file that isn't one of this repo's worktrees or submodules: it points git at another directory",
+                NestedKind.Bare => "a bare repo: git takes this directory " +
+                    "as one, with config and hooks from the sandbox",
+                NestedKind.GitFile => "a .git file that isn't one of this repo's " +
+                    "worktrees or submodules: it points git at another directory",
                 NestedKind.GitLink => "a .git symlink: it points git at another directory",
                 _ => "a nested repo: its config and hooks were writable from the sandbox",
             };
@@ -178,7 +251,13 @@ internal static class GitCheck
     /// in it can be checked by name, and moving it breaks every worktree of the repo.
     /// Returns the repos left, whose checkouts in the tree are the project's own.
     /// </summary>
-    private static HashSet<string> CheckModuleRepos(string gitDir, IReadOnlyCollection<string>? modulesAtStart, List<Quarantined> moved, List<BadName> badNames, Func<string, bool>? tryOpen, Func<string, bool>? tryOpenForWriting)
+    private static HashSet<string> CheckModuleRepos(
+        string gitDir,
+        IReadOnlyCollection<string>? modulesAtStart,
+        List<Quarantined> moved,
+        List<BadName> badNames,
+        Func<string, bool>? tryOpen,
+        Func<string, bool>? tryOpenForWriting)
     {
         var listed = modulesAtStart == null ? null : new HashSet<string>(modulesAtStart, StringComparer.Ordinal);
         var known = new HashSet<string>(StringComparer.Ordinal);
@@ -190,36 +269,52 @@ internal static class GitCheck
         badNames.AddRange(scan.BadNames);
         foreach (var repo in scan.Repos)
         {
-            if (gone.Any(g => RepoGuard.IsInside(g, repo))) continue;
+            if (gone.Any(g => RepoGuard.IsInside(g, repo)))
+                continue;
             if (RepoGuard.IsLink(repo))
             {
-                Move(repo, "a symlink where git keeps a submodule's repo: it points git at config and hooks in another directory", moved);
+                Move(repo, "a symlink where git keeps a submodule's repo: " +
+                    "it points git at config and hooks in another directory", moved);
                 gone.Add(repo);
             }
             else if (listed != null && !listed.Contains(repo))
             {
-                Move(repo, "a submodule repo made during the session: its config and hooks were writable from the sandbox", moved, breakLayout: true);
+                Move(repo, "a submodule repo made during the session: " +
+                    "its config and hooks were writable from the sandbox", moved, breakLayout: true);
                 gone.Add(repo);
             }
             else
             {
                 var commondir = Path.Combine(repo, "commondir");
                 if (RepoGuard.Exists(commondir))
-                    Move(commondir, "a submodule's repo never has one: it makes git read config and hooks from another directory", moved);
-                if (!RepoGuard.Exists(commondir)) known.Add(repo);
+                {
+                    Move(commondir, "a submodule's repo never has one: it " +
+                        "makes git read config and hooks from another directory", moved);
+                }
+
+                if (!RepoGuard.Exists(commondir))
+                    known.Add(repo);
             }
         }
         foreach (var dir in scan.Unreadable)
         {
-            if (gone.Any(g => RepoGuard.IsInside(g, dir))) continue;
-            const string why = "a directory where git keeps submodule repos that can't be read, so pen can't check it: inspect its contents before you fix its permissions";
+            if (gone.Any(g => RepoGuard.IsInside(g, dir)))
+                continue;
+            const string why = "a directory where git keeps submodule repos that can't be read, " +
+                "so pen can't check it: inspect its contents before you fix its permissions";
             if (!TryRenameWithOpening(dir, why, moved, tryOpenForWriting, breakLayout: true))
                 Move(dir, why, moved, breakLayout: true);
         }
         return known;
     }
 
-    private static void SweepHazards(string git, List<Quarantined> moved, List<string> unreachable, Func<string, bool>? tryOpen, Func<string, bool>? tryOpenForWriting, ProtectedManifest? atStart)
+    private static void SweepHazards(
+        string git,
+        List<Quarantined> moved,
+        List<string> unreachable,
+        Func<string, bool>? tryOpen,
+        Func<string, bool>? tryOpenForWriting,
+        ProtectedManifest? atStart)
     {
         foreach (var hazard in PausedGit.PromptHazards(git, tryOpen, unreachable, atStart))
             MoveHazard(hazard, moved, tryOpenForWriting);
@@ -231,14 +326,27 @@ internal static class GitCheck
     /// wait for the failure to be read: every known name is tried directly. If
     /// even that stops, the check's own failure stands and says not to run git.
     /// </summary>
-    private static void SweepingHazardsIfItStops(string? git, List<Quarantined> moved, List<string> unreachable, Func<string, bool>? tryOpen, Func<string, bool>? tryOpenForWriting, ProtectedManifest? atStart, Action check)
+    private static void SweepingHazardsIfItStops(
+        string? git,
+        List<Quarantined> moved,
+        List<string> unreachable,
+        Func<string, bool>? tryOpen,
+        Func<string, bool>? tryOpenForWriting,
+        ProtectedManifest? atStart,
+        Action check)
     {
-        try { check(); }
+        try
+        {
+            check();
+        }
         catch (Exception)
         {
             if (git != null)
             {
-                try { SweepHazards(git, moved, unreachable, tryOpen, tryOpenForWriting, atStart); }
+                try
+                {
+                    SweepHazards(git, moved, unreachable, tryOpen, tryOpenForWriting, atStart);
+                }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException or PenException) { }
             }
             throw;
@@ -256,13 +364,21 @@ internal static class GitCheck
     private static void MoveHazard(PromptHazard hazard, List<Quarantined> moved, Func<string, bool>? tryOpenForWriting)
     {
         // Gone with a state directory that an earlier one in it took aside.
-        if (!RepoGuard.Exists(hazard.Path)) return;
-        if (TryRenameWithOpening(hazard.Path, hazard.Why, moved, tryOpenForWriting)) return;
-        if (hazard.StateDir != null && TryRenameWithOpening(hazard.StateDir, hazard.Why, moved, tryOpenForWriting)) return;
+        if (!RepoGuard.Exists(hazard.Path))
+            return;
+        if (TryRenameWithOpening(hazard.Path, hazard.Why, moved, tryOpenForWriting))
+            return;
+        if (hazard.StateDir != null && TryRenameWithOpening(hazard.StateDir, hazard.Why, moved, tryOpenForWriting))
+            return;
         Move(hazard.StateDir ?? hazard.Path, hazard.Why, moved);
     }
 
-    private static bool TryRenameWithOpening(string path, string why, List<Quarantined> moved, Func<string, bool>? tryOpenForWriting, bool breakLayout = false)
+    private static bool TryRenameWithOpening(
+        string path,
+        string why,
+        List<Quarantined> moved,
+        Func<string, bool>? tryOpenForWriting,
+        bool breakLayout = false)
     {
         var held = new List<Quarantined>();
         Move(path, why, held, breakLayout);
@@ -271,7 +387,8 @@ internal static class GitCheck
             held.Clear();
             Move(path, why, held, breakLayout);
         }
-        if (held[0].To.Length == 0) return false;
+        if (held[0].To.Length == 0)
+            return false;
         moved.AddRange(held);
         return true;
     }
@@ -304,8 +421,10 @@ internal static class GitCheck
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             // Never fatal: the rest still gets checked, and the warning names it.
-            var reason = e is UnauthorizedAccessException u ? Out.PermissionDenied(u) : e.Message; // Native.Rename's is strerror's
-            moved.Add(new(path, "", $"{why}. COULD NOT MOVE IT ({reason}): don't run git here until you've dealt with it"));
+            // Native.Rename's is strerror's
+            var reason = e is UnauthorizedAccessException u ? Out.PermissionDenied(u) : e.Message;
+            moved.Add(new(path, "", $"{why}. COULD NOT MOVE IT ({reason}): " +
+                "don't run git here until you've dealt with it"));
             return false;
         }
     }
@@ -313,7 +432,8 @@ internal static class GitCheck
     internal static string FreeName(string path)
     {
         var to = path + Suffix;
-        for (int i = 2; RepoGuard.Exists(to); i++) to = $"{path}{Suffix}-{i}";
+        for (int i = 2; RepoGuard.Exists(to); i++)
+            to = $"{path}{Suffix}-{i}";
         return to;
     }
 
@@ -321,31 +441,38 @@ internal static class GitCheck
     public static string Warning(string dir, IReadOnlyList<Quarantined> moved)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("pen: WARNING: this session left git files that would make git on this machine run code from the sandbox.");
+        sb.AppendLine("pen: WARNING: this session left git files that " +
+            "would make git on this machine run code from the sandbox.");
         sb.AppendLine("pen: They've been moved out of git's way:");
         foreach (var q in moved)
         {
             sb.Append("  ").Append(RepoGuard.Rel(dir, q.From));
-            if (q.To.Length > 0) sb.Append(" → ").Append(RepoGuard.Rel(dir, q.To));
+            if (q.To.Length > 0)
+                sb.Append(" → ").Append(RepoGuard.Rel(dir, q.To));
             sb.AppendLine().Append("      ").AppendLine(q.Why);
         }
         var restorable = moved.Where(q => q.To.Length > 0).ToList();
         if (restorable.Count > 0)
         {
-            sb.AppendLine("pen: Inspect each one before putting it back (a hook or a core.* setting in its config runs on this machine). To restore one:");
+            sb.AppendLine("pen: Inspect each one before putting it back (a hook or a " +
+                "core.* setting in its config runs on this machine). To restore one:");
             foreach (var q in restorable)
             {
                 // Command substitution drops trailing newlines, so no quoting
                 // that works in every shell can name this one.
                 if (q.From.EndsWith('\n'))
                 {
-                    sb.Append("  pen can't write a command for ").Append(Out.Field(q.From)).AppendLine(", since the name ends in a newline: rename it back by hand");
+                    sb.Append("  pen can't write a command for ").Append(Out.Field(q.From)).AppendLine(
+                        ", since the name ends in a newline: rename it back by hand");
                     continue;
                 }
                 sb.Append("  mv ").Append(Quote(q.To)).Append(' ').Append(Quote(q.From));
                 if (q.Inner is { } i)
+                {
                     sb.Append(" && mv ").Append(Quote(Path.Combine(q.From, Path.GetFileName(i.To))))
                       .Append(' ').Append(Quote(Path.Combine(q.From, Path.GetFileName(i.From))));
+                }
+
                 sb.AppendLine();
             }
         }
@@ -372,10 +499,15 @@ internal static class GitCheck
             """;
     }
 
-    /// <summary>Starts a session that does nothing, which first finishes any session left unfinished, or refuses.</summary>
+    /// <summary>
+    /// Starts a session that does nothing, which first finishes any session left unfinished, or refuses.
+    /// </summary>
     internal const string RetryCommand = "pen true";
 
-    /// <summary>The loud warning for a check that couldn't vouch for <paramref name="dir"/>: <paramref name="why"/> says what stopped it.</summary>
+    /// <summary>
+    /// The loud warning for a check that couldn't vouch for
+    /// <paramref name="dir"/>: <paramref name="why"/> says what stopped it.
+    /// </summary>
     public static string NotCheckedWarning(string dir, string why) =>
         $"""
         pen: WARNING: git wasn't checked: don't run git here ({Out.Field(dir)}).
@@ -383,16 +515,26 @@ internal static class GitCheck
         pen: Your shell prompt and IDE may run git too, so keep them out of this directory. Inspect its .git (config, hooks, modules, rebase-merge, rebase-apply, sequencer) and any repos nested in it by hand first.
         """;
 
-    /// <summary>Prints what a session-end check found: first what it renamed, then any paused operations, then that it didn't finish.</summary>
+    /// <summary>
+    /// Prints what a session-end check found: first what it renamed,
+    /// then any paused operations, then that it didn't finish.
+    /// </summary>
     public static void Report(string dir, CheckResult check)
     {
-        if (check.Moved.Count > 0) Out.Raw(Warning(dir, check.Moved));
+        if (check.Moved.Count > 0)
+            Out.Raw(Warning(dir, check.Moved));
         foreach (var r in check.Restored ?? [])
             Out.Line($"{RepoGuard.Rel(dir, r.Path)}: {r.What}");
         foreach (var c in check.Opened ?? [])
-            Out.Line($"changed {RepoGuard.Rel(dir, c.Path)} from mode {Octal(c.Was)} to {Octal(c.Now)} so it could be checked, and left it that way");
-        if (check.Paused is { Count: > 0 } paused) Out.Raw(PausedGit.Warning(dir, paused));
-        if (check.Failure != null) Out.Raw(NotCheckedWarning(dir, check.Failure));
+        {
+            Out.Line($"changed {RepoGuard.Rel(dir, c.Path)} from mode {Octal(c.Was)} " +
+                $"to {Octal(c.Now)} so it could be checked, and left it that way");
+        }
+
+        if (check.Paused is { Count: > 0 } paused)
+            Out.Raw(PausedGit.Warning(dir, paused));
+        if (check.Failure != null)
+            Out.Raw(NotCheckedWarning(dir, check.Failure));
     }
 
     private static string Octal(UnixFileMode mode) => Convert.ToString((int)mode, 8);
@@ -408,7 +550,8 @@ internal static class GitCheck
     /// </summary>
     internal static string Quote(string s)
     {
-        if (s.StartsWith('-')) s = "./" + s;
+        if (s.StartsWith('-'))
+            s = "./" + s;
         if (!s.Any(c => Out.IsControl(c) || c == '\\'))
             return "'" + s.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
         var sb = new StringBuilder("\"$(printf '");
@@ -416,10 +559,14 @@ internal static class GitCheck
         {
             if (char.IsAsciiLetterOrDigit(c) || c is '/' or '.' or '_' or '-' or ' ' or ',' or ':' or '+' or '=' or '@'
                 || (c > '\x7f' && !Out.IsControl(c)))
+            {
                 sb.Append(c);
+            }
             else
+            {
                 foreach (var b in Encoding.UTF8.GetBytes(c.ToString()))
                     sb.Append('\\').Append(Convert.ToString(b, 8).PadLeft(3, '0'));
+            }
         }
         return sb.Append("')\"").ToString();
     }

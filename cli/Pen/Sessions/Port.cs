@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Sockets;
-using Pen.Platform;
 
 namespace Pen.Sessions;
 
@@ -24,7 +23,8 @@ internal readonly record struct Port(int Number, bool FromFlag)
         var merged = new List<Port>();
         foreach (var n in config.Concat(flag))
         {
-            if (!merged.Exists(p => p.Number == n)) merged.Add(new(n, fromFlag.Contains(n)));
+            if (!merged.Exists(p => p.Number == n))
+                merged.Add(new(n, fromFlag.Contains(n)));
         }
         return merged;
     }
@@ -39,11 +39,20 @@ internal readonly record struct Port(int Number, bool FromFlag)
         var taken = ports.Where(p => isTaken(p.Number)).ToList();
         var flagTaken = taken.Where(p => p.FromFlag).Select(p => p.Number).ToList();
         if (flagTaken.Count > 0)
+        {
             throw new PenException(flagTaken.Count == 1
-                ? $"--port {flagTaken[0]}: port {flagTaken[0]} is already in use on this machine (127.0.0.1): stop what's using it (pen ps lists sessions forwarding ports), or pick another port"
-                : $"--port: ports {string.Join(", ", flagTaken)} are already in use on this machine (127.0.0.1): stop what's using them (pen ps lists sessions forwarding ports), or pick other ports");
+                ? $"--port {flagTaken[0]}: port {flagTaken[0]} is already in use on this machine (127.0.0.1): " +
+                    "stop what's using it (pen ps lists sessions forwarding ports), or pick another port"
+                : $"--port: ports {string.Join(", ", flagTaken)} are already in use on this machine (127.0.0.1): " +
+                    "stop what's using them (pen ps lists sessions forwarding ports), or pick other ports");
+        }
+
         foreach (var p in taken)
-            warn($"not forwarding port {p.Number} (from .pen/config.toml): it's already in use on this machine, maybe by another pen session (pen ps)");
+        {
+            warn($"not forwarding port {p.Number} (from .pen/config.toml): it's " +
+                "already in use on this machine, maybe by another pen session (pen ps)");
+        }
+
         return ports.Where(p => !taken.Contains(p)).Select(p => p.Number).ToList();
     }
 
@@ -74,7 +83,13 @@ internal readonly record struct Port(int Number, bool FromFlag)
             using var c = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             return c.ConnectAsync(endpoint).Wait(TimeSpan.FromMilliseconds(500)) && c.Connected;
         }
-        catch (AggregateException) { return false; }
-        catch (SocketException) { return false; }
+        catch (AggregateException)
+        {
+            return false;
+        }
+        catch (SocketException)
+        {
+            return false;
+        }
     }
 }

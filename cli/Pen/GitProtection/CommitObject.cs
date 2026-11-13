@@ -29,26 +29,34 @@ internal sealed record CommitObject(
     public static CommitObject Parse(byte[] raw)
     {
         int split = raw.AsSpan().IndexOf("\n\n"u8);
-        if (split < 0) throw new PenException("no blank line after its headers");
+        if (split < 0)
+            throw new PenException("no blank line after its headers");
         var header = raw.AsSpan(0, split);
-        if (header.Contains((byte)0)) throw new PenException("a NUL in its headers");
-        if (header.Contains((byte)'\r')) throw new PenException("a carriage return in its headers");
+        if (header.Contains((byte)0))
+            throw new PenException("a NUL in its headers");
+        if (header.Contains((byte)'\r'))
+            throw new PenException("a carriage return in its headers");
 
         // Latin-1 keeps each byte as one char, so nothing is lost before the strict decoding below.
         var lines = System.Text.Encoding.Latin1.GetString(header).Split('\n');
         int i = 0;
         string? Take(string key) =>
-            i < lines.Length && lines[i].StartsWith(key + " ", StringComparison.Ordinal) ? lines[i++][(key.Length + 1)..] : null;
+            i < lines.Length && lines[i].StartsWith(key + " ", StringComparison.Ordinal)
+                ? lines[i++][(key.Length + 1)..]
+                : null;
 
         var tree = Take("tree");
-        if (tree == null || !IsHash(tree)) throw new PenException("no valid tree as its first header");
+        if (tree == null || !IsHash(tree))
+            throw new PenException("no valid tree as its first header");
         var parents = new List<string>();
         while (Take("parent") is { } parent)
         {
-            if (!IsHash(parent) || parent.Length != tree.Length) throw new PenException("an invalid parent header");
+            if (!IsHash(parent) || parent.Length != tree.Length)
+                throw new PenException("an invalid parent header");
             parents.Add(parent);
         }
-        var (authorName, authorEmail, authorDate) = Ident(Take("author") ?? throw new PenException("no author header after its parents"), "author");
+        var (authorName, authorEmail, authorDate) = Ident(Take("author") ?? throw new PenException(
+            "no author header after its parents"), "author");
         Ident(Take("committer") ?? throw new PenException("no committer header after its author"), "committer");
 
         string? encoding = null;
@@ -66,12 +74,15 @@ internal sealed record CommitObject(
                 continue;
             }
             int sp = line.IndexOf(' ');
-            if (sp <= 0) throw new PenException("a malformed header");
+            if (sp <= 0)
+                throw new PenException("a malformed header");
             current = line[..sp];
-            if (IsCoreHeader(current)) throw new PenException($"a second \"{current}\" header, or one out of place");
+            if (IsCoreHeader(current))
+                throw new PenException($"a second \"{current}\" header, or one out of place");
             if (current is "encoding" or "gpgsig" or "gpgsig-sha256" && !seen.Add(current))
                 throw new PenException($"a second \"{current}\" header");
-            if (current == "encoding") encoding = Utf8(line[(sp + 1)..], "encoding header");
+            if (current == "encoding")
+                encoding = Utf8(line[(sp + 1)..], "encoding header");
         }
         return new(tree, parents, authorName, authorEmail, authorDate, encoding, raw[(split + 2)..]);
     }
@@ -91,7 +102,10 @@ internal sealed record CommitObject(
         if (date.Split(' ') is not [var seconds, var zone]
             || seconds.Length == 0 || !seconds.All(char.IsAsciiDigit)
             || zone.Length != 5 || zone[0] is not ('+' or '-') || !zone[1..].All(char.IsAsciiDigit))
+        {
             throw new PenException($"a malformed date in its {key} header");
+        }
+
         return (Utf8(value[..lt].TrimEnd(), key + " name"), Utf8(value[(lt + 1)..gt], key + " email"), date);
     }
 
@@ -101,7 +115,14 @@ internal sealed record CommitObject(
     /// </summary>
     private static string Utf8(string latin1, string what)
     {
-        try { return new UTF8Encoding(false, throwOnInvalidBytes: true).GetString(System.Text.Encoding.Latin1.GetBytes(latin1)); }
-        catch (DecoderFallbackException) { throw new NotUtf8Exception(what); }
+        try
+        {
+            return new UTF8Encoding(false, throwOnInvalidBytes: true)
+                .GetString(System.Text.Encoding.Latin1.GetBytes(latin1));
+        }
+        catch (DecoderFallbackException)
+        {
+            throw new NotUtf8Exception(what);
+        }
     }
 }

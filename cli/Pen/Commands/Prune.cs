@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.RegularExpressions;
-using Pen.Configuration;
 using Pen.Images;
 using Pen.Platform;
 using Pen.Projects;
@@ -40,7 +39,8 @@ internal static partial class Prune
             Out.Line("nothing to prune: no project has volumes or state");
             return 0;
         }
-        if (entries.Count > 0) Out.Raw(Render(host, entries));
+        if (entries.Count > 0)
+            Out.Raw(Render(host, entries));
 
         var removable = entries.Where(e => e.Removable).ToList();
         if (removable.Count == 0 && staleTools.Count == 0)
@@ -51,9 +51,14 @@ internal static partial class Prune
         if (staleTools.Count > 0)
             Out.Raw($"to remove, tools images on an old base image:\n  {string.Join("\n  ", staleTools)}");
         if (removable.Count > 0)
-            Out.Raw($"Removing deletes {(removable.Count == 1 ? "that project's" : $"those {removable.Count} projects'")} sandbox homes (agent logins"
+        {
+            Out.Raw("Removing deletes " +
+                $"{(removable.Count == 1 ? "that project's" : $"those {removable.Count} projects'")} " +
+                "sandbox homes (agent logins"
                     + " and config, shell history), NuGet caches, Docker-in-Docker images, project layers\n"
                     + "and pen's state for them. No project files are touched.");
+        }
+
         if (!Out.Confirm(removable.Count + staleTools.Count == 1 ? "remove it?" : "remove them?", input))
         {
             Out.Line("nothing removed");
@@ -62,7 +67,11 @@ internal static partial class Prune
 
         var failed = 0;
         foreach (var e in removable)
-            if (!Remove(host, e)) failed++;
+        {
+            if (!Remove(host, e))
+                failed++;
+        }
+
         foreach (var image in staleTools)
         {
             var r = Proc.Capture("docker", ["image", "rm", image]);
@@ -83,19 +92,25 @@ internal static partial class Prune
     /// project named tools has a repository that starts the same way. With no current base
     /// to compare, or a label that can't be read, nothing is called old.
     /// </summary>
-    internal static List<string> StaleToolsImages(IEnumerable<string> images, string? currentBase, Func<string, string?> baseIdOf)
+    internal static List<string> StaleToolsImages(
+        IEnumerable<string> images,
+        string? currentBase,
+        Func<string, string?> baseIdOf)
     {
-        if (currentBase == null) return [];
+        if (currentBase == null)
+            return [];
         return images
             .Where(i => ToolsTag().IsMatch(i))
-            .Where(i => baseIdOf(i) is { } id && id.StartsWith("sha256:", StringComparison.Ordinal) && id != currentBase)
+            .Where(i => baseIdOf(i) is { } id
+                && id.StartsWith("sha256:", StringComparison.Ordinal) && id != currentBase)
             .Order(StringComparer.Ordinal)
             .ToList();
     }
 
     private static string? ReadBaseId(string image)
     {
-        var r = Proc.Capture("docker", ["image", "inspect", "--format", $"{{{{ index .Config.Labels \"{ToolsImage.BaseIdLabel}\" }}}}", image]);
+        var r = Proc.Capture("docker",
+            ["image", "inspect", "--format", $"{{{{ index .Config.Labels \"{ToolsImage.BaseIdLabel}\" }}}}", image]);
         return r.ExitStatus.ExitCode == 0 ? r.StandardOutput.Trim() : null;
     }
 
@@ -109,8 +124,10 @@ internal static partial class Prune
         var byKey = new SortedDictionary<string, List<string>>(StringComparer.Ordinal);
         foreach (var v in volumes)
         {
-            if (KeyOfVolume(v) is not { } key) continue;
-            if (!byKey.TryGetValue(key, out var list)) byKey[key] = list = [];
+            if (KeyOfVolume(v) is not { } key)
+                continue;
+            if (!byKey.TryGetValue(key, out var list))
+                byKey[key] = list = [];
             list.Add(v);
         }
         if (Directory.Exists(host.StateRoot))
@@ -118,7 +135,8 @@ internal static partial class Prune
             foreach (var dir in Directory.EnumerateDirectories(host.StateRoot))
             {
                 var key = Path.GetFileName(dir);
-                if (KeyPattern().IsMatch(key) && !byKey.ContainsKey(key)) byKey[key] = [];
+                if (KeyPattern().IsMatch(key) && !byKey.ContainsKey(key))
+                    byKey[key] = [];
             }
         }
 
@@ -126,7 +144,8 @@ internal static partial class Prune
         return byKey.Select(kv =>
         {
             var runtimeDir = host.RuntimeDir(kv.Key);
-            if (!Directory.Exists(runtimeDir)) runtimeDir = null;
+            if (!Directory.Exists(runtimeDir))
+                runtimeDir = null;
             var recorded = runtimeDir == null ? null : ReadProjectDir(runtimeDir);
             var (status, current) = Classify(kv.Key, recorded);
             return new Entry(kv.Key, status, kv.Value.Order(StringComparer.Ordinal).ToList(),
@@ -144,15 +163,20 @@ internal static partial class Prune
     /// </summary>
     internal static (Status Status, string? CurrentKey) Classify(string key, string? recordedDir)
     {
-        if (recordedDir == null) return (Status.Unknown, null);
-        if (!Directory.Exists(recordedDir)) return (Status.Missing, null);
+        if (recordedDir == null)
+            return (Status.Unknown, null);
+        if (!Directory.Exists(recordedDir))
+            return (Status.Missing, null);
         var real = Native.RealPath(recordedDir);
-        if (real == null) return (Status.Missing, null);
+        if (real == null)
+            return (Status.Missing, null);
         var current = Project.KeyFor(Project.FindRepo(real).RepoDir);
         return current == key ? (Status.Live, null) : (Status.Moved, current);
     }
 
-    /// <summary>The project key a Pen volume (&lt;key&gt;_home, _nuget or _dind) belongs to, or null for any other volume.</summary>
+    /// <summary>
+    /// The project key a Pen volume (&lt;key&gt;_home, _nuget or _dind) belongs to, or null for any other volume.
+    /// </summary>
     internal static string? KeyOfVolume(string volume)
     {
         foreach (var s in Reset.VolumeSuffixes)
@@ -182,8 +206,14 @@ internal static partial class Prune
             var dir = File.ReadAllText(Path.Combine(runtimeDir, Session.ProjectDirFile)).TrimEnd('\n');
             return dir.StartsWith('/') ? dir : null;
         }
-        catch (FileNotFoundException) { return null; }
-        catch (DirectoryNotFoundException) { return null; }
+        catch (FileNotFoundException)
+        {
+            return null;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return null;
+        }
     }
 
     /// <summary>The listing: one line per key, grouped by status, with how to remove an unknown one by hand.</summary>
@@ -193,9 +223,11 @@ internal static partial class Prune
         void Group(Status status, string heading, Func<Entry, string> describe)
         {
             var group = entries.Where(e => e.Status == status).ToList();
-            if (group.Count == 0) return;
+            if (group.Count == 0)
+                return;
             sb.Append(heading).Append('\n');
-            foreach (var e in group) sb.Append("  ").Append(describe(e)).Append('\n');
+            foreach (var e in group)
+                sb.Append("  ").Append(describe(e)).Append('\n');
         }
 
         Group(Status.Live, "kept, in use:", e => $"{Out.Field(host.Display(e.RecordedDir!))}  ({e.Key})");
@@ -215,12 +247,15 @@ internal static partial class Prune
     private static string Contents(Entry e)
     {
         var parts = new List<string>();
-        if (e.Volumes.Count > 0) parts.Add(string.Join(", ", e.Volumes));
-        if (e.Images.Count > 0) parts.Add(string.Join(", ", e.Images));
+        if (e.Volumes.Count > 0)
+            parts.Add(string.Join(", ", e.Volumes));
+        if (e.Images.Count > 0)
+            parts.Add(string.Join(", ", e.Images));
         return parts.Count == 0 ? "" : "\n    " + string.Join("; ", parts);
     }
 
-    private static string Quote(string s) => s.All(c => char.IsAsciiLetterOrDigit(c) || "/~._-".Contains(c)) ? s : "'" + s.Replace("'", "'\\''") + "'";
+    private static string Quote(string s) =>
+        s.All(c => char.IsAsciiLetterOrDigit(c) || "/~._-".Contains(c)) ? s : "'" + s.Replace("'", "'\\''") + "'";
 
     /// <summary>
     /// Removes one moved or missing key: under project.lock exclusive, and only
@@ -280,7 +315,8 @@ internal static partial class Prune
 
     private static List<string> ListImages()
     {
-        var r = Proc.Capture("docker", ["image", "ls", "--format", "{{.Repository}}:{{.Tag}}", "--filter", "reference=pen-*"]);
+        var r = Proc.Capture("docker",
+            ["image", "ls", "--format", "{{.Repository}}:{{.Tag}}", "--filter", "reference=pen-*"]);
         if (r.ExitStatus.ExitCode != 0)
             throw new PenException($"docker image ls failed: {r.StandardError.Trim()}");
         return Lines(r.StandardOutput);

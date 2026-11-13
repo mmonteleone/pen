@@ -1,4 +1,3 @@
-using Pen.Configuration;
 using Pen.Platform;
 
 namespace Pen.Trust;
@@ -7,7 +6,12 @@ namespace Pen.Trust;
 /// What a project's .pen/ asks for that isn't approved. ports isn't in it: they
 /// only publish to the host's loopback.
 /// </summary>
-internal sealed record TrustRequest(IReadOnlyList<string> Domains, bool Docker, string? GitHubOwner, string? OriginOwner, LayerRequest? Layer)
+internal sealed record TrustRequest(
+    IReadOnlyList<string> Domains,
+    bool Docker,
+    string? GitHubOwner,
+    string? OriginOwner,
+    LayerRequest? Layer)
 {
     /// <summary>How many domains a prompt lists. An agent could add thousands to bury one, or the rest.</summary>
     public const int MaxListedDomains = 20;
@@ -32,7 +36,9 @@ internal sealed record TrustRequest(IReadOnlyList<string> Domains, bool Docker, 
             .Concat(Tools.Take(MaxListedTools).Select(ToolLine))
             .Concat(HiddenTools > 0 ? [$"  ...and {HiddenTools} more tools: pen trust --list shows them all"] : [])
             .Concat(Domains.Take(MaxListedDomains).Select(DomainLine))
-            .Concat(HiddenDomains > 0 ? [$"  ...and {HiddenDomains} more domains: pen trust --list shows them all"] : []);
+            .Concat(HiddenDomains > 0
+                ? [$"  ...and {HiddenDomains} more domains: pen trust --list shows them all"]
+                : []);
 
     /// <summary>Every item, with no limit, for pen trust --list.</summary>
     public IEnumerable<string> AllLines() => Grants().Concat(Tools.Select(ToolLine)).Concat(Domains.Select(DomainLine));
@@ -42,15 +48,22 @@ internal sealed record TrustRequest(IReadOnlyList<string> Domains, bool Docker, 
     {
         get
         {
-            string[] hidden = [.. (HiddenTools > 0 ? new[] { $"{HiddenTools} tools" } : []), .. (HiddenDomains > 0 ? new[] { $"{HiddenDomains} domains" } : [])];
-            return hidden.Length > 0 ? $"approve all of these, with the {string.Join(" and ", hidden)} not listed?" : "approve these?";
+            string[] hidden =
+            [
+                .. (HiddenTools > 0 ? new[] { $"{HiddenTools} tools" } : []),
+                .. (HiddenDomains > 0 ? new[] { $"{HiddenDomains} domains" } : [])
+            ];
+            return hidden.Length > 0
+                ? $"approve all of these, with the {string.Join(" and ", hidden)} not listed?"
+                : "approve these?";
         }
     }
 
     /// <summary>What's being approved, as it was hashed; the live .pen/ may already say something else.</summary>
     private string LayerBody() => Layer!.CopyDir == null
         ? Layer.Dockerfile!
-        : $"    The rest of what's being approved is in {Out.Field(Layer.CopyDir)} until you answer, a copy made with this hash. "
+        : $"    The rest of what's being approved is in {Out.Field(Layer.CopyDir)} " +
+            "until you answer, a copy made with this hash. "
           + "Read that, not .pen/, which may have changed since.\n" + Layer.Dockerfile;
 
     private static string DomainLine(string domain) => $"  allow {Out.Field(domain)}: the sandbox can reach it";
@@ -60,21 +73,30 @@ internal sealed record TrustRequest(IReadOnlyList<string> Domains, bool Docker, 
         var domains = string.Join(", ", request.Domains.Select(Out.Field));
         var name = Out.Field(request.Tool.ToString());
         return !request.IsNew ? $"  tool {name} now brings more domains: the sandbox can reach {domains}"
-            : $"  tool {name}: sessions run with it installed" + (domains.Length > 0 ? $", and the sandbox can reach {domains}" : "");
+            : $"  tool {name}: sessions run with it installed"
+                + (domains.Length > 0 ? $", and the sandbox can reach {domains}" : "");
     }
 
     private IEnumerable<string> Grants()
     {
         if (Layer != null)
+        {
             yield return Layer.Hash == null
                 ? $"  .pen/Dockerfile can't be approved: {Out.Field(Layer.Problem ?? "")}"
-                : "  .pen/Dockerfile (new or changed): sessions run in the image it builds, and its build steps can use "
+                : "  .pen/Dockerfile (new or changed): sessions run in " +
+                    "the image it builds, and its build steps can use "
                   + "everything in .pen/ except config.toml and reach the network directly, past the proxy."
                   + (Layer.Dockerfile == null ? " pen trust shows it." : "\n" + LayerBody());
+        }
+
         if (Docker)
             yield return "  docker = true: sessions get their own Docker daemon, running privileged";
         if (GitHubOwner != null)
+        {
             yield return $"  github_owner = {Out.Field(GitHubOwner)}: sessions get this owner's GitHub token ("
-                + (OriginOwner != null ? $"origin's owner is {Out.Field(OriginOwner)})" : "origin has no GitHub owner)");
+                + (OriginOwner != null
+                    ? $"origin's owner is {Out.Field(OriginOwner)})"
+                    : "origin has no GitHub owner)");
+        }
     }
 }

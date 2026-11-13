@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Text.Unicode;
 using Microsoft.Win32.SafeHandles;
 
@@ -106,26 +105,34 @@ internal static partial class Native
     /// </summary>
     public static List<UndecodableEntry>? ListUndecodable(string dir)
     {
-        if (DirentLayout is not { } layout) return null;
+        if (DirentLayout is not { } layout)
+            return null;
         var handle = OpenDirNative(dir);
-        if (handle == 0) return null;
+        if (handle == 0)
+            return null;
         try
         {
             var found = new List<UndecodableEntry>();
             while (true)
             {
                 var entry = ReadDirNative(handle);
-                if (entry == 0) return Marshal.GetLastPInvokeError() == 0 ? found : null;
+                if (entry == 0)
+                    return Marshal.GetLastPInvokeError() == 0 ? found : null;
                 var name = new List<byte>();
-                for (byte b; (b = Marshal.ReadByte(entry, layout.Name + name.Count)) != 0;) name.Add(b);
+                for (byte b; (b = Marshal.ReadByte(entry, layout.Name + name.Count)) != 0;)
+                    name.Add(b);
                 var bytes = name.ToArray();
-                if (Utf8.IsValid(bytes)) continue;
+                if (Utf8.IsValid(bytes))
+                    continue;
                 // Unknown counts as able to hold a repo: nothing here can look closer.
                 var type = Marshal.ReadByte(entry, layout.Type);
                 found.Add(new(bytes, type is DT_DIR or DT_LNK or DT_UNKNOWN));
             }
         }
-        finally { CloseDirNative(handle); }
+        finally
+        {
+            CloseDirNative(handle);
+        }
     }
 
     public const int LOCK_SH = 1, LOCK_EX = 2, LOCK_NB = 4, LOCK_UN = 8;
@@ -150,9 +157,11 @@ internal static partial class Native
     public static string? ReadRegularFile(string path)
     {
         using var handle = OpenRegular(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-        if (handle == null) return null;
+        if (handle == null)
+            return null;
         var length = RandomAccess.GetLength(handle);
-        if (length > MaxTextFile) return null;
+        if (length > MaxTextFile)
+            return null;
         using var reader = new StreamReader(new FileStream(handle, FileAccess.Read));
         // One spare char: filling it means the file grew past what was checked.
         var chars = new char[length + 1];
@@ -160,7 +169,9 @@ internal static partial class Native
         return read > length ? null : new string(chars, 0, read);
     }
 
-    /// <summary>A regular file's exact bytes, through a symlink if it's one, or null as for <see cref="ReadRegularFile"/>.</summary>
+    /// <summary>
+    /// A regular file's exact bytes, through a symlink if it's one, or null as for <see cref="ReadRegularFile"/>.
+    /// </summary>
     public static byte[]? ReadRegularBytes(string path)
     {
         using var handle = OpenRegular(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
@@ -179,12 +190,15 @@ internal static partial class Native
         if (fd < 0)
         {
             int errno = Marshal.GetLastPInvokeError();
-            if (errno is EACCES or EPERM) throw new UnauthorizedAccessException($"Access to the path '{path}' is denied.");
-            if (errno is ENOENT or ENOTDIR) throw new FileNotFoundException(path);
+            if (errno is EACCES or EPERM)
+                throw new UnauthorizedAccessException($"Access to the path '{path}' is denied.");
+            if (errno is ENOENT or ENOTDIR)
+                throw new FileNotFoundException(path);
             return null;
         }
         var handle = new SafeFileHandle(fd, ownsHandle: true);
-        if (handle.Type == System.IO.FileHandleType.RegularFile) return handle;
+        if (handle.Type == System.IO.FileHandleType.RegularFile)
+            return handle;
         handle.Dispose();
         return null;
     }
@@ -197,7 +211,8 @@ internal static partial class Native
     public static RegularFile? ReadProtected(string path)
     {
         using var handle = OpenRegular(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
-        if (handle == null) return null;
+        if (handle == null)
+            return null;
         return ReadBounded(handle) is { } bytes ? new(bytes, File.GetUnixFileMode(handle)) : null;
     }
 
@@ -205,14 +220,16 @@ internal static partial class Native
     private static byte[]? ReadBounded(SafeFileHandle handle)
     {
         var length = RandomAccess.GetLength(handle);
-        if (length > MaxTextFile) return null;
+        if (length > MaxTextFile)
+            return null;
         // One spare byte: filling it means the file grew past what was checked.
         var bytes = new byte[length + 1];
         int total = 0;
         while (total < bytes.Length)
         {
             int n = RandomAccess.Read(handle, bytes.AsSpan(total), total);
-            if (n == 0) break;
+            if (n == 0)
+                break;
             total += n;
         }
         return total > length ? null : bytes[..total];
@@ -234,18 +251,38 @@ internal static partial class Native
     public static SafeFileHandle? OpenRegularNoFollow(string path)
     {
         // O_NOFOLLOW differs by architecture on Linux, and fails closed where it isn't known.
-        if (!OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture is not (Architecture.X64 or Architecture.Arm64)) return null;
-        try { return OpenRegular(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+        if (!OperatingSystem.IsMacOS()
+            && RuntimeInformation.ProcessArchitecture is not (Architecture.X64 or Architecture.Arm64))
+        {
+            return null;
+        }
+
+        try
+        {
+            return OpenRegular(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
-    /// <summary>realpath(3): resolves symlinks and, on macOS, the on-disk case. Null if the path doesn't exist.</summary>
+    /// <summary>
+    /// realpath(3): resolves symlinks and, on macOS, the on-disk case. Null if the path doesn't exist.
+    /// </summary>
     public static string? RealPath(string path)
     {
         var p = RealPathNative(path, 0);
-        if (p == 0) return null;
-        try { return Marshal.PtrToStringUTF8(p); }
-        finally { Free(p); }
+        if (p == 0)
+            return null;
+        try
+        {
+            return Marshal.PtrToStringUTF8(p);
+        }
+        finally
+        {
+            Free(p);
+        }
     }
 
     public static bool IsATty(int fd) => IsATtyNative(fd) == 1;
@@ -261,7 +298,8 @@ internal static partial class Native
         {
             // Truncating a lock file is harmless, and racing creators both succeed.
             int c = CreatNative(path, 0b110_000_000);
-            if (c >= 0) CloseNative(c);
+            if (c >= 0)
+                CloseNative(c);
             fd = OpenNative(path, O_RDWR | O_CLOEXEC);
         }
         if (fd < 0)
@@ -276,15 +314,18 @@ internal static partial class Native
         handle.DangerousAddRef(ref added);
         try
         {
-            if (FlockNative((int)handle.DangerousGetHandle(), operation) == 0) return true;
+            if (FlockNative((int)handle.DangerousGetHandle(), operation) == 0)
+                return true;
             int errno = Marshal.GetLastPInvokeError();
             // EWOULDBLOCK is 35 on macOS and 11 on Linux.
-            if (errno == (OperatingSystem.IsMacOS() ? 35 : 11)) return false;
+            if (errno == (OperatingSystem.IsMacOS() ? 35 : 11))
+                return false;
             throw new IOException($"flock failed: {Marshal.GetPInvokeErrorMessage(errno)}");
         }
         finally
         {
-            if (added) handle.DangerousRelease();
+            if (added)
+                handle.DangerousRelease();
         }
     }
 }

@@ -14,13 +14,16 @@ internal static class SessionRegistry
     {
         var running = new List<SessionDir>();
         var sessions = Path.Combine(runtimeDir, "sessions");
-        if (!Directory.Exists(sessions)) return running;
+        if (!Directory.Exists(sessions))
+            return running;
         foreach (var path in Directory.EnumerateDirectories(sessions).Order(StringComparer.Ordinal))
         {
             var s = new SessionDir(projectKey, path);
-            if (!s.IsOpen) continue;
+            if (!s.IsOpen)
+                continue;
             using var probe = FileLock.TryTake(s.LockFile, exclusive: true);
-            if (probe == null) running.Add(s);
+            if (probe == null)
+                running.Add(s);
         }
         return running;
     }
@@ -29,7 +32,8 @@ internal static class SessionRegistry
     public static List<SessionDir> RunningEverywhere(HostEnv host)
     {
         var all = new List<SessionDir>();
-        if (!Directory.Exists(host.StateRoot)) return all;
+        if (!Directory.Exists(host.StateRoot))
+            return all;
         foreach (var dir in Directory.EnumerateDirectories(host.StateRoot).Order(StringComparer.Ordinal))
             all.AddRange(Running(Path.GetFileName(dir), dir));
         return all;
@@ -85,7 +89,8 @@ internal static class SessionRegistry
         try
         {
             locks.Add(FileLock.TryTake(ProjectLockFile(runtimeDir), exclusive: false)
-                ?? throw new PenException("refusing to sign: a pen reset is running in this project: try again once it's done"));
+                ?? throw new PenException("refusing to sign: a pen reset " +
+                    "is running in this project: try again once it's done"));
             var l = FileLock.TryTake(WorktreeLockFile(runtimeDir, project.Dir), exclusive: true);
             if (l == null)
             {
@@ -113,7 +118,8 @@ internal static class SessionRegistry
     {
         var runtimeDir = host.RuntimeDir(project.Key);
         var l = FileLock.TryTake(ProjectLockFile(runtimeDir), exclusive: true);
-        if (l != null) return l;
+        if (l != null)
+            return l;
 
         var running = Running(project.Key, runtimeDir);
         throw new PenException(running.Count == 0
@@ -122,7 +128,8 @@ internal static class SessionRegistry
     }
 
     private static string Refusal(string what, List<SessionDir> running, string where) =>
-        $"refusing to {what} while {(running.Count == 1 ? "a session is" : $"{running.Count} sessions are")} running in {where}:\n"
+        $"refusing to {what} while {(running.Count == 1 ? "a session is" : $"{running.Count} sessions are")} " +
+            $"running in {where}:\n"
         + string.Join('\n', running.Select(s => "  " + s.Container))
         + "\nexit them first (or, for one you can't reach, docker rm -f <name>: its pen then ends the session)";
 
@@ -135,7 +142,8 @@ internal static class SessionRegistry
 
         public void Dispose()
         {
-            for (int i = _held.Count - 1; i >= 0; i--) _held[i].Dispose();
+            for (int i = _held.Count - 1; i >= 0; i--)
+                _held[i].Dispose();
             _held.Clear();
         }
     }

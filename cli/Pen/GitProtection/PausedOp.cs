@@ -1,5 +1,3 @@
-using System.Text;
-
 namespace Pen.GitProtection;
 
 /// <summary>State for a paused operation in a git dir, as found: Path is the state directory.</summary>

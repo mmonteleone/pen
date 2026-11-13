@@ -6,6 +6,19 @@ using Pen.Platform;
 
 namespace Pen.Projects;
 
+/// <summary>
+/// The project Pen runs in: the current directory, by its real path. Its key,
+/// pen-&lt;dir&gt;-&lt;hash&gt;, names the project's volumes, image and runtime dir.
+/// It comes from <see cref="RepoDir"/>, so all worktrees of a repo share one
+/// key (logins, caches, sessions and locks), while each keeps its own
+/// <see cref="Dir"/> (mounted as the project, with its own .pen/).
+/// <para>
+/// The repo is modeled apart from the dir: <see cref="CommonGitDir"/> is the
+/// git dir holding config, hooks and objects (the dir's own .git, or for a
+/// linked worktree the main checkout's), and <see cref="RepoDir"/> is the main
+/// checkout. For a plain directory both describe the dir itself.
+/// </para>
+/// </summary>
 internal sealed record Project(string Dir, string Key, string? CommonGitDir, string RepoDir)
 {
     public string GitDir => Path.Combine(Dir, ".git");
@@ -18,10 +31,16 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
     /// <summary>Resolves <paramref name="cwd"/> and applies the directory refusals.</summary>
     public static Project Resolve(string cwd, HostEnv host)
     {
-        var dir = Native.RealPath(cwd) ?? throw new PenException($"can't resolve the current directory {Out.Field(cwd)}: it was removed, or a parent's permissions were changed. Fix that or cd to the project, then rerun");
+        var dir = Native.RealPath(cwd) ?? throw new PenException("can't resolve the " +
+            $"current directory {Out.Field(cwd)}: it was removed, or a parent's " +
+            "permissions were changed. Fix that or cd to the project, then rerun");
         // Everything in it would look absent: a repo would pass for a plain directory.
         if (!Native.CanList(dir))
-            throw new PenException($"pen can't read {Out.Field(dir)}: fix its permissions (chmod u+rwx {GitCheck.Quote(dir)}), then rerun");
+        {
+            throw new PenException($"pen can't read {Out.Field(dir)}: fix its " +
+                $"permissions (chmod u+rwx {GitCheck.Quote(dir)}), then rerun");
+        }
+
         CheckAllowed(dir, host);
         var (common, repoDir) = FindRepo(dir);
         return new Project(dir, KeyFor(repoDir), common, repoDir);
@@ -35,10 +54,13 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
     internal static (string? CommonGitDir, string RepoDir) FindRepo(string dir)
     {
         var git = Path.Combine(dir, ".git");
-        if (Directory.Exists(git)) return (git, dir);
-        if (!File.Exists(git)) return (null, dir);
+        if (Directory.Exists(git))
+            return (git, dir);
+        if (!File.Exists(git))
+            return (null, dir);
         var common = RepoScan.ResolveWorktree(git);
-        if (common == null) return (null, dir);
+        if (common == null)
+            return (null, dir);
         // A bare repo's worktree has no main checkout; the dir stands in for it.
         return (common, RepoGuard.IsMainCheckoutGitDir(common) ? Path.GetDirectoryName(common)! : dir);
     }
@@ -52,11 +74,14 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
         var sb = new StringBuilder();
         foreach (var c in name)
         {
-            if (c is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '_' or '-') sb.Append(c);
-            else if (sb.Length > 0 && sb[^1] != '-') sb.Append('-');
+            if (c is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '_' or '-')
+                sb.Append(c);
+            else if (sb.Length > 0 && sb[^1] != '-')
+                sb.Append('-');
         }
         var clean = sb.ToString().Trim('-');
-        if (clean.Length > 40) clean = clean[..40].TrimEnd('-');
+        if (clean.Length > 40)
+            clean = clean[..40].TrimEnd('-');
         return clean.Length == 0 ? "project" : clean;
     }
 
@@ -76,15 +101,20 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
 
         var home = Native.RealPath(host.Home) ?? host.Home;
         if (IsSameOrAncestor(dir, home))
+        {
             throw new PenException(dir == home
                 ? "refusing to run in your home directory: run pen in a project directory"
                 : $"refusing to run in {dir}: it contains your home directory");
+        }
 
         foreach (var penPath in new[] { host.ConfigDir, host.StateRoot })
         {
             var real = Native.RealPath(penPath) ?? penPath.Replace(host.Home, home, StringComparison.Ordinal);
             if (IsSameOrAncestor(dir, real) || IsSameOrAncestor(real, dir))
-                throw new PenException($"refusing to run in {Out.Field(dir)}: it overlaps {host.Display(penPath)}, which the sandbox must not reach");
+            {
+                throw new PenException($"refusing to run in {Out.Field(dir)}: it " +
+                    $"overlaps {host.Display(penPath)}, which the sandbox must not reach");
+            }
         }
 
         if (!Path.Exists(Path.Combine(dir, ".git")))
@@ -92,7 +122,10 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
             for (var parent = Path.GetDirectoryName(dir); parent != null; parent = Path.GetDirectoryName(parent))
             {
                 if (Path.Exists(Path.Combine(parent, ".git")))
-                    throw new PenException($"{Out.Field(dir)} is inside the git repo at {Out.Field(parent)}: run pen from the repo root");
+                {
+                    throw new PenException($"{Out.Field(dir)} is inside the git " +
+                        $"repo at {Out.Field(parent)}: run pen from the repo root");
+                }
             }
         }
     }

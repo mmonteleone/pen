@@ -28,7 +28,8 @@ internal sealed class SessionSignals : IDisposable
         set
         {
             Interlocked.Exchange(ref _child, value);
-            if (value != null && Stopping) StopChild();
+            if (value != null && Stopping)
+                StopChild();
         }
     }
     public string? Container { set => _container = value; }
@@ -64,7 +65,8 @@ internal sealed class SessionSignals : IDisposable
     private void StopChild()
     {
         var child = Volatile.Read(ref _child);
-        if (child == null || Interlocked.Exchange(ref _stopIssued, 1) == 1) return;
+        if (child == null || Interlocked.Exchange(ref _stopIssued, 1) == 1)
+            return;
         var container = _container;
         var grace = Grace;
         _ = Task.Run(() =>
@@ -74,11 +76,13 @@ internal sealed class SessionSignals : IDisposable
                 // With a TTY, compose forwards neither signal and keeps waiting
                 // on the container, so the container goes first (as in the end
                 // path), and compose then exits on its own.
-                if (container != null) Proc.Capture("docker", ["rm", "-f", container]);
+                if (container != null)
+                    Proc.Capture("docker", ["rm", "-f", container]);
                 if (!child.WaitForExit(grace))
                 {
                     child.Signal(PosixSignal.SIGTERM);
-                    if (!child.WaitForExit(grace)) child.Kill();
+                    if (!child.WaitForExit(grace))
+                        child.Kill();
                 }
             }
             catch (InvalidOperationException) { } // already exited
@@ -87,6 +91,7 @@ internal sealed class SessionSignals : IDisposable
 
     public void Dispose()
     {
-        foreach (var r in _registrations) r.Dispose();
+        foreach (var r in _registrations)
+            r.Dispose();
     }
 }

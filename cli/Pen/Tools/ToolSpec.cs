@@ -44,14 +44,20 @@ internal readonly partial record struct ToolSpec(string Name, string Version)
     /// The canonical list: no exact duplicates, sorted ordinally. Returns what's wrong
     /// if it holds two versions of a tool whose recipe doesn't allow that, or null.
     /// </summary>
-    public static string? TryCanonicalize(IEnumerable<ToolSpec> tools, RecipeCatalog catalog, out IReadOnlyList<ToolSpec> canonical)
+    public static string? TryCanonicalize(
+        IEnumerable<ToolSpec> tools,
+        RecipeCatalog catalog,
+        out IReadOnlyList<ToolSpec> canonical)
     {
         var sorted = tools.Distinct().OrderBy(t => t.ToString(), StringComparer.Ordinal).ToList();
         canonical = sorted;
         foreach (var versions in sorted.GroupBy(t => t.Name, StringComparer.Ordinal))
         {
             if (versions.Count() > 1 && catalog.TryGet(versions.Key, out var recipe) && !recipe.Multiple)
-                return $"{string.Join(" and ", versions)} can't be used together: only one version of {versions.Key} can be installed";
+            {
+                return $"{string.Join(" and ", versions)} can't be used together: " +
+                    $"only one version of {versions.Key} can be installed";
+            }
         }
         return null;
     }
@@ -69,14 +75,19 @@ internal readonly partial record struct ToolSpec(string Name, string Version)
     /// name of a visible agent recipe and none of <paramref name="named"/> (any version) is that
     /// agent. Otherwise null. Only the command's first word counts.
     /// </summary>
-    public static ToolSpec? ImpliedAgent(IReadOnlyList<string> command, RecipeCatalog catalog, IEnumerable<ToolSpec> named)
+    public static ToolSpec? ImpliedAgent(
+        IReadOnlyList<string> command,
+        RecipeCatalog catalog,
+        IEnumerable<ToolSpec> named)
     {
         if (command.Count == 0 || !catalog.TryGet(command[0], out var recipe) || !recipe.IsAgent || recipe.Hidden)
             return null;
         return named.Any(t => t.Name == recipe.Name) ? null : new ToolSpec(recipe.Name, recipe.Default);
     }
 
-    /// <summary>The domains the tools' recipes bring, in order. A tool with no recipe (not one that's parsed) brings none.</summary>
+    /// <summary>
+    /// The domains the tools' recipes bring, in order. A tool with no recipe (not one that's parsed) brings none.
+    /// </summary>
     public static List<string> DomainsOf(IEnumerable<ToolSpec> tools, RecipeCatalog catalog) =>
         tools.Select(t => t.Name).Distinct(StringComparer.Ordinal)
             .SelectMany(name => catalog.TryGet(name, out var recipe) ? recipe.Allow : [])

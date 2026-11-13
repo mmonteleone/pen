@@ -7,7 +7,10 @@ namespace Pen.Platform;
 /// <summary>Child processes. None of them inherit anything but stdin/stdout/stderr (so never a lock fd).</summary>
 internal static class Proc
 {
-    public static ProcessStartInfo Info(string file, IEnumerable<string> args, IReadOnlyDictionary<string, string>? env = null)
+    public static ProcessStartInfo Info(
+        string file,
+        IEnumerable<string> args,
+        IReadOnlyDictionary<string, string>? env = null)
     {
         var psi = new ProcessStartInfo(file, args)
         {
@@ -15,7 +18,11 @@ internal static class Proc
             InheritedHandles = [],
         };
         if (env != null)
-            foreach (var (k, v) in env) psi.Environment[k] = v;
+        {
+            foreach (var (k, v) in env)
+                psi.Environment[k] = v;
+        }
+
         return psi;
     }
 
@@ -24,7 +31,10 @@ internal static class Proc
         Code(Guard(file, () => Process.Run(Info(file, args, env))));
 
     /// <summary>Runs with output captured.</summary>
-    public static ProcessTextOutput Capture(string file, IEnumerable<string> args, IReadOnlyDictionary<string, string>? env = null)
+    public static ProcessTextOutput Capture(
+        string file,
+        IEnumerable<string> args,
+        IReadOnlyDictionary<string, string>? env = null)
     {
         var psi = Info(file, args, env);
         psi.RedirectStandardOutput = psi.RedirectStandardError = true;
@@ -47,11 +57,17 @@ internal static class Proc
 
     private static T Guard<T>(string file, Func<T> f)
     {
-        try { return f(); }
+        try
+        {
+            return f();
+        }
         catch (Win32Exception e) when (e.NativeErrorCode == 2) // ENOENT
         {
             throw new PenException($"{file} not found: is it installed and on PATH?");
         }
-        catch (Win32Exception e) { throw new PenException($"can't run {file}: {e.Message}"); }
+        catch (Win32Exception e)
+        {
+            throw new PenException($"can't run {file}: {e.Message}");
+        }
     }
 }

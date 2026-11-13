@@ -55,13 +55,18 @@ internal static class ToolsImage
     /// </summary>
     private static string Dockerfile(List<Install> plan)
     {
-        static string Quoted(string s) => $"\"{JsonEncodedText.Encode(s, JavaScriptEncoder.UnsafeRelaxedJsonEscaping)}\"";
-        static string EnvValue(string s) => $"\"{s.Replace(@"\", @"\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal).Replace("$", @"\$", StringComparison.Ordinal)}\"";
+        static string Quoted(string s) =>
+            $"\"{JsonEncodedText.Encode(s, JavaScriptEncoder.UnsafeRelaxedJsonEscaping)}\"";
+        static string EnvValue(string s) => $"\"{s
+            .Replace(@"\", @"\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal)
+            .Replace("$", @"\$", StringComparison.Ordinal)}\"";
         var text = new StringBuilder($"FROM {Image.Name}\nUSER root\n");
         foreach (var (recipe, versions) in plan)
         {
             var argv = string.Join(',', versions.Prepend($"{MountPoint}/{RecipeCatalog.InstallFile}").Select(Quoted));
-            text.Append($"RUN --mount=type=bind,source={RecipeCatalog.Root}{recipe.Name},target={MountPoint} [{argv}]\n");
+            text.Append(
+                $"RUN --mount=type=bind,source={RecipeCatalog.Root}{recipe.Name},target={MountPoint} [{argv}]\n");
         }
         foreach (var (recipe, _) in plan)
         {
@@ -71,7 +76,8 @@ internal static class ToolsImage
         return text.ToString();
     }
 
-    internal static string Dockerfile(IEnumerable<ToolSpec> tools, RecipeCatalog catalog) => Dockerfile(Plan(tools, catalog));
+    internal static string Dockerfile(IEnumerable<ToolSpec> tools, RecipeCatalog catalog) =>
+        Dockerfile(Plan(tools, catalog));
 
     /// <summary>
     /// The image's name, whatever order the tools are in: from the base image's ID,
@@ -91,7 +97,8 @@ internal static class ToolsImage
         foreach (var (recipe, versions) in plan)
         {
             Add("recipe", recipe.Name);
-            foreach (var version in versions) Add("version", version);
+            foreach (var version in versions)
+                Add("version", version);
             Add(RecipeCatalog.SettingsFile, recipe.Settings);
             Add(RecipeCatalog.InstallFile, recipe.Script);
         }
@@ -104,12 +111,13 @@ internal static class ToolsImage
     {
         var plan = Plan(tools, catalog);
         using var tar = new TarWriter(output, TarEntryFormat.Ustar, leaveOpen: true);
-        void Write(string path, string text, UnixFileMode mode) => tar.WriteEntry(new UstarTarEntry(TarEntryType.RegularFile, path)
-        {
-            DataStream = new MemoryStream(Encoding.UTF8.GetBytes(text)),
-            Mode = mode,
-            ModificationTime = DateTimeOffset.UnixEpoch,
-        });
+        void Write(string path, string text, UnixFileMode mode) =>
+            tar.WriteEntry(new UstarTarEntry(TarEntryType.RegularFile, path)
+            {
+                DataStream = new MemoryStream(Encoding.UTF8.GetBytes(text)),
+                Mode = mode,
+                ModificationTime = DateTimeOffset.UnixEpoch,
+            });
         Write("Dockerfile", Dockerfile(plan), (UnixFileMode)0b110_100_100);
         foreach (var (recipe, _) in plan)
             Write(recipe.InstallPath, recipe.Script, (UnixFileMode)0b111_101_101);
@@ -130,14 +138,24 @@ internal static class ToolsImage
     /// </summary>
     public static string Ensure(IReadOnlyList<ToolSpec> tools, RecipeCatalog catalog, bool noCache = false)
     {
-        if (tools.Count == 0) return Image.Name;
-        var baseId = CurrentBaseId() ?? throw new PenException($"can't read the ID of {Image.Name}: is Docker running?");
+        if (tools.Count == 0)
+            return Image.Name;
+        var baseId = CurrentBaseId() ?? throw new PenException("can't " +
+            $"read the ID of {Image.Name}: is Docker running?");
 
         var name = Tag(baseId, tools, catalog);
-        if (!noCache && Proc.Capture("docker", ["image", "inspect", "--format", "{{.Id}}", name]).ExitStatus.ExitCode == 0)
+        if (!noCache
+            && Proc.Capture("docker", ["image", "inspect", "--format", "{{.Id}}", name]).ExitStatus.ExitCode == 0)
+        {
             return name;
-        var args = new List<string> { "build", "--progress", "plain", "-t", name, "--label", $"{BaseIdLabel}={baseId}" };
-        if (noCache) args.Add("--no-cache");
+        }
+
+        var args = new List<string>
+        {
+            "build", "--progress", "plain", "-t", name, "--label", $"{BaseIdLabel}={baseId}"
+        };
+        if (noCache)
+            args.Add("--no-cache");
         args.Add("-");
         Image.RunBuild(
             args,

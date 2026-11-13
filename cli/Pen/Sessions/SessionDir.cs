@@ -32,13 +32,17 @@ internal sealed class SessionDir(string projectKey, string path)
     {
         foreach (var log in new[] { PreviousProxyLog, ProxyLog })
         {
-            if (!System.IO.File.Exists(log)) continue;
-            foreach (var line in System.IO.File.ReadLines(log)) yield return line;
+            if (!System.IO.File.Exists(log))
+                continue;
+            foreach (var line in System.IO.File.ReadLines(log))
+                yield return line;
         }
     }
     public string LockFile => File("session.lock");
     public string EnvFile => File("session.env");
-    /// <summary>Present when the session started in a repo; holds its common git dir (empty from older pens: PROJECT_DIR/.git).</summary>
+    /// <summary>
+    /// Present when the session started in a repo; holds its common git dir (empty from older pens: PROJECT_DIR/.git).
+    /// </summary>
     public string StartedWithGit => File("started-with-git");
     /// <summary>
     /// The submodule repos in the common git dir at the start, each path
@@ -76,9 +80,11 @@ internal sealed class SessionDir(string projectKey, string path)
     public string[] ComposeArgs(params string[] args)
     {
         var a = new List<string> { "compose", "--progress", "quiet" };
-        if (System.IO.File.Exists(DockerMarker)) a.AddRange(["--profile", "docker"]);
+        if (System.IO.File.Exists(DockerMarker))
+            a.AddRange(["--profile", "docker"]);
         a.AddRange(["-f", ComposeFile]);
-        if (System.IO.File.Exists(OverrideFile)) a.AddRange(["-f", OverrideFile]);
+        if (System.IO.File.Exists(OverrideFile))
+            a.AddRange(["-f", OverrideFile]);
         a.AddRange(["-p", ComposeProject]);
         a.AddRange(args);
         return [.. a];
@@ -94,7 +100,9 @@ internal sealed class SessionDir(string projectKey, string path)
     public void WriteModules(IEnumerable<string> repos) =>
         System.IO.File.WriteAllText(ModulesFile, string.Concat(repos.Select(r => r + "\0")));
 
-    /// <summary>The module repos at the start, or null for a session started by a Pen that didn't record them.</summary>
+    /// <summary>
+    /// The module repos at the start, or null for a session started by a Pen that didn't record them.
+    /// </summary>
     public string[]? ReadModules() =>
         System.IO.File.Exists(ModulesFile) ? System.IO.File.ReadAllText(ModulesFile).Split('\0')[..^1] : null;
 
@@ -102,12 +110,16 @@ internal sealed class SessionDir(string projectKey, string path)
         System.IO.File.WriteAllText(StartedFile, utc.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture));
 
     public void WritePorts(IReadOnlyList<int> ports) =>
-        System.IO.File.WriteAllText(PortsFile, string.Concat(ports.Select(p => p.ToString(CultureInfo.InvariantCulture) + "\n")));
+        System.IO.File.WriteAllText(PortsFile,
+            string.Concat(ports.Select(p => p.ToString(CultureInfo.InvariantCulture) + "\n")));
 
     /// <summary>The forwarded ports; none for a session started by a Pen that didn't record them.</summary>
     public List<int> ReadPorts() =>
         System.IO.File.Exists(PortsFile)
-            ? System.IO.File.ReadAllLines(PortsFile).Select(l => int.TryParse(l, CultureInfo.InvariantCulture, out var p) ? p : 0).Where(p => p > 0).ToList()
+            ? System.IO.File.ReadAllLines(PortsFile)
+                .Select(l => int.TryParse(l, CultureInfo.InvariantCulture, out var p) ? p : 0)
+                .Where(p => p > 0)
+                .ToList()
             : [];
 
     public void WriteTools(IEnumerable<ToolSpec> tools, IEnumerable<string> domains)
@@ -120,12 +132,14 @@ internal sealed class SessionDir(string projectKey, string path)
     public string[] ReadTools() => System.IO.File.Exists(ToolsFile) ? System.IO.File.ReadAllLines(ToolsFile) : [];
 
     /// <summary>The domains its tools brought; none for a session started by a Pen that didn't record them.</summary>
-    public string[] ReadToolDomains() => System.IO.File.Exists(ToolDomainsFile) ? System.IO.File.ReadAllLines(ToolDomainsFile) : [];
+    public string[] ReadToolDomains() =>
+        System.IO.File.Exists(ToolDomainsFile) ? System.IO.File.ReadAllLines(ToolDomainsFile) : [];
 
     /// <summary>The common git dir the session started with, or null when it didn't start in a repo.</summary>
     public (bool StartedWithGit, string? CommonGitDir) ReadGit()
     {
-        if (!System.IO.File.Exists(StartedWithGit)) return (false, null);
+        if (!System.IO.File.Exists(StartedWithGit))
+            return (false, null);
         var common = System.IO.File.ReadAllText(StartedWithGit).TrimEnd('\n');
         return (true, common.Length == 0 ? null : common);
     }
@@ -135,9 +149,16 @@ internal sealed class SessionDir(string projectKey, string path)
     {
         var sessions = System.IO.Path.GetDirectoryName(Path);
         var runtime = sessions == null ? null : System.IO.Path.GetDirectoryName(sessions);
-        if (runtime == null) return null;
-        try { return System.IO.File.ReadAllText(System.IO.Path.Combine(runtime, Session.ProjectDirFile)).TrimEnd('\n'); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+        if (runtime == null)
+            return null;
+        try
+        {
+            return System.IO.File.ReadAllText(System.IO.Path.Combine(runtime, Session.ProjectDirFile)).TrimEnd('\n');
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     public DateTime? ReadStarted() =>
@@ -148,11 +169,13 @@ internal sealed class SessionDir(string projectKey, string path)
     public Dictionary<string, string> ReadEnv()
     {
         var env = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (!System.IO.File.Exists(EnvFile)) return env;
+        if (!System.IO.File.Exists(EnvFile))
+            return env;
         foreach (var line in System.IO.File.ReadAllLines(EnvFile))
         {
             int eq = line.IndexOf('=');
-            if (eq > 0) env[line[..eq]] = line[(eq + 1)..];
+            if (eq > 0)
+                env[line[..eq]] = line[(eq + 1)..];
         }
         return env;
     }

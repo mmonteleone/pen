@@ -1,5 +1,3 @@
-using Pen.Commands;
-using Pen.Platform;
 using Pen.Proxy;
 using Pen.Sessions;
 using Pen.Tools;
@@ -190,26 +188,39 @@ internal static class Cli
             else if (a == "--port" || a.StartsWith("--port=", StringComparison.Ordinal))
             {
                 var value = a == "--port" ? (i + 1 < args.Count ? args[i + 1] : null) : a["--port=".Length..];
-                if (value == null) throw Error("--port: missing the port number");
-                if (!int.TryParse(value, System.Globalization.NumberStyles.None, null, out var port) || !Port.IsValid(port))
+                if (value == null)
+                    throw Error("--port: missing the port number");
+                if (!int.TryParse(value, System.Globalization.NumberStyles.None, null, out var port)
+                || !Port.IsValid(port))
+                {
                     throw Error($"--port: \"{value}\" isn't a port number (1 to 65535)");
-                if (!ports.Contains(port)) ports.Add(port);
+                }
+
+                if (!ports.Contains(port))
+                    ports.Add(port);
                 i += a == "--port" ? 2 : 1;
             }
             else if (a == "--tool" || a.StartsWith("--tool=", StringComparison.Ordinal))
             {
                 var value = a == "--tool" ? (i + 1 < args.Count ? args[i + 1] : null) : a["--tool=".Length..];
-                if (value == null) throw Error("--tool: missing the tool (name or name:version)");
+                if (value == null)
+                    throw Error("--tool: missing the tool (name or name:version)");
                 if (value == "list")
                 {
-                    if (args.Count != (a == "--tool" ? 2 : 1)) throw Error("--tool list takes nothing else");
+                    if (args.Count != (a == "--tool" ? 2 : 1))
+                        throw Error("--tool list takes nothing else");
                     return new(CommandKind.ToolList, []);
                 }
-                if (ToolSpec.TryParse(value, RecipeCatalog.Embedded, out var tool) is { } invalid) throw Error($"--tool: {invalid}");
+                if (ToolSpec.TryParse(value, RecipeCatalog.Embedded, out var tool) is { } invalid)
+                    throw Error($"--tool: {invalid}");
                 tools.Add(tool);
                 i += a == "--tool" ? 2 : 1;
             }
-            else break;
+            else
+            {
+                break;
+            }
+
             runOption ??= a.StartsWith("--port", StringComparison.Ordinal) ? "--port"
                 : a.StartsWith("--tool", StringComparison.Ordinal) ? "--tool"
                 : a;
@@ -219,14 +230,18 @@ internal static class Cli
             var after = args.Skip(i).ToList();
             var c = Parse(after);
             if (c.Kind != CommandKind.Run)
+            {
                 throw Error(after.Count > 0 && Subcommands.ContainsKey(after[0])
                     ? $"{runOption} goes only with a command to run, not pen {after[0]}"
                     : $"{runOption} goes only with a command to run");
+            }
+
             if (ToolSpec.TryCanonicalize(tools, RecipeCatalog.Embedded, out var canonical) is { } conflict)
                 throw Error($"--tool: {conflict}");
             return c with { Docker = docker, Ports = ports, Tools = canonical };
         }
-        if (args.Count == 0) return new(CommandKind.Run, []);
+        if (args.Count == 0)
+            return new(CommandKind.Run, []);
         var first = args[0];
         var rest = args.Skip(1).ToList();
 
@@ -248,58 +263,85 @@ internal static class Cli
             switch (kind)
             {
                 case CommandKind.Run:
-                    if (rest.Count > 0 && rest[0] == "--") rest.RemoveAt(0);
-                    if (rest.Count == 0) throw Error("pen run: missing the command to run");
+                    if (rest.Count > 0 && rest[0] == "--")
+                        rest.RemoveAt(0);
+                    if (rest.Count == 0)
+                        throw Error("pen run: missing the command to run");
                     return new(CommandKind.Run, rest);
                 case CommandKind.Upgrade:
                     var clean = false;
                     foreach (var a in rest)
                     {
-                        if (a == "--clean") clean = true;
-                        else throw Error($"pen upgrade: unexpected argument \"{a}\"");
+                        if (a == "--clean")
+                            clean = true;
+                        else
+                            throw Error($"pen upgrade: unexpected argument \"{a}\"");
                     }
                     return new(CommandKind.Upgrade, [], clean);
                 case CommandKind.Reset:
-                    if (rest.Count > 0) throw Error($"pen reset: unexpected argument \"{rest[0]}\"");
+                    if (rest.Count > 0)
+                        throw Error($"pen reset: unexpected argument \"{rest[0]}\"");
                     return new(CommandKind.Reset, []);
                 case CommandKind.Ps:
-                    if (rest.Count > 0) throw Error($"pen ps: unexpected argument \"{rest[0]}\"");
+                    if (rest.Count > 0)
+                        throw Error($"pen ps: unexpected argument \"{rest[0]}\"");
                     return new(CommandKind.Ps, []);
                 case CommandKind.Prune:
-                    if (rest.Count > 0) throw Error($"pen prune: unexpected argument \"{rest[0]}\"");
+                    if (rest.Count > 0)
+                        throw Error($"pen prune: unexpected argument \"{rest[0]}\"");
                     return new(CommandKind.Prune, []);
                 case CommandKind.Allow:
                     var global = false;
                     var domains = new List<string>();
                     if (rest.Contains("--defaults"))
                     {
-                        if (rest.Count > 1) throw Error("pen allow --defaults takes nothing else");
+                        if (rest.Count > 1)
+                            throw Error("pen allow --defaults takes nothing else");
                         return new(CommandKind.Allow, [], Defaults: true);
                     }
                     foreach (var a in rest)
                     {
-                        if (a == "--global") global = true;
-                        else if (a.StartsWith('-')) throw Error($"pen allow: unknown option \"{a}\"");
+                        if (a == "--global")
+                        {
+                            global = true;
+                        }
+                        else if (a.StartsWith('-'))
+                        {
+                            throw Error($"pen allow: unknown option \"{a}\"");
+                        }
                         else if (!Allowlist.IsValidDomain(a.ToLowerInvariant()))
-                            throw Error($"pen allow: \"{a}\" isn't a domain (use example.com, or .example.com to include its subdomains)");
-                        else if (!domains.Contains(a.ToLowerInvariant())) domains.Add(a.ToLowerInvariant());
+                        {
+                            throw Error($"pen allow: \"{a}\" isn't a domain (use " +
+                                "example.com, or .example.com to include its subdomains)");
+                        }
+                        else if (!domains.Contains(a.ToLowerInvariant()))
+                        {
+                            domains.Add(a.ToLowerInvariant());
+                        }
                     }
-                    if (global && domains.Count == 0) throw Error("pen allow --global: missing the domains to allow");
+                    if (global && domains.Count == 0)
+                        throw Error("pen allow --global: missing the domains to allow");
                     return new(CommandKind.Allow, domains, Global: global);
                 case CommandKind.Trust:
                     var yes = false;
                     var list = false;
                     foreach (var a in rest)
                     {
-                        if (a == "--yes") yes = true;
-                        else if (a == "--list") list = true;
-                        else throw Error($"pen trust: unexpected argument \"{a}\"");
+                        if (a == "--yes")
+                            yes = true;
+                        else if (a == "--list")
+                            list = true;
+                        else
+                            throw Error($"pen trust: unexpected argument \"{a}\"");
                     }
-                    if (yes && list) throw Error("pen trust: --yes and --list don't go together");
+                    if (yes && list)
+                        throw Error("pen trust: --yes and --list don't go together");
                     return new(CommandKind.Trust, [], Yes: yes, List: list);
                 case CommandKind.Sign:
-                    if (rest.Count > 1) throw Error($"pen sign: unexpected argument \"{rest[1]}\"");
-                    if (rest.Count == 1 && rest[0].StartsWith('-')) throw Error($"pen sign: unknown option \"{rest[0]}\"");
+                    if (rest.Count > 1)
+                        throw Error($"pen sign: unexpected argument \"{rest[1]}\"");
+                    if (rest.Count == 1 && rest[0].StartsWith('-'))
+                        throw Error($"pen sign: unknown option \"{rest[0]}\"");
                     return new(CommandKind.Sign, rest);
                 default:
                     return new(kind, rest);

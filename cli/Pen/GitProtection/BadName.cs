@@ -1,4 +1,3 @@
-using System.IO.Enumeration;
 using Pen.Platform;
 
 namespace Pen.GitProtection;
@@ -12,5 +11,6 @@ namespace Pen.GitProtection;
 /// </summary>
 internal sealed record BadName(string Shown, bool EndsInNewline)
 {
-    public static BadName At(string dir, UndecodableEntry entry) => new(Path.Combine(dir, entry.Escaped), entry.EndsInNewline);
+    public static BadName At(string dir, UndecodableEntry entry) =>
+        new(Path.Combine(dir, entry.Escaped), entry.EndsInNewline);
 }

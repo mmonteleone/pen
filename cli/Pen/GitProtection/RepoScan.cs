@@ -30,7 +30,10 @@ internal static class RepoScan
     /// So are the checkouts of <paramref name="moduleRepos"/> (default: the
     /// module repos in the common git dir now; see <see cref="ResolveModuleCheckout"/>).
     /// </summary>
-    public static List<NestedRepo> FindNested(string root, string? commonGitDir = null, IReadOnlyCollection<string>? moduleRepos = null) =>
+    public static List<NestedRepo> FindNested(
+        string root,
+        string? commonGitDir = null,
+        IReadOnlyCollection<string>? moduleRepos = null) =>
         ScanNested(root, commonGitDir, moduleRepos).Found;
 
     /// <summary>
@@ -46,10 +49,15 @@ internal static class RepoScan
     /// BadNames has each entry there that could hold a repo; a plain file with
     /// such a name can't, so it's left alone.
     /// </summary>
-    public static NestedScan ScanNested(string root, string? commonGitDir = null, IReadOnlyCollection<string>? moduleRepos = null, Func<string, bool>? tryOpen = null)
+    public static NestedScan ScanNested(
+        string root,
+        string? commonGitDir = null,
+        IReadOnlyCollection<string>? moduleRepos = null,
+        Func<string, bool>? tryOpen = null)
     {
         commonGitDir ??= Path.Combine(root, ".git");
-        var modules = new HashSet<string>(moduleRepos ?? FindModuleRepos(commonGitDir).Where(r => !IsLinkPath(r)), StringComparer.Ordinal);
+        var modules = new HashSet<string>(moduleRepos ?? FindModuleRepos(commonGitDir).Where(r => !IsLinkPath(r)),
+            StringComparer.Ordinal);
         var found = new List<NestedRepo>();
         var unlistable = new List<string>();
         var badNames = new List<BadName>();
@@ -61,8 +69,10 @@ internal static class RepoScan
             if (entries == null)
             {
                 // Gone, or shut: nothing host git could reach.
-                if (Native.IsShutOrGone(dir)) continue;
-                if (tryOpen != null && tryOpen(dir)) entries = List(dir);
+                if (Native.IsShutOrGone(dir))
+                    continue;
+                if (tryOpen != null && tryOpen(dir))
+                    entries = List(dir);
                 if (entries == null)
                 {
                     unlistable.Add(dir);
@@ -82,7 +92,8 @@ internal static class RepoScan
                 foreach (var u in raw)
                 {
                     undecodable.Add(u.Decoded);
-                    if (u.CouldHoldRepo) badNames.Add(BadName.At(dir, u));
+                    if (u.CouldHoldRepo)
+                        badNames.Add(BadName.At(dir, u));
                 }
             }
 
@@ -91,22 +102,31 @@ internal static class RepoScan
             {
                 var path = Path.Combine(dir, e.Name);
                 // Unless a real entry has the name it decodes to, which is scanned as usual.
-                if (undecodable.Contains(e.Name) && !Path.Exists(path)) continue;
+                if (undecodable.Contains(e.Name) && !Path.Exists(path))
+                    continue;
                 if (Is(e.Name, ".git"))
                 {
-                    if (dir == root) continue; // the project's own; never descended into
-                    if (e.IsLink) found.Add(new(path, NestedKind.GitLink));
-                    else if (e.IsDir) found.Add(new(path, NestedKind.GitDir));
+                    if (dir == root)
+                        continue; // the project's own; never descended into
+                    if (e.IsLink)
+                        found.Add(new(path, NestedKind.GitLink));
+                    else if (e.IsDir)
+                        found.Add(new(path, NestedKind.GitDir));
                     else if (ResolveWorktree(path) != commonGitDir && ResolveModuleCheckout(path, modules) == null)
                         found.Add(new(path, NestedKind.GitFile));
                     continue; // a .git's contents belong to that repo
                 }
-                if (Is(e.Name, "HEAD")) head |= !e.IsDir;
-                else if (Is(e.Name, "objects")) objects |= e.IsDir;
-                else if (Is(e.Name, "refs")) refs |= e.IsDir;
-                else if (Is(e.Name, "commondir")) commondir |= !e.IsDir;
+                if (Is(e.Name, "HEAD"))
+                    head |= !e.IsDir;
+                else if (Is(e.Name, "objects"))
+                    objects |= e.IsDir;
+                else if (Is(e.Name, "refs"))
+                    refs |= e.IsDir;
+                else if (Is(e.Name, "commondir"))
+                    commondir |= !e.IsDir;
 
-                if (e.IsDir && !e.IsLink) pending.Push(path);
+                if (e.IsDir && !e.IsLink)
+                    pending.Push(path);
             }
             // git's is_git_directory: HEAD, plus objects/ and refs/ or a commondir naming them.
             if (head && ((objects && refs) || commondir))
@@ -125,10 +145,14 @@ internal static class RepoScan
         try
         {
             return new FileSystemEnumerable<Entry>(dir,
-                (ref FileSystemEntry e) => new Entry(e.FileName.ToString(), e.IsDirectory, (e.Attributes & FileAttributes.ReparsePoint) != 0),
+                (ref FileSystemEntry e) =>
+                    new Entry(e.FileName.ToString(), e.IsDirectory, (e.Attributes & FileAttributes.ReparsePoint) != 0),
                 Options).ToList();
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private static bool Is(string name, string wanted) => name.Equals(wanted, StringComparison.OrdinalIgnoreCase);
@@ -147,7 +171,8 @@ internal static class RepoScan
     /// linked worktree whose .git file is <paramref name="gitFile"/>, or null
     /// unless it has exactly the layout `git worktree add` makes:
     /// <list type="bullet">
-    /// <item>the file says "gitdir: &lt;common&gt;/worktrees/&lt;name&gt;", with no symlink anywhere along that path;</item>
+    /// <item>the file says "gitdir: &lt;common&gt;/worktrees/&lt;name&gt;", with no symlink anywhere along that
+    /// path;</item>
     /// <item>&lt;name&gt;/commondir is "../..";</item>
     /// <item>&lt;name&gt;/gitdir points back to this .git file.</item>
     /// </list>
@@ -157,46 +182,73 @@ internal static class RepoScan
     {
         try
         {
-            if (IsLinkPath(gitFile)) return null;
+            if (IsLinkPath(gitFile))
+                return null;
             var gitdir = ReadPathFile(gitFile, "gitdir: ");
-            if (gitdir == null) return null;
-            if (!Path.IsPathRooted(gitdir)) gitdir = Path.Combine(Path.GetDirectoryName(gitFile)!, gitdir);
+            if (gitdir == null)
+                return null;
+            if (!Path.IsPathRooted(gitdir))
+                gitdir = Path.Combine(Path.GetDirectoryName(gitFile)!, gitdir);
 
             // git resolves the gitdir with realpath, so a symlink anywhere along
             // it would lead elsewhere than it reads: require it to be real already.
             var full = Path.GetFullPath(gitdir).TrimEnd('/');
             var real = Native.RealPath(full);
-            if (real == null || real != full) return null;
+            if (real == null || real != full)
+                return null;
             var worktrees = Path.GetDirectoryName(real);
-            if (worktrees == null || Path.GetFileName(worktrees) != "worktrees") return null;
+            if (worktrees == null || Path.GetFileName(worktrees) != "worktrees")
+                return null;
             var common = Path.GetDirectoryName(worktrees);
-            if (common == null || common == "/") return null;
+            if (common == null || common == "/")
+                return null;
 
-            if (ReadPathFile(Path.Combine(real, "commondir"), "") != "../..") return null;
+            if (ReadPathFile(Path.Combine(real, "commondir"), "") != "../..")
+                return null;
 
             var back = ReadPathFile(Path.Combine(real, "gitdir"), "");
-            if (back == null) return null;
-            if (!Path.IsPathRooted(back)) back = Path.Combine(real, back);
+            if (back == null)
+                return null;
+            if (!Path.IsPathRooted(back))
+                back = Path.Combine(real, back);
             var backReal = Native.RealPath(back);
-            if (backReal == null || backReal != Native.RealPath(gitFile)) return null;
+            if (backReal == null || backReal != Native.RealPath(gitFile))
+                return null;
             return common;
         }
-        catch (IOException) { return null; }
-        catch (UnauthorizedAccessException) { return null; }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
-    /// <summary>The git dir a validated linked worktree's .git file names: &lt;common&gt;/worktrees/&lt;name&gt;. Null if it can't be read.</summary>
+    /// <summary>
+    /// The git dir a validated linked worktree's .git file names:
+    /// &lt;common&gt;/worktrees/&lt;name&gt;. Null if it can't be read.
+    /// </summary>
     internal static string? WorktreeEntry(string gitFile)
     {
         try
         {
             var gitdir = ReadPathFile(gitFile, "gitdir: ");
-            if (gitdir == null) return null;
-            if (!Path.IsPathRooted(gitdir)) gitdir = Path.Combine(Path.GetDirectoryName(gitFile)!, gitdir);
+            if (gitdir == null)
+                return null;
+            if (!Path.IsPathRooted(gitdir))
+                gitdir = Path.Combine(Path.GetDirectoryName(gitFile)!, gitdir);
             return Path.GetFullPath(gitdir).TrimEnd('/');
         }
-        catch (IOException) { return null; }
-        catch (UnauthorizedAccessException) { return null; }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -204,7 +256,8 @@ internal static class RepoScan
     /// has <paramref name="gitFile"/> as its .git file, or null unless it has
     /// the layout `git submodule` makes:
     /// <list type="bullet">
-    /// <item>the file says "gitdir: &lt;repo&gt;", with no symlink anywhere along that path, and &lt;repo&gt; is one of <paramref name="moduleRepos"/>;</item>
+    /// <item>the file says "gitdir: &lt;repo&gt;", with no symlink anywhere along that path, and &lt;repo&gt; is one of
+    /// <paramref name="moduleRepos"/>;</item>
     /// <item>&lt;repo&gt;/config's core.worktree resolves back to the .git file's dir.</item>
     /// </list>
     /// The repo's config and hooks are protected (and its list is the one taken
@@ -215,27 +268,45 @@ internal static class RepoScan
     {
         try
         {
-            if (moduleRepos.Count == 0 || IsLinkPath(gitFile)) return null;
+            if (moduleRepos.Count == 0 || IsLinkPath(gitFile))
+                return null;
             var gitdir = ReadPathFile(gitFile, "gitdir: ");
-            if (gitdir == null) return null;
+            if (gitdir == null)
+                return null;
             var checkout = Path.GetDirectoryName(gitFile)!;
-            if (!Path.IsPathRooted(gitdir)) gitdir = Path.Combine(checkout, gitdir);
+            if (!Path.IsPathRooted(gitdir))
+                gitdir = Path.Combine(checkout, gitdir);
             var full = Path.GetFullPath(gitdir).TrimEnd('/');
             var real = Native.RealPath(full);
-            if (real == null || real != full || !moduleRepos.Contains(real)) return null;
+            if (real == null || real != full || !moduleRepos.Contains(real))
+                return null;
 
             var config = Path.Combine(real, "config");
-            if (IsLinkPath(config)) return null;
+            if (IsLinkPath(config))
+                return null;
             var worktree = GitConfigFile.ParseFile(config)
-                .Where(e => e.Section == "core" && e.Subsection == null && e.Key == "worktree").Select(e => e.Value).LastOrDefault();
-            if (string.IsNullOrEmpty(worktree)) return null;
-            if (!Path.IsPathRooted(worktree)) worktree = Path.Combine(real, worktree); // git resolves it from the git dir
+                .Where(e => e.Section == "core" && e.Subsection == null && e.Key == "worktree")
+                .Select(e => e.Value)
+                .LastOrDefault();
+            if (string.IsNullOrEmpty(worktree))
+                return null;
+            if (!Path.IsPathRooted(worktree))
+                worktree = Path.Combine(real, worktree); // git resolves it from the git dir
             var worktreeReal = Native.RealPath(Path.GetFullPath(worktree));
             return worktreeReal != null && worktreeReal == Native.RealPath(checkout) ? real : null;
         }
-        catch (IOException) { return null; }
-        catch (UnauthorizedAccessException) { return null; }
-        catch (PenException) { return null; } // an unreadable config: not a checkout Pen can vouch for
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+        catch (PenException)
+        {
+            return null;
+        } // an unreadable config: not a checkout Pen can vouch for
     }
 
     /// <summary>
@@ -272,43 +343,67 @@ internal static class RepoScan
     {
         WalkModules(Path.Combine(gitDir, "modules"), scan);
         var worktrees = Path.Combine(gitDir, "worktrees");
-        if (IsLinkPath(worktrees) || !Directory.Exists(worktrees)) return; // a symlinked worktrees/ is refused by the mounts
+        if (IsLinkPath(worktrees) || !Directory.Exists(worktrees))
+            return; // a symlinked worktrees/ is refused by the mounts
         var entries = ListOrNote(worktrees, Directory.EnumerateFileSystemEntries, scan);
-        if (entries == null) return;
+        if (entries == null)
+            return;
         var undecodable = NoteBadNames(worktrees, entries, scan);
-        if (undecodable == null) return;
+        if (undecodable == null)
+            return;
         foreach (var wt in entries)
-            if (!undecodable.Contains(Path.GetFileName(wt)) && !IsLinkPath(wt)) WalkModules(Path.Combine(wt, "modules"), scan);
+        {
+            if (!undecodable.Contains(Path.GetFileName(wt)) && !IsLinkPath(wt))
+                WalkModules(Path.Combine(wt, "modules"), scan);
+        }
     }
 
     private static void WalkModules(string dir, ModuleScan scan)
     {
-        if (IsLinkPath(dir)) { scan.Repos.Add(dir); return; }
-        if (!Directory.Exists(dir)) return;
+        if (IsLinkPath(dir))
+        {
+            scan.Repos.Add(dir);
+            return;
+        }
+        if (!Directory.Exists(dir))
+            return;
         var entries = ListOrNote(dir, Directory.EnumerateFileSystemEntries, scan);
-        if (entries == null) return;
+        if (entries == null)
+            return;
         var undecodable = NoteBadNames(dir, entries, scan);
-        if (undecodable == null) return;
+        if (undecodable == null)
+            return;
         foreach (var entry in entries)
         {
             // Unless a real entry has the name it decodes to, which is walked as usual.
-            if (undecodable.Contains(Path.GetFileName(entry)) && !Path.Exists(entry)) continue;
+            if (undecodable.Contains(Path.GetFileName(entry)) && !Path.Exists(entry))
+                continue;
             // Before the symlink test, so a quarantined symlink isn't flagged and renamed again.
-            if (Path.GetFileName(entry).Contains(GitCheck.Suffix, StringComparison.Ordinal)) continue;
-            if (IsLinkPath(entry)) scan.Repos.Add(entry);
+            if (Path.GetFileName(entry).Contains(GitCheck.Suffix, StringComparison.Ordinal))
+                continue;
+            if (IsLinkPath(entry))
+            {
+                scan.Repos.Add(entry);
+            }
             else if (!Path.Exists(entry))
             {
                 // Listed but not there to stat: dir can be read but not entered.
                 scan.Unreadable.Add(dir);
                 return;
             }
-            else if (!Directory.Exists(entry)) continue; // git keeps only directories here
+            else if (!Directory.Exists(entry))
+            {
+                continue; // git keeps only directories here
+            }
             else if (IsGitDirLayout(entry))
             {
                 scan.Repos.Add(entry);
                 AddModuleRepos(entry, scan);
             }
-            else WalkModules(entry, scan); // a level of a name with "/" in it
+            else
+            {
+                WalkModules(entry, scan); // a level of a name with "/" in it
+            }
         }
     }
 
@@ -319,7 +414,8 @@ internal static class RepoScan
     /// </summary>
     private static HashSet<string>? NoteBadNames(string dir, List<string> entries, ModuleScan scan)
     {
-        if (!entries.Any(e => HasReplacement(Path.GetFileName(e)))) return [];
+        if (!entries.Any(e => HasReplacement(Path.GetFileName(e))))
+            return [];
         var raw = Native.ListUndecodable(dir);
         if (raw == null)
         {
@@ -330,11 +426,19 @@ internal static class RepoScan
         return raw.Select(u => u.Decoded).ToHashSet(StringComparer.Ordinal);
     }
 
-    /// <summary>The sorted entries of <paramref name="dir"/>; none if it's gone; null, noting it, if it can't be read.</summary>
+    /// <summary>
+    /// The sorted entries of <paramref name="dir"/>; none if it's gone; null, noting it, if it can't be read.
+    /// </summary>
     private static List<string>? ListOrNote(string dir, Func<string, IEnumerable<string>> list, ModuleScan scan)
     {
-        try { return list(dir).Order(StringComparer.Ordinal).ToList(); }
-        catch (DirectoryNotFoundException) { return []; }
+        try
+        {
+            return list(dir).Order(StringComparer.Ordinal).ToList();
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return [];
+        }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             scan.Unreadable.Add(dir);
@@ -348,12 +452,16 @@ internal static class RepoScan
         ((Directory.Exists(Path.Combine(dir, "objects")) && Directory.Exists(Path.Combine(dir, "refs")))
          || Path.Exists(Path.Combine(dir, "commondir")) || IsLinkPath(Path.Combine(dir, "commondir")));
 
-    /// <summary>A one-line file's value after <paramref name="prefix"/>, or null if it doesn't have that shape.</summary>
+    /// <summary>
+    /// A one-line file's value after <paramref name="prefix"/>, or null if it doesn't have that shape.
+    /// </summary>
     private static string? ReadPathFile(string path, string prefix)
     {
-        if (!File.Exists(path) || IsLinkPath(path)) return null;
+        if (!File.Exists(path) || IsLinkPath(path))
+            return null;
         var text = Native.ReadRegularFile(path);
-        if (text == null || !text.StartsWith(prefix, StringComparison.Ordinal)) return null;
+        if (text == null || !text.StartsWith(prefix, StringComparison.Ordinal))
+            return null;
         var value = text[prefix.Length..].TrimEnd('\n', '\r');
         return value.Length == 0 || value.Contains('\n') || value.Contains('\0') ? null : value;
     }

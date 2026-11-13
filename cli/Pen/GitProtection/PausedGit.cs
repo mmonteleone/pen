@@ -37,25 +37,39 @@ internal static class PausedGit
     /// <summary>The most lines listed from one file.</summary>
     internal const int MaxLines = RepoGuard.MaxListed;
 
-    /// <summary>The most characters shown of one line, so a line can't flood the terminal or push its end out of sight unnoticed.</summary>
+    /// <summary>
+    /// The most characters shown of one line, so a line can't
+    /// flood the terminal or push its end out of sight unnoticed.
+    /// </summary>
     internal const int MaxLineLength = 200;
 
-    private static readonly HashSet<string> StockStrategies = new(StringComparer.Ordinal) { "ort", "recursive", "resolve", "octopus", "ours", "subtree" };
+    private static readonly HashSet<string> StockStrategies = new(StringComparer.Ordinal)
+    {
+        "ort", "recursive", "resolve", "octopus", "ours", "subtree"
+    };
 
-    /// <summary>The paused operations in <paramref name="gitDir"/>, its worktree entries, and its module repos and their worktree entries. Never throws.</summary>
+    /// <summary>
+    /// The paused operations in <paramref name="gitDir"/>, its worktree
+    /// entries, and its module repos and their worktree entries. Never throws.
+    /// </summary>
     public static List<PausedOp> Find(string gitDir)
     {
         var found = new List<PausedOp>();
         try
         {
-            if (!Directory.Exists(gitDir)) return found;
+            if (!Directory.Exists(gitDir))
+                return found;
             LookWithWorktrees(gitDir, found);
             foreach (var repo in RepoScan.FindModuleRepos(gitDir))
-                if (!RepoGuard.IsLink(repo)) LookWithWorktrees(repo, found);
+            {
+                if (!RepoGuard.IsLink(repo))
+                    LookWithWorktrees(repo, found);
+            }
         }
         catch (Exception e)
         {
-            found.Add(new(gitDir, "a git dir pen couldn't finish looking through", [new($"it may hold more paused state: {Out.Describe(e)}", [])]));
+            found.Add(new(gitDir, "a git dir pen couldn't finish looking through",
+                [new($"it may hold more paused state: {Out.Describe(e)}", [])]));
         }
         return found;
     }
@@ -80,27 +94,48 @@ internal static class PausedGit
     /// checks, and which was refused at the start so can't have been there then.
     /// </para>
     /// </summary>
-    public static List<PromptHazard> PromptHazards(string gitDir, Func<string, bool>? tryOpen, List<string> unreachable, ProtectedManifest? atStart = null)
+    public static List<PromptHazard> PromptHazards(
+        string gitDir,
+        Func<string, bool>? tryOpen,
+        List<string> unreachable,
+        ProtectedManifest? atStart = null)
     {
         var found = new List<PromptHazard>();
-        if (!Directory.Exists(gitDir)) return found;
+        if (!Directory.Exists(gitDir))
+            return found;
         void Visit(string dir)
         {
             LookForHazards(Path.Combine(dir, "rebase-merge"), ["msgnum", "end"], found);
             LookForHazards(Path.Combine(dir, "rebase-apply"), ["next", "last"], found);
-            if (atStart == null) return;
+            if (atStart == null)
+                return;
             var config = Path.Combine(dir, "config.worktree");
             if (RepoGuard.Exists(config) && !atStart.Vouches(config))
-                found.Add(new(config, null, "a config.worktree that wasn't there at the session's start, or that another session could have made: git reads it as config, so a setting in it can run code on this machine. git worktree add copies one into a new worktree, so it may be harmless"));
+            {
+                found.Add(new(config, null, "a config.worktree that wasn't there at the session's start, or that " +
+                    "another session could have made: git reads it as config, so a setting in it can run code on " +
+                    "this machine. git worktree add copies one into a new worktree, so it may be harmless"));
+            }
         }
         void CouldntLook(string path)
         {
-            if (!RepoGuard.IsLink(path)) unreachable.Add(path); // git won't follow a symlink here to a project's worktree: a warning covers it
-            else if (atStart != null) found.Add(new(path, null, "a symlink where git keeps a worktree's files: it points git at a config.worktree in another directory"));
+            if (!RepoGuard.IsLink(path))
+            {
+                unreachable.Add(path); // git won't follow a symlink here to a project's worktree: a warning covers it
+            }
+            else if (atStart != null)
+            {
+                found.Add(new(path, null, "a symlink where git keeps a worktree's " +
+                    "files: it points git at a config.worktree in another directory"));
+            }
         }
         WithWorktrees(gitDir, Visit, CouldntLook, tryOpen);
         foreach (var repo in RepoScan.FindModuleRepos(gitDir))
-            if (!RepoGuard.IsLink(repo)) WithWorktrees(repo, Visit, CouldntLook, tryOpen);
+        {
+            if (!RepoGuard.IsLink(repo))
+                WithWorktrees(repo, Visit, CouldntLook, tryOpen);
+        }
+
         return found;
     }
 
@@ -112,10 +147,12 @@ internal static class PausedGit
             found.Add(new(stateDir, null, $"a symlink where git keeps a paused rebase: {prompt}"));
             return;
         }
-        if (!Directory.Exists(stateDir)) return;
+        if (!Directory.Exists(stateDir))
+            return;
         if (!Native.CanEnter(stateDir))
         {
-            found.Add(new(stateDir, null, $"a paused rebase's directory that can't be read, so pen can't check it: {prompt}, once its permissions are fixed"));
+            found.Add(new(stateDir, null, "a paused rebase's directory that can't be " +
+                $"read, so pen can't check it: {prompt}, once its permissions are fixed"));
             return;
         }
         foreach (var name in counts)
@@ -129,22 +166,38 @@ internal static class PausedGit
             found.Add(new(head, stateDir, $"git only writes a ref name here: {prompt}"));
     }
 
-    /// <summary>Whether a state file is missing or holds what git writes. A file that can't be vouched for doesn't.</summary>
+    /// <summary>
+    /// Whether a state file is missing or holds what git writes. A file that can't be vouched for doesn't.
+    /// </summary>
     private static bool HoldsWhatGitWrites(string path, Func<byte[], bool> valid)
     {
         try
         {
-            if (RepoGuard.IsLink(path)) return false;
+            if (RepoGuard.IsLink(path))
+                return false;
             var bytes = Native.ReadProtected(path)?.Bytes;
             return bytes != null && valid(bytes);
         }
-        catch (FileNotFoundException) { return true; }
-        catch (DirectoryNotFoundException) { return true; }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
+        catch (FileNotFoundException)
+        {
+            return true;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
-    /// <summary>git's msgnum, end, next or last: a decimal number and a newline. Digits and line ends alone can't expand, whatever else is odd about them.</summary>
-    internal static bool IsCount(byte[] content) => content.All(b => b is (>= (byte)'0' and <= (byte)'9') or (byte)'\n' or (byte)'\r');
+    /// <summary>
+    /// git's msgnum, end, next or last: a decimal number and a newline. Digits
+    /// and line ends alone can't expand, whatever else is odd about them.
+    /// </summary>
+    internal static bool IsCount(byte[] content) =>
+        content.All(b => b is (>= (byte)'0' and <= (byte)'9') or (byte)'\n' or (byte)'\r');
 
     /// <summary>
     /// git's head-name: "detached HEAD", or the ref being rebased with a newline.
@@ -154,21 +207,26 @@ internal static class PausedGit
     internal static bool IsHeadName(byte[] content)
     {
         var value = Encoding.Latin1.GetString(content).TrimEnd('\n', '\r');
-        return value.Length == 0 || value == "detached HEAD" || (value.StartsWith("refs/", StringComparison.Ordinal) && IsRefName(value));
+        return value.Length == 0
+            || value == "detached HEAD"
+            || (value.StartsWith("refs/", StringComparison.Ordinal) && IsRefName(value));
     }
 
     /// <summary>git's check_refname_format with no flags, on one char per byte.</summary>
     internal static bool IsRefName(string name)
     {
-        if (name == "@" || name.EndsWith('.')) return false;
+        if (name == "@" || name.EndsWith('.'))
+            return false;
         var parts = name.Split('/');
         return parts.Length >= 2 && parts.All(IsRefNameComponent);
     }
 
     private static bool IsRefNameComponent(string part)
     {
-        if (part.Length == 0 || part[0] == '.' || part.EndsWith(".lock", StringComparison.Ordinal)) return false;
-        if (part.Contains("..", StringComparison.Ordinal) || part.Contains("@{", StringComparison.Ordinal)) return false;
+        if (part.Length == 0 || part[0] == '.' || part.EndsWith(".lock", StringComparison.Ordinal))
+            return false;
+        if (part.Contains("..", StringComparison.Ordinal) || part.Contains("@{", StringComparison.Ordinal))
+            return false;
         return !part.Any(c => c is < ' ' or '\x7f' or ' ' or '*' or ':' or '?' or '[' or '\\' or '^' or '~');
     }
 
@@ -176,12 +234,18 @@ internal static class PausedGit
         WithWorktrees(gitDir, dir => Look(dir, found), path => found.Add(CouldntLook(path)), tryOpen: null);
 
     /// <summary>Visits a git dir and its worktree entries, naming what it can't look in.</summary>
-    private static void WithWorktrees(string gitDir, Action<string> visit, Action<string> couldntLook, Func<string, bool>? tryOpen)
+    private static void WithWorktrees(
+        string gitDir,
+        Action<string> visit,
+        Action<string> couldntLook,
+        Func<string, bool>? tryOpen)
     {
         visit(gitDir);
         var worktrees = Path.Combine(gitDir, "worktrees");
-        if (!RepoGuard.Exists(worktrees)) return;
-        if (!RepoGuard.IsLink(worktrees) && Directory.Exists(worktrees) && !Native.CanList(worktrees)) tryOpen?.Invoke(worktrees);
+        if (!RepoGuard.Exists(worktrees))
+            return;
+        if (!RepoGuard.IsLink(worktrees) && Directory.Exists(worktrees) && !Native.CanList(worktrees))
+            tryOpen?.Invoke(worktrees);
         if (RepoGuard.IsLink(worktrees) || !Directory.Exists(worktrees) || !Native.CanList(worktrees))
         {
             couldntLook(worktrees);
@@ -191,7 +255,8 @@ internal static class PausedGit
         {
             // git keeps only directories here. One it can't enter is what it would
             // read once the user fixes the mode, so it can't pass as empty.
-            if (!RepoGuard.IsLink(entry) && Directory.Exists(entry) && !Native.CanEnter(entry)) tryOpen?.Invoke(entry);
+            if (!RepoGuard.IsLink(entry) && Directory.Exists(entry) && !Native.CanEnter(entry))
+                tryOpen?.Invoke(entry);
             if (RepoGuard.IsLink(entry) || !Path.Exists(entry) || (Directory.Exists(entry) && !Native.CanEnter(entry)))
                 couldntLook(entry);
             else if (Directory.Exists(entry))
@@ -205,7 +270,8 @@ internal static class PausedGit
     private static void Look(string gitDir, List<PausedOp> found)
     {
         LookAt(Path.Combine(gitDir, "rebase-merge"), "a paused rebase", found, dir => [
-            ExecNote(dir, "git-rebase-todo", "exec lines in git-rebase-todo, which run on this machine at git rebase --continue or --skip:"),
+            ExecNote(dir, "git-rebase-todo", "exec lines in git-rebase-todo, " +
+                "which run on this machine at git rebase --continue or --skip:"),
             ExecNote(dir, "git-rebase-todo.backup", NotRun("git-rebase-todo.backup")),
             ExecNote(dir, "done", NotRun("done")),
             StrategyFileNote(dir),
@@ -221,7 +287,8 @@ internal static class PausedGit
 
     private static void LookAt(string dir, string kind, List<PausedOp> found, Func<string, PausedNote?[]> notes)
     {
-        if (!RepoGuard.Exists(dir)) return;
+        if (!RepoGuard.Exists(dir))
+            return;
         if (RepoGuard.IsLink(dir))
             found.Add(new(dir, kind, [new("couldn't read the todo in it: it's a symlink", [])]));
         else if (!Directory.Exists(dir))
@@ -233,14 +300,16 @@ internal static class PausedGit
     private static PausedNote? ExecNote(string dir, string file, string heading)
     {
         var (text, problem) = Read(Path.Combine(dir, file));
-        if (problem != null) return new($"couldn't read {file}, so pen can't say what it would run: {problem}", []);
+        if (problem != null)
+            return new($"couldn't read {file}, so pen can't say what it would run: {problem}", []);
         return text == null ? null : LinesNote(heading, ExecLines(text));
     }
 
     private static PausedNote? StrategyFileNote(string dir)
     {
         var (text, problem) = Read(Path.Combine(dir, "strategy"));
-        if (problem != null) return new($"couldn't read strategy, which can name a program for git to run: {problem}", []);
+        if (problem != null)
+            return new($"couldn't read strategy, which can name a program for git to run: {problem}", []);
         var value = text?.TrimEnd('\n', '\r');
         return string.IsNullOrEmpty(value) || StockStrategies.Contains(value) ? null
             : LinesNote(StrategyHeading("strategy"), [value]);
@@ -249,19 +318,23 @@ internal static class PausedGit
     private static PausedNote? OptsNote(string dir)
     {
         var (text, problem) = Read(Path.Combine(dir, "opts"));
-        if (problem != null) return new($"couldn't read opts, which can name a program for git to run: {problem}", []);
+        if (problem != null)
+            return new($"couldn't read opts, which can name a program for git to run: {problem}", []);
         return text == null ? null : LinesNote(StrategyHeading("opts"), StrategyLines(text));
     }
 
-    private static string StrategyHeading(string file) => $"a merge strategy in {file} that isn't one of git's own: git runs it as a program on this machine when the operation continues:";
+    private static string StrategyHeading(string file) => $"a merge strategy in {file} that isn't " +
+        "one of git's own: git runs it as a program on this machine when the operation continues:";
 
     private static PausedNote? ApplyOptNote(string dir)
     {
         var (text, problem) = Read(Path.Combine(dir, "apply-opt"));
-        if (problem != null) return new($"couldn't read apply-opt, which holds options for git apply: {problem}", []);
+        if (problem != null)
+            return new($"couldn't read apply-opt, which holds options for git apply: {problem}", []);
         var value = text?.Trim();
         return string.IsNullOrEmpty(value) ? null
-            : LinesNote("options for git apply in apply-opt, one of which can overwrite any file (--build-fake-ancestor):", [value]);
+            : LinesNote("options for git apply in apply-opt, one of " +
+                "which can overwrite any file (--build-fake-ancestor):", [value]);
     }
 
     private static PausedNote? LinesNote(string heading, List<string> lines) =>
@@ -282,13 +355,25 @@ internal static class PausedGit
     {
         try
         {
-            if (RepoGuard.IsLink(path)) return (null, "it's a symlink");
+            if (RepoGuard.IsLink(path))
+                return (null, "it's a symlink");
             var bytes = Native.ReadProtected(path)?.Bytes;
-            return bytes == null ? (null, "it isn't a regular file of a reasonable size") : (Encoding.UTF8.GetString(bytes), null);
+            return bytes == null
+                ? (null, "it isn't a regular file of a reasonable size")
+                : (Encoding.UTF8.GetString(bytes), null);
         }
-        catch (FileNotFoundException) { return (null, null); }
-        catch (DirectoryNotFoundException) { return (null, null); }
-        catch (Exception e) { return (null, e is UnauthorizedAccessException ? "permission denied" : Out.Describe(e)); }
+        catch (FileNotFoundException)
+        {
+            return (null, null);
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return (null, null);
+        }
+        catch (Exception e)
+        {
+            return (null, e is UnauthorizedAccessException ? "permission denied" : Out.Describe(e));
+        }
     }
 
     /// <summary>
@@ -304,8 +389,10 @@ internal static class PausedGit
         foreach (var raw in text.Split('\n'))
         {
             var line = raw.TrimStart(' ', '\t');
-            if (line.EndsWith('\r')) line = line[..^1];
-            if (IsCommand(line, "exec") || IsCommand(line, "x")) found.Add(line);
+            if (line.EndsWith('\r'))
+                line = line[..^1];
+            if (IsCommand(line, "exec") || IsCommand(line, "x"))
+                found.Add(line);
         }
         return found;
     }
@@ -326,7 +413,8 @@ internal static class PausedGit
         foreach (var raw in text.Split('\n'))
         {
             var line = raw.Trim();
-            if (MentionsStrategy(line) && !IsStockStrategyLine(line)) found.Add(line);
+            if (MentionsStrategy(line) && !IsStockStrategyLine(line))
+                found.Add(line);
         }
         return found;
     }
@@ -334,10 +422,13 @@ internal static class PausedGit
     private static bool MentionsStrategy(string line)
     {
         const string word = "strategy";
-        for (int at = line.IndexOf(word, StringComparison.OrdinalIgnoreCase); at >= 0; at = line.IndexOf(word, at + 1, StringComparison.OrdinalIgnoreCase))
+        for (int at = line.IndexOf(word, StringComparison.OrdinalIgnoreCase);
+            at >= 0;
+            at = line.IndexOf(word, at + 1, StringComparison.OrdinalIgnoreCase))
         {
             var end = at + word.Length;
-            if (end == line.Length || line[end] != '-') return true; // strategy-option only passes arguments to it
+            if (end == line.Length || line[end] != '-')
+                return true; // strategy-option only passes arguments to it
         }
         return false;
     }
@@ -349,19 +440,25 @@ internal static class PausedGit
             && StockStrategies.Contains(line[(eq + 1)..].Trim());
     }
 
-    /// <summary>The warning for what <see cref="Find"/> returned. Paths are relative to <paramref name="dir"/> where they can be.</summary>
+    /// <summary>
+    /// The warning for what <see cref="Find"/> returned. Paths
+    /// are relative to <paramref name="dir"/> where they can be.
+    /// </summary>
     public static string Warning(string dir, IReadOnlyList<PausedOp> paused)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("pen: WARNING: git has paused operations here. They may be yours, but the sandbox could write to them, and continuing one runs what it says on this machine:");
+        sb.AppendLine("pen: WARNING: git has paused operations here. They may be yours, but the " +
+            "sandbox could write to them, and continuing one runs what it says on this machine:");
         foreach (var op in paused.Take(RepoGuard.MaxListed))
         {
             sb.Append("  ").Append(RepoGuard.Rel(dir, op.Path)).Append(": ").AppendLine(op.Kind);
             foreach (var note in op.Notes)
             {
                 sb.Append("      ").AppendLine(note.Text);
-                foreach (var line in note.Lines) sb.Append("        ").AppendLine(line);
-                if (note.More > 0) sb.Append("        … and ").Append(note.More).AppendLine(" more");
+                foreach (var line in note.Lines)
+                    sb.Append("        ").AppendLine(line);
+                if (note.More > 0)
+                    sb.Append("        … and ").Append(note.More).AppendLine(" more");
             }
         }
         var rest = paused.Skip(RepoGuard.MaxListed).ToList();
@@ -369,11 +466,14 @@ internal static class PausedGit
         {
             sb.Append("  … and ").Append(rest.Count).Append(" more");
             var withNotes = rest.Count(op => op.Notes.Count > 0);
-            if (withNotes > 0) sb.Append(", ").Append(withNotes).Append(" of them with something to look at");
+            if (withNotes > 0)
+                sb.Append(", ").Append(withNotes).Append(" of them with something to look at");
             sb.AppendLine();
         }
-        sb.AppendLine("pen: Inspect each one before git rebase --continue or --skip (or the same for git am, cherry-pick or revert).");
-        sb.Append("pen: A short entry isn't a clean bill: pen parses only the todo files, the merge strategy and git apply's options, and can't vouch for what a pick brings in or the text reword opens in your editor.");
+        sb.AppendLine("pen: Inspect each one before git rebase --continue " +
+            "or --skip (or the same for git am, cherry-pick or revert).");
+        sb.Append("pen: A short entry isn't a clean bill: pen parses only the todo files, the merge strategy and " +
+            "git apply's options, and can't vouch for what a pick brings in or the text reword opens in your editor.");
         return sb.ToString();
     }
 }

@@ -1,10 +1,9 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Text.RegularExpressions;
-using Tomlyn.Model;
 using Pen.Configuration;
 using Pen.Images;
 using Pen.Platform;
 using Pen.Proxy;
+using Tomlyn.Model;
 
 namespace Pen.Tools;
 
@@ -26,7 +25,9 @@ internal sealed class Recipe
     public bool IsAgent { get; init; }
     /// <summary>Domains the tool needs, in file order.</summary>
     public List<string> Allow { get; } = [];
-    /// <summary>Environment for sessions with the tool, in file order: set in its image (<see cref="ToolsImage"/>).</summary>
+    /// <summary>
+    /// Environment for sessions with the tool, in file order: set in its image (<see cref="ToolsImage"/>).
+    /// </summary>
     public List<KeyValuePair<string, string>> Env { get; } = [];
     public string InstallPath => $"{RecipeCatalog.Root}{Name}/{RecipeCatalog.InstallFile}";
     /// <summary>The text of tool.toml, as loaded.</summary>
@@ -34,7 +35,7 @@ internal sealed class Recipe
     /// <summary>The text of install.sh, as loaded.</summary>
     public required string Script { get; init; }
 
-    private Regex versionRegex = null!;
+    private Regex _versionRegex = null!;
 
     /// <summary>
     /// Whether the regex matches all of the version. Not just IsMatch: an unanchored
@@ -42,7 +43,7 @@ internal sealed class Recipe
     /// </summary>
     public bool AcceptsVersion(string version)
     {
-        var m = versionRegex.Match(version);
+        var m = _versionRegex.Match(version);
         return m.Success && m.Index == 0 && m.Length == version.Length;
     }
 
@@ -59,11 +60,15 @@ internal sealed class Recipe
                 throw Error($"unknown key \"{key}\"");
         }
         object Required(string key) => table.TryGetValue(key, out var v) ? v : throw Error($"{key} is missing");
-        bool Flag(string key) => !table.TryGetValue(key, out var v) ? false : v as bool? ?? throw Error($"{key} must be true or false (unquoted)");
+        bool Flag(string key) => !table.TryGetValue(key, out var v) ? false : v as bool? ?? throw Error(
+            $"{key} must be true or false (unquoted)");
 
         var isAgent = false;
         if (table.TryGetValue("kind", out var kind))
-            isAgent = Config.String(kind, "kind", Error) == "agent" ? true : throw Error("kind must be \"agent\" or left out");
+        {
+            isAgent = Config.String(kind, "kind", Error) == "agent" ? true : throw Error(
+                "kind must be \"agent\" or left out");
+        }
 
         Regex regex;
         try
@@ -85,14 +90,15 @@ internal sealed class Recipe
             IsAgent = isAgent,
             Settings = text,
             Script = script,
-            versionRegex = regex,
+            _versionRegex = regex,
         };
         if (!ToolSpec.IsVersionSyntax(recipe.Default) || !recipe.AcceptsVersion(recipe.Default))
             throw Error($"default \"{recipe.Default}\" isn't a valid version");
 
         if (table.TryGetValue("allow", out var allow))
         {
-            if (allow is not TomlArray domains) throw Error("allow must be a list of domains");
+            if (allow is not TomlArray domains)
+                throw Error("allow must be a list of domains");
             foreach (var d in domains)
             {
                 if (d is not string domain || !Allowlist.IsValidDomain(domain))
@@ -104,10 +110,13 @@ internal sealed class Recipe
         {
             foreach (var (variable, value) in Config.Table(env, "env", Error))
             {
-                if (!Config.EnvNameRegex().IsMatch(variable)) throw Error($"env.{variable} isn't a valid environment variable name");
-                if (Config.IsReservedEnv(variable)) throw Error($"env.{variable} is set by pen");
+                if (!Config.EnvNameRegex().IsMatch(variable))
+                    throw Error($"env.{variable} isn't a valid environment variable name");
+                if (Config.IsReservedEnv(variable))
+                    throw Error($"env.{variable} is set by pen");
                 var setting = Config.String(value, $"env.{variable}", Error);
-                if (setting.Any(char.IsControl)) throw Error($"env.{variable} can't hold a line break or control character");
+                if (setting.Any(char.IsControl))
+                    throw Error($"env.{variable} can't hold a line break or control character");
                 recipe.Env.Add(new(variable, setting));
             }
         }

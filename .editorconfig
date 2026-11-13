@@ -38,3 +38,84 @@ indent_style = tab
 
 [*.{gitignore,conf}]
 indent_size = 2
+
+# Style enforced in the build (EnforceCodeStyleInBuild in Pen.csproj).
+[cli/Pen/**.cs]
+# Unnecessary usings and formatting.
+dotnet_diagnostic.IDE0005.severity = warning
+dotnet_diagnostic.IDE0055.severity = warning
+
+# One statement per line: an embedded statement goes on its own line, braces when it spans lines,
+# no repeated blank lines.
+csharp_style_allow_embedded_statements_on_same_line_experimental = false
+dotnet_diagnostic.IDE2001.severity = warning
+dotnet_style_allow_multiple_blank_lines_experimental = false
+dotnet_diagnostic.IDE2000.severity = warning
+csharp_prefer_braces = when_multiline
+dotnet_diagnostic.IDE0011.severity = warning
+
+# Naming: private instance fields are _camelCase; constants and static readonly fields are PascalCase.
+dotnet_naming_symbols.constants.applicable_kinds = field
+dotnet_naming_symbols.constants.applicable_accessibilities = *
+dotnet_naming_symbols.constants.required_modifiers = const
+dotnet_naming_symbols.static_readonly_fields.applicable_kinds = field
+dotnet_naming_symbols.static_readonly_fields.applicable_accessibilities = *
+dotnet_naming_symbols.static_readonly_fields.required_modifiers = static, readonly
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_style.pascal_case.capitalization = pascal_case
+dotnet_naming_style.underscore_camel_case.capitalization = camel_case
+dotnet_naming_style.underscore_camel_case.required_prefix = _
+dotnet_naming_rule.constants_are_pascal_case.symbols = constants
+dotnet_naming_rule.constants_are_pascal_case.style = pascal_case
+dotnet_naming_rule.constants_are_pascal_case.severity = warning
+dotnet_naming_rule.static_readonly_fields_are_pascal_case.symbols = static_readonly_fields
+dotnet_naming_rule.static_readonly_fields_are_pascal_case.style = pascal_case
+dotnet_naming_rule.static_readonly_fields_are_pascal_case.severity = warning
+dotnet_naming_rule.private_fields_are_underscore_camel_case.symbols = private_fields
+dotnet_naming_rule.private_fields_are_underscore_camel_case.style = underscore_camel_case
+dotnet_naming_rule.private_fields_are_underscore_camel_case.severity = warning
+dotnet_diagnostic.IDE1006.severity = warning
+dotnet_style_require_accessibility_modifiers = always
+dotnet_diagnostic.IDE0040.severity = warning
+
+# Readonly fields, no unused private members or parameters.
+dotnet_style_readonly_field = true
+dotnet_diagnostic.IDE0044.severity = warning
+dotnet_diagnostic.IDE0051.severity = warning
+dotnet_diagnostic.IDE0052.severity = warning
+dotnet_code_quality_unused_parameters = all
+dotnet_diagnostic.IDE0060.severity = warning
+
+# Expression bodies only where they fit on one line.
+csharp_style_expression_bodied_methods = when_on_single_line:warning
+csharp_style_expression_bodied_constructors = when_on_single_line:warning
+csharp_style_expression_bodied_operators = when_on_single_line:warning
+csharp_style_expression_bodied_properties = when_on_single_line:warning
+csharp_style_expression_bodied_indexers = when_on_single_line:warning
+csharp_style_expression_bodied_accessors = when_on_single_line:warning
+csharp_style_expression_bodied_lambdas = when_on_single_line:warning
+csharp_style_expression_bodied_local_functions = when_on_single_line:warning
+dotnet_diagnostic.IDE0021.severity = warning
+dotnet_diagnostic.IDE0022.severity = warning
+dotnet_diagnostic.IDE0023.severity = warning
+dotnet_diagnostic.IDE0024.severity = warning
+dotnet_diagnostic.IDE0025.severity = warning
+dotnet_diagnostic.IDE0026.severity = warning
+dotnet_diagnostic.IDE0027.severity = warning
+dotnet_diagnostic.IDE0053.severity = warning
+dotnet_diagnostic.IDE0061.severity = warning
+
+# Tests aren't restyled: the same rules only as suggestions.
+[cli/Pen.Tests/**.cs]
+dotnet_diagnostic.IDE0005.severity = suggestion
+dotnet_diagnostic.IDE0055.severity = suggestion
+dotnet_diagnostic.IDE2000.severity = suggestion
+dotnet_diagnostic.IDE2001.severity = suggestion
+dotnet_diagnostic.IDE0011.severity = suggestion
+dotnet_diagnostic.IDE1006.severity = suggestion
+dotnet_diagnostic.IDE0040.severity = suggestion
+dotnet_diagnostic.IDE0044.severity = suggestion
+dotnet_diagnostic.IDE0051.severity = suggestion
+dotnet_diagnostic.IDE0052.severity = suggestion
+dotnet_diagnostic.IDE0060.severity = suggestion

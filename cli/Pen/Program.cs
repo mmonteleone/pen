@@ -52,7 +52,8 @@ internal static class Program
     /// can't be shown: the AOT build (UseSystemResourceKeys) has it as a resource key.
     /// </summary>
     internal static string FileFailure(IOException e) =>
-        $"a file operation failed ({e.GetType().Name}): check that the disk has space and the files under the project and ~/.config/pen are usable, then rerun";
+        $"a file operation failed ({e.GetType().Name}): check that the disk has space " +
+            "and the files under the project and ~/.config/pen are usable, then rerun";
 
     private static int Run(string[] args)
     {
@@ -69,14 +70,18 @@ internal static class Program
                 Console.Out.Write(AllowCommand.Defaults());
                 return 0;
             case CommandKind.Version:
-                Console.Out.WriteLine("pen " + (typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "?"));
+                Console.Out.WriteLine("pen "
+                    + (typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                        ?.InformationalVersion ?? "?"));
                 return 0;
         }
 
         var host = HostEnv.FromProcess();
         StartDir.Leave(host);
-        if (command.Kind == CommandKind.Ps) return Ps.Run(host);
-        if (command.Kind == CommandKind.Prune) return Prune.Run(host, Console.In);
+        if (command.Kind == CommandKind.Ps)
+            return Ps.Run(host);
+        if (command.Kind == CommandKind.Prune)
+            return Prune.Run(host, Console.In);
         Config.EnsureUserConfig(host);
         var user = Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User);
 
@@ -95,7 +100,8 @@ internal static class Program
         {
             CommandKind.Run => RunSession(host, project, user, ProjectConfig(), command),
             CommandKind.Allow => AllowCommand.List(host, project, user, ProjectConfig()),
-            CommandKind.Trust => TrustGate.Command(host, project, user, ProjectConfig(), command.Yes, Answers.FromProcess(), command.List),
+            CommandKind.Trust => TrustGate.Command(host, project, user, ProjectConfig(), command.Yes,
+                Answers.FromProcess(), command.List),
             CommandKind.Sign => Sign.Run(host, project, command.Args.Count > 0 ? command.Args[0] : null),
             CommandKind.Reset => Reset.Run(host, project, Console.In),
             _ => throw new InvalidOperationException($"unhandled command {command.Kind}"),
@@ -107,6 +113,7 @@ internal static class Program
     // --port adds to ports in .pen/config.toml.
     // --tool adds to tools in both config files.
     private static int RunSession(HostEnv host, Project project, Config user, Config projectConfig, Command command) =>
-        new Session(host, project, user, projectConfig).Run(command.Args, docker: command.Docker || projectConfig.Docker == true,
+        new Session(host, project, user, projectConfig).Run(command.Args,
+            docker: command.Docker || projectConfig.Docker == true,
             ports: Port.Merge(projectConfig.Ports, command.Ports), flagTools: command.Tools);
 }

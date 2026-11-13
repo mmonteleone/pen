@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Pen.Configuration;
 using Pen.Platform;
 using Pen.Projects;
@@ -19,7 +18,8 @@ internal static class Image
     /// <summary>The label of the current image, or null if there's no image.</summary>
     public static string? CurrentHash()
     {
-        var r = Proc.Capture("docker", ["image", "inspect", "--format", $"{{{{ index .Config.Labels \"{HashLabel}\" }}}}", Name]);
+        var r = Proc.Capture("docker",
+            ["image", "inspect", "--format", $"{{{{ index .Config.Labels \"{HashLabel}\" }}}}", Name]);
         return r.ExitStatus.ExitCode == 0 ? r.StandardOutput.Trim() : null;
     }
 
@@ -28,7 +28,8 @@ internal static class Image
     {
         var want = Embedded.ImageHash();
         var have = CurrentHash();
-        if (have == want) return;
+        if (have == want)
+            return;
         Out.Line(have == null
             ? $"building {Name} (first run, this takes a few minutes)"
             : $"rebuilding {Name}: its image files changed");
@@ -38,9 +39,12 @@ internal static class Image
     public static void Build(string hash, string? refresh, bool pull, bool noCache)
     {
         var args = new List<string> { "build", "-t", Name, "--label", $"{HashLabel}={hash}" };
-        if (pull) args.Add("--pull");
-        if (noCache) args.Add("--no-cache");
-        if (refresh != null) args.AddRange(["--build-arg", $"PEN_REFRESH={refresh}"]);
+        if (pull)
+            args.Add("--pull");
+        if (noCache)
+            args.Add("--no-cache");
+        if (refresh != null)
+            args.AddRange(["--build-arg", $"PEN_REFRESH={refresh}"]);
         args.Add("-");
 
         var psi = Proc.Info("docker", args);
@@ -77,22 +81,37 @@ internal static class Image
     /// image must never skip the build: only building is what ties it to the approved copy.
     /// </para>
     /// </summary>
-    public static string? EnsureProjectLayer(HostEnv host, Project project, bool noCache = false, string baseImage = Name)
+    public static string? EnsureProjectLayer(
+        HostEnv host,
+        Project project,
+        bool noCache = false,
+        string baseImage = Name)
     {
         var dockerfile = Path.Combine(project.PenDir, "Dockerfile");
-        if (!File.Exists(dockerfile)) return null;
+        if (!File.Exists(dockerfile))
+            return null;
         using var context = LayerContext.Take(host, project);
         if (context.Result.Hash == null)
             throw new PenException($"can't build from .pen/: {context.Result.Problem}");
         if (context.Result.Hash != TrustStore.For(host, project).LayerHash)
-            throw new PenException(".pen/ isn't what was approved (it may have just changed): review it with pen trust, then rerun");
+        {
+            throw new PenException(".pen/ isn't what was approved (it may " +
+                "have just changed): review it with pen trust, then rerun");
+        }
+
         var name = ProjectLayerName(project, baseImage);
 
-        var args = new List<string> { "build", "--progress", "plain", "-t", name, "--label", $"pen.project={project.Key}" };
-        if (noCache) args.Add("--no-cache");
-        if (baseImage != Name) args.AddRange(["--build-context", $"{Name}=docker-image://{baseImage}"]);
+        var args = new List<string>
+        {
+            "build", "--progress", "plain", "-t", name, "--label", $"pen.project={project.Key}"
+        };
+        if (noCache)
+            args.Add("--no-cache");
+        if (baseImage != Name)
+            args.AddRange(["--build-context", $"{Name}=docker-image://{baseImage}"]);
         args.AddRange(["-f", Path.Combine(context.Dir, "Dockerfile"), context.Dir]);
-        RunBuild(args, context: null, $"building the project layer {name} from .pen/Dockerfile", "building the project layer from .pen/Dockerfile failed");
+        RunBuild(args, context: null, $"building the project layer {name} from .pen/Dockerfile",
+            "building the project layer from .pen/Dockerfile failed");
         return name;
     }
 
@@ -113,10 +132,14 @@ internal static class Image
         bool live = false;
         void OnLine(string? line)
         {
-            if (line == null) return;
+            if (line == null)
+                return;
             lock (gate)
             {
-                if (live) Out.Raw(line); else buffered.Add(line);
+                if (live)
+                    Out.Raw(line);
+                else
+                    buffered.Add(line);
             }
         }
 
@@ -142,7 +165,8 @@ internal static class Image
             lock (gate)
             {
                 Out.Line(announce);
-                foreach (var l in buffered) Out.Raw(l);
+                foreach (var l in buffered)
+                    Out.Raw(l);
                 buffered.Clear();
                 live = true;
             }
@@ -152,7 +176,8 @@ internal static class Image
         {
             lock (gate)
             {
-                foreach (var l in buffered.TakeLast(40)) Out.Raw(l);
+                foreach (var l in buffered.TakeLast(40))
+                    Out.Raw(l);
             }
             throw new PenException($"{failure} (docker build exited {p.ExitCode})");
         }
@@ -166,7 +191,9 @@ internal static class Image
     public static string ProjectLayerName(Project project, string baseImage = Name)
     {
         var tag = baseImage == Name ? "latest" : baseImage[(baseImage.LastIndexOf(':') + 1)..];
-        return project.Dir == project.RepoDir ? $"{project.Key}:{tag}" : $"{project.Key}-{Project.Hash(project.Dir)}:{tag}";
+        return project.Dir == project.RepoDir
+            ? $"{project.Key}:{tag}"
+            : $"{project.Key}-{Project.Hash(project.Dir)}:{tag}";
     }
 
     /// <summary>
@@ -174,21 +201,36 @@ internal static class Image
     /// less what isn't approved, as pen upgrade doesn't ask. Outside a project, the user's alone.
     /// A problem with the project's only costs its tools, with a note.
     /// </summary>
-    internal static IReadOnlyList<ToolSpec> UpgradeTools(HostEnv host, Project? project, Config user, RecipeCatalog? recipes = null)
+    internal static IReadOnlyList<ToolSpec> UpgradeTools(
+        HostEnv host,
+        Project? project,
+        Config user,
+        RecipeCatalog? recipes = null)
     {
         var catalog = recipes ?? RecipeCatalog.Embedded;
-        if (project == null) return user.Tools;
+        if (project == null)
+            return user.Tools;
         Config projectConfig;
-        try { projectConfig = Config.Load(project.PenDir, ".pen", ConfigKind.Project); }
+        try
+        {
+            projectConfig = Config.Load(project.PenDir, ".pen", ConfigKind.Project);
+        }
         catch (PenException e)
         {
             Out.Line($"skipping this project's tools: {e.Message}");
             return user.Tools;
         }
-        var unapproved = TrustGate.UnapprovedTools(projectConfig, user.Tools, TrustStore.For(host, project), catalog).Select(r => r.Tool).ToList();
+        var unapproved = TrustGate.UnapprovedTools(projectConfig, user.Tools, TrustStore.For(host, project), catalog)
+            .Select(r => r.Tool)
+            .ToList();
         if (unapproved.Count > 0)
-            Out.Line($"skipping tools that .pen/ asks for and aren't approved (pen trust reviews them): {string.Join(' ', unapproved.Select(t => Out.Field(t.ToString())))}");
-        if (ToolSpec.TryCanonicalize(user.Tools.Concat(projectConfig.Tools.Except(unapproved)), catalog, out var tools) is { } conflict)
+        {
+            Out.Line("skipping tools that .pen/ asks for and aren't approved (pen trust reviews " +
+                $"them): {string.Join(' ', unapproved.Select(t => Out.Field(t.ToString())))}");
+        }
+
+        if (ToolSpec.TryCanonicalize(user.Tools.Concat(projectConfig.Tools.Except(unapproved)), catalog,
+            out var tools) is { } conflict)
         {
             Out.Line($"skipping this project's tools: {conflict}");
             return user.Tools;
@@ -196,10 +238,14 @@ internal static class Image
         return tools;
     }
 
-    /// <summary>Rebuilds the project's layer on <paramref name="baseImage"/>, if it has one and it's approved; pen upgrade doesn't ask.</summary>
+    /// <summary>
+    /// Rebuilds the project's layer on <paramref name="baseImage"/>,
+    /// if it has one and it's approved; pen upgrade doesn't ask.
+    /// </summary>
     internal static void UpgradeProjectLayer(HostEnv host, Project project, bool clean, string baseImage = Name)
     {
-        if (!TrustGate.HasDockerfile(project)) return;
+        if (!TrustGate.HasDockerfile(project))
+            return;
         if (TrustGate.UnapprovedLayer(project, TrustStore.For(host, project)) != null)
         {
             Out.Line("skipping the project layer: .pen/ isn't approved (pen trust reviews it)");
@@ -217,14 +263,19 @@ internal static class Image
     public static void Upgrade(HostEnv host, Config user, bool clean)
     {
         Out.Line($"upgrading {Name}{(clean ? " from scratch (--clean)" : "")}");
-        Build(Embedded.ImageHash(), refresh: DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(), pull: true, noCache: clean);
+        Build(Embedded.ImageHash(), refresh: DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(), pull: true,
+            noCache: clean);
 
         // The project layer too, when run in a project that has one.
         Project? project = null;
-        try { project = Project.Resolve(StartDir.Get(), host); }
+        try
+        {
+            project = Project.Resolve(StartDir.Get(), host);
+        }
         catch (PenException) { }
         var tools = ToolsImage.Ensure(UpgradeTools(host, project, user), RecipeCatalog.Embedded, noCache: clean);
-        if (project != null) UpgradeProjectLayer(host, project, clean, tools);
+        if (project != null)
+            UpgradeProjectLayer(host, project, clean, tools);
 
         Out.Line("pulling sidecar images");
         // compose reads the embedded compose.yaml from stdin. Its required
@@ -238,7 +289,8 @@ internal static class Image
             ["NUGET_PACKAGES"] = "/nonexistent",
             ["PEN_SEED"] = "/nonexistent",
         };
-        var psi = Proc.Info("docker", ["compose", "--profile", "docker", "-f", "-", "-p", "pen-upgrade", "pull", "proxy", "dind"], env);
+        var psi = Proc.Info("docker",
+            ["compose", "--profile", "docker", "-f", "-", "-p", "pen-upgrade", "pull", "proxy", "dind"], env);
         psi.RedirectStandardInput = true;
         using var p = Proc.Start(psi);
         using (var stdin = p.StandardInput)

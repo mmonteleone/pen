@@ -1,6 +1,3 @@
-using System.Globalization;
-using System.Text;
-using System.Text.Json;
 using Pen.Platform;
 
 namespace Pen.GitProtection;
@@ -20,7 +17,8 @@ internal sealed record ProtectedManifest(List<ProtectedFile> Files, List<string>
     /// </summary>
     public bool Vouches(string path)
     {
-        if (RepoGuard.IsLink(path)) return false;
+        if (RepoGuard.IsLink(path))
+            return false;
         var real = Native.RealPath(path) ?? path;
         return Files.Any(f => !f.Adopted && (f.Path == path || f.Path == real))
             || ReadOnlyDirs.Any(d => RepoGuard.IsInside(d, path) || RepoGuard.IsInside(d, real));

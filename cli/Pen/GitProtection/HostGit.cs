@@ -1,5 +1,3 @@
-using System.Diagnostics;
-using System.Text;
 using Pen.Platform;
 
 namespace Pen.GitProtection;
@@ -51,21 +49,32 @@ internal sealed class HostGit
     public List<string> Args(IEnumerable<string> args)
     {
         var all = new List<string>();
-        if (_dir != null) all.AddRange(["-C", _dir]);
+        if (_dir != null)
+            all.AddRange(["-C", _dir]);
         all.AddRange(Overrides);
         all.AddRange(_config);
         all.AddRange(args);
         return all;
     }
 
-    public GitResult Run(IEnumerable<string> args, byte[]? stdin = null, IReadOnlyDictionary<string, string>? env = null)
+    public GitResult Run(
+        IEnumerable<string> args,
+        byte[]? stdin = null,
+        IReadOnlyDictionary<string, string>? env = null)
     {
         var psi = Proc.Info("git", Args(args), _env);
         if (env != null)
-            foreach (var (k, v) in env) psi.Environment[k] = v;
-        foreach (var name in ScrubbedEnv) psi.Environment.Remove(name);
-        foreach (var name in ForcedEnv) psi.Environment[name] = "1";
-        if (_dir == null) psi.WorkingDirectory = "/";
+        {
+            foreach (var (k, v) in env)
+                psi.Environment[k] = v;
+        }
+
+        foreach (var name in ScrubbedEnv)
+            psi.Environment.Remove(name);
+        foreach (var name in ForcedEnv)
+            psi.Environment[name] = "1";
+        if (_dir == null)
+            psi.WorkingDirectory = "/";
         psi.RedirectStandardOutput = psi.RedirectStandardError = true;
         psi.RedirectStandardInput = true;
 
@@ -76,7 +85,8 @@ internal sealed class HostGit
         try
         {
             using var input = p.StandardInput.BaseStream;
-            if (stdin != null) input.Write(stdin);
+            if (stdin != null)
+                input.Write(stdin);
         }
         catch (IOException) { } // git exited without reading it; its exit code says why
         copy.Wait();
@@ -90,7 +100,8 @@ internal sealed class HostGit
     public string Out(params string[] args)
     {
         var r = Run(args);
-        if (!r.Ok) throw new PenException($"git {string.Join(' ', args)} failed: {r.Stderr.Trim()}");
+        if (!r.Ok)
+            throw new PenException($"git {string.Join(' ', args)} failed: {r.Stderr.Trim()}");
         return r.Text.Trim();
     }
 

@@ -3,7 +3,6 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using Pen.GitProtection;
 using Pen.Images;
-using Pen.Platform;
 
 namespace Pen.Sessions;
 
@@ -28,17 +27,24 @@ internal static class SessionCompose
     /// runs pen:latest as nobody with no capabilities on a read-only root; the
     /// agent can reach it, but only to be relayed back to itself.
     /// </summary>
-    public static string Override(IReadOnlyList<Mount> mounts, bool readOnlyRoot = false, string? dindContainer = null, PortForward? ports = null)
+    public static string Override(
+        IReadOnlyList<Mount> mounts,
+        bool readOnlyRoot = false,
+        string? dindContainer = null,
+        PortForward? ports = null)
     {
-        if (ports is { Ports.Count: 0 }) ports = null;
+        if (ports is { Ports.Count: 0 })
+            ports = null;
         using var ms = new MemoryStream();
-        using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
+        using (var w = new Utf8JsonWriter(ms,
+            new JsonWriterOptions { Indented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
         {
             w.WriteStartObject();
             w.WriteString("x-pen", "this session's mounts over the project mount and its services, written by pen");
             w.WriteStartObject("services");
             w.WriteStartObject("agent");
-            if (readOnlyRoot) w.WriteBoolean("read_only", true);
+            if (readOnlyRoot)
+                w.WriteBoolean("read_only", true);
             if (dindContainer != null)
             {
                 w.WriteStartObject("environment");
@@ -73,7 +79,8 @@ internal static class SessionCompose
                 WriteMounts(w, mounts);
                 w.WriteEndObject();
             }
-            if (ports != null) WritePortsService(w, ports);
+            if (ports != null)
+                WritePortsService(w, ports);
             w.WriteEndObject();
             if (ports != null)
             {
@@ -95,7 +102,8 @@ internal static class SessionCompose
         w.WriteStartArray("entrypoint");
         w.WriteEndArray();
         // A socat per port; tini (init) as PID 1 stops them all at once.
-        var script = string.Concat(ports.Ports.Select(p => $"socat TCP-LISTEN:{p},fork,reuseaddr TCP:{ports.AgentContainer}:{p} & ")) + "wait";
+        var script = string.Concat(ports.Ports.Select(p => "socat " +
+            $"TCP-LISTEN:{p},fork,reuseaddr TCP:{ports.AgentContainer}:{p} & ")) + "wait";
         w.WriteStartArray("command");
         w.WriteStringValue("sh");
         w.WriteStringValue("-c");
@@ -112,7 +120,8 @@ internal static class SessionCompose
         w.WriteBoolean("read_only", true);
         w.WriteNumber("pids_limit", 1024);
         w.WriteStartArray("ports");
-        foreach (var p in ports.Ports) w.WriteStringValue($"127.0.0.1:{p}:{p}");
+        foreach (var p in ports.Ports)
+            w.WriteStringValue($"127.0.0.1:{p}:{p}");
         w.WriteEndArray();
         w.WriteStartArray("networks");
         w.WriteStringValue("sandbox");

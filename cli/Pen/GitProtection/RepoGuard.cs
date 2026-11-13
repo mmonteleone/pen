@@ -29,21 +29,35 @@ internal static class RepoGuard
     {
         var git = Path.Combine(dir, ".git");
         if (IsLink(git))
-            throw new PenException($"{Rel(dir, git)} is a symlink, which pen doesn't support: run pen in the repo it points to");
+        {
+            throw new PenException($"{Rel(dir, git)} is a symlink, which " +
+                "pen doesn't support: run pen in the repo it points to");
+        }
+
         var common = git;
         if (File.Exists(git))
-            common = CheckWorktree(dir, git);
+            common = CheckWorktree(git);
         if (Directory.Exists(common) && !Native.CanList(common))
-            throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't read {Rel(dir, common)}, so it can't protect it: fix its permissions, then rerun");
+        {
+            throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't read " +
+                $"{Rel(dir, common)}, so it can't protect it: fix its permissions, then rerun");
+        }
+
         if (Exists(Path.Combine(common, "commondir")))
-            throw new PenException($"{Rel(dir, Path.Combine(common, "commondir"))} exists, which a normal repo never has: it makes git read config and hooks from another directory. Inspect it and remove it, then rerun");
+        {
+            throw new PenException($"{Rel(dir, Path.Combine(common, "commondir"))} exists, which a normal repo never " +
+                "has: it makes git read config and hooks from another directory. Inspect it and remove it, then rerun");
+        }
 
         var modules = RepoScan.ScanModules(common);
         var unreadable = modules.Unreadable;
         if (unreadable.Count > 0)
-            throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't read these directories where git keeps submodule repos, so it can't protect what's in them:\n"
+        {
+            throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't read these " +
+                "directories where git keeps submodule repos, so it can't protect what's in them:\n"
                 + string.Join('\n', unreadable.Select(u => "  " + Rel(dir, u)))
                 + "\nfix their permissions or remove them, then rerun");
+        }
 
         var scan = RepoScan.ScanNested(dir, common);
         var badNames = modules.BadNames.Concat(scan.BadNames).ToList();
@@ -54,22 +68,28 @@ internal static class RepoGuard
                 : "";
             // A repo renamed there would be adopted as a submodule's at the next start.
             var gitDirNote = modules.BadNames.Count > 0
-                ? $"\ninspect any under {Rel(dir, common)} first and prefer removing them: a repo renamed there is trusted as a submodule's repo at the next start"
+                ? $"\ninspect any under {Rel(dir, common)} first and prefer removing them: " +
+                    "a repo renamed there is trusted as a submodule's repo at the next start"
                 : "";
-            throw new PenException($"refusing to run in {Out.Field(dir)}: these names aren't valid UTF-8, so pen can't look inside them, though git on this machine can still enter them and run what's there (shown with octal escapes):\n"
+            throw new PenException($"refusing to run in {Out.Field(dir)}: these names aren't " +
+                "valid UTF-8, so pen can't look inside them, though git on this machine can " +
+                "still enter them and run what's there (shown with octal escapes):\n"
                 + string.Join('\n', ListedBadNames(dir, badNames).Select(n => "  " + n))
                 + "\nrename or remove each, then rerun" + command + gitDirNote);
         }
         if (scan.Unlistable.Count > 0)
         {
             var listed = scan.Unlistable.Take(MaxListed).Select(u => "  " + Rel(dir, u));
-            if (scan.Unlistable.Count > MaxListed) listed = listed.Append($"  … and {scan.Unlistable.Count - MaxListed} more");
-            throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't list these directories, though git on this machine can still enter them, so it can't see a repo inside one:\n"
+            if (scan.Unlistable.Count > MaxListed)
+                listed = listed.Append($"  … and {scan.Unlistable.Count - MaxListed} more");
+            throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't list these directories, " +
+                "though git on this machine can still enter them, so it can't see a repo inside one:\n"
                 + string.Join('\n', listed)
                 + "\nfix their permissions (chmod u+rx) or remove them, then rerun");
         }
         var nested = scan.Found;
-        if (nested.Count == 0) return;
+        if (nested.Count == 0)
+            return;
         var sb = new StringBuilder();
         sb.Append(Directory.Exists(git)
             ? $"refusing to run in {dir}: it has other git repos inside it, whose config and hooks pen can't protect:"
@@ -78,20 +98,34 @@ internal static class RepoGuard
         foreach (var n in nested.Take(MaxListed))
         {
             bool submodule = n.Kind == NestedKind.GitDir && IsSubmodulePath(dir, n.RepoDir);
-            sb.Append($"\n  {Rel(dir, n.RepoDir)}{(submodule ? " (a submodule with its own .git dir)" : Describe(n.Kind))}");
-            if (submodule) anySubmodule = true; else anyOther = true;
+            sb.Append(
+                $"\n  {Rel(dir, n.RepoDir)}{(submodule ? " (a submodule with its own .git dir)" : Describe(n.Kind))}");
+            if (submodule)
+                anySubmodule = true;
+            else
+                anyOther = true;
         }
-        if (nested.Count > MaxListed) { sb.Append($"\n  … and {nested.Count - MaxListed} more"); anyOther = true; }
+        if (nested.Count > MaxListed)
+        {
+            sb.Append($"\n  … and {nested.Count - MaxListed} more");
+            anyOther = true;
+        }
         if (anySubmodule)
-            sb.Append("\nfor a submodule, run git submodule absorbgitdirs here on this machine: it moves the submodule's .git dir into this repo's, where pen can protect it");
-        if (anyOther) sb.Append("\nrun pen in each repo instead");
+        {
+            sb.Append("\nfor a submodule, run git submodule absorbgitdirs here on this machine: " +
+                "it moves the submodule's .git dir into this repo's, where pen can protect it");
+        }
+
+        if (anyOther)
+            sb.Append("\nrun pen in each repo instead");
         throw new PenException(sb.ToString());
     }
 
     /// <summary>The first few of <paramref name="names"/> for a message, and how many more there are.</summary>
     internal static IEnumerable<string> ListedBadNames(string dir, List<BadName> names)
     {
-        var listed = names.Take(MaxListed).Select(n => Rel(dir, n.Shown) + (n.EndsInNewline ? " (it ends in a newline, so no command can name it here: rename it by hand)" : ""));
+        var listed = names.Take(MaxListed).Select(n => Rel(dir, n.Shown) + (n.EndsInNewline ? " " +
+            "(it ends in a newline, so no command can name it here: rename it by hand)" : ""));
         return names.Count > MaxListed ? listed.Append($"… and {names.Count - MaxListed} more") : listed;
     }
 
@@ -104,16 +138,21 @@ internal static class RepoGuard
     /// </summary>
     internal static bool IsSubmodulePath(string dir, string repoDir)
     {
-        for (var super = Path.GetDirectoryName(repoDir); super != null && IsInside(dir, super); super = Path.GetDirectoryName(super))
+        for (var super = Path.GetDirectoryName(repoDir);
+            super != null && IsInside(dir, super);
+            super = Path.GetDirectoryName(super))
         {
             var gitmodules = Path.Combine(super, ".gitmodules");
-            if (!File.Exists(gitmodules) || IsLink(gitmodules)) continue;
+            if (!File.Exists(gitmodules) || IsLink(gitmodules))
+                continue;
             var rel = Path.GetRelativePath(super, repoDir);
             try
             {
                 if (GitConfigFile.ParseFile(gitmodules).Any(e =>
                         e.Section == "submodule" && e.Key == "path" && e.Value.TrimEnd('/') == rel))
+                {
                     return true;
+                }
             }
             catch (PenException) { } // no advice from a file that can't be read
         }
@@ -126,15 +165,26 @@ internal static class RepoGuard
     /// validate (a submodule's checkout, or a forged one), or a worktree of a
     /// bare repo, which has no main checkout to share Pen's state with.
     /// </summary>
-    private static string CheckWorktree(string dir, string git)
+    private static string CheckWorktree(string git)
     {
         var common = RepoScan.ResolveWorktree(git)
-            ?? throw new PenException(".git is a file that isn't a valid linked worktree (a submodule's checkout, or a worktree whose entry in the main repo is missing or moved), which pen doesn't support. For a submodule, run pen in the repo that has it; for a worktree, git worktree repair in the main checkout may fix it");
+            ?? throw new PenException(".git is a file that isn't a valid linked worktree (a " +
+                "submodule's checkout, or a worktree whose entry in the main repo is missing or " +
+                "moved), which pen doesn't support. For a submodule, run pen in the repo that " +
+                "has it; for a worktree, git worktree repair in the main checkout may fix it");
         // ResolveWorktree requires the path to be real already; this is belt and braces.
         if (IsLink(common) || !Directory.Exists(common) || Native.RealPath(common) != common)
-            throw new PenException($"this worktree's git dir {Out.Field(common)} isn't a real directory, which pen doesn't support");
+        {
+            throw new PenException($"this worktree's git dir {Out.Field(common)} " +
+                "isn't a real directory, which pen doesn't support");
+        }
+
         if (!IsMainCheckoutGitDir(common))
-            throw new PenException($"this is a worktree of the bare repo {Out.Field(common)}, which pen doesn't support: run pen in a worktree of a repo with a main checkout");
+        {
+            throw new PenException($"this is a worktree of the bare repo {Out.Field(common)}, " +
+                "which pen doesn't support: run pen in a worktree of a repo with a main checkout");
+        }
+
         return common;
     }
 
@@ -144,7 +194,8 @@ internal static class RepoGuard
     /// </summary>
     internal static bool IsMainCheckoutGitDir(string common)
     {
-        if (Path.GetFileName(common) != ".git" || !Directory.Exists(common)) return false;
+        if (Path.GetFileName(common) != ".git" || !Directory.Exists(common))
+            return false;
         var bare = GitConfigFile.ParseFile(Path.Combine(common, "config"))
             .Where(e => e.Section == "core" && e.Key == "bare").Select(e => e.Value).LastOrDefault();
         return bare == null || !GitConfigFile.IsTrue(bare);
@@ -158,7 +209,9 @@ internal static class RepoGuard
         _ => "",
     };
 
-    internal const string CaseWarning = "warning: this repo's git dir isn't known to be case-sensitive, so read-only protection of single files in it may not hold: the agent could change .git/config by writing .git/CONFIG. Don't run git in this repo on this machine until the session ends";
+    internal const string CaseWarning = "warning: this repo's git dir isn't known to be case-sensitive, " +
+        "so read-only protection of single files in it may not hold: the agent could change .git/config " +
+        "by writing .git/CONFIG. Don't run git in this repo on this machine until the session ends";
 
     /// <summary>
     /// Warns once if the repo's common git dir may fold case: that's where
@@ -167,7 +220,8 @@ internal static class RepoGuard
     /// </summary>
     internal static void WarnIfCaseMayFold(Project project, Action<string> warn, Func<string, bool>? probe = null)
     {
-        if (project.CommonGitDir is { } common && (probe ?? MayFoldCase)(common)) warn(CaseWarning);
+        if (project.CommonGitDir is { } common && (probe ?? MayFoldCase)(common))
+            warn(CaseWarning);
     }
 
     internal static bool MayFoldCase(string gitDir) => MayFoldCase(gitDir, NewCaseProbeName());
@@ -194,7 +248,8 @@ internal static class RepoGuard
         var upper = Path.Combine(gitDir, name.ToUpperInvariant());
         try
         {
-            if (Exists(probe) || Exists(upper)) return true;
+            if (Exists(probe) || Exists(upper))
+                return true;
             try
             {
                 new FileStream(probe, new FileStreamOptions
@@ -249,7 +304,8 @@ internal static class RepoGuard
             foreach (var name in new[] { "HEAD", "index" })
             {
                 var f = Path.Combine(common, name);
-                if (!File.Exists(f)) continue;
+                if (!File.Exists(f))
+                    continue;
                 RequireNotLink(dir, f);
                 // Not verified: the main checkout's git changes these legitimately.
                 mounts.Add(new(f, ReadOnly: true));
@@ -314,7 +370,8 @@ internal static class RepoGuard
                 if (IsLink(wt))
                     throw new PenException($"{Rel(dir, wt)} is a symlink, which pen doesn't support");
                 var commondir = Path.Combine(wt, "commondir");
-                if (Exists(commondir)) RequireNotLink(dir, commondir);
+                if (Exists(commondir))
+                    RequireNotLink(dir, commondir);
                 if (!IsWorktreeInside(dir, wt))
                 {
                     // The worktree isn't visible in the sandbox, so its entry
@@ -327,7 +384,8 @@ internal static class RepoGuard
                     AddIncludes(dir, common, worktreeFile, hostHome, mounts);
                     continue;
                 }
-                if (Exists(commondir)) mounts.Add(new(commondir, ReadOnly: true, Verify: true));
+                if (Exists(commondir))
+                    mounts.Add(new(commondir, ReadOnly: true, Verify: true));
                 AddWorktreeConfig(dir, common, Path.Combine(wt, "config.worktree"), worktreeConfig, hostHome, mounts);
             }
         }
@@ -356,10 +414,18 @@ internal static class RepoGuard
         foreach (var repo in RepoScan.FindModuleRepos(gitDir))
         {
             if (IsLink(repo))
-                throw new PenException($"{Rel(dir, repo)} is a symlink, which pen doesn't support: a submodule's git dir has to be a real directory inside {Rel(dir, gitDir)}");
+            {
+                throw new PenException($"{Rel(dir, repo)} is a symlink, which pen doesn't support: " +
+                    $"a submodule's git dir has to be a real directory inside {Rel(dir, gitDir)}");
+            }
+
             var commondir = Path.Combine(repo, "commondir");
             if (Exists(commondir))
-                throw new PenException($"{Rel(dir, commondir)} exists, which a submodule's repo never has: it makes git read config and hooks from another directory. Inspect it and remove it, then rerun");
+            {
+                throw new PenException($"{Rel(dir, commondir)} exists, which a submodule's repo never has: it " +
+                    "makes git read config and hooks from another directory. Inspect it and remove it, then rerun");
+            }
+
             if (mounts.Any(m => m.ReadOnly && IsInside(m.Path, repo)))
             {
                 foreach (var name in new[] { "config", "config.worktree" })
@@ -371,9 +437,15 @@ internal static class RepoGuard
                 continue;
             }
             var between = new Stack<string>();
-            for (var p = Path.GetDirectoryName(repo); p != null && p != gitDir && IsInside(gitDir, p); p = Path.GetDirectoryName(p))
+            for (var p = Path.GetDirectoryName(repo);
+                p != null && p != gitDir && IsInside(gitDir, p);
+                p = Path.GetDirectoryName(p))
+            {
                 between.Push(p);
-            foreach (var p in between) mounts.Add(new(p, ReadOnly: false));
+            }
+
+            foreach (var p in between)
+                mounts.Add(new(p, ReadOnly: false));
             ProtectGitDir(repo, gitDir, dir, hostHome, mounts);
         }
     }
@@ -389,19 +461,35 @@ internal static class RepoGuard
         var gitdirFile = Path.Combine(entry, "gitdir");
         try
         {
-            if (!File.Exists(gitdirFile) || IsLink(gitdirFile)) return false;
+            if (!File.Exists(gitdirFile) || IsLink(gitdirFile))
+                return false;
             var text = Native.ReadRegularFile(gitdirFile)?.TrimEnd('\n', '\r');
-            if (string.IsNullOrEmpty(text) || text.Contains('\n') || text.Contains('\0')) return false;
-            if (!Path.IsPathRooted(text)) text = Path.Combine(entry, text);
+            if (string.IsNullOrEmpty(text) || text.Contains('\n') || text.Contains('\0'))
+                return false;
+            if (!Path.IsPathRooted(text))
+                text = Path.Combine(entry, text);
             return IsInside(dir, ResolveExisting(Path.GetFullPath(text)));
         }
-        catch (IOException) { return false; }
-        catch (UnauthorizedAccessException) { return false; }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
-    private static void AddWorktreeConfig(string dir, string common, string path, bool enabled, string hostHome, List<Mount> mounts)
+    private static void AddWorktreeConfig(
+        string dir,
+        string common,
+        string path,
+        bool enabled,
+        string hostHome,
+        List<Mount> mounts)
     {
-        if (!enabled && !Exists(path)) return;
+        if (!enabled && !Exists(path))
+            return;
         EnsureFile(dir, path);
         mounts.Add(new(path, ReadOnly: true, Verify: true));
         AddIncludes(dir, common, path, hostHome, mounts);
@@ -410,8 +498,8 @@ internal static class RepoGuard
     /// <summary>
     /// include.path and includeIf.*.path files inside the project or
     /// <paramref name="common"/>, the project's git dir: those are what the sandbox
-    /// can write, whichever repo in the git dir the including file belongs to. The agent could write one of those and host git would read it as
-    /// config, so each is mounted read-only too. A missing one inside the git
+    /// can write, whichever repo in the git dir the including file belongs to. The agent could write one of those
+    /// and host git would read it as config, so each is mounted read-only too. A missing one inside the git
     /// dir is created empty; a missing one in the working tree is refused,
     /// since creating it would add a file to the project. A path that wasn't valid
     /// UTF-8 is refused: decoded, it has U+FFFD where git has other bytes, so
@@ -427,41 +515,85 @@ internal static class RepoGuard
     /// A ~user or %(prefix) path is refused: Pen can't tell where it leads.
     /// </para>
     /// </summary>
-    private static bool AddIncludes(string dir, string common, string configFile, string hostHome, List<Mount> mounts) =>
-        AddIncludes(dir, common, configFile, hostHome, mounts, new HashSet<string>(StringComparer.Ordinal) { configFile });
+    private static bool AddIncludes(
+        string dir,
+        string common,
+        string configFile,
+        string hostHome,
+        List<Mount> mounts) =>
+        AddIncludes(dir, common, configFile, hostHome, mounts,
+            new HashSet<string>(StringComparer.Ordinal) { configFile });
 
-    private static bool AddIncludes(string dir, string common, string configFile, string hostHome, List<Mount> mounts, HashSet<string> visited)
+    private static bool AddIncludes(
+        string dir,
+        string common,
+        string configFile,
+        string hostHome,
+        List<Mount> mounts,
+        HashSet<string> visited)
     {
         bool worktreeConfig = false;
         foreach (var e in GitConfigFile.ParseFile(configFile))
         {
-            if (e.Section == "extensions" && e.Key == "worktreeconfig" && GitConfigFile.IsTrue(e.Value)) worktreeConfig = true;
-            if (e.Section is not ("include" or "includeif") || e.Key != "path" || e.Value.Length == 0) continue;
+            if (e.Section == "extensions" && e.Key == "worktreeconfig" && GitConfigFile.IsTrue(e.Value))
+                worktreeConfig = true;
+            if (e.Section is not ("include" or "includeif") || e.Key != "path" || e.Value.Length == 0)
+                continue;
             if (e.Value.Contains('\ufffd'))
-                throw new PenException($"{Rel(dir, configFile)} includes a path that isn't valid UTF-8, so pen can't tell which file git would read: remove the include or rename the file, then rerun");
+            {
+                throw new PenException($"{Rel(dir, configFile)} includes a path that isn't valid UTF-8, so pen " +
+                    "can't tell which file git would read: remove the include or rename the file, then rerun");
+            }
+
             var p = e.Value;
-            if (p == "~" || p.StartsWith("~/", StringComparison.Ordinal)) p = hostHome + p[1..];
+            if (p == "~" || p.StartsWith("~/", StringComparison.Ordinal))
+            {
+                p = hostHome + p[1..];
+            }
             else if (p.StartsWith('~') || p.StartsWith("%(prefix)/", StringComparison.Ordinal))
-                throw new PenException($"{Rel(dir, configFile)} includes {Out.Field(p)}, and pen can't resolve that form of path, so it can't tell which file git would read: write the path out in full or remove the include, then rerun");
-            if (!Path.IsPathRooted(p)) p = Path.Combine(Path.GetDirectoryName(configFile)!, p);
+            {
+                throw new PenException($"{Rel(dir, configFile)} includes {Out.Field(p)}, and " +
+                    "pen can't resolve that form of path, so it can't tell which file git " +
+                    "would read: write the path out in full or remove the include, then rerun");
+            }
+
+            if (!Path.IsPathRooted(p))
+                p = Path.Combine(Path.GetDirectoryName(configFile)!, p);
 
             // As the OS walks it: ".." after a symlink is the parent of where that leads.
             var written = Path.GetFullPath(p);
             var real = HooksPath.RealPathWalk(p, _ => false, out _)
-                ?? throw new PenException($"{Rel(dir, configFile)} includes {Rel(dir, written)}, and pen can't follow that path to the file git would read: fix its permissions or remove the include, then rerun");
-            if (real == written) p = written; // no symlink to tell them apart, and a cycle then repeats one name
-            if (!visited.Add(p)) continue;
+                ?? throw new PenException($"{Rel(dir, configFile)} includes " +
+                    $"{Rel(dir, written)}, and pen can't follow that path to the file git " +
+                    "would read: fix its permissions or remove the include, then rerun");
+            if (real == written)
+                p = written; // no symlink to tell them apart, and a cycle then repeats one name
+            if (!visited.Add(p))
+                continue;
             if (visited.Count > MaxIncludeFiles)
-                throw new PenException($"{Rel(dir, configFile)} takes git config includes past {MaxIncludeFiles} files, more than pen will follow: remove it or the includes in it, then rerun");
+            {
+                throw new PenException($"{Rel(dir, configFile)} takes git config includes past {MaxIncludeFiles} " +
+                    "files, more than pen will follow: remove it or the includes in it, then rerun");
+            }
 
             if (written != real && (IsInside(dir, written) || IsInside(common, written)))
-                throw new PenException($"{Rel(dir, configFile)} includes {Rel(dir, written)} through a symlink, which pen doesn't support: the agent could redirect the include");
-            if (Directory.Exists(real)) continue; // git ignores a directory
+            {
+                throw new PenException($"{Rel(dir, configFile)} includes {Rel(dir, written)} through " +
+                    "a symlink, which pen doesn't support: the agent could redirect the include");
+            }
+
+            if (Directory.Exists(real))
+                continue; // git ignores a directory
             bool writable = IsInside(dir, real) || IsInside(common, real);
             if (writable && !File.Exists(real))
             {
                 if (!IsInside(common, real))
-                    throw new PenException($"{Rel(dir, configFile)} includes {Rel(dir, real)}, which doesn't exist: the agent could create it, and git on this machine would read it as config. Create it (it can be empty) or remove the include, then rerun");
+                {
+                    throw new PenException($"{Rel(dir, configFile)} includes {Rel(dir, real)}, which " +
+                        "doesn't exist: the agent could create it, and git on this machine would read " +
+                        "it as config. Create it (it can be empty) or remove the include, then rerun");
+                }
+
                 try
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(real)!);
@@ -469,7 +601,9 @@ internal static class RepoGuard
                 }
                 catch (Exception x) when (x is IOException or UnauthorizedAccessException)
                 {
-                    throw new PenException($"{Rel(dir, configFile)} includes {Rel(dir, real)}, which pen can't create to protect it (a parent is a file, the name is too long, or it's not writable): remove it or the include in it, then rerun");
+                    throw new PenException($"{Rel(dir, configFile)} includes {Rel(dir, real)}, " +
+                        "which pen can't create to protect it (a parent is a file, the name is too " +
+                        "long, or it's not writable): remove it or the include in it, then rerun");
                 }
             }
             if (writable)
@@ -493,9 +627,11 @@ internal static class RepoGuard
         while (true)
         {
             var real = Native.RealPath(p);
-            if (real != null) return rest.Aggregate(real, Path.Combine);
+            if (real != null)
+                return rest.Aggregate(real, Path.Combine);
             var parent = Path.GetDirectoryName(p);
-            if (parent == null) return path;
+            if (parent == null)
+                return path;
             rest.Push(Path.GetFileName(p));
             p = parent;
         }
@@ -505,7 +641,11 @@ internal static class RepoGuard
     {
         RequireNotLink(dir, path);
         if (File.Exists(path))
-            throw new PenException($"{Rel(dir, path)} is a file, not a directory: pen needs to mount it read-only as a directory");
+        {
+            throw new PenException($"{Rel(dir, path)} is a file, not a " +
+                "directory: pen needs to mount it read-only as a directory");
+        }
+
         Directory.CreateDirectory(path);
     }
 
@@ -514,13 +654,17 @@ internal static class RepoGuard
         RequireNotLink(dir, path);
         if (Directory.Exists(path))
             throw new PenException($"{Rel(dir, path)} is a directory, not a file");
-        if (!File.Exists(path)) File.WriteAllText(path, "");
+        if (!File.Exists(path))
+            File.WriteAllText(path, "");
     }
 
     internal static void RequireNotLink(string dir, string path)
     {
         if (IsLink(path))
-            throw new PenException($"{Rel(dir, path)} is a symlink, which pen doesn't support here: it has to mount it read-only");
+        {
+            throw new PenException($"{Rel(dir, path)} is a symlink, which " +
+                "pen doesn't support here: it has to mount it read-only");
+        }
     }
 
     internal static bool IsLink(string path) => new FileInfo(path).LinkTarget != null;
@@ -531,7 +675,10 @@ internal static class RepoGuard
     internal static bool IsInside(string dir, string path) =>
         path == dir || path.StartsWith(dir.TrimEnd('/') + "/", StringComparison.Ordinal);
 
-    /// <summary>A path for messages, relative to <paramref name="dir"/> when it's inside, safe to print (<see cref="Out.Field"/>).</summary>
+    /// <summary>
+    /// A path for messages, relative to <paramref name="dir"/>
+    /// when it's inside, safe to print (<see cref="Out.Field"/>).
+    /// </summary>
     internal static string Rel(string dir, string path) =>
         Out.Field(path == dir ? "." : IsInside(dir, path) ? path[(dir.TrimEnd('/').Length + 1)..] : path);
 }

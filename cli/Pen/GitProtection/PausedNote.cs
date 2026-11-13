@@ -1,5 +1,3 @@
-using System.Text;
-
 namespace Pen.GitProtection;
 
 /// <summary>A detail of a paused operation: a heading, and lines already safe to print.</summary>

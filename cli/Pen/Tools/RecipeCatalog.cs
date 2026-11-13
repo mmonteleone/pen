@@ -1,7 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text.RegularExpressions;
-using Tomlyn.Model;
-using Pen.Platform;
 
 namespace Pen.Tools;
 
@@ -15,16 +13,19 @@ internal sealed partial class RecipeCatalog
     private const string ReservedName = "list";
 
     private static readonly Lazy<RecipeCatalog> EmbeddedCatalog = new(() =>
-        FromFiles(Pen.Platform.Embedded.Under(Root).Select(path => KeyValuePair.Create(path, Pen.Platform.Embedded.Text(path)))));
+        FromFiles(Pen.Platform.Embedded.Under(Root)
+            .Select(path => KeyValuePair.Create(path, Pen.Platform.Embedded.Text(path)))));
 
-    /// <summary>Every recipe embedded in the binary. A malformed one throws, which unit tests catch before it ships.</summary>
+    /// <summary>
+    /// Every recipe embedded in the binary. A malformed one throws, which unit tests catch before it ships.
+    /// </summary>
     public static RecipeCatalog Embedded => EmbeddedCatalog.Value;
 
-    private readonly SortedDictionary<string, Recipe> recipes = new(StringComparer.Ordinal);
+    private readonly SortedDictionary<string, Recipe> _recipes = new(StringComparer.Ordinal);
 
-    public IEnumerable<Recipe> Recipes => recipes.Values;
+    public IEnumerable<Recipe> Recipes => _recipes.Values;
 
-    public bool TryGet(string name, [MaybeNullWhen(false)] out Recipe recipe) => recipes.TryGetValue(name, out recipe);
+    public bool TryGet(string name, [MaybeNullWhen(false)] out Recipe recipe) => _recipes.TryGetValue(name, out recipe);
 
     /// <summary>
     /// Loads recipes from files named by their paths under tools/. A recipe is exactly
@@ -38,22 +39,32 @@ internal sealed partial class RecipeCatalog
         {
             var parts = path.StartsWith(Root, StringComparison.Ordinal) ? path[Root.Length..].Split('/') : [];
             if (parts.Length != 2 || !NameRegex().IsMatch(parts[0]) || parts[0] == ReservedName)
-                throw new PenException($"{path}: not part of a recipe (tools/<name>/{SettingsFile} and {InstallFile}, with a lowercase name other than {ReservedName})");
-            if (parts[1] == SettingsFile) settings[parts[0]] = text;
-            else if (parts[1] == InstallFile) scripts[parts[0]] = text;
-            else throw new PenException($"{path}: a recipe has only {SettingsFile} and {InstallFile}");
+            {
+                throw new PenException($"{path}: not part of a recipe (tools/<name>/{SettingsFile} " +
+                    $"and {InstallFile}, with a lowercase name other than {ReservedName})");
+            }
+
+            if (parts[1] == SettingsFile)
+                settings[parts[0]] = text;
+            else if (parts[1] == InstallFile)
+                scripts[parts[0]] = text;
+            else
+                throw new PenException($"{path}: a recipe has only {SettingsFile} and {InstallFile}");
         }
 
         var catalog = new RecipeCatalog();
         foreach (var (name, text) in settings)
         {
-            if (!scripts.TryGetValue(name, out var script)) throw new PenException($"{Root}{name}/{InstallFile} is missing");
-            if (!script.StartsWith("#!", StringComparison.Ordinal)) throw new PenException($"{Root}{name}/{InstallFile} must start with #!");
-            catalog.recipes[name] = Recipe.Parse(name, text, script);
+            if (!scripts.TryGetValue(name, out var script))
+                throw new PenException($"{Root}{name}/{InstallFile} is missing");
+            if (!script.StartsWith("#!", StringComparison.Ordinal))
+                throw new PenException($"{Root}{name}/{InstallFile} must start with #!");
+            catalog._recipes[name] = Recipe.Parse(name, text, script);
         }
         foreach (var name in scripts.Keys)
         {
-            if (!settings.ContainsKey(name)) throw new PenException($"{Root}{name}/{SettingsFile} is missing");
+            if (!settings.ContainsKey(name))
+                throw new PenException($"{Root}{name}/{SettingsFile} is missing");
         }
         return catalog;
     }
@@ -71,17 +82,21 @@ internal sealed partial class RecipeCatalog
     /// <summary>What pen --tool list prints.</summary>
     public string Listing()
     {
-        if (!Offered.Any()) return "no tools are available yet\n";
+        if (!Offered.Any())
+            return "no tools are available yet\n";
         var agents = Offered.Where(r => r.IsAgent).ToList();
         var tools = Offered.Where(r => !r.IsAgent).ToList();
         string Group(List<Recipe> group)
         {
             var width = group.Max(r => r.Name.Length);
             return string.Concat(group.Select(r =>
-                $"{r.Name.PadRight(width)}  default {r.Default}{(r.Multiple ? ", several versions can be installed together" : "")}\n"));
+                $"{r.Name.PadRight(width)}  default " +
+                    $"{r.Default}{(r.Multiple ? ", several versions can be installed together" : "")}\n"));
         }
-        if (agents.Count == 0) return Group(tools);
-        if (tools.Count == 0) return $"agents:\n{Group(agents)}";
+        if (agents.Count == 0)
+            return Group(tools);
+        if (tools.Count == 0)
+            return $"agents:\n{Group(agents)}";
         return $"agents:\n{Group(agents)}\ntools:\n{Group(tools)}";
     }
 

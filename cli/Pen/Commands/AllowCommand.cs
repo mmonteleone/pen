@@ -36,12 +36,18 @@ internal static class AllowCommand
     /// <paramref name="stub"/> if it's missing. Replaces the file by rename,
     /// keeping its mode. Returns the added domains.
     /// </summary>
-    public static List<string> Append(string path, string displayPath, ConfigKind kind, IReadOnlyList<string> domains, string stub)
+    public static List<string> Append(
+        string path,
+        string displayPath,
+        ConfigKind kind,
+        IReadOnlyList<string> domains,
+        string stub)
     {
         var existing = Config.ReadText(path, displayPath);
         bool exists = existing != null;
         var updated = ConfigEdit.AddAllowed(existing ?? stub, displayPath, kind, domains, out var added);
-        if (added.Count == 0) return added;
+        if (added.Count == 0)
+            return added;
 
         var mode = exists ? File.GetUnixFileMode(path)
             : kind == ConfigKind.User ? UnixFileMode.UserRead | UnixFileMode.UserWrite
@@ -49,8 +55,12 @@ internal static class AllowCommand
         var tmp = $"{path}.tmp-{Environment.ProcessId}";
         try
         {
-            using (var f = new FileStream(tmp, new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write, UnixCreateMode = mode }))
+            using (var f = new FileStream(tmp,
+            new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write, UnixCreateMode = mode }))
+            {
                 f.Write(Encoding.UTF8.GetBytes(updated));
+            }
+
             File.SetUnixFileMode(tmp, mode); // in case a stale tmp existed with another mode
             File.Move(tmp, path, overwrite: true);
         }
@@ -64,7 +74,10 @@ internal static class AllowCommand
     public static int Add(HostEnv host, IReadOnlyList<string> domains, bool global)
     {
         Project? project = null;
-        try { project = Project.Resolve(StartDir.Get(), host); }
+        try
+        {
+            project = Project.Resolve(StartDir.Get(), host);
+        }
         catch (PenException) when (global) { } // --global works from anywhere
         if (project != null)
         {
@@ -90,16 +103,25 @@ internal static class AllowCommand
         }
 
         var skipped = domains.Except(added).ToList();
-        if (added.Count > 0) Out.Line($"added to {where}: {string.Join(' ', added)}");
-        if (skipped.Count > 0) Out.Line($"already in {where}: {string.Join(' ', skipped)}");
+        if (added.Count > 0)
+            Out.Line($"added to {where}: {string.Join(' ', added)}");
+        if (skipped.Count > 0)
+            Out.Line($"already in {where}: {string.Join(' ', skipped)}");
 
         int applied = 0, failed = 0;
         foreach (var s in Targets(host, project, global))
         {
-            if (Apply(host, s)) applied++; else failed++;
+            if (Apply(host, s))
+                applied++;
+            else
+                failed++;
         }
         if (applied > 0)
-            Out.Line($"applied to {applied} running session{(applied == 1 ? "" : "s")}{(global ? "" : " in this directory")}");
+        {
+            Out.Line($"applied to {applied} running session{(applied == 1 ? "" : "s")}"
+                + $"{(global ? "" : " in this directory")}");
+        }
+
         return failed == 0 ? 0 : 1;
     }
 
@@ -127,9 +149,11 @@ internal static class AllowCommand
             if (!env.TryGetValue("PROJECT_DIR", out var projectDir))
                 throw new PenException("its session.env is missing");
             var user = Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User);
-            var projectConfig = Config.Load(Path.Combine(projectDir, ".pen"), Out.Field(Path.Combine(projectDir, ".pen")), ConfigKind.Project);
+            var projectConfig = Config.Load(Path.Combine(projectDir, ".pen"),
+                Out.Field(Path.Combine(projectDir, ".pen")), ConfigKind.Project);
             var approved = TrustStore.Load(host.RuntimeDir(s.ProjectKey), projectDir).ApprovedOf(projectConfig.Allow);
-            var merged = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow, approved, s.ReadToolDomains());
+            var merged = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow,
+                approved, s.ReadToolDomains());
             // Truncate and write, never rename: the proxy's single-file bind
             // mount pins the inode.
             using (var f = new FileStream(s.File("allowlist.txt"), FileMode.Truncate, FileAccess.Write))
@@ -177,12 +201,19 @@ internal static class AllowCommand
             foreach (var line in log)
             {
                 var f = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                if (f.Length < 5 || !f[2].StartsWith("TCP_DENIED", StringComparison.Ordinal)) continue;
+                if (f.Length < 5 || !f[2].StartsWith("TCP_DENIED", StringComparison.Ordinal))
+                    continue;
                 var h = Allowlist.HostOf(f[4]);
-                if (h.Length == 0) continue;
-                if (!DateTimeOffset.TryParse(f[0], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var t))
+                if (h.Length == 0)
+                    continue;
+                if (!DateTimeOffset.TryParse(f[0], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal,
+                out var t))
+                {
                     t = DateTimeOffset.MinValue;
-                if (!last.TryGetValue(h, out var seen) || t > seen) last[h] = t;
+                }
+
+                if (!last.TryGetValue(h, out var seen) || t > seen)
+                    last[h] = t;
             }
         }
         return last.Select(kv => new Blocked(kv.Key, kv.Value))
@@ -200,8 +231,12 @@ internal static class AllowCommand
         // What a session would get: an unapproved domain in .pen/ stays listed.
         var store = TrustStore.For(host, project);
         var approved = store.ApprovedOf(projectConfig.Allow);
-        var toolDomains = ToolSpec.DomainsOf(user.Tools.Concat(store.ApprovedToolsOf(projectConfig.Tools, RecipeCatalog.Embedded)), RecipeCatalog.Embedded);
-        var allowed = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow, approved, toolDomains).ToHashSet(StringComparer.Ordinal);
+        var toolDomains = ToolSpec.DomainsOf(
+            user.Tools.Concat(store.ApprovedToolsOf(projectConfig.Tools, RecipeCatalog.Embedded)),
+            RecipeCatalog.Embedded);
+        var allowed = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow, approved,
+                toolDomains)
+            .ToHashSet(StringComparer.Ordinal);
         var blocked = BlockedAcross(logs).Where(b => !Allowlist.IsAllowed(allowed, b.Host)).ToList();
         if (blocked.Count == 0)
         {
@@ -214,10 +249,13 @@ internal static class AllowCommand
         Out.Stdout("blocked in this project's sessions, newest first:\n");
         foreach (var b in shown)
         {
-            var when = b.Last == DateTimeOffset.MinValue ? "" : b.Last.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+            var when = b.Last == DateTimeOffset.MinValue
+                ? ""
+                : b.Last.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
             Out.Stdout($"  {Allowlist.ShownHost(b.Host),-40} {when}\n");
         }
-        if (blocked.Count > shown.Count) Out.Stdout($"  and {blocked.Count - shown.Count} more, blocked earlier\n");
+        if (blocked.Count > shown.Count)
+            Out.Stdout($"  and {blocked.Count - shown.Count} more, blocked earlier\n");
         var allowable = shown.Select(b => b.Host).Where(Allowlist.IsValidDomain).ToList();
         if (allowable.Count > 0)
             Out.Stdout($"pen allow {string.Join(' ', allowable)}   (add --global for all projects)\n");

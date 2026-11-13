@@ -1,7 +1,6 @@
 using System.Text;
 using Tomlyn.Parsing;
 using Tomlyn.Syntax;
-using Pen.Platform;
 
 namespace Pen.Configuration;
 
@@ -18,11 +17,17 @@ internal static class ConfigEdit
     /// added to allow, and which ones those were. A broken file is reported
     /// (as a PenException) before anything is changed.
     /// </summary>
-    public static string AddAllowed(string text, string displayPath, ConfigKind kind, IReadOnlyList<string> domains, out List<string> added)
+    public static string AddAllowed(
+        string text,
+        string displayPath,
+        ConfigKind kind,
+        IReadOnlyList<string> domains,
+        out List<string> added)
     {
         var before = Config.Parse(text, displayPath, kind);
         added = domains.Select(d => d.ToLowerInvariant()).Distinct().Where(d => !before.Allow.Contains(d)).ToList();
-        if (added.Count == 0) return text;
+        if (added.Count == 0)
+            return text;
 
         var nl = text.Contains("\r\n") ? "\r\n" : "\n";
         var doc = SyntaxParser.Parse(text, displayPath, validate: true);
@@ -40,25 +45,37 @@ internal static class ConfigEdit
         }
         else
         {
-            throw new PenException($"{displayPath}: allow isn't written as a list pen can add to; add {string.Join(", ", added.Select(Quote))} by hand");
+            throw new PenException($"{displayPath}: allow isn't written as a list pen " +
+                $"can add to; add {string.Join(", ", added.Select(Quote))} by hand");
         }
 
         // Belt and braces: the edit must change nothing but allow.
         Config after;
-        try { after = Config.Parse(result, displayPath, kind); }
-        catch (PenException) { after = new(); }
+        try
+        {
+            after = Config.Parse(result, displayPath, kind);
+        }
+        catch (PenException)
+        {
+            after = new();
+        }
         if (!after.Allow.SequenceEqual(before.Allow.Concat(added))
             || after.GitHubOwner != before.GitHubOwner || after.Docker != before.Docker
             || !after.Ports.SequenceEqual(before.Ports)
             || !after.Env.SequenceEqual(before.Env)
             || !after.GitHubTokens.OrderBy(kv => kv.Key).SequenceEqual(before.GitHubTokens.OrderBy(kv => kv.Key)))
-            throw new PenException($"{displayPath}: couldn't add to allow automatically; add {string.Join(", ", added.Select(Quote))} by hand");
+        {
+            throw new PenException($"{displayPath}: couldn't add to allow " +
+                $"automatically; add {string.Join(", ", added.Select(Quote))} by hand");
+        }
+
         return result;
     }
 
     private static string? KeyName(KeyValueSyntax kv)
     {
-        if (kv.Key is not { } key || key.DotKeys.ChildrenCount > 0) return null;
+        if (kv.Key is not { } key || key.DotKeys.ChildrenCount > 0)
+            return null;
         return key.Key switch
         {
             BareKeySyntax bare => bare.Key?.Text,
@@ -90,7 +107,8 @@ internal static class ConfigEdit
         while (at > 0)
         {
             int prev = LineStart(text, at - 1);
-            if (!text[prev..at].TrimStart().StartsWith('#')) break;
+            if (!text[prev..at].TrimStart().StartsWith('#'))
+                break;
             at = prev;
         }
         return at;
@@ -114,9 +132,11 @@ internal static class ConfigEdit
         if (string.IsNullOrEmpty(indent))
         {
             // No items (maybe only comments): match the first comment line inside, else two spaces.
-            var inside = text[(array.OpenBracket!.Span.End.Offset + 1)..close].Split('\n').Skip(1).FirstOrDefault(l => l.Trim().Length > 0);
+            var inside = text[(array.OpenBracket!.Span.End.Offset + 1)..close].Split('\n').Skip(1)
+            .FirstOrDefault(l => l.Trim().Length > 0);
             indent = inside != null ? inside[..(inside.Length - inside.TrimStart().Length)] : "  ";
-            if (indent.Length == 0) indent = "  ";
+            if (indent.Length == 0)
+                indent = "  ";
         }
 
         var sb = new StringBuilder(text);

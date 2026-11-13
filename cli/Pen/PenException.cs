@@ -1,6 +1,3 @@
-using System.Globalization;
-using System.Text;
-
 namespace Pen;
 
 /// <summary>A refusal or error shown to the user as "pen: message".</summary>

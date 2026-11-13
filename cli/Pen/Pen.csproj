@@ -16,6 +16,12 @@
     <UseSystemResourceKeys>true</UseSystemResourceKeys>
     <StripSymbols>true</StripSymbols>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- Code style (.editorconfig) and XML doc comments are checked in the build; members needn't all have docs. -->
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+    <!-- The XML file is only for those checks: a Native AOT publish has nothing to copy it from. -->
+    <PublishDocumentationFile>false</PublishDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>

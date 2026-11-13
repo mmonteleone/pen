@@ -10,7 +10,8 @@ internal static partial class Allowlist
     /// <summary>A plain domain or a .domain wildcard, with at least two labels, not an IP address.</summary>
     public static bool IsValidDomain(string domain)
     {
-        if (domain.Length > 254 || !DomainRegex().IsMatch(domain)) return false;
+        if (domain.Length > 254 || !DomainRegex().IsMatch(domain))
+            return false;
         var bare = domain.TrimStart('.');
         return !IPAddress.TryParse(bare, out _) && !bare.Split('.').All(l => l.All(char.IsAsciiDigit));
     }
@@ -21,7 +22,11 @@ internal static partial class Allowlist
     /// <summary>Domains from an allowlist file: one per line, '#' comments, blank lines ignored.</summary>
     public static IEnumerable<string> ParseList(string text) =>
         text.Split('\n')
-            .Select(l => { int h = l.IndexOf('#'); return (h >= 0 ? l[..h] : l).Trim().ToLowerInvariant(); })
+            .Select(l =>
+            {
+                int h = l.IndexOf('#');
+                return (h >= 0 ? l[..h] : l).Trim().ToLowerInvariant();
+            })
             .Where(l => l.Length > 0);
 
     /// <summary>
@@ -37,8 +42,10 @@ internal static partial class Allowlist
         var result = new List<string>();
         foreach (var d in all)
         {
-            if (!seen.Add(d)) continue;
-            if (WildcardsOver(d).Any(w => w != d && wildcards.Contains(w))) continue;
+            if (!seen.Add(d))
+                continue;
+            if (WildcardsOver(d).Any(w => w != d && wildcards.Contains(w)))
+                continue;
             result.Add(d);
         }
         return result;
@@ -55,7 +62,8 @@ internal static partial class Allowlist
         for (int at = 0; ; at = bare.IndexOf('.', at) + 1)
         {
             yield return "." + bare[at..];
-            if (bare.IndexOf('.', at) < 0) yield break;
+            if (bare.IndexOf('.', at) < 0)
+                yield break;
         }
     }
 
@@ -80,9 +88,11 @@ internal static partial class Allowlist
         foreach (var line in logLines)
         {
             var f = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (f.Length < 5 || !f[2].StartsWith("TCP_DENIED", StringComparison.Ordinal)) continue;
+            if (f.Length < 5 || !f[2].StartsWith("TCP_DENIED", StringComparison.Ordinal))
+                continue;
             var host = HostOf(f[4]);
-            if (host.Length > 0 && seen.Add(host)) hosts.Add(host);
+            if (host.Length > 0 && seen.Add(host))
+                hosts.Add(host);
         }
         return hosts;
     }
@@ -91,18 +101,22 @@ internal static partial class Allowlist
     internal static string HostOf(string url)
     {
         int scheme = url.IndexOf("://", StringComparison.Ordinal);
-        if (scheme >= 0) url = url[(scheme + 3)..];
+        if (scheme >= 0)
+            url = url[(scheme + 3)..];
         int slash = url.IndexOf('/');
-        if (slash >= 0) url = url[..slash];
+        if (slash >= 0)
+            url = url[..slash];
         int at = url.LastIndexOf('@');
-        if (at >= 0) url = url[(at + 1)..];
+        if (at >= 0)
+            url = url[(at + 1)..];
         if (url.StartsWith('['))
         {
             int close = url.IndexOf(']');
             return close > 0 ? url[1..close] : url;
         }
         int colon = url.LastIndexOf(':');
-        if (colon >= 0) url = url[..colon];
+        if (colon >= 0)
+            url = url[..colon];
         return url.ToLowerInvariant();
     }
 
@@ -124,10 +138,12 @@ internal static partial class Allowlist
     /// </summary>
     public static string? BlockedLine(IReadOnlyList<string> hosts)
     {
-        if (hosts.Count == 0) return null;
+        if (hosts.Count == 0)
+            return null;
         var shown = hosts.Skip(Math.Max(0, hosts.Count - MaxListed)).ToList();
         var line = "blocked: " + string.Join(", ", shown.Select(ShownHost));
-        if (hosts.Count > shown.Count) line += $" and {hosts.Count - shown.Count} more (pen allow lists the latest)";
+        if (hosts.Count > shown.Count)
+            line += $" and {hosts.Count - shown.Count} more (pen allow lists the latest)";
         var allowable = shown.Where(IsValidDomain).ToList();
         if (allowable.Count > 0)
             line += $" → pen allow {string.Join(' ', allowable)} (add --global for all projects)";

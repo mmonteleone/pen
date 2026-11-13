@@ -17,7 +17,8 @@ internal sealed record HostEnv(string Home, uint Uid, uint Gid, string NuGetPack
         if (string.IsNullOrEmpty(home) || !home.StartsWith('/'))
             throw new PenException("HOME isn't set to an absolute path");
         home = home.TrimEnd('/');
-        if (home.Length == 0) home = "/";
+        if (home.Length == 0)
+            home = "/";
 
         var nuget = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
         if (string.IsNullOrEmpty(nuget))

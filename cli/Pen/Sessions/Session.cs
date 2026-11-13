@@ -20,12 +20,19 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
 
     private string RuntimeDir => host.RuntimeDir(project.Key);
 
+    /// <param name="command">to run in the sandbox; its first word may name an agent to bring</param>
     /// <param name="docker">with Docker-in-Docker (pen --docker, or docker = true in .pen/config.toml)</param>
     /// <param name="ports">to forward from the host (pen --port and ports in .pen/config.toml, merged)</param>
     /// <param name="answers">where approvals of .pen/ come from (default: this process's stdin)</param>
     /// <param name="flagTools">from pen --tool, which need no approval</param>
     /// <param name="recipes">where tools come from (default: the embedded recipes)</param>
-    public int Run(IReadOnlyList<string> command, bool docker = false, IReadOnlyList<Port>? ports = null, Answers? answers = null, IReadOnlyList<ToolSpec>? flagTools = null, RecipeCatalog? recipes = null)
+    public int Run(
+        IReadOnlyList<string> command,
+        bool docker = false,
+        IReadOnlyList<Port>? ports = null,
+        Answers? answers = null,
+        IReadOnlyList<ToolSpec>? flagTools = null,
+        RecipeCatalog? recipes = null)
     {
         var catalog = recipes ?? RecipeCatalog.Embedded;
         // Every session holds project.lock and its dir's worktree lock
@@ -40,13 +47,18 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
             throw new PenException("not starting: deal with the warning above first");
 
         RepoGuard.CheckAtStart(project.Dir);
-        // A command naming an agent brings it, like --tool, unless a tool from user config, .pen/ or --tool already names it.
-        if (ToolSpec.ImpliedAgent(command, catalog, [.. user.Tools, .. projectConfig.Tools, .. flagTools ?? []]) is { } implied)
+        // A command naming an agent brings it, like --tool, unless a tool from user config, .pen/ or --tool already
+        // names it.
+        if (ToolSpec.ImpliedAgent(command, catalog, [.. user.Tools, .. projectConfig.Tools, .. flagTools ?? []])
+            is { } implied)
+        {
             flagTools = [.. flagTools ?? [], implied];
+        }
         // Tools that can't go together stop the session, whatever's approved.
         var tools = ToolSpec.Merge(catalog, user.Tools, projectConfig.Tools, flagTools ?? []);
         // Before anything below uses a setting from .pen/.
-        TrustGate.RequireForSession(host, project, user, projectConfig, answers ?? Answers.FromProcess(), flagTools, catalog);
+        TrustGate.RequireForSession(host, project, user, projectConfig, answers ?? Answers.FromProcess(), flagTools,
+            catalog);
         var mounts = RepoGuard.PrepareMounts(project.Dir, host.Home);
         // What the session-end check takes as the submodules' own (PrepareMounts protects them).
         var modules = project.IsRepo ? RepoScan.FindModuleRepos(project.CommonGitDir!) : [];
@@ -59,7 +71,8 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         var owner = GitHub.ProjectOwner(project, projectConfig);
         var token = GitHub.TokenFor(owner, user, RuntimeDir, host);
         var toolDomains = ToolSpec.DomainsOf(tools, catalog);
-        var allowlist = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow, projectConfig.Allow, toolDomains);
+        var allowlist = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow,
+            projectConfig.Allow, toolDomains);
 
         // One docker session per project: two daemons can't share the dind
         // volume. A dind still using it (an earlier session's teardown failed)
@@ -107,7 +120,8 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
             File.WriteAllText(session.StartedWithGit, project.CommonGitDir + "\n");
             session.WriteModules(modules);
         }
-        if (docker) File.WriteAllText(session.DockerMarker, "");
+        if (docker)
+            File.WriteAllText(session.DockerMarker, "");
         session.WritePorts(forwarded);
         session.WriteTools(tools, toolDomains);
         session.WriteCommand(command);
@@ -123,22 +137,28 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         File.WriteAllText(session.ComposeFile, Embedded.Text("compose.yaml"));
 
         var secrets = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (token != null) secrets["GH_TOKEN"] = token;
-        foreach (var (k, v) in user.Env) secrets[k] = v;
+        if (token != null)
+            secrets["GH_TOKEN"] = token;
+        foreach (var (k, v) in user.Env)
+            secrets[k] = v;
 
         var runArgs = new List<string> { "run", "--rm", "--name", session.Container };
-        if (!Native.IsATty(0) || !Native.IsATty(1)) runArgs.Add("-T");
-        foreach (var name in secrets.Keys) runArgs.AddRange(["-e", name]); // by name only: values never on a command line
+        if (!Native.IsATty(0) || !Native.IsATty(1))
+            runArgs.Add("-T");
+        foreach (var name in secrets.Keys)
+            runArgs.AddRange(["-e", name]); // by name only: values never on a command line
         runArgs.Add("agent");
         runArgs.AddRange(command);
 
         int exitCode;
         var psi = Proc.Info("docker", session.ComposeArgs([.. runArgs]), env);
-        foreach (var (k, v) in secrets) psi.Environment[k] = v;
+        foreach (var (k, v) in secrets)
+            psi.Environment[k] = v;
         ScrubComposeEnv(psi);
         try
         {
-            if (signals.Stopping) throw new PenException("stopped before the session started");
+            if (signals.Stopping)
+                throw new PenException("stopped before the session started");
             using var child = Proc.Start(psi);
             signals.Container = session.Container;
             signals.Child = child;
@@ -162,13 +182,15 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
     private FileLock TakeDindLock()
     {
         var l = FileLock.TryTake(System.IO.Path.Combine(RuntimeDir, "dind.lock"), exclusive: true)
-            ?? throw new PenException("another --docker session is running in this project, and only one can run at a time (they'd share its Docker volume): exit it, or start this one without --docker");
+            ?? throw new PenException("another --docker session is running in this project, and only one can " +
+                "run at a time (they'd share its Docker volume): exit it, or start this one without --docker");
         var volume = $"{project.Key}_dind";
         var stale = Docker.ContainersUsing(volume);
         if (stale.Count > 0)
         {
             l.Dispose();
-            throw new PenException($"{string.Join(", ", stale)} still uses {volume}, left over from an earlier session: remove it with docker rm -f {string.Join(' ', stale)}, then rerun");
+            throw new PenException($"{string.Join(", ", stale)} still uses {volume}, left over from an " +
+                $"earlier session: remove it with docker rm -f {string.Join(' ', stale)}, then rerun");
         }
         return l;
     }
@@ -176,8 +198,14 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
     /// <summary>Host env that would change what compose loads or starts.</summary>
     internal static void ScrubComposeEnv(ProcessStartInfo psi)
     {
-        foreach (var name in new[] { "COMPOSE_FILE", "COMPOSE_PROJECT_NAME", "COMPOSE_PROFILES", "COMPOSE_ENV_FILES", "COMPOSE_PATH_SEPARATOR" })
+        foreach (var name in new[]
+            {
+                "COMPOSE_FILE", "COMPOSE_PROJECT_NAME", "COMPOSE_PROFILES", "COMPOSE_ENV_FILES",
+                "COMPOSE_PATH_SEPARATOR"
+            })
+        {
             psi.Environment.Remove(name);
+        }
     }
 
     /// <summary>
@@ -197,12 +225,18 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
 
     internal const string ProjectDirFile = "project-dir";
 
-    /// <summary>Writes <paramref name="repoDir"/> to project-dir unless it's already there, via temp file + rename.</summary>
+    /// <summary>
+    /// Writes <paramref name="repoDir"/> to project-dir unless it's already there, via temp file + rename.
+    /// </summary>
     internal static void WriteProjectDir(string runtimeDir, string repoDir)
     {
         var path = System.IO.Path.Combine(runtimeDir, ProjectDirFile);
         var content = repoDir + "\n";
-        try { if (File.ReadAllText(path) == content) return; }
+        try
+        {
+            if (File.ReadAllText(path) == content)
+                return;
+        }
         catch (FileNotFoundException) { }
         var tmp = path + "." + Environment.ProcessId + ".tmp";
         File.WriteAllText(tmp, content);
@@ -216,7 +250,8 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         {
             var id = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(4));
             var path = System.IO.Path.Combine(sessions, id);
-            if (Directory.Exists(path)) continue;
+            if (Directory.Exists(path))
+                continue;
             Directory.CreateDirectory(path, Dir700);
             return new SessionDir(project.Key, path);
         }
@@ -239,11 +274,20 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         foreach (var container in File.Exists(session.DockerMarker)
                      ? new[] { session.Container, session.DindContainer } : [session.Container])
         {
-            try { Docker.RemoveWriter(container); }
-            catch (PenException e) { failures.Add(e.Message); }
+            try
+            {
+                Docker.RemoveWriter(container);
+            }
+            catch (PenException e)
+            {
+                failures.Add(e.Message);
+            }
         }
         if (failures.Count > 0)
-            throw new PenException($"{string.Join("\n", failures)}\nsession {session.Id} is retained for retry by the next pen command here; Git has not been checked");
+        {
+            throw new PenException($"{string.Join("\n", failures)}\nsession {session.Id} is " +
+                "retained for retry by the next pen command here; Git has not been checked");
+        }
 
         // The .git check, now that the agent is gone and before anything runs git.
         var result = new SessionEndResult(true, null);
@@ -253,13 +297,17 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         {
             var check = GitCheck.RunAtSessionEnd(projectDir, session);
             GitCheck.Report(projectDir, check);
-            result = new(check.Failure == null, check.Failure == null && check.Moved.Count == 0 && check.Restored is not { Count: > 0 } ? projectDir : null);
+            result = new(check.Failure == null,
+                check.Failure == null && check.Moved.Count == 0 && check.Restored is not { Count: > 0 }
+                    ? projectDir
+                    : null);
             keepFiles = check.RestoreIncomplete;
             restoreBlocked = check.RestoreBlocked;
         }
         else if (File.Exists(session.ProtectedManifest))
         {
-            Out.Raw(GitCheck.NotCheckedWarning(session.Path, "the session's record of its project is damaged, so its protected files weren't compared"));
+            Out.Raw(GitCheck.NotCheckedWarning(session.Path, "the session's record " +
+                "of its project is damaged, so its protected files weren't compared"));
             result = new(false, null);
             keepFiles = true;
         }
@@ -269,7 +317,9 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         // What the session ended up allowing (pen allow may have added to it),
         // so the blocked line doesn't suggest a domain that's allowed by now.
         var allowedFile = session.File("allowlist.txt");
-        var allowed = File.Exists(allowedFile) ? Allowlist.ParseList(File.ReadAllText(allowedFile)).ToHashSet(StringComparer.Ordinal) : [];
+        var allowed = File.Exists(allowedFile)
+            ? Allowlist.ParseList(File.ReadAllText(allowedFile)).ToHashSet(StringComparer.Ordinal)
+            : [];
 
         if (env.Count > 0)
         {
@@ -278,9 +328,14 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
             ScrubComposeEnv(psi);
             var down = Process.RunAndCaptureText(psi);
             if (down.ExitStatus.ExitCode != 0)
-                Out.Line($"stopping session {session.Id}'s stack failed: {down.StandardError.Trim()} (it will be retried by the next pen command here)");
+            {
+                Out.Line($"stopping session {session.Id}'s stack failed: " +
+                    $"{down.StandardError.Trim()} (it will be retried by the next pen command here)");
+            }
             else if (!keepFiles)
+            {
                 DeleteSessionFiles(session);
+            }
         }
         else if (!keepFiles)
         {
@@ -289,9 +344,12 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
 
         if (File.Exists(session.ProxyLog) || File.Exists(session.PreviousProxyLog))
         {
-            var blocked = Allowlist.BlockedHosts(session.ProxyLogLines()).Where(h => !Allowlist.IsAllowed(allowed, h)).ToList();
+            var blocked = Allowlist.BlockedHosts(session.ProxyLogLines())
+            .Where(h => !Allowlist.IsAllowed(allowed, h))
+            .ToList();
             var line = Allowlist.BlockedLine(blocked);
-            if (line != null) Out.Line(line);
+            if (line != null)
+                Out.Line(line);
         }
         return result;
     }
@@ -307,17 +365,27 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
     /// <summary>Runs Pen's own git call (the unsigned-commit count), so only once no check has failed.</summary>
     private static void Remind(SessionEndResult result)
     {
-        if (result.ReminderDir == null) return;
+        if (result.ReminderDir == null)
+            return;
         var reminder = Sign.Reminder(result.ReminderDir);
-        if (reminder != null) Out.Line(reminder);
+        if (reminder != null)
+            Out.Line(reminder);
     }
 
     private static void DeleteSessionFiles(SessionDir session)
     {
         foreach (var f in Directory.EnumerateFileSystemEntries(session.Path))
         {
-            if (f == session.ProxyLog || f == session.PreviousProxyLog || f == session.LockFile || f == session.ComposeFile || f == session.RestoredManifest) continue;
-            if (Directory.Exists(f)) Directory.Delete(f, recursive: true); else File.Delete(f);
+            if (f == session.ProxyLog || f == session.PreviousProxyLog || f == session.LockFile
+                || f == session.ComposeFile || f == session.RestoredManifest)
+            {
+                continue;
+            }
+
+            if (Directory.Exists(f))
+                Directory.Delete(f, recursive: true);
+            else
+                File.Delete(f);
         }
         // compose.yaml marks the session open, so it goes last but for the lock and
         // the record of what it vouched for: an open session always has that record.
@@ -337,7 +405,8 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
     internal static bool FinishDeadSessions(string projectKey, string runtimeDir)
     {
         var sessions = System.IO.Path.Combine(runtimeDir, "sessions");
-        if (!Directory.Exists(sessions)) return true;
+        if (!Directory.Exists(sessions))
+            return true;
         var ended = new List<SessionEndResult>();
         foreach (var path in Directory.EnumerateDirectories(sessions))
         {
@@ -345,19 +414,25 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
             if (s.IsOpen)
             {
                 using var l = FileLock.TryTake(s.LockFile, exclusive: true);
-                if (l == null || !s.IsOpen) continue; // running, or ended while we looked
+                if (l == null || !s.IsOpen)
+                    continue; // running, or ended while we looked
                 Out.Line($"ending session {s.Id}, whose pen exited without ending it");
                 ended.Add(End(s));
             }
             else if (DateTime.UtcNow - LastActivity(path) > KeepEndedSessions)
             {
-                try { Directory.Delete(path, recursive: true); }
+                try
+                {
+                    Directory.Delete(path, recursive: true);
+                }
                 catch (IOException) { }
                 catch (UnauthorizedAccessException) { }
             }
         }
-        if (ended.Any(e => !e.CheckFinished)) return false;
-        foreach (var e in ended) Remind(e);
+        if (ended.Any(e => !e.CheckFinished))
+            return false;
+        foreach (var e in ended)
+            Remind(e);
         return true;
     }
 
@@ -365,7 +440,12 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
     {
         var t = Directory.GetLastWriteTimeUtc(dir);
         var log = System.IO.Path.Combine(dir, "proxy.log");
-        if (File.Exists(log)) { var lt = File.GetLastWriteTimeUtc(log); if (lt > t) t = lt; }
+        if (File.Exists(log))
+        {
+            var lt = File.GetLastWriteTimeUtc(log);
+            if (lt > t)
+                t = lt;
+        }
         return t;
     }
 }

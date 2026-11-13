@@ -1,5 +1,3 @@
-using System.IO.Enumeration;
-
 namespace Pen.GitProtection;
 
 internal enum NestedKind

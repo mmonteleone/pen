@@ -1,6 +1,3 @@
-using System.Buffers.Binary;
-using System.Security.Cryptography;
-using System.Text;
 using Pen.Platform;
 using Pen.Projects;
 using Pen.Sessions;
@@ -44,7 +41,8 @@ internal sealed class LayerContext : IDisposable
         try
         {
             Remove(parent);
-            System.IO.Directory.CreateDirectory(parent, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            System.IO.Directory.CreateDirectory(parent,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             var dir = Path.Combine(parent, "context");
             return new(held, parent, dir, PenDirHash.Snapshot(project.PenDir, dir));
         }
@@ -67,12 +65,17 @@ internal sealed class LayerContext : IDisposable
         var prefix = $"{Prefix}{Project.Hash(project.Dir)}-review-";
         foreach (var old in System.IO.Directory.GetDirectories(runtimeDir, prefix + "*"))
         {
-            if (DateTime.UtcNow - System.IO.Directory.GetLastWriteTimeUtc(old) < KeepAbandonedReviews) continue;
-            try { Remove(old); }
+            if (DateTime.UtcNow - System.IO.Directory.GetLastWriteTimeUtc(old) < KeepAbandonedReviews)
+                continue;
+            try
+            {
+                Remove(old);
+            }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         }
         var parent = Path.Combine(runtimeDir, prefix + Guid.NewGuid().ToString("N")[..8]);
-        System.IO.Directory.CreateDirectory(parent, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        System.IO.Directory.CreateDirectory(parent,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         var dir = Path.Combine(parent, "context");
         return new(null, parent, dir, PenDirHash.Snapshot(project.PenDir, dir));
     }
@@ -80,29 +83,39 @@ internal sealed class LayerContext : IDisposable
     private static FileLock WaitForLock(string path)
     {
         var held = FileLock.TryTake(path, exclusive: true);
-        if (held != null) return held;
+        if (held != null)
+            return held;
         Out.Line("waiting for another pen building this directory's project layer");
-        while ((held = FileLock.TryTake(path, exclusive: true)) == null) Thread.Sleep(200);
+        while ((held = FileLock.TryTake(path, exclusive: true)) == null)
+            Thread.Sleep(200);
         return held;
     }
 
     public void Dispose()
     {
-        try { Remove(_parent); }
+        try
+        {
+            Remove(_parent);
+        }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // the next build removes it
         _lock?.Dispose();
     }
 
-    /// <summary>Everything left in a runtime dir, which a plain recursive delete can't remove if it holds a read-only directory.</summary>
+    /// <summary>
+    /// Everything left in a runtime dir, which a plain recursive delete can't remove if it holds a read-only directory.
+    /// </summary>
     public static void RemoveAllIn(string runtimeDir)
     {
-        if (!System.IO.Directory.Exists(runtimeDir)) return;
-        foreach (var parent in System.IO.Directory.GetDirectories(runtimeDir, Prefix + "*")) Remove(parent);
+        if (!System.IO.Directory.Exists(runtimeDir))
+            return;
+        foreach (var parent in System.IO.Directory.GetDirectories(runtimeDir, Prefix + "*"))
+            Remove(parent);
     }
 
     private static void Remove(string path)
     {
-        if (!System.IO.Directory.Exists(path)) return;
+        if (!System.IO.Directory.Exists(path))
+            return;
         MakeRemovable(new DirectoryInfo(path));
         System.IO.Directory.Delete(path, recursive: true);
     }
@@ -112,6 +125,9 @@ internal sealed class LayerContext : IDisposable
         dir.UnixFileMode |= UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
         var all = new EnumerationOptions { AttributesToSkip = 0, IgnoreInaccessible = false };
         foreach (var sub in dir.EnumerateDirectories("*", all))
-            if (sub.LinkTarget == null) MakeRemovable(sub);
+        {
+            if (sub.LinkTarget == null)
+                MakeRemovable(sub);
+        }
     }
 }

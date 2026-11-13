@@ -27,7 +27,9 @@ internal sealed class TrustStore
     private readonly HashSet<string> _domains = new(StringComparer.Ordinal);
     private readonly HashSet<string> _owners = new(StringComparer.Ordinal);
     private readonly HashSet<string> _tools = new(StringComparer.Ordinal);
-    /// <summary>"name:version domain": kept apart from <see cref="_domains"/>, so neither approves for the other.</summary>
+    /// <summary>
+    /// "name:version domain": kept apart from <see cref="_domains"/>, so neither approves for the other.
+    /// </summary>
     private readonly HashSet<string> _toolDomains = new(StringComparer.Ordinal);
 
     public bool Docker { get; private set; }
@@ -39,26 +41,35 @@ internal sealed class TrustStore
         _dir = dir;
     }
 
-    public static string PathFor(string runtimeDir, string dir) => Path.Combine(runtimeDir, $"trust-{Project.Hash(dir)}");
+    public static string PathFor(string runtimeDir, string dir) =>
+        Path.Combine(runtimeDir, $"trust-{Project.Hash(dir)}");
 
     public static TrustStore For(HostEnv host, Project project) => Load(host.RuntimeDir(project.Key), project.Dir);
 
-    /// <summary>The approvals for <paramref name="dir"/>: none if the file is missing, unreadable or corrupt. Doesn't throw for any of those.</summary>
+    /// <summary>
+    /// The approvals for <paramref name="dir"/>: none if the file is
+    /// missing, unreadable or corrupt. Doesn't throw for any of those.
+    /// </summary>
     public static TrustStore Load(string runtimeDir, string dir) => Read(PathFor(runtimeDir, dir), dir);
 
     private static TrustStore Read(string path, string dir)
     {
         string? text = null;
-        try { text = Native.ReadRegularFile(path); }
+        try
+        {
+            text = Native.ReadRegularFile(path);
+        }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         return (text == null ? null : Parse(text, path, dir)) ?? new TrustStore(path, dir);
     }
 
     private static TrustStore? Parse(string text, string path, string dir)
     {
-        if (!text.EndsWith('\n')) return null;
+        if (!text.EndsWith('\n'))
+            return null;
         var lines = text[..^1].Split('\n');
-        if (lines.Length < 2 || lines[0] != Header || lines[1] != "dir " + dir) return null;
+        if (lines.Length < 2 || lines[0] != Header || lines[1] != "dir " + dir)
+            return null;
 
         var store = new TrustStore(path, dir);
         foreach (var line in lines.Skip(2))
@@ -94,7 +105,8 @@ internal sealed class TrustStore
     }
 
     private static bool IsDomain(string value) => Allowlist.IsValidDomain(value);
-    private static bool IsOwner(string value) => Config.OwnerRegex().IsMatch(value) && value == value.ToLowerInvariant();
+    private static bool IsOwner(string value) =>
+        Config.OwnerRegex().IsMatch(value) && value == value.ToLowerInvariant();
     private static bool IsToolDomain(string value) =>
         value.Split(' ') is [var tool, var domain] && ToolSpec.IsCanonicalText(tool) && IsDomain(domain);
     private static bool IsHash(string value) => value.Length == 64 && value.All(c => char.IsAsciiHexDigitLower(c));
@@ -117,7 +129,9 @@ internal sealed class TrustStore
     /// <summary>The approved ones among a project's allow list: all of it that may reach an allowlist.</summary>
     public List<string> ApprovedOf(IEnumerable<string> allow) => allow.Where(CoversDomain).ToList();
 
-    /// <summary>Records everything in <paramref name="request"/>. One with a Layer that has a Problem can't be approved.</summary>
+    /// <summary>
+    /// Records everything in <paramref name="request"/>. One with a Layer that has a Problem can't be approved.
+    /// </summary>
     public TrustStore Approve(TrustRequest request)
     {
         if (request.Layer is { Hash: null, Problem: var problem })
@@ -134,38 +148,49 @@ internal sealed class TrustStore
     /// replaces it by rename, so it's never seen half-written. A value that isn't
     /// a strict shape refuses the whole write.
     /// </summary>
-    private TrustStore Written(IEnumerable<string> domains, string? owner, bool docker, string? layerHash, IEnumerable<ToolRequest>? tools = null)
+    private TrustStore Written(
+        IEnumerable<string> domains,
+        string? owner,
+        bool docker,
+        string? layerHash,
+        IEnumerable<ToolRequest>? tools = null)
     {
         var next = Read(_path, _dir);
         foreach (var domain in domains)
         {
-            if (!IsDomain(domain)) throw new PenException($"can't approve {Out.Field(domain)}: it isn't a domain");
+            if (!IsDomain(domain))
+                throw new PenException($"can't approve {Out.Field(domain)}: it isn't a domain");
             next._domains.Add(domain);
         }
         if (owner != null)
         {
             var lower = owner.ToLowerInvariant();
-            if (!IsOwner(lower)) throw new PenException($"can't approve {Out.Field(owner)}: it isn't a GitHub owner name");
+            if (!IsOwner(lower))
+                throw new PenException($"can't approve {Out.Field(owner)}: it isn't a GitHub owner name");
             next._owners.Add(lower);
         }
         if (layerHash != null)
         {
-            if (!IsHash(layerHash)) throw new PenException($"can't approve {Out.Field(layerHash)}: it isn't a hash");
+            if (!IsHash(layerHash))
+                throw new PenException($"can't approve {Out.Field(layerHash)}: it isn't a hash");
             next.LayerHash = layerHash;
         }
         foreach (var request in tools ?? [])
         {
             var text = request.Tool.ToString();
-            if (!ToolSpec.IsCanonicalText(text)) throw new PenException($"can't approve {Out.Field(text)}: it isn't a tool");
+            if (!ToolSpec.IsCanonicalText(text))
+                throw new PenException($"can't approve {Out.Field(text)}: it isn't a tool");
             next._tools.Add(text);
             foreach (var domain in request.Domains)
             {
-                if (!IsDomain(domain)) throw new PenException($"can't approve {Out.Field(domain)}: it isn't a domain");
+                if (!IsDomain(domain))
+                    throw new PenException($"can't approve {Out.Field(domain)}: it isn't a domain");
                 next._toolDomains.Add($"{text} {domain}");
             }
         }
         next.Docker |= docker;
-        if (_dir.Contains('\n')) throw new PenException("can't record approvals for a directory whose path contains a newline");
+        if (_dir.Contains('\n'))
+            throw new PenException("can't record approvals for a directory whose path contains a newline");
         next.Save();
         return next;
     }
@@ -177,14 +202,17 @@ internal sealed class TrustStore
         lines.AddRange(_owners.Order(StringComparer.Ordinal).Select(o => "github_owner " + o));
         lines.AddRange(_tools.Order(StringComparer.Ordinal).Select(t => "tool " + t));
         lines.AddRange(_toolDomains.Order(StringComparer.Ordinal).Select(d => "tool-allow " + d));
-        if (Docker) lines.Add("docker");
-        if (LayerHash != null) lines.Add("layer " + LayerHash);
+        if (Docker)
+            lines.Add("docker");
+        if (LayerHash != null)
+            lines.Add("layer " + LayerHash);
 
         var mode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
         var tmp = $"{_path}.{Environment.ProcessId}.tmp";
         try
         {
-            using (var f = new FileStream(tmp, new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write, UnixCreateMode = mode }))
+            using (var f = new FileStream(tmp,
+            new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write, UnixCreateMode = mode }))
             {
                 f.Write(System.Text.Encoding.UTF8.GetBytes(string.Join('\n', lines) + "\n"));
                 f.Flush(flushToDisk: true);

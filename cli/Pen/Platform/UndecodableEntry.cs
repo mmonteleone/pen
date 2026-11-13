@@ -1,8 +1,4 @@
-using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.Unicode;
-using Microsoft.Win32.SafeHandles;
-using Pen.CommandLine;
 
 namespace Pen.Platform;
 
@@ -32,8 +28,15 @@ internal sealed record UndecodableEntry(byte[] Name, bool CouldHoldRepo)
             for (int i = 0; i < Name.Length; i++)
             {
                 var b = Name[i];
-                if (char.IsAsciiLetterOrDigit((char)b) || b is (byte)'.' or (byte)'_' or (byte)' ' || (b == (byte)'-' && i > 0)) sb.Append((char)b);
-                else sb.Append('\\').Append(Convert.ToString(b, 8).PadLeft(3, '0'));
+                if (char.IsAsciiLetterOrDigit((char)b) || b is (byte)'.' or (byte)'_' or (byte)' '
+                    || (b == (byte)'-' && i > 0))
+                {
+                    sb.Append((char)b);
+                }
+                else
+                {
+                    sb.Append('\\').Append(Convert.ToString(b, 8).PadLeft(3, '0'));
+                }
             }
             return sb.ToString();
         }

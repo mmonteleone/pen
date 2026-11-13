@@ -1,7 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using Pen.Platform;
-using Pen.Projects;
 using Pen.Sessions;
 
 namespace Pen.Commands;
@@ -46,24 +45,36 @@ internal static partial class Ps
             })
             .OrderBy(r => r.Project, StringComparer.Ordinal)
             .ThenBy(r => r.Started ?? DateTime.MaxValue)
-            .Select(r => { r.Cells[0] = r.Project; return r.Cells; })
+            .Select(r =>
+            {
+                r.Cells[0] = r.Project;
+                return r.Cells;
+            })
             .Prepend(["PROJECT", "SESSION", "DOCKER", "PORTS", "TOOLS", "AGE", "COMMAND"])
             .ToList();
 
         var widths = Enumerable.Range(0, rows[0].Length).Select(i => rows.Max(r => r[i].Length)).ToArray();
         var sb = new StringBuilder();
         foreach (var r in rows)
-            sb.Append(string.Join("  ", r.Select((c, i) => i < r.Length - 1 ? c.PadRight(widths[i]) : c)).TrimEnd()).Append('\n');
+        {
+            sb.Append(string.Join("  ", r.Select((c, i) => i < r.Length - 1 ? c.PadRight(widths[i]) : c)).TrimEnd())
+                .Append('\n');
+        }
+
         return sb.ToString();
     }
 
     /// <summary>How long ago: 45s, 12m, 3h05m, 2d04h.</summary>
     internal static string Age(TimeSpan d)
     {
-        if (d < TimeSpan.Zero) d = TimeSpan.Zero;
-        if (d.TotalMinutes < 1) return $"{(int)d.TotalSeconds}s";
-        if (d.TotalHours < 1) return $"{(int)d.TotalMinutes}m";
-        if (d.TotalDays < 1) return $"{(int)d.TotalHours}h{d.Minutes:00}m";
+        if (d < TimeSpan.Zero)
+            d = TimeSpan.Zero;
+        if (d.TotalMinutes < 1)
+            return $"{(int)d.TotalSeconds}s";
+        if (d.TotalHours < 1)
+            return $"{(int)d.TotalMinutes}m";
+        if (d.TotalDays < 1)
+            return $"{(int)d.TotalHours}h{d.Minutes:00}m";
         return $"{(int)d.TotalDays}d{d.Hours:00}h";
     }
 
@@ -73,8 +84,10 @@ internal static partial class Ps
     /// </summary>
     internal static string Describe(string[]? command)
     {
-        if (command == null) return "?";
-        if (command.Length == 0) return "(shell)";
+        if (command == null)
+            return "?";
+        if (command.Length == 0)
+            return "(shell)";
         var line = string.Join(' ', command.Select(Quote));
         line = Out.Field(Whitespace().Replace(line, " "));
         return line.Length <= MaxCommand ? line : line[..(MaxCommand - 1)] + "…";
