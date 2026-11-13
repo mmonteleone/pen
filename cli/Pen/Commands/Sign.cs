@@ -399,7 +399,7 @@ internal static class Sign
         using var locks = SessionRegistry.TakeForSign(host, project);
         // This command's own check below takes the module repos there now, so
         // it can't stand in for an ended session's that didn't finish.
-        if (!Session.FinishDeadSessions(project.Key, host.RuntimeDir(project.Key)))
+        if (!Session.FinishDeadSessions(project.Key, host.GetRuntimeDir(project.Key)))
             throw new PenException("not signing: deal with the warning above first");
 
         var check = GitCheck.RunWithoutOpening(project.Dir, startedWithGit: true, project.CommonGitDir);
@@ -427,7 +427,7 @@ internal static class Sign
         var range = Range(git, b.Commit, head);
         if (range.Count == 0)
         {
-            Out.Line($"nothing to sign: no commits in {Out.Field(b.Name)}..HEAD");
+            Out.WriteLine($"nothing to sign: no commits in {Out.Field(b.Name)}..HEAD");
             return 0;
         }
         var pushed = OnARemote(git, b.Commit, head, range);
@@ -441,24 +441,24 @@ internal static class Sign
         var verified = Verified(git, range);
         if (verified.Count == range.Count)
         {
-            Out.Line($"nothing to sign: all {range.Count} commits in {Out.Field(b.Name)}..HEAD are signed");
+            Out.WriteLine($"nothing to sign: all {range.Count} commits in {Out.Field(b.Name)}..HEAD are signed");
             return 0;
         }
 
-        Out.Line($"re-signing {range.Count} commit{(range.Count == 1 ? "" : "s")} " +
+        Out.WriteLine($"re-signing {range.Count} commit{(range.Count == 1 ? "" : "s")} " +
             $"in {Out.Field(b.Name)}..HEAD (same trees and authors; hashes change):");
         foreach (var sha in range)
-            Out.Raw(Listing(sha, objects[sha], verified.Contains(sha)));
+            Out.WriteRaw(Listing(sha, objects[sha], verified.Contains(sha)));
 
         var signing = git.With(SigningConfig(git));
         var map = Rewrite(signing, range, verified);
         var newHead = map[head];
         if (newHead != head)
             UpdateBranch(git, branchRef, newHead, head);
-        Out.Line($"signed: {Out.Field(branchRef["refs/heads/".Length..])} is now " +
+        Out.WriteLine($"signed: {Out.Field(branchRef["refs/heads/".Length..])} is now " +
             $"{newHead[..12]} (was {head[..12]}; the old commits stay in the reflog)");
         if (VerificationHint(git, range.Where(c => map[c] != c).Select(c => map[c]).ToList()) is { } hint)
-            Out.Line(hint);
+            Out.WriteLine(hint);
         return 0;
     }
 

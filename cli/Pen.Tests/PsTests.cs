@@ -9,7 +9,7 @@ public class PsTests
     /// <summary>An open session under <paramref name="key"/>; its lock is held (running) unless dead.</summary>
     private static FileLock? Session(HostEnv host, string key, string id, string projectDir, string[]? command, DateTime? started, bool docker = false, bool dead = false, int[]? ports = null, ToolSpec[]? tools = null)
     {
-        var s = new SessionDir(key, Path.Combine(host.RuntimeDir(key), "sessions", id));
+        var s = new SessionDir(key, Path.Combine(host.GetRuntimeDir(key), "sessions", id));
         Directory.CreateDirectory(s.Path);
         File.WriteAllText(s.EnvFile, $"PROJECT_DIR={projectDir}\nPEN_PROJECT={key}\n");
         if (command != null) s.WriteCommand(command);

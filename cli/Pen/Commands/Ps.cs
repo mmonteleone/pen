@@ -15,10 +15,10 @@ internal static partial class Ps
         var sessions = SessionRegistry.RunningEverywhere(host);
         if (sessions.Count == 0)
         {
-            Out.Line("no sessions running");
+            Out.WriteLine("no sessions running");
             return 0;
         }
-        Out.Stdout(Render(host, sessions, DateTime.UtcNow));
+        Out.WriteStdout(Render(host, sessions, DateTime.UtcNow));
         return 0;
     }
 

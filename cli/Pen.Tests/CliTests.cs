@@ -2,18 +2,18 @@ namespace Pen.Tests;
 
 public class CliTests
 {
-    private static Command P(params string[] args) => Cli.Parse(args);
+    private static Command P(params string[] args) => CommandParser.Parse(args);
 
     [Fact]
     public void AnIOExceptionNothingHandledIsOneCleanLine_AndBugsStillThrow()
     {
-        Assert.Equal(0, Program.Guarded(() => 0));
-        Assert.Equal(1, Program.Guarded(() => throw new IOException("IO_SharingViolation_NoFileName")));
-        Assert.Equal(1, Program.Guarded(() => throw new PathTooLongException("IO_PathTooLong")));
-        Assert.Equal(3, Program.Guarded(() => throw new PenException("refused", 3)));
-        Assert.Throws<InvalidOperationException>(() => Program.Guarded(() => throw new InvalidOperationException()));
+        Assert.Equal(0, Program.RunGuarded(() => 0));
+        Assert.Equal(1, Program.RunGuarded(() => throw new IOException("IO_SharingViolation_NoFileName")));
+        Assert.Equal(1, Program.RunGuarded(() => throw new PathTooLongException("IO_PathTooLong")));
+        Assert.Equal(3, Program.RunGuarded(() => throw new PenException("refused", 3)));
+        Assert.Throws<InvalidOperationException>(() => Program.RunGuarded(() => throw new InvalidOperationException()));
 
-        var message = Program.FileFailure(new PathTooLongException("IO_PathTooLong"));
+        var message = Program.DescribeFileFailure(new PathTooLongException("IO_PathTooLong"));
         Assert.StartsWith("a file operation failed (PathTooLongException)", message);
         Assert.DoesNotContain("IO_PathTooLong", message);
     }
@@ -29,8 +29,8 @@ public class CliTests
         Assert.Equal(CommandKind.Help, P("trust", "--help").Kind);
         Assert.Equal(2, Assert.Throws<PenException>(() => P("trust", "-y")).ExitCode);
         Assert.Equal(CommandKind.Run, P("run", "trust").Kind);
-        Assert.Contains("pen trust", Cli.Usage);
-        Assert.Contains("--yes", Cli.SubcommandHelp["trust"]);
+        Assert.Contains("pen trust", HelpText.Usage);
+        Assert.Contains("--yes", HelpText.Subcommands["trust"]);
     }
 
     [Fact]
@@ -116,7 +116,7 @@ public class CliTests
         var c = P(args);
         Assert.Equal(CommandKind.Help, c.Kind);
         Assert.Equal([topic], c.Args);
-        Assert.StartsWith("usage: pen", Cli.SubcommandHelp[topic]);
+        Assert.StartsWith("usage: pen", HelpText.Subcommands[topic]);
     }
 
     [Fact]
@@ -133,8 +133,8 @@ public class CliTests
     public void EverySubcommandHasHelp_AndTheUsageMentionsIt()
     {
         foreach (var name in new[] { "run", "upgrade", "allow", "sign", "reset", "ps", "prune" })
-            Assert.True(Cli.SubcommandHelp.ContainsKey(name), name);
-        Assert.Contains("pen <subcommand> --help", Cli.Usage);
+            Assert.True(HelpText.Subcommands.ContainsKey(name), name);
+        Assert.Contains("pen <subcommand> --help", HelpText.Usage);
     }
 
     [Fact]
@@ -312,11 +312,11 @@ public class CliTests
     [Fact]
     public void TheHelpNoLongerSaysSessionsDontInstallTools()
     {
-        Assert.DoesNotContain("don't install tools", Cli.Usage);
-        Assert.DoesNotContain("don't install tools", Cli.SubcommandHelp["run"]);
+        Assert.DoesNotContain("don't install tools", HelpText.Usage);
+        Assert.DoesNotContain("don't install tools", HelpText.Subcommands["run"]);
     }
 
     [Fact]
     public void TheToolsImageBuildOptionIsGone() =>
-        Assert.Equal(2, Assert.Throws<PenException>(() => Cli.Parse(["--tool", "pen-test", "--build-tools-image"])).ExitCode);
+        Assert.Equal(2, Assert.Throws<PenException>(() => CommandParser.Parse(["--tool", "pen-test", "--build-tools-image"])).ExitCode);
 }

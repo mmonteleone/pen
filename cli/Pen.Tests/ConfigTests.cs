@@ -175,7 +175,7 @@ public class ConfigTests
     [Fact]
     public void TheTemplatesParseEmpty_WithEveryExampleCommentedOut()
     {
-        var text = Embedded.Text("templates/config.toml");
+        var text = Embedded.ReadText("templates/config.toml");
         var empty = User(text);
         Assert.Empty(empty.Env);
         Assert.Empty(empty.GitHubTokens);
@@ -200,7 +200,7 @@ public class ConfigTests
         var host = t.Host();
         Config.EnsureUserConfig(host, () => ("T", "t@example.invalid"));
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(host.UserConfigPath));
-        Assert.Equal(Embedded.Text("templates/config.toml"), File.ReadAllText(host.UserConfigPath));
+        Assert.Equal(Embedded.ReadText("templates/config.toml"), File.ReadAllText(host.UserConfigPath));
 
         File.WriteAllText(host.UserConfigPath, "[env]\nX = \"mine\"\n");
         Config.EnsureUserConfig(host, () => ("T", "t@example.invalid"));

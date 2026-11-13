@@ -13,7 +13,7 @@ public class SeedTests
     [Fact]
     public void TheTemplateEmbedsEveryDotfile()
     {
-        var names = Embedded.Under("templates/home/").Select(n => n["templates/home/".Length..]).Order(StringComparer.Ordinal);
+        var names = Embedded.ListUnder("templates/home/").Select(n => n["templates/home/".Length..]).Order(StringComparer.Ordinal);
         Assert.Equal(Expected.Order(StringComparer.Ordinal), names);
     }
 
@@ -38,7 +38,7 @@ public class SeedTests
     [Fact]
     public void AMissingIdentityIsLeftCommentedOut()
     {
-        var text = Seed.GitConfig(Embedded.Text("templates/home/.gitconfig"), null, "");
+        var text = Seed.GitConfig(Embedded.ReadText("templates/home/.gitconfig"), null, "");
         Assert.Contains("#\tname = Your Name", text);
         Assert.Contains("#\temail = you@example.com", text);
     }
@@ -64,13 +64,13 @@ public class SeedTests
     [Fact]
     public void TheTemplatesCarryTheSandboxSettings_AndNoPersonalDefaults()
     {
-        using var settings = JsonDocument.Parse(Embedded.Text("templates/home/.claude/settings.json"));
+        using var settings = JsonDocument.Parse(Embedded.ReadText("templates/home/.claude/settings.json"));
         var root = settings.RootElement;
         Assert.Equal("bypassPermissions", root.GetProperty("permissions").GetProperty("defaultMode").GetString());
         Assert.False(root.TryGetProperty("attribution", out _));
 
         // No MCP servers: a CodeGraph entry needs the codegraph tool, which a new seed can't assume.
-        var codex = Embedded.Text("templates/home/.codex/config.toml");
+        var codex = Embedded.ReadText("templates/home/.codex/config.toml");
         Assert.Contains("approval_policy = \"never\"", codex);
         Assert.DoesNotContain("mcp_servers", codex);
         Assert.DoesNotContain("codegraph", codex);
@@ -81,7 +81,7 @@ public class SeedTests
     {
         foreach (var f in new[] { "templates/home/.claude/CLAUDE.md", "templates/home/.codex/AGENTS.md" })
         {
-            var text = Embedded.Text(f);
+            var text = Embedded.ReadText(f);
             Assert.Contains("CONNECT tunnel failed", text);
             Assert.Contains("Don't work around it.", text);
             Assert.Contains("`.git/config` is read-only here.", text);

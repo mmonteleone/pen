@@ -422,7 +422,7 @@ internal static class GitCheck
         {
             // Never fatal: the rest still gets checked, and the warning names it.
             // Native.Rename's is strerror's
-            var reason = e is UnauthorizedAccessException u ? Out.PermissionDenied(u) : e.Message;
+            var reason = e is UnauthorizedAccessException u ? Out.DescribePermissionDenied(u) : e.Message;
             moved.Add(new(path, "", $"{why}. COULD NOT MOVE IT ({reason}): " +
                 "don't run git here until you've dealt with it"));
             return false;
@@ -522,19 +522,19 @@ internal static class GitCheck
     public static void Report(string dir, CheckResult check)
     {
         if (check.Moved.Count > 0)
-            Out.Raw(Warning(dir, check.Moved));
+            Out.WriteRaw(Warning(dir, check.Moved));
         foreach (var r in check.Restored ?? [])
-            Out.Line($"{RepoGuard.Rel(dir, r.Path)}: {r.What}");
+            Out.WriteLine($"{RepoGuard.Rel(dir, r.Path)}: {r.What}");
         foreach (var c in check.Opened ?? [])
         {
-            Out.Line($"changed {RepoGuard.Rel(dir, c.Path)} from mode {Octal(c.Was)} " +
+            Out.WriteLine($"changed {RepoGuard.Rel(dir, c.Path)} from mode {Octal(c.Was)} " +
                 $"to {Octal(c.Now)} so it could be checked, and left it that way");
         }
 
         if (check.Paused is { Count: > 0 } paused)
-            Out.Raw(PausedGit.Warning(dir, paused));
+            Out.WriteRaw(PausedGit.Warning(dir, paused));
         if (check.Failure != null)
-            Out.Raw(NotCheckedWarning(dir, check.Failure));
+            Out.WriteRaw(NotCheckedWarning(dir, check.Failure));
     }
 
     private static string Octal(UnixFileMode mode) => Convert.ToString((int)mode, 8);

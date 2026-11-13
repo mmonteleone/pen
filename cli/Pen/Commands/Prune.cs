@@ -36,23 +36,23 @@ internal static partial class Prune
         var staleTools = StaleToolsImages(images, ToolsImage.CurrentBaseId(), ReadBaseId);
         if (entries.Count == 0 && staleTools.Count == 0)
         {
-            Out.Line("nothing to prune: no project has volumes or state");
+            Out.WriteLine("nothing to prune: no project has volumes or state");
             return 0;
         }
         if (entries.Count > 0)
-            Out.Raw(Render(host, entries));
+            Out.WriteRaw(Render(host, entries));
 
         var removable = entries.Where(e => e.Removable).ToList();
         if (removable.Count == 0 && staleTools.Count == 0)
         {
-            Out.Line("nothing to prune");
+            Out.WriteLine("nothing to prune");
             return 0;
         }
         if (staleTools.Count > 0)
-            Out.Raw($"to remove, tools images on an old base image:\n  {string.Join("\n  ", staleTools)}");
+            Out.WriteRaw($"to remove, tools images on an old base image:\n  {string.Join("\n  ", staleTools)}");
         if (removable.Count > 0)
         {
-            Out.Raw("Removing deletes " +
+            Out.WriteRaw("Removing deletes " +
                 $"{(removable.Count == 1 ? "that project's" : $"those {removable.Count} projects'")} " +
                 "sandbox homes (agent logins"
                     + " and config, shell history), NuGet caches, Docker-in-Docker images, project layers\n"
@@ -61,7 +61,7 @@ internal static partial class Prune
 
         if (!Out.Confirm(removable.Count + staleTools.Count == 1 ? "remove it?" : "remove them?", input))
         {
-            Out.Line("nothing removed");
+            Out.WriteLine("nothing removed");
             return 1;
         }
 
@@ -77,7 +77,7 @@ internal static partial class Prune
             var r = Proc.Capture("docker", ["image", "rm", image]);
             if (r.ExitStatus.ExitCode != 0)
             {
-                Out.Line($"can't remove {image}: {r.StandardError.Trim()}");
+                Out.WriteLine($"can't remove {image}: {r.StandardError.Trim()}");
                 failed++;
             }
         }
@@ -143,7 +143,7 @@ internal static partial class Prune
         var imageList = images.ToList();
         return byKey.Select(kv =>
         {
-            var runtimeDir = host.RuntimeDir(kv.Key);
+            var runtimeDir = host.GetRuntimeDir(kv.Key);
             if (!Directory.Exists(runtimeDir))
                 runtimeDir = null;
             var recorded = runtimeDir == null ? null : ReadProjectDir(runtimeDir);
@@ -264,11 +264,11 @@ internal static partial class Prune
     /// </summary>
     internal static bool Remove(HostEnv host, Entry e)
     {
-        var runtimeDir = e.RuntimeDir ?? host.RuntimeDir(e.Key);
+        var runtimeDir = e.RuntimeDir ?? host.GetRuntimeDir(e.Key);
         using var l = FileLock.TryTake(SessionRegistry.ProjectLockFile(runtimeDir), exclusive: true);
         if (l == null || SessionRegistry.Running(e.Key, runtimeDir).Count > 0)
         {
-            Out.Line($"skipping {e.Key}: a session (or pen sign or reset) is running in it");
+            Out.WriteLine($"skipping {e.Key}: a session (or pen sign or reset) is running in it");
             return false;
         }
 
@@ -277,7 +277,7 @@ internal static partial class Prune
             var r = Proc.Capture("docker", ["volume", "rm", .. e.Volumes]);
             if (r.ExitStatus.ExitCode != 0)
             {
-                Out.Line($"can't remove {e.Key}'s volumes: {r.StandardError.Trim()}");
+                Out.WriteLine($"can't remove {e.Key}'s volumes: {r.StandardError.Trim()}");
                 return false;
             }
         }
@@ -286,7 +286,7 @@ internal static partial class Prune
             var r = Proc.Capture("docker", ["image", "rm", .. e.Images]);
             if (r.ExitStatus.ExitCode != 0)
             {
-                Out.Line($"can't remove {e.Key}'s images: {r.StandardError.Trim()}");
+                Out.WriteLine($"can't remove {e.Key}'s images: {r.StandardError.Trim()}");
                 return false;
             }
         }
@@ -298,10 +298,10 @@ internal static partial class Prune
         catch (DirectoryNotFoundException) { }
         catch (Exception x) when (x is IOException or UnauthorizedAccessException)
         {
-            Out.Line($"can't remove {host.Display(runtimeDir)}: {Out.Describe(x)}");
+            Out.WriteLine($"can't remove {host.Display(runtimeDir)}: {Out.Describe(x)}");
             return false;
         }
-        Out.Line($"removed {e.Key}");
+        Out.WriteLine($"removed {e.Key}");
         return true;
     }
 

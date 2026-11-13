@@ -26,11 +26,11 @@ internal static class Image
     /// <summary>Builds pen:latest first when it's missing or doesn't match this CLI's image files.</summary>
     public static void EnsureCurrent()
     {
-        var want = Embedded.ImageHash();
+        var want = Embedded.ComputeImageHash();
         var have = CurrentHash();
         if (have == want)
             return;
-        Out.Line(have == null
+        Out.WriteLine(have == null
             ? $"building {Name} (first run, this takes a few minutes)"
             : $"rebuilding {Name}: its image files changed");
         Build(want, refresh: null, pull: false, noCache: false);
@@ -47,7 +47,7 @@ internal static class Image
             args.AddRange(["--build-arg", $"PEN_REFRESH={refresh}"]);
         args.Add("-");
 
-        var psi = Proc.Info("docker", args);
+        var psi = Proc.CreateStartInfo("docker", args);
         psi.RedirectStandardInput = true;
         using var p = Proc.Start(psi);
         try
@@ -123,7 +123,7 @@ internal static class Image
     /// </summary>
     internal static void RunBuild(IReadOnlyList<string> args, Action<Stream>? context, string announce, string failure)
     {
-        var psi = Proc.Info("docker", args);
+        var psi = Proc.CreateStartInfo("docker", args);
         psi.RedirectStandardOutput = psi.RedirectStandardError = true;
         psi.RedirectStandardInput = context != null;
 
@@ -137,7 +137,7 @@ internal static class Image
             lock (gate)
             {
                 if (live)
-                    Out.Raw(line);
+                    Out.WriteRaw(line);
                 else
                     buffered.Add(line);
             }
@@ -164,9 +164,9 @@ internal static class Image
         {
             lock (gate)
             {
-                Out.Line(announce);
+                Out.WriteLine(announce);
                 foreach (var l in buffered)
-                    Out.Raw(l);
+                    Out.WriteRaw(l);
                 buffered.Clear();
                 live = true;
             }
@@ -177,7 +177,7 @@ internal static class Image
             lock (gate)
             {
                 foreach (var l in buffered.TakeLast(40))
-                    Out.Raw(l);
+                    Out.WriteRaw(l);
             }
             throw new PenException($"{failure} (docker build exited {p.ExitCode})");
         }
@@ -217,7 +217,7 @@ internal static class Image
         }
         catch (PenException e)
         {
-            Out.Line($"skipping this project's tools: {e.Message}");
+            Out.WriteLine($"skipping this project's tools: {e.Message}");
             return user.Tools;
         }
         var unapproved = TrustGate.UnapprovedTools(projectConfig, user.Tools, TrustStore.For(host, project), catalog)
@@ -225,14 +225,14 @@ internal static class Image
             .ToList();
         if (unapproved.Count > 0)
         {
-            Out.Line("skipping tools that .pen/ asks for and aren't approved (pen trust reviews " +
+            Out.WriteLine("skipping tools that .pen/ asks for and aren't approved (pen trust reviews " +
                 $"them): {string.Join(' ', unapproved.Select(t => Out.Field(t.ToString())))}");
         }
 
         if (ToolSpec.TryCanonicalize(user.Tools.Concat(projectConfig.Tools.Except(unapproved)), catalog,
             out var tools) is { } conflict)
         {
-            Out.Line($"skipping this project's tools: {conflict}");
+            Out.WriteLine($"skipping this project's tools: {conflict}");
             return user.Tools;
         }
         return tools;
@@ -248,10 +248,10 @@ internal static class Image
             return;
         if (TrustGate.UnapprovedLayer(project, TrustStore.For(host, project)) != null)
         {
-            Out.Line("skipping the project layer: .pen/ isn't approved (pen trust reviews it)");
+            Out.WriteLine("skipping the project layer: .pen/ isn't approved (pen trust reviews it)");
             return;
         }
-        Out.Line($"rebuilding the project layer {ProjectLayerName(project, baseImage)}");
+        Out.WriteLine($"rebuilding the project layer {ProjectLayerName(project, baseImage)}");
         EnsureProjectLayer(host, project, noCache: clean, baseImage: baseImage);
     }
 
@@ -262,8 +262,8 @@ internal static class Image
     /// </summary>
     public static void Upgrade(HostEnv host, Config user, bool clean)
     {
-        Out.Line($"upgrading {Name}{(clean ? " from scratch (--clean)" : "")}");
-        Build(Embedded.ImageHash(), refresh: DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(), pull: true,
+        Out.WriteLine($"upgrading {Name}{(clean ? " from scratch (--clean)" : "")}");
+        Build(Embedded.ComputeImageHash(), refresh: DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(), pull: true,
             noCache: clean);
 
         // The project layer too, when run in a project that has one.
@@ -277,7 +277,7 @@ internal static class Image
         if (project != null)
             UpgradeProjectLayer(host, project, clean, tools);
 
-        Out.Line("pulling sidecar images");
+        Out.WriteLine("pulling sidecar images");
         // compose reads the embedded compose.yaml from stdin. Its required
         // variables only need values for interpolation; nothing is started.
         var env = new Dictionary<string, string>
@@ -289,15 +289,15 @@ internal static class Image
             ["NUGET_PACKAGES"] = "/nonexistent",
             ["PEN_SEED"] = "/nonexistent",
         };
-        var psi = Proc.Info("docker",
+        var psi = Proc.CreateStartInfo("docker",
             ["compose", "--profile", "docker", "-f", "-", "-p", "pen-upgrade", "pull", "proxy", "dind"], env);
         psi.RedirectStandardInput = true;
         using var p = Proc.Start(psi);
         using (var stdin = p.StandardInput)
-            stdin.Write(Embedded.Text("compose.yaml"));
+            stdin.Write(Embedded.ReadText("compose.yaml"));
         p.WaitForExit();
         if (p.ExitCode != 0)
             throw new PenException($"docker compose pull failed (exit {p.ExitCode})");
-        Out.Line("upgrade done");
+        Out.WriteLine("upgrade done");
     }
 }

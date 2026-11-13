@@ -72,8 +72,8 @@ public class TrustGateTests
         {
             Assert.Empty(Calls); // nothing at all ran, so no token or allowlist went anywhere
             Assert.False(HasSeen("token-seen"));
-            Assert.False(File.Exists(Path.Combine(Host.RuntimeDir(Project.Key), "token-notice")));
-            Assert.Empty(Directory.GetDirectories(Path.Combine(Host.RuntimeDir(Project.Key), "sessions")));
+            Assert.False(File.Exists(Path.Combine(Host.GetRuntimeDir(Project.Key), "token-notice")));
+            Assert.Empty(Directory.GetDirectories(Path.Combine(Host.GetRuntimeDir(Project.Key), "sessions")));
         }
 
         public void Dispose()
@@ -96,7 +96,7 @@ public class TrustGateTests
         var e = Assert.Throws<PenException>(() => f.Run(Saying(answer)));
         Assert.Contains("not starting", e.Message);
         f.AssertNothingReached();
-        Assert.False(File.Exists(TrustStore.PathFor(f.Host.RuntimeDir(f.Project.Key), f.Project.Dir)));
+        Assert.False(File.Exists(TrustStore.PathFor(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir)));
     }
 
     [Fact]
@@ -177,7 +177,7 @@ public class TrustGateTests
         var build = Assert.Single(f.Calls.Skip(callsBefore));
         Assert.Contains($"-t {name} ", build);
         Assert.Contains("--build-context pen:latest=docker-image://pen-tools:0123456789abcdef ", build);
-        Assert.StartsWith(f.Host.RuntimeDir(f.Project.Key), f.Seen("context-path"));
+        Assert.StartsWith(f.Host.GetRuntimeDir(f.Project.Key), f.Seen("context-path"));
         Assert.Equal(Approved, f.Seen("seen-context/Dockerfile")); // not the swap
     }
 
@@ -319,7 +319,7 @@ public class TrustGateTests
         Assert.NotNull(Image.EnsureProjectLayer(f.Host, f.Project));
 
         var context = f.Seen("context-path");
-        Assert.StartsWith(f.Host.RuntimeDir(f.Project.Key) + "/", context);
+        Assert.StartsWith(f.Host.GetRuntimeDir(f.Project.Key) + "/", context);
         Assert.False(RepoGuard.IsInside(f.Project.Dir, context));
         Assert.EndsWith("/Dockerfile", f.Calls[^1].Split(' ')[^2]);
         Assert.False(Path.Exists(context));
@@ -349,7 +349,7 @@ public class TrustGateTests
     private static string StaleContext(Fixture f)
     {
         Session.EnsureRuntimeDir(f.Host, f.Project);
-        var parent = Path.Combine(f.Host.RuntimeDir(f.Project.Key), "layer-" + Project.Hash(f.Project.Dir));
+        var parent = Path.Combine(f.Host.GetRuntimeDir(f.Project.Key), "layer-" + Project.Hash(f.Project.Dir));
         var ro = Directory.CreateDirectory(Path.Combine(parent, "context", "ro")).FullName;
         File.WriteAllText(Path.Combine(ro, "stale"), "x");
         File.SetUnixFileMode(ro, UnixFileMode.UserRead | UnixFileMode.UserExecute);
@@ -371,7 +371,7 @@ public class TrustGateTests
     {
         using var f = new Fixture(projectToml: "", dockerfile: "");
         StaleContext(f);
-        var runtimeDir = f.Host.RuntimeDir(f.Project.Key);
+        var runtimeDir = f.Host.GetRuntimeDir(f.Project.Key);
         Directory.Delete(f.Project.Dir, recursive: true);
         Assert.True(Prune.Remove(f.Host, Assert.Single(Prune.Find(f.Host, [], []), e => e.Key == f.Project.Key)));
         Assert.False(Directory.Exists(runtimeDir));
@@ -382,7 +382,7 @@ public class TrustGateTests
     {
         using var f = new Fixture(projectToml: "");
         Approve(f);
-        var lockFile = Path.Combine(f.Host.RuntimeDir(f.Project.Key), "layer-" + Project.Hash(f.Project.Dir) + ".lock");
+        var lockFile = Path.Combine(f.Host.GetRuntimeDir(f.Project.Key), "layer-" + Project.Hash(f.Project.Dir) + ".lock");
         var held = FileLock.TryTake(lockFile, exclusive: true)!;
         var build = Task.Factory.StartNew(() => Image.EnsureProjectLayer(f.Host, f.Project), TaskCreationOptions.LongRunning);
         await Task.Delay(TimeSpan.FromMilliseconds(500), TestContext.Current.CancellationToken);
@@ -414,7 +414,7 @@ public class TrustGateTests
     }
 
     private static string[] Reviews(Fixture f) =>
-        Directory.GetDirectories(f.Host.RuntimeDir(f.Project.Key), "layer-*-review-*");
+        Directory.GetDirectories(f.Host.GetRuntimeDir(f.Project.Key), "layer-*-review-*");
 
     private const string Benign = "FROM pen:latest\nRUN benign\n";
 
@@ -462,7 +462,7 @@ public class TrustGateTests
         var shown = CapturingStderr(() => Assert.Throws<PenException>(() => TrustGate.RequireForSession(f.Host, f.Project, f.User, f.ProjectConfig, answers)));
         Assert.Contains("| RUN evil-shown", shown);
         Assert.Empty(Reviews(f));
-        Assert.False(File.Exists(TrustStore.PathFor(f.Host.RuntimeDir(f.Project.Key), f.Project.Dir)));
+        Assert.False(File.Exists(TrustStore.PathFor(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir)));
     }
 
     [Fact]
@@ -485,7 +485,7 @@ public class TrustGateTests
     {
         using var f = new Fixture(projectToml: "");
         Session.EnsureRuntimeDir(f.Host, f.Project);
-        var prefix = Path.Combine(f.Host.RuntimeDir(f.Project.Key), $"layer-{Project.Hash(f.Project.Dir)}-review-");
+        var prefix = Path.Combine(f.Host.GetRuntimeDir(f.Project.Key), $"layer-{Project.Hash(f.Project.Dir)}-review-");
         var (old, fresh) = (prefix + "old", prefix + "fresh");
         Directory.CreateDirectory(Path.Combine(old, "context"));
         Directory.CreateDirectory(Path.Combine(fresh, "context"));
@@ -521,7 +521,7 @@ public class TrustGateTests
         Assert.Contains("docker = true", captured.ToString());
         Assert.Contains("| RUN evil", captured.ToString());
         Assert.Empty(Reviews(f));
-        Assert.False(File.Exists(TrustStore.PathFor(f.Host.RuntimeDir(f.Project.Key), f.Project.Dir)));
+        Assert.False(File.Exists(TrustStore.PathFor(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir)));
         var after = TrustGate.Requested(f.Project, f.User, f.ProjectConfig, TrustStore.For(f.Host, f.Project));
         Assert.Equal(50, after.Domains.Count);
         Assert.True(after.Docker);
@@ -534,7 +534,7 @@ public class TrustGateTests
     {
         using var f = new Fixture();
         Assert.Equal(0, f.Run(Saying("y")));
-        File.WriteAllText(TrustStore.PathFor(f.Host.RuntimeDir(f.Project.Key), f.Project.Dir), "garbage\n");
+        File.WriteAllText(TrustStore.PathFor(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir), "garbage\n");
         File.Delete(f.CallsFile);
         Assert.Throws<PenException>(() => f.Run(NoTerminal));
         Assert.Empty(f.Calls);
@@ -582,7 +582,7 @@ public class TrustGateTests
         using var f = new Fixture();
         var e = Assert.Throws<PenException>(() => TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: false, NoTerminal));
         Assert.Contains("--yes", e.Message);
-        Assert.False(File.Exists(TrustStore.PathFor(f.Host.RuntimeDir(f.Project.Key), f.Project.Dir)));
+        Assert.False(File.Exists(TrustStore.PathFor(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir)));
     }
 
     // pen upgrade
@@ -626,7 +626,7 @@ public class TrustGateTests
         File.WriteAllText(Path.Combine(f.T.Path, "swap-in"), "FROM pen:latest\nRUN worse\n");
         Image.UpgradeProjectLayer(f.Host, f.Project, clean: false);
         Assert.Equal(Approved, f.Seen("seen-context/Dockerfile"));
-        Assert.StartsWith(f.Host.RuntimeDir(f.Project.Key) + "/", f.Seen("context-path"));
+        Assert.StartsWith(f.Host.GetRuntimeDir(f.Project.Key) + "/", f.Seen("context-path"));
     }
 
     // pen allow
@@ -674,7 +674,7 @@ public class TrustGateTests
         var (s, l) = RunningSession(f);
         using var _ = l;
         TrustStore.For(f.Host, f.Project).ApproveDomains(["ok.example"]);
-        File.WriteAllText(TrustStore.PathFor(f.Host.RuntimeDir(f.Project.Key), f.Project.Dir), "garbage\n");
+        File.WriteAllText(TrustStore.PathFor(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir), "garbage\n");
         Assert.True(AllowCommand.Apply(f.Host, s));
         Assert.DoesNotContain("ok.example", File.ReadAllText(s.File("allowlist.txt")));
     }

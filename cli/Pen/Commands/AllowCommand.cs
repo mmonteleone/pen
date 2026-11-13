@@ -82,7 +82,7 @@ internal static class AllowCommand
         if (project != null)
         {
             Session.EnsureRuntimeDir(host, project);
-            Session.FinishDeadSessions(project.Key, host.RuntimeDir(project.Key));
+            Session.FinishDeadSessions(project.Key, host.GetRuntimeDir(project.Key));
         }
 
         List<string> added;
@@ -104,9 +104,9 @@ internal static class AllowCommand
 
         var skipped = domains.Except(added).ToList();
         if (added.Count > 0)
-            Out.Line($"added to {where}: {string.Join(' ', added)}");
+            Out.WriteLine($"added to {where}: {string.Join(' ', added)}");
         if (skipped.Count > 0)
-            Out.Line($"already in {where}: {string.Join(' ', skipped)}");
+            Out.WriteLine($"already in {where}: {string.Join(' ', skipped)}");
 
         int applied = 0, failed = 0;
         foreach (var s in Targets(host, project, global))
@@ -118,7 +118,7 @@ internal static class AllowCommand
         }
         if (applied > 0)
         {
-            Out.Line($"applied to {applied} running session{(applied == 1 ? "" : "s")}"
+            Out.WriteLine($"applied to {applied} running session{(applied == 1 ? "" : "s")}"
                 + $"{(global ? "" : " in this directory")}");
         }
 
@@ -132,7 +132,7 @@ internal static class AllowCommand
     /// </summary>
     internal static List<SessionDir> Targets(HostEnv host, Project? project, bool global) =>
         global ? SessionRegistry.RunningEverywhere(host)
-        : SessionRegistry.RunningIn(project!.Key, host.RuntimeDir(project.Key), project.Dir);
+        : SessionRegistry.RunningIn(project!.Key, host.GetRuntimeDir(project.Key), project.Dir);
 
     /// <summary>
     /// Regenerates one running session's allowlist from the current config
@@ -151,15 +151,17 @@ internal static class AllowCommand
             var user = Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User);
             var projectConfig = Config.Load(Path.Combine(projectDir, ".pen"),
                 Out.Field(Path.Combine(projectDir, ".pen")), ConfigKind.Project);
-            var approved = TrustStore.Load(host.RuntimeDir(s.ProjectKey), projectDir).ApprovedOf(projectConfig.Allow);
-            var merged = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow,
+            var approved = TrustStore.Load(host.GetRuntimeDir(s.ProjectKey), projectDir)
+                .ApprovedOf(projectConfig.Allow);
+            var merged = Allowlist.Merge(Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")), user.Allow,
                 approved, s.ReadToolDomains());
             // Truncate and write, never rename: the proxy's single-file bind
             // mount pins the inode.
             using (var f = new FileStream(s.File("allowlist.txt"), FileMode.Truncate, FileAccess.Write))
                 f.Write(Encoding.UTF8.GetBytes(Allowlist.Render(merged)));
 
-            var psi = Proc.Info("docker", s.ComposeArgs("exec", "-T", "proxy", "squid", "-k", "reconfigure"), env);
+            var psi = Proc.CreateStartInfo("docker",
+                s.ComposeArgs("exec", "-T", "proxy", "squid", "-k", "reconfigure"), env);
             psi.RedirectStandardOutput = psi.RedirectStandardError = true;
             Session.ScrubComposeEnv(psi);
             var r = Process.RunAndCaptureText(psi);
@@ -169,7 +171,7 @@ internal static class AllowCommand
         }
         catch (Exception e) when (e is PenException or IOException or UnauthorizedAccessException)
         {
-            Out.Line($"couldn't apply it to the running session {s.ComposeProject}: {Out.Describe(e)}");
+            Out.WriteLine($"couldn't apply it to the running session {s.ComposeProject}: {Out.Describe(e)}");
             return false;
         }
     }
@@ -181,7 +183,7 @@ internal static class AllowCommand
     /// </summary>
     internal static string Defaults()
     {
-        var lines = Embedded.Text("proxy/allowlist.txt").Split('\n');
+        var lines = Embedded.ReadText("proxy/allowlist.txt").Split('\n');
         int first = Array.FindIndex(lines, l => l.StartsWith("# ---", StringComparison.Ordinal));
         return string.Join('\n', lines[Math.Max(first, 0)..]).TrimEnd('\n') + "\n";
     }
@@ -222,7 +224,7 @@ internal static class AllowCommand
 
     public static int List(HostEnv host, Project project, Config user, Config projectConfig)
     {
-        var runtimeDir = host.RuntimeDir(project.Key);
+        var runtimeDir = host.GetRuntimeDir(project.Key);
         Session.EnsureRuntimeDir(host, project);
         Session.FinishDeadSessions(project.Key, runtimeDir);
 
@@ -234,31 +236,31 @@ internal static class AllowCommand
         var toolDomains = ToolSpec.DomainsOf(
             user.Tools.Concat(store.ApprovedToolsOf(projectConfig.Tools, RecipeCatalog.Embedded)),
             RecipeCatalog.Embedded);
-        var allowed = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow, approved,
-                toolDomains)
+        var allowed = Allowlist.Merge(Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")), user.Allow,
+                approved, toolDomains)
             .ToHashSet(StringComparer.Ordinal);
         var blocked = BlockedAcross(logs).Where(b => !Allowlist.IsAllowed(allowed, b.Host)).ToList();
         if (blocked.Count == 0)
         {
-            Out.Stdout("nothing blocked in this project's sessions (last 7 days) that isn't allowed now\n");
+            Out.WriteStdout("nothing blocked in this project's sessions (last 7 days) that isn't allowed now\n");
             return 0;
         }
 
         // The newest few: the agent decides how many there are.
         var shown = blocked.Take(Allowlist.MaxListed).ToList();
-        Out.Stdout("blocked in this project's sessions, newest first:\n");
+        Out.WriteStdout("blocked in this project's sessions, newest first:\n");
         foreach (var b in shown)
         {
             var when = b.Last == DateTimeOffset.MinValue
                 ? ""
                 : b.Last.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
-            Out.Stdout($"  {Allowlist.ShownHost(b.Host),-40} {when}\n");
+            Out.WriteStdout($"  {Allowlist.ShownHost(b.Host),-40} {when}\n");
         }
         if (blocked.Count > shown.Count)
-            Out.Stdout($"  and {blocked.Count - shown.Count} more, blocked earlier\n");
+            Out.WriteStdout($"  and {blocked.Count - shown.Count} more, blocked earlier\n");
         var allowable = shown.Select(b => b.Host).Where(Allowlist.IsValidDomain).ToList();
         if (allowable.Count > 0)
-            Out.Stdout($"pen allow {string.Join(' ', allowable)}   (add --global for all projects)\n");
+            Out.WriteStdout($"pen allow {string.Join(' ', allowable)}   (add --global for all projects)\n");
         return 0;
     }
 }

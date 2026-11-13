@@ -4,7 +4,7 @@ namespace Pen.Tests;
 
 public class SessionSignalsTests
 {
-    private static Process Sleeper() => Proc.Start(Proc.Info("sleep", ["30"]));
+    private static Process Sleeper() => Proc.Start(Proc.CreateStartInfo("sleep", ["30"]));
 
     /// <summary>SIGHUP after the child started but before it was handed over still stops it.</summary>
     [Fact]

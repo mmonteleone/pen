@@ -170,7 +170,7 @@ public class UndecodableNameTests
     [Fact]
     public void ALeadingDashIsEscaped_SoPrintfDoesntTakeItForAnOption()
     {
-        Assert.Equal(@"\055x-y\377", new UndecodableEntry([(byte)'-', (byte)'x', (byte)'-', (byte)'y', 0xff], true).Escaped);
+        Assert.Equal(@"\055x-y\377", new UndecodableEntry([(byte)'-', (byte)'x', (byte)'-', (byte)'y', 0xff], true).EscapedName);
 
         using var t = new TempDir();
         var repo = FreshRepo(t);

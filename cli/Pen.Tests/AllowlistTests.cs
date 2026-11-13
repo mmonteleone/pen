@@ -23,7 +23,7 @@ public class AllowlistTests
     [Fact]
     public void TheDefaultListIsValidAndAlreadyMerged()
     {
-        var list = Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")).ToList();
+        var list = Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")).ToList();
         Assert.NotEmpty(list);
         Assert.All(list, d => Assert.True(Allowlist.IsValidDomain(d), d));
         Assert.Equal(list, Allowlist.Merge(list));

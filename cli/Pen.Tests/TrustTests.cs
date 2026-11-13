@@ -21,7 +21,7 @@ public class TrustTests
             Session.EnsureRuntimeDir(Host, Project);
         }
 
-        public string RuntimeDir => Host.RuntimeDir(Project.Key);
+        public string RuntimeDir => Host.GetRuntimeDir(Project.Key);
         public string StorePath => TrustStore.PathFor(RuntimeDir, Project.Dir);
         public TrustStore Store => TrustStore.For(Host, Project);
 
@@ -503,7 +503,7 @@ public class TrustTests
         var project = Project.Resolve(dir, host);
         Session.EnsureRuntimeDir(host, project);
         TrustStore.For(host, project).ApproveDomains(["a.example"]);
-        var path = TrustStore.PathFor(host.RuntimeDir(project.Key), dir);
+        var path = TrustStore.PathFor(host.GetRuntimeDir(project.Key), dir);
         Assert.True(File.Exists(path));
         Directory.Delete(dir);
         Assert.True(Prune.Remove(host, Assert.Single(Prune.Find(host, [], []), e => e.Key == project.Key)));

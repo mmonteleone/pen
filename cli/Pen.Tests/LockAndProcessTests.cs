@@ -122,7 +122,7 @@ public class LockAndProcessTests
     [Fact]
     public void ImageContextAndHash()
     {
-        Assert.Equal(Embedded.ImageHash(), Embedded.ImageHash());
+        Assert.Equal(Embedded.ComputeImageHash(), Embedded.ComputeImageHash());
         using var ms = new MemoryStream();
         Embedded.WriteImageContext(ms);
         ms.Position = 0;
@@ -131,6 +131,6 @@ public class LockAndProcessTests
         while (r.GetNextEntry() is { } e) names.Add(e.Name);
         Assert.Contains("Dockerfile", names);
         Assert.Contains("entrypoint.sh", names);
-        Assert.Equal(Embedded.Under("image/").Count, names.Count);
+        Assert.Equal(Embedded.ListUnder("image/").Count, names.Count);
     }
 }

@@ -35,7 +35,7 @@ internal sealed class LayerContext : IDisposable
     public static LayerContext Take(HostEnv host, Project project)
     {
         Session.EnsureRuntimeDir(host, project);
-        var runtimeDir = host.RuntimeDir(project.Key);
+        var runtimeDir = host.GetRuntimeDir(project.Key);
         var parent = Path.Combine(runtimeDir, Prefix + Project.Hash(project.Dir));
         var held = WaitForLock(parent + ".lock");
         try
@@ -61,7 +61,7 @@ internal sealed class LayerContext : IDisposable
     public static LayerContext Review(HostEnv host, Project project)
     {
         Session.EnsureRuntimeDir(host, project);
-        var runtimeDir = host.RuntimeDir(project.Key);
+        var runtimeDir = host.GetRuntimeDir(project.Key);
         var prefix = $"{Prefix}{Project.Hash(project.Dir)}-review-";
         foreach (var old in System.IO.Directory.GetDirectories(runtimeDir, prefix + "*"))
         {
@@ -85,7 +85,7 @@ internal sealed class LayerContext : IDisposable
         var held = FileLock.TryTake(path, exclusive: true);
         if (held != null)
             return held;
-        Out.Line("waiting for another pen building this directory's project layer");
+        Out.WriteLine("waiting for another pen building this directory's project layer");
         while ((held = FileLock.TryTake(path, exclusive: true)) == null)
             Thread.Sleep(200);
         return held;

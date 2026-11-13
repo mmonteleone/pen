@@ -18,7 +18,7 @@ public sealed class SessionLockTests : IDisposable
     public SessionLockTests()
     {
         _host = _t.Host();
-        _runtime = _host.RuntimeDir(Key);
+        _runtime = _host.GetRuntimeDir(Key);
         Directory.CreateDirectory(_runtime);
         var mainDir = _t.Sub("repo");
         var wtDir = _t.Sub("repo-feat");
@@ -158,7 +158,7 @@ public sealed class SessionLockTests : IDisposable
         using var sw2 = OpenSession("aaaa0003", _wt);
 
         const string otherKey = "pen-other-11111111";
-        var other = new SessionDir(otherKey, Path.Combine(_host.RuntimeDir(otherKey), "sessions", "bbbb0001"));
+        var other = new SessionDir(otherKey, Path.Combine(_host.GetRuntimeDir(otherKey), "sessions", "bbbb0001"));
         Directory.CreateDirectory(other.Path);
         File.WriteAllText(other.EnvFile, $"PROJECT_DIR={_t.Sub("other")}\n");
         File.WriteAllText(other.ComposeFile, "");

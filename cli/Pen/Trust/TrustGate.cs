@@ -28,7 +28,7 @@ internal static class TrustGate
         IReadOnlyList<ToolSpec>? flagTools = null,
         RecipeCatalog? catalog = null)
     {
-        var allowed = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow)
+        var allowed = Allowlist.Merge(Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")), user.Allow)
             .ToHashSet(StringComparer.Ordinal);
         var domains = projectConfig.Allow.Distinct()
             .Where(d => !Allowlist.IsAllowed(allowed, d) && !store.CoversDomain(d))
@@ -136,8 +136,8 @@ internal static class TrustGate
             return;
         RequireCheckable(request);
 
-        Out.Line(Asks);
-        Out.Raw(string.Join('\n', request.Lines()));
+        Out.WriteLine(Asks);
+        Out.WriteRaw(string.Join('\n', request.Lines()));
         if (!Out.Confirm(request.Question, answers.Input))
             throw new PenException("not starting: nothing approved");
         store.Approve(request);
@@ -159,7 +159,7 @@ internal static class TrustGate
         var request = Requested(project, user, projectConfig, store, catalog: catalog);
         if (request.IsEmpty)
         {
-            Out.Line("nothing new to approve in .pen/");
+            Out.WriteLine("nothing new to approve in .pen/");
             return 0;
         }
         if (list)
@@ -169,7 +169,7 @@ internal static class TrustGate
             if (look != null)
                 request = Reviewed(request, look, store, showCopy: false);
             foreach (var line in request.AllLines())
-                Out.Stdout(line + "\n");
+                Out.WriteStdout(line + "\n");
             return 0;
         }
         RequireCheckable(request);
@@ -184,20 +184,20 @@ internal static class TrustGate
             request = Reviewed(request, review, store, showCopy: !yes);
         if (request.IsEmpty)
         {
-            Out.Line("nothing new to approve in .pen/");
+            Out.WriteLine("nothing new to approve in .pen/");
             return 0;
         }
         RequireCheckable(request);
 
-        Out.Line(Asks);
-        Out.Raw(string.Join('\n', request.Lines()));
+        Out.WriteLine(Asks);
+        Out.WriteRaw(string.Join('\n', request.Lines()));
         if (!yes && !Out.Confirm(request.Question, answers.Input))
         {
-            Out.Line("nothing approved");
+            Out.WriteLine("nothing approved");
             return 1;
         }
         store.Approve(request);
-        Out.Line("approved");
+        Out.WriteLine("approved");
         return 0;
     }
 

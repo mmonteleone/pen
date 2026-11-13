@@ -6,57 +6,63 @@ using System.Text;
 namespace Pen.Platform;
 
 /// <summary>
-/// Files embedded in the binary (compose.yaml, image/, proxy/, templates/, tools/),
+/// Reads the files embedded in the binary (compose.yaml, image/, proxy/, templates/, tools/),
 /// named by their repo-relative paths.
 /// </summary>
 internal static class Embedded
 {
-    private static Assembly Asm => typeof(Embedded).Assembly;
+    private static Assembly ResourceAssembly => typeof(Embedded).Assembly;
 
+    /// <summary>Opens the embedded file <paramref name="name"/>.</summary>
+    /// <exception cref="InvalidOperationException">No such file is embedded.</exception>
     public static Stream Open(string name) =>
-        Asm.GetManifestResourceStream(name) ?? throw new InvalidOperationException($"missing embedded file {name}");
+        ResourceAssembly.GetManifestResourceStream(name)
+            ?? throw new InvalidOperationException($"missing embedded file {name}");
 
-    public static string Text(string name)
+    /// <summary>Reads the embedded file <paramref name="name"/> as UTF-8 text.</summary>
+    public static string ReadText(string name)
     {
-        using var r = new StreamReader(Open(name), Encoding.UTF8);
-        return r.ReadToEnd();
+        using var reader = new StreamReader(Open(name), Encoding.UTF8);
+        return reader.ReadToEnd();
     }
 
-    public static byte[] Bytes(string name)
+    /// <summary>Reads the embedded file <paramref name="name"/>'s bytes.</summary>
+    public static byte[] ReadBytes(string name)
     {
-        using var s = Open(name);
-        using var ms = new MemoryStream();
-        s.CopyTo(ms);
-        return ms.ToArray();
+        using var stream = Open(name);
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return buffer.ToArray();
     }
 
-    /// <summary>Embedded names under a prefix such as "image/", sorted ordinally.</summary>
-    public static List<string> Under(string prefix) =>
-        Asm.GetManifestResourceNames()
+    /// <summary>Lists the embedded names under a prefix such as "image/", sorted ordinally.</summary>
+    public static List<string> ListUnder(string prefix) =>
+        ResourceAssembly.GetManifestResourceNames()
             .Where(n => n.StartsWith(prefix, StringComparison.Ordinal))
             .Order(StringComparer.Ordinal)
             .ToList();
 
-    /// <summary>The image hash: SHA-256 over every embedded image/ file's path and content.</summary>
-    public static string ImageHash()
+    /// <summary>Computes the image hash: SHA-256 over every embedded image/ file's path and content.</summary>
+    /// <returns>The hash's first 16 hex digits.</returns>
+    public static string ComputeImageHash()
     {
-        using var h = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        foreach (var name in Under("image/"))
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        foreach (var name in ListUnder("image/"))
         {
-            var bytes = Bytes(name);
-            h.AppendData(Encoding.UTF8.GetBytes($"{name}\0{bytes.Length}\0"));
-            h.AppendData(bytes);
+            var bytes = ReadBytes(name);
+            hash.AppendData(Encoding.UTF8.GetBytes($"{name}\0{bytes.Length}\0"));
+            hash.AppendData(bytes);
         }
-        return Convert.ToHexStringLower(h.GetHashAndReset())[..16];
+        return Convert.ToHexStringLower(hash.GetHashAndReset())[..16];
     }
 
     /// <summary>Writes image/ as a tar build context (paths relative to image/).</summary>
     public static void WriteImageContext(Stream output)
     {
         using var tar = new TarWriter(output, TarEntryFormat.Ustar, leaveOpen: true);
-        foreach (var name in Under("image/"))
+        foreach (var name in ListUnder("image/"))
         {
-            var bytes = Bytes(name);
+            var bytes = ReadBytes(name);
             var entry = new UstarTarEntry(TarEntryType.RegularFile, name["image/".Length..])
             {
                 DataStream = new MemoryStream(bytes),

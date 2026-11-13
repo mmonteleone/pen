@@ -579,7 +579,7 @@ public class SessionEndTests
         var repo = Path.Combine(t.Path, "repo");
         var host = t.Host();
         var project = Project.Resolve(repo, host);
-        var moved = Path.Combine(host.RuntimeDir(project.Key), "sessions", "12345678");
+        var moved = Path.Combine(host.GetRuntimeDir(project.Key), "sessions", "12345678");
         Directory.CreateDirectory(Path.GetDirectoryName(moved)!);
         Directory.Move(session.Path, moved);
 
@@ -660,7 +660,7 @@ public class SessionEndTests
         var repo = Path.Combine(t.Path, "repo");
         var host = t.Host();
         var project = Project.Resolve(repo, host);
-        var sessions = Path.Combine(host.RuntimeDir(project.Key), "sessions");
+        var sessions = Path.Combine(host.GetRuntimeDir(project.Key), "sessions");
         Directory.CreateDirectory(sessions);
         Directory.Move(session.Path, Path.Combine(sessions, "12345678"));
         var run = new Session(host, project, Config.Empty, Config.Empty);

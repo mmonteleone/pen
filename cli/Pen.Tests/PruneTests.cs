@@ -123,7 +123,7 @@ public class PruneTests
         using var t = new TempDir();
         var host = t.Host();
         var key = Record(host, t.Sub("plain"));
-        File.Delete(Path.Combine(host.RuntimeDir(key), Session.ProjectDirFile));
+        File.Delete(Path.Combine(host.GetRuntimeDir(key), Session.ProjectDirFile));
         var e = Only(Prune.Find(host, [$"{key}_home"], []), key);
         Assert.Equal(Prune.Status.Unknown, e.Status);
         Assert.False(e.Removable);
@@ -157,7 +157,7 @@ public class PruneTests
         var ea = Only(entries, a);
         Assert.Equal([$"{a}_home", $"{a}_nuget"], ea.Volumes);
         Assert.Equal([$"{a}-0011aabb:latest", $"{a}:latest"], ea.Images);
-        Assert.Equal(host.RuntimeDir(a), ea.RuntimeDir);
+        Assert.Equal(host.GetRuntimeDir(a), ea.RuntimeDir);
         var eb = Only(entries, b);
         Assert.Empty(eb.Volumes);
         Assert.Empty(eb.Images);
@@ -241,7 +241,7 @@ public class PruneTests
         Directory.Delete(dir);
         var e = Only(Prune.Find(host, [], []), key);
         Assert.True(Prune.Remove(host, e));
-        Assert.False(Directory.Exists(host.RuntimeDir(key)));
+        Assert.False(Directory.Exists(host.GetRuntimeDir(key)));
         Assert.Empty(Prune.Find(host, [], []));
     }
 
@@ -256,9 +256,9 @@ public class PruneTests
         var key = Record(host, dir);
         Directory.Delete(dir);
         var e = Only(Prune.Find(host, [], []), key);
-        using (FileLock.TryTake(SessionRegistry.ProjectLockFile(host.RuntimeDir(key)), exclusive))
+        using (FileLock.TryTake(SessionRegistry.ProjectLockFile(host.GetRuntimeDir(key)), exclusive))
             Assert.False(Prune.Remove(host, e));
-        Assert.True(Directory.Exists(host.RuntimeDir(key)));
+        Assert.True(Directory.Exists(host.GetRuntimeDir(key)));
         Assert.True(Prune.Remove(host, e));
     }
 

@@ -62,7 +62,7 @@ internal sealed class HostGit
         byte[]? stdin = null,
         IReadOnlyDictionary<string, string>? env = null)
     {
-        var psi = Proc.Info("git", Args(args), _env);
+        var psi = Proc.CreateStartInfo("git", Args(args), _env);
         if (env != null)
         {
             foreach (var (k, v) in env)

@@ -18,7 +18,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
     private const UnixFileMode Dir700 = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
     internal static readonly TimeSpan KeepEndedSessions = TimeSpan.FromDays(7);
 
-    private string RuntimeDir => host.RuntimeDir(project.Key);
+    private string RuntimeDir => host.GetRuntimeDir(project.Key);
 
     /// <param name="command">to run in the sandbox; its first word may name an agent to bring</param>
     /// <param name="docker">with Docker-in-Docker (pen --docker, or docker = true in .pen/config.toml)</param>
@@ -71,7 +71,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         var owner = GitHub.ProjectOwner(project, projectConfig);
         var token = GitHub.TokenFor(owner, user, RuntimeDir, host);
         var toolDomains = ToolSpec.DomainsOf(tools, catalog);
-        var allowlist = Allowlist.Merge(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), user.Allow,
+        var allowlist = Allowlist.Merge(Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")), user.Allow,
             projectConfig.Allow, toolDomains);
 
         // One docker session per project: two daemons can't share the dind
@@ -81,7 +81,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
 
         // Ports already in use on the host: a --port is refused, a config
         // port skipped. (One taken between here and compose run fails it.)
-        var forwarded = Port.Choose(ports ?? [], Port.IsTakenOnHost, Out.Line);
+        var forwarded = Port.Choose(ports ?? [], Port.IsTakenOnHost, Out.WriteLine);
 
         foreach (var volume in docker ? ["home", "nuget", "dind"] : new[] { "home", "nuget" })
         {
@@ -95,8 +95,8 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
 
         // Past the refusals, so a session that won't start doesn't warn, and with
         // signals held, so Ctrl-C can't end Pen between the probe's create and delete.
-        RepoGuard.WarnIfCaseMayFold(project, Out.Line);
-        HooksPath.WarnIfWritable(project, host, Out.Line);
+        RepoGuard.WarnIfCaseMayFold(project, Out.WriteLine);
+        HooksPath.WarnIfWritable(project, host, Out.WriteLine);
 
         // compose.yaml goes last:
         // its presence is what marks a session as open.
@@ -126,7 +126,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         session.WriteTools(tools, toolDomains);
         session.WriteCommand(command);
         session.WriteStarted(DateTime.UtcNow);
-        File.WriteAllText(session.File("squid.conf"), Embedded.Text("proxy/squid.conf"));
+        File.WriteAllText(session.File("squid.conf"), Embedded.ReadText("proxy/squid.conf"));
         File.WriteAllText(session.File("allowlist.txt"), Allowlist.Render(allowlist));
         File.WriteAllText(session.OverrideFile, SessionCompose.Override(mounts, readOnlyRoot: rootless,
             dindContainer: docker ? session.DindContainer : null,
@@ -134,7 +134,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         File.WriteAllText(session.ProxyLog, "");
         // Squid's own user writes the log on Linux; the session dir itself is 700.
         File.SetUnixFileMode(session.ProxyLog, (UnixFileMode)0b110_110_110);
-        File.WriteAllText(session.ComposeFile, Embedded.Text("compose.yaml"));
+        File.WriteAllText(session.ComposeFile, Embedded.ReadText("compose.yaml"));
 
         var secrets = new Dictionary<string, string>(StringComparer.Ordinal);
         if (token != null)
@@ -151,7 +151,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         runArgs.AddRange(command);
 
         int exitCode;
-        var psi = Proc.Info("docker", session.ComposeArgs([.. runArgs]), env);
+        var psi = Proc.CreateStartInfo("docker", session.ComposeArgs([.. runArgs]), env);
         foreach (var (k, v) in secrets)
             psi.Environment[k] = v;
         ScrubComposeEnv(psi);
@@ -163,11 +163,11 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
             signals.Container = session.Container;
             signals.Child = child;
             using var trimmer = ProxyLogTrimmer.Start(session, env);
-            exitCode = Proc.Code(child.WaitForExitStatus());
+            exitCode = Proc.ToExitCode(child.WaitForExitStatus());
         }
         catch (PenException e)
         {
-            Out.Line(e.Message);
+            Out.WriteLine(e.Message);
             exitCode = 1;
         }
         finally
@@ -185,7 +185,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
             ?? throw new PenException("another --docker session is running in this project, and only one can " +
                 "run at a time (they'd share its Docker volume): exit it, or start this one without --docker");
         var volume = $"{project.Key}_dind";
-        var stale = Docker.ContainersUsing(volume);
+        var stale = Docker.ListContainersUsing(volume);
         if (stale.Count > 0)
         {
             l.Dispose();
@@ -216,7 +216,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
     /// </summary>
     internal static void EnsureRuntimeDir(HostEnv host, Project project)
     {
-        var runtimeDir = host.RuntimeDir(project.Key);
+        var runtimeDir = host.GetRuntimeDir(project.Key);
         Directory.CreateDirectory(host.StateRoot, Dir700);
         Directory.CreateDirectory(runtimeDir, Dir700);
         Directory.CreateDirectory(System.IO.Path.Combine(runtimeDir, "sessions"), Dir700);
@@ -306,13 +306,13 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         }
         else if (File.Exists(session.ProtectedManifest))
         {
-            Out.Raw(GitCheck.NotCheckedWarning(session.Path, "the session's record " +
+            Out.WriteRaw(GitCheck.NotCheckedWarning(session.Path, "the session's record " +
                 "of its project is damaged, so its protected files weren't compared"));
             result = new(false, null);
             keepFiles = true;
         }
         if (keepFiles)
-            Out.Raw(GitCheck.KeptCopiesAdvice(session, restoreBlocked));
+            Out.WriteRaw(GitCheck.KeptCopiesAdvice(session, restoreBlocked));
 
         // What the session ended up allowing (pen allow may have added to it),
         // so the blocked line doesn't suggest a domain that's allowed by now.
@@ -323,13 +323,13 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
 
         if (env.Count > 0)
         {
-            var psi = Proc.Info("docker", session.ComposeArgs("down", "-t", "1", "--remove-orphans"), env);
+            var psi = Proc.CreateStartInfo("docker", session.ComposeArgs("down", "-t", "1", "--remove-orphans"), env);
             psi.RedirectStandardOutput = psi.RedirectStandardError = true;
             ScrubComposeEnv(psi);
             var down = Process.RunAndCaptureText(psi);
             if (down.ExitStatus.ExitCode != 0)
             {
-                Out.Line($"stopping session {session.Id}'s stack failed: " +
+                Out.WriteLine($"stopping session {session.Id}'s stack failed: " +
                     $"{down.StandardError.Trim()} (it will be retried by the next pen command here)");
             }
             else if (!keepFiles)
@@ -349,7 +349,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
             .ToList();
             var line = Allowlist.BlockedLine(blocked);
             if (line != null)
-                Out.Line(line);
+                Out.WriteLine(line);
         }
         return result;
     }
@@ -369,7 +369,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
             return;
         var reminder = Sign.Reminder(result.ReminderDir);
         if (reminder != null)
-            Out.Line(reminder);
+            Out.WriteLine(reminder);
     }
 
     private static void DeleteSessionFiles(SessionDir session)
@@ -416,7 +416,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
                 using var l = FileLock.TryTake(s.LockFile, exclusive: true);
                 if (l == null || !s.IsOpen)
                     continue; // running, or ended while we looked
-                Out.Line($"ending session {s.Id}, whose pen exited without ending it");
+                Out.WriteLine($"ending session {s.Id}, whose pen exited without ending it");
                 ended.Add(End(s));
             }
             else if (DateTime.UtcNow - LastActivity(path) > KeepEndedSessions)

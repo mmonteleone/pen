@@ -84,7 +84,7 @@ internal static class SessionRegistry
     /// </summary>
     public static Locks TakeForSign(HostEnv host, Project project)
     {
-        var runtimeDir = host.RuntimeDir(project.Key);
+        var runtimeDir = host.GetRuntimeDir(project.Key);
         var locks = new Locks();
         try
         {
@@ -116,7 +116,7 @@ internal static class SessionRegistry
     /// </summary>
     public static FileLock TakeForReset(HostEnv host, Project project)
     {
-        var runtimeDir = host.RuntimeDir(project.Key);
+        var runtimeDir = host.GetRuntimeDir(project.Key);
         var l = FileLock.TryTake(ProjectLockFile(runtimeDir), exclusive: true);
         if (l != null)
             return l;

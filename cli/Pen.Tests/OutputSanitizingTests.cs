@@ -16,7 +16,7 @@ public class OutputSanitizingTests
     [MemberData(nameof(ControlChars))]
     public void CleanStripsThem_AndFieldEscapesThem(char c)
     {
-        Assert.Equal("ab", Out.Clean($"a{c}b"));
+        Assert.Equal("ab", Out.StripControls($"a{c}b"));
         var field = Out.Field($"a{c}b");
         Assert.DoesNotContain(c, field);
         Assert.StartsWith("a\\", field);
@@ -27,7 +27,7 @@ public class OutputSanitizingTests
     public void CleanKeepsTheMessagesOwnLayout_AndOrdinaryText()
     {
         const string text = "pen: a\n\ttab → é 日本語 🙂 'q' \"d\" $x %d \\ \ufffd";
-        Assert.Equal(text, Out.Clean(text));
+        Assert.Equal(text, Out.StripControls(text));
     }
 
     [Fact]
@@ -44,10 +44,10 @@ public class OutputSanitizingTests
     {
         var (err, stdout) = Capture(() =>
         {
-            Out.Line("l" + Esc + "1");
-            Out.Raw("r" + Esc + "2");
+            Out.WriteLine("l" + Esc + "1");
+            Out.WriteRaw("r" + Esc + "2");
             Out.Prompt("p" + Esc + "3");
-            Out.Stdout("s" + Esc + "4\n");
+            Out.WriteStdout("s" + Esc + "4\n");
         });
         Assert.False(err.Contains(Esc, StringComparison.Ordinal));
         Assert.False(stdout.Contains(Esc, StringComparison.Ordinal));
@@ -60,7 +60,7 @@ public class OutputSanitizingTests
     [Fact]
     public void APermissionErrorsPathIsAField()
     {
-        var m = Out.PermissionDenied(new UnauthorizedAccessException("UnauthorizedAccess_IODenied_Path, /a" + Esc + "\nb"));
+        var m = Out.DescribePermissionDenied(new UnauthorizedAccessException("UnauthorizedAccess_IODenied_Path, /a" + Esc + "\nb"));
         Assert.Equal("permission denied: /a\\x1b\\nb", m);
         Assert.Equal(m, Out.Describe(new UnauthorizedAccessException("x, /a" + Esc + "\nb")));
         Assert.Equal("IOException", Out.Describe(new IOException("IO_ResourceKey")));
@@ -73,7 +73,7 @@ public class OutputSanitizingTests
         var w = GitCheck.Warning("/p", [new(evil + "/.git", evil + "/.git.pen-quarantine", "why")]);
         Assert.Contains("  x\\x1b[2J\\npen: all clear/.git → x\\x1b[2J\\npen: all clear/.git.pen-quarantine", w);
         Assert.DoesNotContain("\npen: all clear", w, StringComparison.Ordinal);
-        Assert.Equal(w, Out.Clean(w));
+        Assert.Equal(w, Out.StripControls(w));
 
         var n = GitCheck.NotCheckedWarning(evil, "why");
         Assert.False(n.Contains(Esc, StringComparison.Ordinal));
@@ -294,7 +294,7 @@ public class RestoreCommandTests
             Assert.False(Directory.Exists(q.From));
 
             var warning = GitCheck.Warning(repo, moved);
-            Assert.Equal(warning, Out.Clean(warning)); // nothing left for a terminal to act on
+            Assert.Equal(warning, Out.StripControls(warning)); // nothing left for a terminal to act on
             var command = warning.Split('\n').Single(l => l.StartsWith("  mv ", StringComparison.Ordinal)).Trim();
 
             RunInShell(file, args, t.Path, command);

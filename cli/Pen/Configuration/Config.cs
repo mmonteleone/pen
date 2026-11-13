@@ -278,16 +278,16 @@ internal sealed partial class Config
 
         if (createdDir)
         {
-            Out.Line($"created {host.Display(host.ConfigDir)}/: add " +
+            Out.WriteLine($"created {host.Display(host.ConfigDir)}/: add " +
                 $"GitHub tokens to {host.Display(host.UserConfigPath)}");
         }
         else if (createdConfig)
         {
-            Out.Line($"created {host.Display(host.UserConfigPath)}: add GitHub tokens there");
+            Out.WriteLine($"created {host.Display(host.UserConfigPath)}: add GitHub tokens there");
         }
         else if (createdSeed)
         {
-            Out.Line($"created {host.Display(host.SeedDir)}/, the home seed: " +
+            Out.WriteLine($"created {host.Display(host.SeedDir)}/, the home seed: " +
                 "sandbox-wide agent config, copied into every project's sandbox home");
         }
     }

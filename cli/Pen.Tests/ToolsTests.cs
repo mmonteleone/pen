@@ -71,7 +71,7 @@ public class ToolsTests
     /// <summary>What a pen command line implies, as Session.Run sees its command.</summary>
     private static string? ImpliedBy(params string[] args)
     {
-        var command = Cli.Parse(args);
+        var command = CommandParser.Parse(args);
         Assert.Equal(CommandKind.Run, command.Kind);
         return ToolSpec.ImpliedAgent(command.Args, RecipeCatalog.Embedded, command.Tools)?.ToString();
     }
@@ -268,13 +268,13 @@ public class ToolsTests
     [Fact]
     public void TheFlagAcceptsWhatTheConfigDoes()
     {
-        var c = Cli.Parse(["--tool", "pen-test:1", "--tool=pen-test", "--docker", "--port", "80", "claude", "--tool", "x"]);
+        var c = CommandParser.Parse(["--tool", "pen-test:1", "--tool=pen-test", "--docker", "--port", "80", "claude", "--tool", "x"]);
         Assert.Equal(CommandKind.Run, c.Kind);
         Assert.Equal([new ToolSpec("pen-test", "1")], c.Tools);
         Assert.True(c.Docker);
         Assert.Equal([80], c.Ports);
         Assert.Equal(["claude", "--tool", "x"], c.Args);
-        Assert.Empty(Cli.Parse(["claude"]).Tools);
+        Assert.Empty(CommandParser.Parse(["claude"]).Tools);
     }
 
     [Theory]
@@ -292,14 +292,14 @@ public class ToolsTests
     [InlineData("--tool=list", "ls")]
     [InlineData("--toolx", "pen-test")]
     public void BadFlagsAreUsageErrors(params string[] args) =>
-        Assert.Equal(2, Assert.Throws<PenException>(() => Cli.Parse(args)).ExitCode);
+        Assert.Equal(2, Assert.Throws<PenException>(() => CommandParser.Parse(args)).ExitCode);
 
     [Fact]
     public void ToolListIsItsOwnCommand()
     {
-        Assert.Equal(CommandKind.ToolList, Cli.Parse(["--tool", "list"]).Kind);
-        Assert.Equal(CommandKind.ToolList, Cli.Parse(["--tool=list"]).Kind);
-        Assert.Contains("--tool list", Cli.Usage);
-        Assert.Contains("--tool <spec>", Cli.SubcommandHelp["run"]);
+        Assert.Equal(CommandKind.ToolList, CommandParser.Parse(["--tool", "list"]).Kind);
+        Assert.Equal(CommandKind.ToolList, CommandParser.Parse(["--tool=list"]).Kind);
+        Assert.Contains("--tool list", HelpText.Usage);
+        Assert.Contains("--tool <spec>", HelpText.Subcommands["run"]);
     }
 }

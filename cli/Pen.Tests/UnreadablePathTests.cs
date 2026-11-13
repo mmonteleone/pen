@@ -176,7 +176,7 @@ public class UnreadablePathTests
     [InlineData("Access to the path '/a/b' is denied.", "permission denied: /a/b")]
     [InlineData("UnauthorizedAccess_IODenied_NoPathName", "permission denied")]
     public void PermissionDeniedShowsOnlyThePath(string message, string expected) =>
-        Assert.Equal(expected, Out.PermissionDenied(new UnauthorizedAccessException(message)));
+        Assert.Equal(expected, Out.DescribePermissionDenied(new UnauthorizedAccessException(message)));
 
     [Fact]
     public void AnUnreadableGitmodulesOnlyLosesTheAdvice()

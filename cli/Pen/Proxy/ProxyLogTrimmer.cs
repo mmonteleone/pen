@@ -96,7 +96,7 @@ internal sealed class ProxyLogTrimmer : IDisposable
     {
         // tail reads to the end and truncate follows at once, so only lines squid
         // writes between the two are lost. A tail that fails truncates nothing.
-        var psi = Proc.Info("docker", session.ComposeArgs("exec", "-T", "proxy", "sh", "-c",
+        var psi = Proc.CreateStartInfo("docker", session.ComposeArgs("exec", "-T", "proxy", "sh", "-c",
             $"tail -c {Keep} \"$1\" && truncate -s 0 \"$1\"", "sh", LogInProxy), env);
         psi.RedirectStandardOutput = psi.RedirectStandardError = true;
         Session.ScrubComposeEnv(psi);

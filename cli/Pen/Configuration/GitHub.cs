@@ -62,7 +62,7 @@ internal static partial class GitHub
         }
         if (!File.Exists(marker))
         {
-            Out.Line($"no GitHub token for '{Out.Field(owner)}': add {Out.Field(owner)} = " +
+            Out.WriteLine($"no GitHub token for '{Out.Field(owner)}': add {Out.Field(owner)} = " +
                 $"\"github_pat_…\" under [github] in {host.Display(host.UserConfigPath)}");
             File.WriteAllText(marker, "");
         }

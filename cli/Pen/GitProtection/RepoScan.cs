@@ -91,7 +91,7 @@ internal static class RepoScan
                 }
                 foreach (var u in raw)
                 {
-                    undecodable.Add(u.Decoded);
+                    undecodable.Add(u.DecodedName);
                     if (u.CouldHoldRepo)
                         badNames.Add(BadName.At(dir, u));
                 }
@@ -423,7 +423,7 @@ internal static class RepoScan
             return null;
         }
         scan.BadNames.AddRange(raw.Select(u => BadName.At(dir, u)));
-        return raw.Select(u => u.Decoded).ToHashSet(StringComparer.Ordinal);
+        return raw.Select(u => u.DecodedName).ToHashSet(StringComparer.Ordinal);
     }
 
     /// <summary>

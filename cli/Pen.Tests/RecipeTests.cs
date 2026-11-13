@@ -15,12 +15,12 @@ public class RecipeTests
     [Fact]
     public void EveryEmbeddedRecipeParses()
     {
-        var names = Embedded.Under(RecipeCatalog.Root).Select(p => p.Split('/')[1]).Distinct().ToList();
+        var names = Embedded.ListUnder(RecipeCatalog.Root).Select(p => p.Split('/')[1]).Distinct().ToList();
         Assert.NotEmpty(names);
         foreach (var name in names)
         {
             Assert.True(RecipeCatalog.Embedded.TryGet(name, out var recipe), name);
-            Assert.StartsWith("#!", Embedded.Text(recipe.InstallPath));
+            Assert.StartsWith("#!", Embedded.ReadText(recipe.InstallPath));
         }
     }
 
@@ -219,7 +219,7 @@ public class RecipeTests
     [Fact]
     public void NpmsDomainsComeWithTheNodeRecipe_NotTheDefaults()
     {
-        var defaults = Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")).ToList();
+        var defaults = Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")).ToList();
         foreach (var domain in Get("node").Allow)
             Assert.DoesNotContain(domain, defaults);
         Assert.Contains("docs.npmjs.com", defaults);
@@ -241,7 +241,7 @@ public class RecipeTests
     [Fact]
     public void PyPIDomainsComeWithThePythonRecipe_NotTheDefaults()
     {
-        var defaults = Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")).ToList();
+        var defaults = Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")).ToList();
         foreach (var domain in Get("python").Allow)
             Assert.DoesNotContain(domain, defaults);
         Assert.Contains("docs.python.org", defaults);
@@ -318,7 +318,7 @@ public class RecipeTests
         Assert.Contains(
             "cat >/etc/codex/managed_config.toml <<'EOF'\n# Managed Codex config for the Pen image. Codex is installed in a system path\n"
             + "# and upgraded only by rebuilding the image, so don't check for updates.\ncheck_for_update_on_startup = false\nEOF\n",
-            Embedded.Text("tools/codex/install.sh"));
+            Embedded.ReadText("tools/codex/install.sh"));
 
     [Fact]
     public void ThePiRecipeIsAnAgentWithAnthropicsAndOpenAIsDomains_AndNoVersionCheck()
@@ -348,7 +348,7 @@ public class RecipeTests
     [Fact]
     public void AgentsDomainsComeWithTheirRecipes_NotTheDefaults()
     {
-        var defaults = Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")).ToList();
+        var defaults = Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")).ToList();
         foreach (var agent in RecipeCatalog.Embedded.Recipes.Where(r => r.IsAgent))
             foreach (var domain in agent.Allow)
                 Assert.DoesNotContain(domain, defaults);
@@ -383,15 +383,15 @@ public class RecipeTests
     [InlineData("pi")]
     public void AgentRecipesFromNpmInstallWithTheBasesHelper(string name)
     {
-        Assert.Contains($"\nexec /opt/pen/lib/npm-agent.sh {name} ", Embedded.Text($"tools/{name}/install.sh"));
-        Assert.StartsWith("#!/bin/bash\n", Embedded.Text("image/npm-agent.sh"));
+        Assert.Contains($"\nexec /opt/pen/lib/npm-agent.sh {name} ", Embedded.ReadText($"tools/{name}/install.sh"));
+        Assert.StartsWith("#!/bin/bash\n", Embedded.ReadText("image/npm-agent.sh"));
         // Off PATH: in /opt/pen, next to Pen's Node, rather than a bin directory.
-        Assert.Contains("\nCOPY --chmod=0755 npm-agent.sh /opt/pen/lib/npm-agent.sh\n", Embedded.Text("image/Dockerfile"));
+        Assert.Contains("\nCOPY --chmod=0755 npm-agent.sh /opt/pen/lib/npm-agent.sh\n", Embedded.ReadText("image/Dockerfile"));
     }
 
     [Fact]
     public void TheCodegraphIndexIsIgnoredInEverySession() =>
-        Assert.Contains(".codegraph/", Embedded.Text("image/gitignore").Split('\n'));
+        Assert.Contains(".codegraph/", Embedded.ReadText("image/gitignore").Split('\n'));
 
     [Fact]
     public void AllSettingsAreRead()

@@ -4,7 +4,7 @@ namespace Pen.Tests;
 public class RuntimeDirTests
 {
     private static string ProjectDirOf(HostEnv host, Project p) =>
-        File.ReadAllText(Path.Combine(host.RuntimeDir(p.Key), Session.ProjectDirFile));
+        File.ReadAllText(Path.Combine(host.GetRuntimeDir(p.Key), Session.ProjectDirFile));
 
     [Fact]
     public void WritesTheRepoDir_WithTheRuntimeDirs()
@@ -14,9 +14,9 @@ public class RuntimeDirTests
         var p = Project.Resolve(Git.Repo(t.Sub("repo")), host);
         Session.EnsureRuntimeDir(host, p);
         Assert.Equal(p.Dir + "\n", ProjectDirOf(host, p));
-        Assert.True(Directory.Exists(Path.Combine(host.RuntimeDir(p.Key), "sessions")));
+        Assert.True(Directory.Exists(Path.Combine(host.GetRuntimeDir(p.Key), "sessions")));
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
-            File.GetUnixFileMode(host.RuntimeDir(p.Key)));
+            File.GetUnixFileMode(host.GetRuntimeDir(p.Key)));
     }
 
     [Fact]
@@ -64,7 +64,7 @@ public class RuntimeDirTests
         using var t = new TempDir();
         var host = t.Host();
         var p = Project.Resolve(t.Sub("plain"), host);
-        var runtime = host.RuntimeDir(p.Key);
+        var runtime = host.GetRuntimeDir(p.Key);
         Directory.CreateDirectory(runtime);
         File.WriteAllText(Path.Combine(runtime, Session.ProjectDirFile), "/somewhere/else\n");
         Session.EnsureRuntimeDir(host, p);

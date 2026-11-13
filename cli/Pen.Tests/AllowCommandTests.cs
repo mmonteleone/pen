@@ -68,7 +68,7 @@ public class AllowCommandTests
     [Fact]
     public void AddsToTheTemplatesCommentedArray()
     {
-        var text = Embedded.Text("templates/config.toml");
+        var text = Embedded.ReadText("templates/config.toml");
         var result = Add(text, "b.io");
         Assert.Contains("  # \".example.org\",\n  \"b.io\",\n]", result);
         Assert.Equal(["b.io"], Config.Parse(result, "x", ConfigKind.User).Allow);
@@ -150,7 +150,7 @@ public class AllowCommandTests
         var text = AllowCommand.Defaults();
         Assert.StartsWith("# --- GitHub", text);
         Assert.DoesNotContain("Squid", text.Split('\n')[0]);
-        Assert.Equal(Allowlist.ParseList(Embedded.Text("proxy/allowlist.txt")), Allowlist.ParseList(text));
+        Assert.Equal(Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")), Allowlist.ParseList(text));
         Assert.EndsWith("\n", text);
         Assert.False(text.EndsWith("\n\n"));
     }

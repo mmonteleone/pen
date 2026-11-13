@@ -341,7 +341,7 @@ public class ProtectedFilesTests
     [Fact]
     public void TheSessionDir_IsNotInTheSandbox()
     {
-        var compose = Embedded.Text("compose.yaml");
+        var compose = Embedded.ReadText("compose.yaml");
         var agent = compose[compose.IndexOf("  agent:", StringComparison.Ordinal)..compose.IndexOf("  proxy:", StringComparison.Ordinal)];
         var dind = compose[compose.IndexOf("  dind:\n", StringComparison.Ordinal)..compose.IndexOf("# Shared by every", StringComparison.Ordinal)];
         // Relative sources resolve in the session dir: only the proxy has any, and only its three files.

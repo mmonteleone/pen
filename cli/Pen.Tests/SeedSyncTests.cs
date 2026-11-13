@@ -13,7 +13,7 @@ public class SeedSyncTests
     {
         Assert.SkipWhen(Proc.Capture("sh", ["-c", "command -v jq"]).ExitStatus.ExitCode != 0, "seed JSON checks need jq");
         var script = Path.Combine(t.Path, "sync-seed.sh");
-        File.WriteAllText(script, Embedded.Text("image/sync-seed.sh"));
+        File.WriteAllText(script, Embedded.ReadText("image/sync-seed.sh"));
         var result = Proc.Capture("bash", [script, t.Sub("seed"), t.Sub("sandbox"), "/project"]);
         Assert.True(result.ExitStatus.ExitCode == 0, result.StandardError);
         return result.StandardError;

@@ -13,8 +13,8 @@ internal sealed partial class RecipeCatalog
     private const string ReservedName = "list";
 
     private static readonly Lazy<RecipeCatalog> EmbeddedCatalog = new(() =>
-        FromFiles(Pen.Platform.Embedded.Under(Root)
-            .Select(path => KeyValuePair.Create(path, Pen.Platform.Embedded.Text(path)))));
+        FromFiles(Pen.Platform.Embedded.ListUnder(Root)
+            .Select(path => KeyValuePair.Create(path, Pen.Platform.Embedded.ReadText(path)))));
 
     /// <summary>
     /// Every recipe embedded in the binary. A malformed one throws, which unit tests catch before it ships.

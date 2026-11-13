@@ -44,7 +44,7 @@ internal sealed class TrustStore
     public static string PathFor(string runtimeDir, string dir) =>
         Path.Combine(runtimeDir, $"trust-{Project.Hash(dir)}");
 
-    public static TrustStore For(HostEnv host, Project project) => Load(host.RuntimeDir(project.Key), project.Dir);
+    public static TrustStore For(HostEnv host, Project project) => Load(host.GetRuntimeDir(project.Key), project.Dir);
 
     /// <summary>
     /// The approvals for <paramref name="dir"/>: none if the file is

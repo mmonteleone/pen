@@ -29,15 +29,15 @@ internal static class Seed
         if (Directory.Exists(tmp))
             Directory.Delete(tmp, recursive: true);
         Directory.CreateDirectory(tmp);
-        foreach (var res in Embedded.Under(Prefix))
+        foreach (var res in Embedded.ListUnder(Prefix))
         {
             var rel = res[Prefix.Length..];
             var path = Path.Combine(tmp, rel);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             if (rel == ".gitconfig")
-                File.WriteAllText(path, GitConfig(Embedded.Text(res), name, email));
+                File.WriteAllText(path, GitConfig(Embedded.ReadText(res), name, email));
             else
-                File.WriteAllBytes(path, Embedded.Bytes(res));
+                File.WriteAllBytes(path, Embedded.ReadBytes(res));
         }
         Directory.Move(tmp, seed);
         return true;
