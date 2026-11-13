@@ -48,7 +48,7 @@ public class PsTests
         using var l3 = Session(host, "pen-a-11111111", "bbbb0001", "/srv/a", ["npm", "run", "dev server"], Now.AddDays(-2).AddHours(-4), ports: [5173, 3000]);
         using var dead = Session(host, "pen-a-11111111", "bbbb0002", "/srv/a", ["dead"], Now, dead: true);
 
-        var sessions = Sessions.RunningEverywhere(host);
+        var sessions = SessionRegistry.RunningEverywhere(host);
         Assert.Equal(3, sessions.Count);
         Assert.Equal("""
             PROJECT  SESSION   DOCKER  PORTS      TOOLS    AGE    COMMAND
@@ -65,7 +65,7 @@ public class PsTests
         using var t = new TempDir();
         var host = t.Host();
         using var l = Session(host, "pen-a-11111111", "cccc0001", "/srv/a", command: null, started: null);
-        Assert.EndsWith("/srv/a   cccc0001                        ?    ?\n", Ps.Render(host, Sessions.RunningEverywhere(host), Now));
+        Assert.EndsWith("/srv/a   cccc0001                        ?    ?\n", Ps.Render(host, SessionRegistry.RunningEverywhere(host), Now));
     }
 
     [Fact]

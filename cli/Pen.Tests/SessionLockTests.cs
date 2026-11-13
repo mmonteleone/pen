@@ -44,33 +44,33 @@ public sealed class SessionLockTests : IDisposable
     [Fact]
     public void WorktreeLockIsPerDir()
     {
-        Assert.NotEqual(Sessions.WorktreeLockFile(_runtime, _main.Dir), Sessions.WorktreeLockFile(_runtime, _wt.Dir));
-        Assert.Equal(Sessions.WorktreeLockFile(_runtime, _main.Dir), Sessions.WorktreeLockFile(_runtime, _main.Dir));
-        Assert.Equal(_runtime, Path.GetDirectoryName(Sessions.WorktreeLockFile(_runtime, _wt.Dir)));
-        Assert.Matches("^worktree-[0-9a-f]{8}\\.lock$", Path.GetFileName(Sessions.WorktreeLockFile(_runtime, _wt.Dir)));
+        Assert.NotEqual(SessionRegistry.WorktreeLockFile(_runtime, _main.Dir), SessionRegistry.WorktreeLockFile(_runtime, _wt.Dir));
+        Assert.Equal(SessionRegistry.WorktreeLockFile(_runtime, _main.Dir), SessionRegistry.WorktreeLockFile(_runtime, _main.Dir));
+        Assert.Equal(_runtime, Path.GetDirectoryName(SessionRegistry.WorktreeLockFile(_runtime, _wt.Dir)));
+        Assert.Matches("^worktree-[0-9a-f]{8}\\.lock$", Path.GetFileName(SessionRegistry.WorktreeLockFile(_runtime, _wt.Dir)));
     }
 
     [Fact]
     public void SessionsShareBothLocks_EvenInTheSameDir()
     {
-        using var a = Sessions.TakeForSession(_runtime, _main);
-        using var b = Sessions.TakeForSession(_runtime, _main);
-        using var c = Sessions.TakeForSession(_runtime, _wt);
+        using var a = SessionRegistry.TakeForSession(_runtime, _main);
+        using var b = SessionRegistry.TakeForSession(_runtime, _main);
+        using var c = SessionRegistry.TakeForSession(_runtime, _wt);
         Assert.Equal(2, a.Held.Count);
         Assert.Equal(
-            [Sessions.ProjectLockFile(_runtime), Sessions.WorktreeLockFile(_runtime, _main.Dir)],
+            [SessionRegistry.ProjectLockFile(_runtime), SessionRegistry.WorktreeLockFile(_runtime, _main.Dir)],
             a.Held.Select(l => l.Path));
     }
 
     [Fact]
     public void SignRefusedWhileASessionRunsInItsDir_ListingOnlyThatDirsSessions()
     {
-        using var lm = Sessions.TakeForSession(_runtime, _main);
-        using var lw = Sessions.TakeForSession(_runtime, _wt);
+        using var lm = SessionRegistry.TakeForSession(_runtime, _main);
+        using var lw = SessionRegistry.TakeForSession(_runtime, _wt);
         using var sm = OpenSession("aaaa0001", _main);
         using var sw = OpenSession("aaaa0002", _wt);
 
-        var msg = Refused(() => Sessions.TakeForSign(_host, _main));
+        var msg = Refused(() => SessionRegistry.TakeForSign(_host, _main));
         Assert.Contains("refusing to sign while a session is running in this directory:", msg);
         Assert.Contains($"  {Key}-aaaa0001-agent", msg);
         Assert.DoesNotContain("aaaa0002", msg);
@@ -79,56 +79,56 @@ public sealed class SessionLockTests : IDisposable
     [Fact]
     public void SignAllowedWhileOnlyAnotherWorktreeHasASession()
     {
-        using var lw = Sessions.TakeForSession(_runtime, _wt);
+        using var lw = SessionRegistry.TakeForSession(_runtime, _wt);
         using var sw = OpenSession("aaaa0002", _wt);
-        using var sign = Sessions.TakeForSign(_host, _main);
+        using var sign = SessionRegistry.TakeForSign(_host, _main);
         Assert.Equal(2, sign.Held.Count);
     }
 
     [Fact]
     public void WhileSignRuns_SessionsInItsDirAreRefused_OthersStart()
     {
-        using var sign = Sessions.TakeForSign(_host, _main);
+        using var sign = SessionRegistry.TakeForSign(_host, _main);
 
         Assert.Equal("a pen sign is running in this directory: try again once it's done",
-            Refused(() => Sessions.TakeForSession(_runtime, _main)));
-        using (Sessions.TakeForSession(_runtime, _wt)) { }
+            Refused(() => SessionRegistry.TakeForSession(_runtime, _main)));
+        using (SessionRegistry.TakeForSession(_runtime, _wt)) { }
 
-        Assert.Contains("another pen sign is running in this directory", Refused(() => Sessions.TakeForSign(_host, _main)));
-        using (Sessions.TakeForSign(_host, _wt)) { }
-        Assert.Contains("a pen sign or another pen reset is running", Refused(() => Sessions.TakeForReset(_host, _main)));
+        Assert.Contains("another pen sign is running in this directory", Refused(() => SessionRegistry.TakeForSign(_host, _main)));
+        using (SessionRegistry.TakeForSign(_host, _wt)) { }
+        Assert.Contains("a pen sign or another pen reset is running", Refused(() => SessionRegistry.TakeForReset(_host, _main)));
     }
 
     [Fact]
     public void ARefusedSessionLeavesProjectLockFree()
     {
-        using (Sessions.TakeForSign(_host, _main))
-            Assert.Throws<PenException>(() => Sessions.TakeForSession(_runtime, _main));
+        using (SessionRegistry.TakeForSign(_host, _main))
+            Assert.Throws<PenException>(() => SessionRegistry.TakeForSession(_runtime, _main));
         // Nothing left held by the refused take: reset gets project.lock exclusive.
-        using var reset = Sessions.TakeForReset(_host, _main);
+        using var reset = SessionRegistry.TakeForReset(_host, _main);
     }
 
     [Fact]
     public void WhileResetRuns_SessionsAndSignAreRefused()
     {
-        using var reset = Sessions.TakeForReset(_host, _main);
+        using var reset = SessionRegistry.TakeForReset(_host, _main);
         Assert.Equal("a pen reset is running in this project: try again once it's done",
-            Refused(() => Sessions.TakeForSession(_runtime, _wt)));
-        Assert.Contains("refusing to sign: a pen reset is running", Refused(() => Sessions.TakeForSign(_host, _main)));
+            Refused(() => SessionRegistry.TakeForSession(_runtime, _wt)));
+        Assert.Contains("refusing to sign: a pen reset is running", Refused(() => SessionRegistry.TakeForSign(_host, _main)));
         // The refused sign released nothing it didn't take, and took nothing: the worktree lock is free.
-        using var w = FileLock.TryTake(Sessions.WorktreeLockFile(_runtime, _main.Dir), exclusive: true);
+        using var w = FileLock.TryTake(SessionRegistry.WorktreeLockFile(_runtime, _main.Dir), exclusive: true);
         Assert.NotNull(w);
     }
 
     [Fact]
     public void ResetRefusedWhileASessionRunsInAnyDir_ListingAll()
     {
-        using var lm = Sessions.TakeForSession(_runtime, _main);
-        using var lw = Sessions.TakeForSession(_runtime, _wt);
+        using var lm = SessionRegistry.TakeForSession(_runtime, _main);
+        using var lw = SessionRegistry.TakeForSession(_runtime, _wt);
         using var sm = OpenSession("aaaa0001", _main);
         using var sw = OpenSession("aaaa0002", _wt);
 
-        var msg = Refused(() => Sessions.TakeForReset(_host, _wt));
+        var msg = Refused(() => SessionRegistry.TakeForReset(_host, _wt));
         Assert.Contains("refusing to reset while 2 sessions are running in this project:", msg);
         Assert.Contains($"  {Key}-aaaa0001-agent", msg);
         Assert.Contains($"  {Key}-aaaa0002-agent", msg);
@@ -144,10 +144,10 @@ public sealed class SessionLockTests : IDisposable
         File.WriteAllText(dead.EnvFile, $"PROJECT_DIR={_main.Dir}\n");
         File.WriteAllText(dead.ComposeFile, "");
 
-        Assert.Equal(["aaaa0001"], Sessions.RunningIn(Key, _runtime, _main.Dir).Select(s => s.Id));
-        Assert.Equal(["aaaa0002"], Sessions.RunningIn(Key, _runtime, _wt.Dir).Select(s => s.Id));
-        Assert.Empty(Sessions.RunningIn(Key, _runtime, _t.Sub("elsewhere")));
-        Assert.Equal(2, Sessions.Running(Key, _runtime).Count);
+        Assert.Equal(["aaaa0001"], SessionRegistry.RunningIn(Key, _runtime, _main.Dir).Select(s => s.Id));
+        Assert.Equal(["aaaa0002"], SessionRegistry.RunningIn(Key, _runtime, _wt.Dir).Select(s => s.Id));
+        Assert.Empty(SessionRegistry.RunningIn(Key, _runtime, _t.Sub("elsewhere")));
+        Assert.Equal(2, SessionRegistry.Running(Key, _runtime).Count);
     }
 
     [Fact]

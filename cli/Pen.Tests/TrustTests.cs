@@ -26,7 +26,7 @@ public class TrustTests
         public TrustStore Store => TrustStore.For(Host, Project);
 
         public TrustRequest Requested(string projectToml, string userToml = "") =>
-            Trust.Requested(Project, Config.Parse(userToml, "u", ConfigKind.User), Config.Parse(projectToml, "p", ConfigKind.Project), Store);
+            TrustGate.Requested(Project, Config.Parse(userToml, "u", ConfigKind.User), Config.Parse(projectToml, "p", ConfigKind.Project), Store);
 
         public void Dockerfile(string text = "FROM pen:latest\n")
         {
@@ -455,11 +455,11 @@ public class TrustTests
         using var f = new Fixture();
         var toml = Config.Parse("allow = [" + string.Join(',', ManyDomains(30_000).Select(d => $"\"{d}\"")) + "]\n", "p", ConfigKind.Project);
         var watch = System.Diagnostics.Stopwatch.StartNew();
-        var request = Trust.Requested(f.Project, Config.Empty, toml, f.Store);
+        var request = TrustGate.Requested(f.Project, Config.Empty, toml, f.Store);
         Assert.Equal(30_000, request.Domains.Count);
         f.Store.Approve(request);
         var store = f.Store;
-        Assert.True(Trust.Requested(f.Project, Config.Empty, toml, store).IsEmpty);
+        Assert.True(TrustGate.Requested(f.Project, Config.Empty, toml, store).IsEmpty);
         Assert.Equal(30_000, store.ApprovedOf(toml.Allow).Count);
         Assert.Equal(30_000 + 1, Allowlist.Merge(toml.Allow, [".wild.example"]).Count);
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(8), $"took {watch.Elapsed}");
@@ -548,7 +548,7 @@ public class TrustTests
         Assert.True(f.Requested(toml, toml).IsEmpty);
         Assert.True(f.Requested("", toml).IsEmpty);
         var project = Config.Parse(toml, "p", ConfigKind.Project);
-        Assert.True(Trust.Requested(f.Project, Config.Empty, project, f.Store, [Tool1]).IsEmpty);
+        Assert.True(TrustGate.Requested(f.Project, Config.Empty, project, f.Store, [Tool1]).IsEmpty);
 
         Assert.False(f.Store.CoversTool(Tool1));
         Assert.Equal(Tool1, Assert.Single(f.Requested(toml).Tools).Tool);
@@ -616,7 +616,7 @@ public class TrustTests
     });
 
     private TrustRequest RequestedWith(Fixture f, string projectToml, RecipeCatalog catalog) =>
-        Trust.Requested(f.Project, Config.Empty, Config.Parse(projectToml, "p", ConfigKind.Project), f.Store, catalog: catalog);
+        TrustGate.Requested(f.Project, Config.Empty, Config.Parse(projectToml, "p", ConfigKind.Project), f.Store, catalog: catalog);
 
     private const string ToolToml = "tools = [\"pen-test:1\"]\n";
 

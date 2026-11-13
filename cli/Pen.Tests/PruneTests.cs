@@ -256,7 +256,7 @@ public class PruneTests
         var key = Record(host, dir);
         Directory.Delete(dir);
         var e = Only(Prune.Find(host, [], []), key);
-        using (FileLock.TryTake(Sessions.ProjectLockFile(host.RuntimeDir(key)), exclusive))
+        using (FileLock.TryTake(SessionRegistry.ProjectLockFile(host.RuntimeDir(key)), exclusive))
             Assert.False(Prune.Remove(host, e));
         Assert.True(Directory.Exists(host.RuntimeDir(key)));
         Assert.True(Prune.Remove(host, e));

@@ -1,4 +1,13 @@
 using System.Reflection;
+using Pen.CommandLine;
+using Pen.Commands;
+using Pen.Configuration;
+using Pen.Images;
+using Pen.Platform;
+using Pen.Projects;
+using Pen.Sessions;
+using Pen.Tools;
+using Pen.Trust;
 
 // Pen drives Docker on macOS and Linux only.
 [assembly: System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
@@ -86,7 +95,7 @@ internal static class Program
         {
             CommandKind.Run => RunSession(host, project, user, ProjectConfig(), command),
             CommandKind.Allow => AllowCommand.List(host, project, user, ProjectConfig()),
-            CommandKind.Trust => Trust.Command(host, project, user, ProjectConfig(), command.Yes, Answers.FromProcess(), command.List),
+            CommandKind.Trust => TrustGate.Command(host, project, user, ProjectConfig(), command.Yes, Answers.FromProcess(), command.List),
             CommandKind.Sign => Sign.Run(host, project, command.Args.Count > 0 ? command.Args[0] : null),
             CommandKind.Reset => Reset.Run(host, project, Console.In),
             _ => throw new InvalidOperationException($"unhandled command {command.Kind}"),
