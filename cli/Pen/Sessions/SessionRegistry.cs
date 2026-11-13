@@ -3,14 +3,14 @@ using Pen.Projects;
 
 namespace Pen.Sessions;
 
-/// <summary>Finding a project's sessions, and the locks sessions, pen sign and pen reset take.</summary>
+/// <summary>Finds a project's sessions, and takes the locks sessions, pen sign and pen reset hold.</summary>
 internal static class SessionRegistry
 {
-    /// <summary>
-    /// The project's running sessions: open (compose.yaml still there) with
-    /// their session.lock held by a live Pen.
-    /// </summary>
-    public static List<SessionDir> Running(string projectKey, string runtimeDir)
+    /// <summary>Finds the project's running sessions.</summary>
+    /// <returns>
+    /// The sessions that are open (compose.yaml still there) with their session.lock held by a live Pen, by ID.
+    /// </returns>
+    public static List<SessionDir> FindRunning(string projectKey, string runtimeDir)
     {
         var running = new List<SessionDir>();
         var sessions = Path.Combine(runtimeDir, "sessions");
@@ -18,55 +18,56 @@ internal static class SessionRegistry
             return running;
         foreach (var path in Directory.EnumerateDirectories(sessions).Order(StringComparer.Ordinal))
         {
-            var s = new SessionDir(projectKey, path);
-            if (!s.IsOpen)
+            var session = new SessionDir(projectKey, path);
+            if (!session.IsOpen)
                 continue;
-            using var probe = FileLock.TryTake(s.LockFile, exclusive: true);
+            using var probe = FileLock.TryTake(session.LockFile, exclusive: true);
             if (probe == null)
-                running.Add(s);
+                running.Add(session);
         }
         return running;
     }
 
-    /// <summary>Every project's running sessions, for pen allow --global.</summary>
-    public static List<SessionDir> RunningEverywhere(HostEnv host)
+    /// <summary>Finds every project's running sessions, for pen ps and pen allow --global.</summary>
+    public static List<SessionDir> FindRunningEverywhere(HostEnv host)
     {
         var all = new List<SessionDir>();
         if (!Directory.Exists(host.StateRoot))
             return all;
         foreach (var dir in Directory.EnumerateDirectories(host.StateRoot).Order(StringComparer.Ordinal))
-            all.AddRange(Running(Path.GetFileName(dir), dir));
+            all.AddRange(FindRunning(Path.GetFileName(dir), dir));
         return all;
     }
 
     /// <summary>
-    /// The project's running sessions started in <paramref name="dir"/> (by
-    /// their PROJECT_DIR): for a linked worktree, only that worktree's.
+    /// Finds the project's running sessions started in <paramref name="dir"/> (by their PROJECT_DIR).
     /// </summary>
-    public static List<SessionDir> RunningIn(string projectKey, string runtimeDir, string dir) =>
-        Running(projectKey, runtimeDir)
-            .Where(s => s.ReadEnv().TryGetValue("PROJECT_DIR", out var d) && d == dir)
+    /// <returns>The sessions; for a linked worktree, only that worktree's.</returns>
+    public static List<SessionDir> FindRunningIn(string projectKey, string runtimeDir, string dir) =>
+        FindRunning(projectKey, runtimeDir)
+            .Where(session => session.ReadEnv().TryGetValue("PROJECT_DIR", out var started) && started == dir)
             .ToList();
 
-    public static string ProjectLockFile(string runtimeDir) => Path.Combine(runtimeDir, "project.lock");
-
-    /// <summary>The lock for one dir (the main checkout or a linked worktree) of the project.</summary>
-    public static string WorktreeLockFile(string runtimeDir, string dir) =>
-        Path.Combine(runtimeDir, $"worktree-{Project.HashPath(dir)}.lock");
+    /// <summary>Gets the path of the project's project.lock.</summary>
+    public static string GetProjectLockFile(string runtimeDir) => Path.Combine(runtimeDir, "project.lock");
 
     /// <summary>
-    /// What a session holds for its whole run: project.lock shared (pen reset
-    /// takes it exclusive) and its dir's worktree lock shared (pen sign there
-    /// takes it exclusive).
+    /// Gets the path of the lock for one dir (the main checkout or a linked worktree) of the project.
     /// </summary>
+    public static string GetWorktreeLockFile(string runtimeDir, string dir) =>
+        Path.Combine(runtimeDir, $"worktree-{Project.HashPath(dir)}.lock");
+
+    /// <summary>Takes what a session holds for its whole run.</summary>
+    /// <returns>project.lock shared, then its dir's worktree lock shared.</returns>
+    /// <remarks>pen reset takes project.lock exclusive, and pen sign in the same dir the worktree lock.</remarks>
     public static Locks TakeForSession(string runtimeDir, Project project)
     {
         var locks = new Locks();
         try
         {
-            locks.Add(FileLock.TryTake(ProjectLockFile(runtimeDir), exclusive: false)
+            locks.Add(FileLock.TryTake(GetProjectLockFile(runtimeDir), exclusive: false)
                 ?? throw new PenException("a pen reset is running in this project: try again once it's done"));
-            locks.Add(FileLock.TryTake(WorktreeLockFile(runtimeDir, project.Dir), exclusive: false)
+            locks.Add(FileLock.TryTake(GetWorktreeLockFile(runtimeDir, project.Dir), exclusive: false)
                 ?? throw new PenException("a pen sign is running in this directory: try again once it's done"));
             return locks;
         }
@@ -77,29 +78,29 @@ internal static class SessionRegistry
         }
     }
 
-    /// <summary>
-    /// What pen sign holds for its whole run: project.lock shared (so no reset
-    /// runs) and its dir's worktree lock exclusive. It refuses while a session
-    /// runs in this dir; sessions in the project's other worktrees carry on.
-    /// </summary>
+    /// <summary>Takes what pen sign holds for its whole run.</summary>
+    /// <returns>project.lock shared (so no reset runs), then its dir's worktree lock exclusive.</returns>
+    /// <remarks>
+    /// It refuses while a session runs in this dir; sessions in the project's other worktrees carry on.
+    /// </remarks>
     public static Locks TakeForSign(HostEnv host, Project project)
     {
         var runtimeDir = host.GetRuntimeDir(project.Key);
         var locks = new Locks();
         try
         {
-            locks.Add(FileLock.TryTake(ProjectLockFile(runtimeDir), exclusive: false)
+            locks.Add(FileLock.TryTake(GetProjectLockFile(runtimeDir), exclusive: false)
                 ?? throw new PenException("refusing to sign: a pen reset " +
                     "is running in this project: try again once it's done"));
-            var l = FileLock.TryTake(WorktreeLockFile(runtimeDir, project.Dir), exclusive: true);
-            if (l == null)
+            var worktreeLock = FileLock.TryTake(GetWorktreeLockFile(runtimeDir, project.Dir), exclusive: true);
+            if (worktreeLock == null)
             {
-                var running = RunningIn(project.Key, runtimeDir, project.Dir);
+                var running = FindRunningIn(project.Key, runtimeDir, project.Dir);
                 throw new PenException(running.Count == 0
                     ? "refusing to sign: another pen sign is running in this directory: try again once it's done"
-                    : Refusal("sign", running, "this directory"));
+                    : DescribeRefusal("sign", running, "this directory"));
             }
-            locks.Add(l);
+            locks.Add(worktreeLock);
             return locks;
         }
         catch
@@ -109,37 +110,43 @@ internal static class SessionRegistry
         }
     }
 
-    /// <summary>
-    /// project.lock, exclusive, for the whole of pen reset: it refuses while
-    /// any session (or pen sign) runs in any of the project's dirs, and none
-    /// starts until it's released.
-    /// </summary>
+    /// <summary>Takes project.lock exclusive, for the whole of pen reset.</summary>
+    /// <remarks>
+    /// It refuses while any session (or pen sign) runs in any of the project's dirs, and none starts until it's
+    /// released.
+    /// </remarks>
     public static FileLock TakeForReset(HostEnv host, Project project)
     {
         var runtimeDir = host.GetRuntimeDir(project.Key);
-        var l = FileLock.TryTake(ProjectLockFile(runtimeDir), exclusive: true);
-        if (l != null)
-            return l;
+        var projectLock = FileLock.TryTake(GetProjectLockFile(runtimeDir), exclusive: true);
+        if (projectLock != null)
+            return projectLock;
 
-        var running = Running(project.Key, runtimeDir);
+        var running = FindRunning(project.Key, runtimeDir);
         throw new PenException(running.Count == 0
             ? "refusing to reset: a pen sign or another pen reset is running in this project: try again once it's done"
-            : Refusal("reset", running, "this project"));
+            : DescribeRefusal("reset", running, "this project"));
     }
 
-    private static string Refusal(string what, List<SessionDir> running, string where) =>
+    /// <summary>Describes why <paramref name="what"/> is refused while <paramref name="running"/> run.</summary>
+    private static string DescribeRefusal(string what, List<SessionDir> running, string where) =>
         $"refusing to {what} while {(running.Count == 1 ? "a session is" : $"{running.Count} sessions are")} " +
             $"running in {where}:\n"
-        + string.Join('\n', running.Select(s => "  " + s.Container))
+        + string.Join('\n', running.Select(session => "  " + session.Container))
         + "\nexit them first (or, for one you can't reach, docker rm -f <name>: its pen then ends the session)";
 
     /// <summary>Several locks held together, released in reverse order.</summary>
     internal sealed class Locks : IDisposable
     {
         private readonly List<FileLock> _held = [];
-        public IReadOnlyList<FileLock> Held => _held;
-        public void Add(FileLock l) => _held.Add(l);
 
+        /// <summary>Gets the locks held, in the order they were taken.</summary>
+        public IReadOnlyList<FileLock> Held => _held;
+
+        /// <summary>Adds <paramref name="fileLock"/> to the locks held.</summary>
+        public void Add(FileLock fileLock) => _held.Add(fileLock);
+
+        /// <summary>Releases the locks, the last taken first.</summary>
         public void Dispose()
         {
             for (int i = _held.Count - 1; i >= 0; i--)

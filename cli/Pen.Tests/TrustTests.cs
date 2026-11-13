@@ -471,7 +471,7 @@ public class TrustTests
         const int hosts = 300_000; // a quadratic scan takes minutes on this many
         var lines = Enumerable.Range(0, hosts).Select(i => $"2026-11-01T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT h{i}.example:443 -");
         var watch = System.Diagnostics.Stopwatch.StartNew();
-        var blocked = Allowlist.BlockedHosts(lines.Concat(lines));
+        var blocked = Allowlist.FindBlockedHosts(lines.Concat(lines));
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(30), $"took {watch.Elapsed}");
         Assert.Equal(hosts, blocked.Count);
         Assert.Equal("h0.example", blocked[0]);
@@ -506,7 +506,7 @@ public class TrustTests
         var path = TrustStore.GetPath(host.GetRuntimeDir(project.Key), dir);
         Assert.True(File.Exists(path));
         Directory.Delete(dir);
-        Assert.True(Prune.Remove(host, Assert.Single(Prune.Find(host, [], []), e => e.Key == project.Key)));
+        Assert.True(PruneCommand.Remove(host, Assert.Single(PruneCommand.Find(host, [], []), e => e.Key == project.Key)));
         Assert.False(File.Exists(path));
     }
 

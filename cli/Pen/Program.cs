@@ -75,7 +75,7 @@ internal static class Program
                 Console.Out.Write(RecipeCatalog.Embedded.FormatListing());
                 return 0;
             case CommandKind.Allow when command.Defaults:
-                Console.Out.Write(AllowCommand.Defaults());
+                Console.Out.Write(AllowCommand.FormatDefaults());
                 return 0;
             case CommandKind.Version:
                 return WriteVersion();
@@ -86,9 +86,9 @@ internal static class Program
         switch (command.Kind)
         {
             case CommandKind.Ps:
-                return Ps.Run(host);
+                return new PsCommand(host).Run();
             case CommandKind.Prune:
-                return Prune.Run(host, Console.In);
+                return new PruneCommand(host, Console.In).Run();
         }
 
         Config.EnsureUserConfig(host, GitIdentity.ReadFromHost);
@@ -98,7 +98,7 @@ internal static class Program
             case CommandKind.Upgrade:
                 return new UpgradeCommand(host, user, RecipeCatalog.Embedded).Run(command.Clean);
             case CommandKind.Allow when command.Args.Count > 0:
-                return AllowCommand.Add(host, command.Args, command.Global);
+                return new AllowCommand(host, RecipeCatalog.Embedded).Run(command.Args, command.Global);
         }
 
         var project = Project.Resolve(StartDir.Get(), host);
@@ -108,7 +108,7 @@ internal static class Program
             CommandKind.Allow => ListBlocked(ProjectContext.Load(host, project, user)),
             CommandKind.Trust => RunTrust(ProjectContext.Load(host, project, user), command),
             CommandKind.Sign => RunSign(host, project, command),
-            CommandKind.Reset => Reset.Run(host, project, Console.In),
+            CommandKind.Reset => new ResetCommand(host, project, Console.In).Run(),
             _ => throw new InvalidOperationException($"unhandled command {command.Kind}"),
         };
     }
@@ -137,14 +137,20 @@ internal static class Program
     /// --port adds to ports in .pen/config.toml.
     /// --tool adds to tools in both config files.
     /// </remarks>
-    private static int RunSession(ProjectContext context, Command command) =>
-        new Session(context.Host, context.Project, context.User, context.ProjectConfig).Run(command.Args,
-            docker: command.Docker || context.ProjectConfig.Docker == true,
-            ports: Port.Merge(context.ProjectConfig.Ports, command.Ports), flagTools: command.Tools);
+    private static int RunSession(ProjectContext context, Command command)
+    {
+        var request = new SessionRequest(command.Args)
+        {
+            Docker = command.Docker || context.ProjectConfig.Docker == true,
+            Ports = Port.Merge(context.ProjectConfig.Ports, command.Ports),
+            FlagTools = command.Tools,
+        };
+        return new Session(context, Answers.FromProcess(), RecipeCatalog.Embedded).Run(request);
+    }
 
     /// <summary>Runs pen allow without domains: lists the recently blocked ones.</summary>
     private static int ListBlocked(ProjectContext context) =>
-        AllowCommand.List(context.Host, context.Project, context.User, context.ProjectConfig);
+        new AllowCommand(context.Host, RecipeCatalog.Embedded).ListBlocked(context);
 
     /// <summary>Runs pen trust.</summary>
     private static int RunTrust(ProjectContext context, Command command) =>

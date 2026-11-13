@@ -48,7 +48,7 @@ public class PsTests
         using var l3 = Session(host, "pen-a-11111111", "bbbb0001", "/srv/a", ["npm", "run", "dev server"], Now.AddDays(-2).AddHours(-4), ports: [5173, 3000]);
         using var dead = Session(host, "pen-a-11111111", "bbbb0002", "/srv/a", ["dead"], Now, dead: true);
 
-        var sessions = SessionRegistry.RunningEverywhere(host);
+        var sessions = SessionRegistry.FindRunningEverywhere(host);
         Assert.Equal(3, sessions.Count);
         Assert.Equal("""
             PROJECT  SESSION   DOCKER  PORTS      TOOLS    AGE    COMMAND
@@ -56,7 +56,7 @@ public class PsTests
             ~/src/b  aaaa0002  docker             a:1,b:2  3h07m  (shell)
             ~/src/b  aaaa0001                              5m     claude
 
-            """, Ps.Render(host, sessions, Now));
+            """, PsCommand.Render(host, sessions, Now));
     }
 
     [Fact]
@@ -65,7 +65,7 @@ public class PsTests
         using var t = new TempDir();
         var host = t.Host();
         using var l = Session(host, "pen-a-11111111", "cccc0001", "/srv/a", command: null, started: null);
-        Assert.EndsWith("/srv/a   cccc0001                        ?    ?\n", Ps.Render(host, SessionRegistry.RunningEverywhere(host), Now));
+        Assert.EndsWith("/srv/a   cccc0001                        ?    ?\n", PsCommand.Render(host, SessionRegistry.FindRunningEverywhere(host), Now));
     }
 
     [Fact]
@@ -91,14 +91,14 @@ public class PsTests
     [InlineData(86400 + 3 * 3600 + 59, "1d03h")]
     [InlineData(-5, "0s")]
     public void Age(int seconds, string expected) =>
-        Assert.Equal(expected, Ps.Age(TimeSpan.FromSeconds(seconds)));
+        Assert.Equal(expected, PsCommand.FormatAge(TimeSpan.FromSeconds(seconds)));
 
     [Fact]
     public void DescribeQuotesFlattensAndCuts()
     {
-        Assert.Equal("bash -c 'echo it'\\''s; ls'", Ps.Describe(["bash", "-c", "echo it's;\n  ls"]));
-        Assert.Equal("echo ''", Ps.Describe(["echo", ""]));
-        var cut = Ps.Describe(["echo", new string('x', 200)]);
+        Assert.Equal("bash -c 'echo it'\\''s; ls'", PsCommand.Describe(["bash", "-c", "echo it's;\n  ls"]));
+        Assert.Equal("echo ''", PsCommand.Describe(["echo", ""]));
+        var cut = PsCommand.Describe(["echo", new string('x', 200)]);
         Assert.Equal(80, cut.Length);
         Assert.EndsWith("x…", cut);
     }

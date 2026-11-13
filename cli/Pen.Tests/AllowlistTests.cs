@@ -59,16 +59,16 @@ public class AllowlistTests
             "garbage",
             "",
         ];
-        Assert.Equal(["example.com", "foo.io", "140.82.112.3", "2001:db8::1"], Allowlist.BlockedHosts(log));
+        Assert.Equal(["example.com", "foo.io", "140.82.112.3", "2001:db8::1"], Allowlist.FindBlockedHosts(log));
     }
 
     [Fact]
     public void BlockedLine()
     {
-        Assert.Null(Allowlist.BlockedLine([]));
+        Assert.Null(Allowlist.FormatBlockedLine([]));
         Assert.Equal("blocked: foo.com, bar.io, 1.2.3.4 → pen allow foo.com bar.io (add --global for all projects)",
-            Allowlist.BlockedLine(["foo.com", "bar.io", "1.2.3.4"]));
-        Assert.Equal("blocked: 1.2.3.4", Allowlist.BlockedLine(["1.2.3.4"]));
+            Allowlist.FormatBlockedLine(["foo.com", "bar.io", "1.2.3.4"]));
+        Assert.Equal("blocked: 1.2.3.4", Allowlist.FormatBlockedLine(["1.2.3.4"]));
     }
 
     [Fact]
@@ -77,14 +77,14 @@ public class AllowlistTests
         var hosts = Enumerable.Range(0, 5000).Select(i => $"h{i}.example").ToList();
         var shown = Enumerable.Range(4980, 20).Select(i => $"h{i}.example").ToList();
         Assert.Equal($"blocked: {string.Join(", ", shown)} and 4980 more (pen allow lists the latest) → pen allow {string.Join(' ', shown)} (add --global for all projects)",
-            Allowlist.BlockedLine(hosts));
-        Assert.DoesNotContain("h4979.example", Allowlist.BlockedLine(hosts));
+            Allowlist.FormatBlockedLine(hosts));
+        Assert.DoesNotContain("h4979.example", Allowlist.FormatBlockedLine(hosts));
     }
 
     [Fact]
     public void BlockedLine_CutsALongHostShort()
     {
-        var line = Allowlist.BlockedLine([new string('a', 5000) + ".example"])!;
+        var line = Allowlist.FormatBlockedLine([new string('a', 5000) + ".example"])!;
         Assert.True(line.Length < 200);
         Assert.Contains("…", line);
         Assert.DoesNotContain("pen allow", line);

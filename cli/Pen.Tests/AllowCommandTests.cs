@@ -14,22 +14,22 @@ public class AllowCommandTests
         var s = new SessionDir(project.Key, t.Sub("home", ".local", "state", "pen", project.Key, "sessions", "12345678"));
         File.WriteAllText(s.ComposeFile, "");
         File.WriteAllText(s.EnvFile, $"PROJECT_DIR={project.Dir}\n");
-        File.WriteAllText(s.File("allowlist.txt"), "");
+        File.WriteAllText(s.GetPath("allowlist.txt"), "");
         using var sessionLock = FileLock.TryTake(s.LockFile, exclusive: true);
         using var fake = new FakeDocker(t, "if [ ! -f retry ]; then exit 1; fi\n");
-        Assert.Equal(1, AllowCommand.Add(host, ["retry.example"], global: true));
+        Assert.Equal(1, new AllowCommand(host, RecipeCatalog.Embedded).Run(["retry.example"], global: true));
         var config = File.ReadAllText(host.UserConfigPath);
         var written = File.GetLastWriteTimeUtc(host.UserConfigPath);
         File.WriteAllText(Path.Combine(t.Path, "retry"), "");
-        Assert.Equal(0, AllowCommand.Add(host, ["retry.example"], global: true));
+        Assert.Equal(0, new AllowCommand(host, RecipeCatalog.Embedded).Run(["retry.example"], global: true));
         Assert.Equal(config, File.ReadAllText(host.UserConfigPath));
         Assert.Equal(written, File.GetLastWriteTimeUtc(host.UserConfigPath));
-        Assert.Contains("retry.example", File.ReadAllText(s.File("allowlist.txt")));
+        Assert.Contains("retry.example", File.ReadAllText(s.GetPath("allowlist.txt")));
         Assert.Equal(2, File.ReadAllLines(Path.Combine(t.Path, "calls")).Length);
     }
 
     private static string Add(string text, params string[] domains) =>
-        ConfigEdit.AddAllowed(text, "x.toml", ConfigKind.User, domains, out _);
+        ConfigEdit.AddAllowed(text, "x.toml", ConfigKind.User, domains).Text;
 
     [Fact]
     public void AddsToAMultiLineArray_KeepingCommentsAndIndent()
@@ -94,7 +94,7 @@ public class AllowCommandTests
     public void KeepsAProjectFilesOtherKeys_PortsIncluded()
     {
         var text = "github_owner = \"acme\"\ndocker = true\nports = [3000, 5173]\nallow = [\"a.io\"]\n";
-        var result = ConfigEdit.AddAllowed(text, ".pen/config.toml", ConfigKind.Project, ["b.io"], out _);
+        var result = ConfigEdit.AddAllowed(text, ".pen/config.toml", ConfigKind.Project, ["b.io"]).Text;
         Assert.Equal(text.Replace("[\"a.io\"]", "[\n  \"a.io\",\n  \"b.io\",\n]"), result);
         Assert.Equal([3000, 5173], Config.Parse(result, "x", ConfigKind.Project).Ports);
     }
@@ -107,8 +107,9 @@ public class AllowCommandTests
     public void SkipsWhatsAllowed_AndRefusesABrokenFile()
     {
         var text = "allow = [\"a.io\"]\n";
-        Assert.Same(text, ConfigEdit.AddAllowed(text, "x", ConfigKind.User, ["A.io", "a.io"], out var added));
-        Assert.Empty(added);
+        var edit = ConfigEdit.AddAllowed(text, "x", ConfigKind.User, ["A.io", "a.io"]);
+        Assert.Same(text, edit.Text);
+        Assert.Empty(edit.Added);
         Assert.StartsWith("x.toml: unknown key", Assert.Throws<PenException>(() => Add("allw = 1\n", "b.io")).Message);
     }
 
@@ -147,7 +148,7 @@ public class AllowCommandTests
     [Fact]
     public void DefaultsListsEveryDefaultDomain_WithSectionComments_WithoutTheFileHeader()
     {
-        var text = AllowCommand.Defaults();
+        var text = AllowCommand.FormatDefaults();
         Assert.StartsWith("# --- GitHub", text);
         Assert.DoesNotContain("Squid", text.Split('\n')[0]);
         Assert.Equal(Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")), Allowlist.ParseList(text));
@@ -169,7 +170,7 @@ public class AllowCommandTests
             "2026-11-05T09:00:00Z 172.18.0.3 TCP_DENIED/403 GET http://plain.io/x -",
             "2026-11-05T09:30:00Z 172.18.0.3 TCP_DENIED_ABORTED/403 CONNECT example.com:443 -",
         ];
-        var hosts = AllowCommand.BlockedAcross([older, newer]).Select(b => b.Host).ToList();
+        var hosts = AllowCommand.FindBlockedAcross([older, newer]).Select(b => b.Host).ToList();
         Assert.Equal(["example.com", "plain.io", "old.io"], hosts);
     }
 

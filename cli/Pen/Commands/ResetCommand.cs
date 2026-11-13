@@ -1,0 +1,60 @@
+using Pen.Platform;
+using Pen.Projects;
+using Pen.Sessions;
+
+namespace Pen.Commands;
+
+/// <summary>Runs pen reset: removes the project's volumes, after asking.</summary>
+/// <param name="host">The host user's environment.</param>
+/// <param name="project">The project whose volumes go.</param>
+/// <param name="input">Where the confirmation is read from.</param>
+/// <remarks>
+/// It holds project.lock exclusive throughout, so it refuses while any session or pen sign runs in the project,
+/// and none starts until it's done.
+/// </remarks>
+internal sealed class ResetCommand(HostEnv host, Project project, TextReader input)
+{
+    /// <summary>What a project's volume names end in, after its key and an underscore.</summary>
+    public static readonly string[] VolumeSuffixes = ["home", "nuget", "dind"];
+
+    /// <summary>Removes the project's volumes if the user agrees.</summary>
+    /// <returns>0 once removed, or when there are none; 1 when the user declines; a failure throws.</returns>
+    public int Run()
+    {
+        Session.EnsureRuntimeDir(host, project);
+        using var projectLock = SessionRegistry.TakeForReset(host, project);
+        Session.FinishDeadSessions(project.Key, host.GetRuntimeDir(project.Key));
+
+        var volumes = FindVolumes();
+        if (volumes.Count == 0)
+        {
+            Out.WriteLine($"nothing to reset: {project.Key} has no volumes");
+            return 0;
+        }
+
+        Out.WriteLine($"this removes {string.Join(", ", volumes)}:");
+        var images = volumes.Any(volume => volume.EndsWith("_dind", StringComparison.Ordinal))
+            ? " and its Docker images"
+            : "";
+        Out.WriteRaw("  the project's sandbox home (agent logins and config, shell history), its NuGet cache"
+                + images
+                + ".\n  The project's files and your ~/.config/pen are untouched.");
+        if (!Out.Confirm("remove them?", input))
+        {
+            Out.WriteLine("nothing removed");
+            return 1;
+        }
+
+        var result = Proc.Capture("docker", ["volume", "rm", .. volumes]);
+        if (result.ExitStatus.ExitCode != 0)
+            throw new PenException($"docker volume rm failed: {result.StandardError.Trim()}");
+        Out.WriteLine($"removed {string.Join(", ", volumes)}");
+        return 0;
+    }
+
+    /// <summary>Finds the project's volumes that exist.</summary>
+    private List<string> FindVolumes() =>
+        VolumeSuffixes.Select(suffix => $"{project.Key}_{suffix}")
+            .Where(volume => Proc.Capture("docker", ["volume", "inspect", volume]).ExitStatus.ExitCode == 0)
+            .ToList();
+}

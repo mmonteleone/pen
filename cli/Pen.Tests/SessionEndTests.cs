@@ -13,7 +13,7 @@ public class SessionEndTests
         File.WriteAllText(session.EnvFile, $"PROJECT_DIR={repo}\n");
         File.WriteAllText(session.StartedWithGit, Path.Combine(repo, ".git") + "\n");
         File.WriteAllText(session.ModulesFile, "");
-        File.WriteAllText(session.File("allowlist.txt"), "github.com\n");
+        File.WriteAllText(session.GetPath("allowlist.txt"), "github.com\n");
         File.WriteAllText(session.ProxyLog, "");
         if (docker) File.WriteAllText(session.DockerMarker, "");
         File.WriteAllText(Path.Combine(repo, ".git", "commondir"), "planted\n");
@@ -663,9 +663,9 @@ public class SessionEndTests
         var sessions = Path.Combine(host.GetRuntimeDir(project.Key), "sessions");
         Directory.CreateDirectory(sessions);
         Directory.Move(session.Path, Path.Combine(sessions, "12345678"));
-        var run = new Session(host, project, Config.Empty, Config.Empty);
+        var run = new Session(new ProjectContext(host, project, Config.Empty, Config.Empty), Answers.FromProcess(), RecipeCatalog.Embedded);
 
-        var error = Assert.Throws<PenException>(() => run.Run(["true"]));
+        var error = Assert.Throws<PenException>(() => run.Run(new(["true"])));
 
         Assert.Contains("not starting", error.Message);
         Assert.False(File.Exists(gitCalls));
@@ -676,7 +676,7 @@ public class SessionEndTests
         // The dead session is gone, so the next run gets past that point. The
         // fake docker has no images, so it stops at the first image call.
         File.Delete(Path.Combine(repo, ".git", "commondir"));
-        var next = Record.Exception(() => run.Run(["true"]));
+        var next = Record.Exception(() => run.Run(new(["true"])));
         Assert.DoesNotContain("not starting", next?.Message ?? "");
         Assert.Contains(File.ReadAllLines(calls), c => !c.StartsWith("rm ", StringComparison.Ordinal) && !c.StartsWith("compose ", StringComparison.Ordinal));
     }

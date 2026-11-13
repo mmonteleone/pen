@@ -439,7 +439,7 @@ public class RepoGuardTests
     [Fact]
     public void ComposeOverrideQuotesPathsAndEscapesDollars()
     {
-        var yaml = SessionCompose.Override([new("/p/a \"b\" $HOME é/.git", false), new("/p/.pen", true)]);
+        var yaml = SessionCompose.GenerateOverride([new("/p/a \"b\" $HOME é/.git", false), new("/p/.pen", true)]);
         Assert.Contains("\"source\": \"/p/a \\\"b\\\" $$HOME é/.git\"", yaml);
         Assert.Contains("\"read_only\": true", yaml);
         Assert.Contains("\"create_host_path\": false", yaml);

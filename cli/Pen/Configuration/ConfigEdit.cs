@@ -17,20 +17,19 @@ internal static class ConfigEdit
     /// <param name="displayPath">Names the file in errors.</param>
     /// <param name="kind">Which keys the file may hold.</param>
     /// <param name="domains">The domains to allow.</param>
-    /// <param name="added">The domains that weren't allowed yet, lowercased, in order.</param>
-    /// <returns>The edited text, or <paramref name="text"/> itself if nothing needed adding.</returns>
+    /// <returns>
+    /// The edited text, or <paramref name="text"/> itself if nothing needed adding, and the domains added.
+    /// </returns>
     /// <remarks>A broken file is reported (as a PenException) before anything is changed.</remarks>
-    public static string AddAllowed(
-        string text,
-        string displayPath,
-        ConfigKind kind,
-        IReadOnlyList<string> domains,
-        out List<string> added)
+    public static AllowEdit AddAllowed(string text, string displayPath, ConfigKind kind, IReadOnlyList<string> domains)
     {
         var before = Config.Parse(text, displayPath, kind);
-        added = domains.Select(d => d.ToLowerInvariant()).Distinct().Where(d => !before.Allow.Contains(d)).ToList();
+        var added = domains.Select(domain => domain.ToLowerInvariant())
+            .Distinct()
+            .Where(domain => !before.Allow.Contains(domain))
+            .ToList();
         if (added.Count == 0)
-            return text;
+            return new(text, added);
 
         var result = InsertDomains(text, displayPath, added);
         // Belt and braces: the edit must change nothing but allow.
@@ -40,7 +39,7 @@ internal static class ConfigEdit
                 $"automatically; add {string.Join(", ", added.Select(Quote))} by hand");
         }
 
-        return result;
+        return new(result, added);
     }
 
     /// <summary>Inserts <paramref name="added"/> into the text's top-level allow array, or adds one.</summary>

@@ -44,10 +44,10 @@ public sealed class SessionLockTests : IDisposable
     [Fact]
     public void WorktreeLockIsPerDir()
     {
-        Assert.NotEqual(SessionRegistry.WorktreeLockFile(_runtime, _main.Dir), SessionRegistry.WorktreeLockFile(_runtime, _wt.Dir));
-        Assert.Equal(SessionRegistry.WorktreeLockFile(_runtime, _main.Dir), SessionRegistry.WorktreeLockFile(_runtime, _main.Dir));
-        Assert.Equal(_runtime, Path.GetDirectoryName(SessionRegistry.WorktreeLockFile(_runtime, _wt.Dir)));
-        Assert.Matches("^worktree-[0-9a-f]{8}\\.lock$", Path.GetFileName(SessionRegistry.WorktreeLockFile(_runtime, _wt.Dir)));
+        Assert.NotEqual(SessionRegistry.GetWorktreeLockFile(_runtime, _main.Dir), SessionRegistry.GetWorktreeLockFile(_runtime, _wt.Dir));
+        Assert.Equal(SessionRegistry.GetWorktreeLockFile(_runtime, _main.Dir), SessionRegistry.GetWorktreeLockFile(_runtime, _main.Dir));
+        Assert.Equal(_runtime, Path.GetDirectoryName(SessionRegistry.GetWorktreeLockFile(_runtime, _wt.Dir)));
+        Assert.Matches("^worktree-[0-9a-f]{8}\\.lock$", Path.GetFileName(SessionRegistry.GetWorktreeLockFile(_runtime, _wt.Dir)));
     }
 
     [Fact]
@@ -58,7 +58,7 @@ public sealed class SessionLockTests : IDisposable
         using var c = SessionRegistry.TakeForSession(_runtime, _wt);
         Assert.Equal(2, a.Held.Count);
         Assert.Equal(
-            [SessionRegistry.ProjectLockFile(_runtime), SessionRegistry.WorktreeLockFile(_runtime, _main.Dir)],
+            [SessionRegistry.GetProjectLockFile(_runtime), SessionRegistry.GetWorktreeLockFile(_runtime, _main.Dir)],
             a.Held.Select(l => l.Path));
     }
 
@@ -116,7 +116,7 @@ public sealed class SessionLockTests : IDisposable
             Refused(() => SessionRegistry.TakeForSession(_runtime, _wt)));
         Assert.Contains("refusing to sign: a pen reset is running", Refused(() => SessionRegistry.TakeForSign(_host, _main)));
         // The refused sign released nothing it didn't take, and took nothing: the worktree lock is free.
-        using var w = FileLock.TryTake(SessionRegistry.WorktreeLockFile(_runtime, _main.Dir), exclusive: true);
+        using var w = FileLock.TryTake(SessionRegistry.GetWorktreeLockFile(_runtime, _main.Dir), exclusive: true);
         Assert.NotNull(w);
     }
 
@@ -144,10 +144,10 @@ public sealed class SessionLockTests : IDisposable
         File.WriteAllText(dead.EnvFile, $"PROJECT_DIR={_main.Dir}\n");
         File.WriteAllText(dead.ComposeFile, "");
 
-        Assert.Equal(["aaaa0001"], SessionRegistry.RunningIn(Key, _runtime, _main.Dir).Select(s => s.Id));
-        Assert.Equal(["aaaa0002"], SessionRegistry.RunningIn(Key, _runtime, _wt.Dir).Select(s => s.Id));
-        Assert.Empty(SessionRegistry.RunningIn(Key, _runtime, _t.Sub("elsewhere")));
-        Assert.Equal(2, SessionRegistry.Running(Key, _runtime).Count);
+        Assert.Equal(["aaaa0001"], SessionRegistry.FindRunningIn(Key, _runtime, _main.Dir).Select(s => s.Id));
+        Assert.Equal(["aaaa0002"], SessionRegistry.FindRunningIn(Key, _runtime, _wt.Dir).Select(s => s.Id));
+        Assert.Empty(SessionRegistry.FindRunningIn(Key, _runtime, _t.Sub("elsewhere")));
+        Assert.Equal(2, SessionRegistry.FindRunning(Key, _runtime).Count);
     }
 
     [Fact]
@@ -164,10 +164,10 @@ public sealed class SessionLockTests : IDisposable
         File.WriteAllText(other.ComposeFile, "");
         using var so = FileLock.TryTake(other.LockFile, exclusive: true)!;
 
-        Assert.Equal(["aaaa0001"], AllowCommand.Targets(_host, _main, global: false).Select(s => s.Id));
-        Assert.Equal(["aaaa0002", "aaaa0003"], AllowCommand.Targets(_host, _wt, global: false).Select(s => s.Id));
+        Assert.Equal(["aaaa0001"], AllowCommand.FindTargets(_host, _main, global: false).Select(s => s.Id));
+        Assert.Equal(["aaaa0002", "aaaa0003"], AllowCommand.FindTargets(_host, _wt, global: false).Select(s => s.Id));
         Assert.Equal(["aaaa0001", "aaaa0002", "aaaa0003", "bbbb0001"],
-            AllowCommand.Targets(_host, _wt, global: true).Select(s => s.Id).Order(StringComparer.Ordinal));
-        Assert.Equal(4, AllowCommand.Targets(_host, project: null, global: true).Count);
+            AllowCommand.FindTargets(_host, _wt, global: true).Select(s => s.Id).Order(StringComparer.Ordinal));
+        Assert.Equal(4, AllowCommand.FindTargets(_host, project: null, global: true).Count);
     }
 }

@@ -350,7 +350,7 @@ public class WorktreeTests
     {
         using var t = new TempDir();
         var (repo, wt, _) = RepoWithWorktree(t);
-        var yaml = SessionCompose.Override(RepoGuard.PrepareMounts(wt, "/nonexistent-home"), dindContainer: "x-dind");
+        var yaml = SessionCompose.GenerateOverride(RepoGuard.PrepareMounts(wt, "/nonexistent-home"), dindContainer: "x-dind");
         var dind = yaml[yaml.IndexOf("\"dind\"", StringComparison.Ordinal)..];
         Assert.Contains($"\"source\": \"{Path.Combine(repo, ".git")}\"", dind);
         Assert.Contains($"\"source\": \"{Path.Combine(wt, ".git")}\"", dind);
@@ -432,7 +432,7 @@ public class WorktreeTests
         Assert.Equal($"{main.Key}-{Project.HashPath(wt)}:0123456789abcdef", Image.GetProjectLayerName(w, one));
         Assert.Equal($"{main.Key}:fedcba9876543210", Image.GetProjectLayerName(main, other));
         Assert.Equal($"{main.Key}:latest", Image.GetProjectLayerName(main, Image.Name));
-        Assert.True(Prune.IsImageOf(main.Key, Image.GetProjectLayerName(main, one)));
-        Assert.True(Prune.IsImageOf(main.Key, Image.GetProjectLayerName(w, one)));
+        Assert.True(PruneCommand.IsImageOf(main.Key, Image.GetProjectLayerName(main, one)));
+        Assert.True(PruneCommand.IsImageOf(main.Key, Image.GetProjectLayerName(w, one)));
     }
 }

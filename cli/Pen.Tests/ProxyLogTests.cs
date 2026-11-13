@@ -59,7 +59,7 @@ public class ProxyLogTests
 
         // squid goes on appending, and the listing reads both files, oldest first.
         File.AppendAllText(s.ProxyLog, Line(lines));
-        var read = s.ProxyLogLines().ToList();
+        var read = s.ReadProxyLogLines().ToList();
         Assert.Equal(keptLines.Append(Line(lines).TrimEnd('\n')), read);
     }
 
@@ -174,10 +174,10 @@ public class ProxyLogTests
         File.WriteAllText(s.ProxyLog,
             "2026-11-02T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT both.example:443 -\n" +
             "2026-11-02T10:00:01Z 172.18.0.3 TCP_DENIED/403 CONNECT new.example:443 -\n");
-        Assert.Equal(["old.example", "both.example", "new.example"], Allowlist.BlockedHosts(s.ProxyLogLines()));
-        Assert.Equal(["new.example", "both.example", "old.example"], AllowCommand.BlockedAcross([s.ProxyLogLines()]).Select(b => b.Host));
+        Assert.Equal(["old.example", "both.example", "new.example"], Allowlist.FindBlockedHosts(s.ReadProxyLogLines()));
+        Assert.Equal(["new.example", "both.example", "old.example"], AllowCommand.FindBlockedAcross([s.ReadProxyLogLines()]).Select(b => b.Host));
 
         File.Delete(s.ProxyLog);
-        Assert.Equal(["old.example", "both.example"], Allowlist.BlockedHosts(s.ProxyLogLines()));
+        Assert.Equal(["old.example", "both.example"], Allowlist.FindBlockedHosts(s.ReadProxyLogLines()));
     }
 }

@@ -66,7 +66,7 @@ public class TrustGateTests
         public bool HasSeen(string name) => File.Exists(Path.Combine(T.Path, name));
 
         public int Run(Answers answers, IReadOnlyList<ToolSpec>? flagTools = null, RecipeCatalog? recipes = null, string[]? command = null) =>
-            new Session(Host, Project, User, ProjectConfig).Run(command ?? ["true"], docker: ProjectConfig.Docker == true, answers: answers, flagTools: flagTools, recipes: recipes);
+            new Session(new ProjectContext(Host, Project, User, ProjectConfig), answers, recipes ?? RecipeCatalog.Embedded).Run(new(command ?? ["true"]) { Docker = ProjectConfig.Docker == true, FlagTools = flagTools ?? [] });
 
         public void AssertNothingReached()
         {
@@ -373,7 +373,7 @@ public class TrustGateTests
         StaleContext(f);
         var runtimeDir = f.Host.GetRuntimeDir(f.Project.Key);
         Directory.Delete(f.Project.Dir, recursive: true);
-        Assert.True(Prune.Remove(f.Host, Assert.Single(Prune.Find(f.Host, [], []), e => e.Key == f.Project.Key)));
+        Assert.True(PruneCommand.Remove(f.Host, Assert.Single(PruneCommand.Find(f.Host, [], []), e => e.Key == f.Project.Key)));
         Assert.False(Directory.Exists(runtimeDir));
     }
 
@@ -544,7 +544,7 @@ public class TrustGateTests
     public void PortsAloneDontAsk()
     {
         using var f = new Fixture(projectToml: "ports = [39871]\n", dockerfile: "");
-        Assert.Equal(0, new Session(f.Host, f.Project, f.User, f.ProjectConfig).Run(["true"], ports: Port.Merge(f.ProjectConfig.Ports, []), answers: NoTerminal));
+        Assert.Equal(0, new Session(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded).Run(new(["true"]) { Ports = Port.Merge(f.ProjectConfig.Ports, []) }));
     }
 
     [Fact]
@@ -638,7 +638,7 @@ public class TrustGateTests
         var s = new SessionDir(f.Project.Key, f.T.Sub("home", ".local", "state", "pen", f.Project.Key, "sessions", "12345678"));
         File.WriteAllText(s.ComposeFile, "");
         File.WriteAllText(s.EnvFile, $"PROJECT_DIR={f.Project.Dir}\n");
-        File.WriteAllText(s.File("allowlist.txt"), "");
+        File.WriteAllText(s.GetPath("allowlist.txt"), "");
         return (s, FileLock.TryTake(s.LockFile, exclusive: true)!);
     }
 
@@ -648,8 +648,8 @@ public class TrustGateTests
         using var f = new Fixture(dockerfile: "");
         var (s, l) = RunningSession(f);
         using var _ = l;
-        Assert.Equal(0, AllowCommand.Add(f.Host, ["typed.example"], global: true));
-        var list = File.ReadAllText(s.File("allowlist.txt"));
+        Assert.Equal(0, new AllowCommand(f.Host, RecipeCatalog.Embedded).Run(["typed.example"], global: true));
+        var list = File.ReadAllText(s.GetPath("allowlist.txt"));
         Assert.Contains("typed.example", list);
         Assert.DoesNotContain("evil.example", list);
     }
@@ -662,7 +662,7 @@ public class TrustGateTests
         using var _ = l;
         TrustStore.For(f.Host, f.Project).ApproveDomains(["ok.example"]);
         Assert.True(AllowCommand.Apply(f.Host, s));
-        var list = File.ReadAllText(s.File("allowlist.txt"));
+        var list = File.ReadAllText(s.GetPath("allowlist.txt"));
         Assert.Contains("ok.example", list);
         Assert.DoesNotContain("evil.example", list);
     }
@@ -676,7 +676,7 @@ public class TrustGateTests
         TrustStore.For(f.Host, f.Project).ApproveDomains(["ok.example"]);
         File.WriteAllText(TrustStore.GetPath(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir), "garbage\n");
         Assert.True(AllowCommand.Apply(f.Host, s));
-        Assert.DoesNotContain("ok.example", File.ReadAllText(s.File("allowlist.txt")));
+        Assert.DoesNotContain("ok.example", File.ReadAllText(s.GetPath("allowlist.txt")));
     }
 
     [Fact]
@@ -685,7 +685,7 @@ public class TrustGateTests
         using var f = new Fixture(projectToml: "", dockerfile: "");
         var cwd = Environment.CurrentDirectory;
         Environment.CurrentDirectory = f.Project.Dir;
-        try { Assert.Equal(0, AllowCommand.Add(f.Host, ["typed.example"], global: false)); }
+        try { Assert.Equal(0, new AllowCommand(f.Host, RecipeCatalog.Embedded).Run(["typed.example"], global: false)); }
         finally { Environment.CurrentDirectory = cwd; }
         Assert.Equal(["typed.example"], f.ProjectConfig.Allow);
         Assert.Equal(0, f.Run(NoTerminal));
@@ -698,7 +698,7 @@ public class TrustGateTests
         using var f = new Fixture(projectToml: "allow = [\"planted.example\", \"other.example\"]\n", dockerfile: "");
         var cwd = Environment.CurrentDirectory;
         Environment.CurrentDirectory = f.Project.Dir;
-        try { Assert.Equal(0, AllowCommand.Add(f.Host, ["planted.example"], global: false)); }
+        try { Assert.Equal(0, new AllowCommand(f.Host, RecipeCatalog.Embedded).Run(["planted.example"], global: false)); }
         finally { Environment.CurrentDirectory = cwd; }
         var store = TrustStore.For(f.Host, f.Project);
         Assert.True(store.CoversDomain("planted.example"));
@@ -709,7 +709,7 @@ public class TrustGateTests
     public void GlobalAllowApprovesNothingInTheProject()
     {
         using var f = new Fixture(dockerfile: "");
-        Assert.Equal(0, AllowCommand.Add(f.Host, ["typed.example"], global: true));
+        Assert.Equal(0, new AllowCommand(f.Host, RecipeCatalog.Embedded).Run(["typed.example"], global: true));
         Assert.False(TrustStore.For(f.Host, f.Project).CoversDomain("typed.example"));
     }
 
@@ -726,7 +726,7 @@ public class TrustGateTests
         var stdout = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
-        try { AllowCommand.List(f.Host, f.Project, Config.Empty, f.ProjectConfig); }
+        try { new AllowCommand(f.Host, RecipeCatalog.Embedded).ListBlocked(new ProjectContext(f.Host, f.Project, Config.Empty, f.ProjectConfig)); }
         finally { Console.SetOut(stdout); }
         Assert.Contains("evil.example", captured.ToString());
         Assert.DoesNotContain("ok.example", captured.ToString());
@@ -816,7 +816,7 @@ public class TrustGateTests
     {
         using var f = ToolsFixture();
         var user = Config.Parse(ProjectTool, "u", ConfigKind.User);
-        Assert.Equal(0, new Session(f.Host, f.Project, user, f.ProjectConfig).Run(["true"], answers: NoTerminal));
+        Assert.Equal(0, new Session(new ProjectContext(f.Host, f.Project, user, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded).Run(new(["true"])));
         Assert.Contains("example.org", f.Seen("allowlist-seen").Split('\n'));
         Assert.False(TrustStore.For(f.Host, f.Project).CoversTool(PenTest));
     }
@@ -903,8 +903,8 @@ public class TrustGateTests
         var (s, l) = RunningSession(f);
         using var _ = l;
         s.WriteTools([PenTest], ["example.org"]);
-        Assert.Equal(0, AllowCommand.Add(f.Host, ["typed.example"], global: true));
-        var list = File.ReadAllText(s.File("allowlist.txt")).Split('\n');
+        Assert.Equal(0, new AllowCommand(f.Host, RecipeCatalog.Embedded).Run(["typed.example"], global: true));
+        var list = File.ReadAllText(s.GetPath("allowlist.txt")).Split('\n');
         Assert.Contains("typed.example", list);
         Assert.Contains("example.org", list);
     }
@@ -916,12 +916,12 @@ public class TrustGateTests
         var (s, l) = RunningSession(f);
         using var _ = l;
         Assert.True(AllowCommand.Apply(f.Host, s));
-        Assert.DoesNotContain("example.org", File.ReadAllText(s.File("allowlist.txt")));
+        Assert.DoesNotContain("example.org", File.ReadAllText(s.GetPath("allowlist.txt")));
 
         // Approved after this session started: it's for sessions that start with the tool.
         new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded).Run(yes: true, list: false);
         Assert.True(AllowCommand.Apply(f.Host, s));
-        Assert.DoesNotContain("example.org", File.ReadAllText(s.File("allowlist.txt")));
+        Assert.DoesNotContain("example.org", File.ReadAllText(s.GetPath("allowlist.txt")));
     }
 
     [Fact]
@@ -948,7 +948,7 @@ public class TrustGateTests
             var stdout = Console.Out;
             var captured = new StringWriter();
             Console.SetOut(captured);
-            try { AllowCommand.List(f.Host, f.Project, Config.Empty, f.ProjectConfig); }
+            try { new AllowCommand(f.Host, RecipeCatalog.Embedded).ListBlocked(new ProjectContext(f.Host, f.Project, Config.Empty, f.ProjectConfig)); }
             finally { Console.SetOut(stdout); }
             return captured.ToString();
         }
