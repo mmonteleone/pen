@@ -8,18 +8,20 @@ namespace Pen.Configuration;
 /// <summary>Picks the supplied GitHub token for a project, by the owner of its origin.</summary>
 internal static partial class GitHub
 {
-    /// <summary>The origin URL from a .git/config, read directly (never by running git).</summary>
-    public static string? OriginUrl(string gitConfigText) =>
+    /// <summary>Finds the origin URL in a .git/config's text, read directly (never by running git).</summary>
+    /// <returns>The first url of remote "origin" (git uses it for fetch), or null if there's none.</returns>
+    public static string? FindOriginUrl(string gitConfigText) =>
         GitConfigFile.Parse(gitConfigText)
             .Where(e => e.Section == "remote" && e.Subsection == "origin" && e.Key == "url")
             .Select(e => e.Value)
-            .FirstOrDefault(); // git uses the first url for fetch
+            .FirstOrDefault();
 
-    /// <summary>The owner in a github.com URL: https, scp-style (git@github.com:o/r) or ssh://.</summary>
-    public static string? OwnerFromUrl(string url)
+    /// <summary>Parses the owner out of a github.com URL: https, scp-style (git@github.com:o/r) or ssh://.</summary>
+    /// <returns>The owner, or null if <paramref name="url"/> isn't a github.com repo URL.</returns>
+    public static string? ParseOwner(string url)
     {
-        var m = OwnerRegex().Match(url);
-        return m.Success ? m.Groups[1].Value : null;
+        var match = OwnerRegex().Match(url);
+        return match.Success ? match.Groups[1].Value : null;
     }
 
     [GeneratedRegex(
@@ -28,12 +30,16 @@ internal static partial class GitHub
         RegexOptions.IgnoreCase)]
     private static partial Regex OwnerRegex();
 
-    /// <summary>The owner to use: github_owner from .pen/config.toml, else origin's.</summary>
-    public static string? ProjectOwner(Project project, Config projectConfig) =>
-        projectConfig.GitHubOwner ?? OriginOwner(project);
+    /// <summary>
+    /// Finds the owner whose token the project uses: github_owner from .pen/config.toml, else origin's.
+    /// </summary>
+    /// <returns>The owner, or null if neither names one.</returns>
+    public static string? FindProjectOwner(Project project, Config projectConfig) =>
+        projectConfig.GitHubOwner ?? ReadOriginOwner(project);
 
-    /// <summary>The owner in origin's URL, from the repo's git config.</summary>
-    public static string? OriginOwner(Project project)
+    /// <summary>Reads the owner in origin's URL from the repo's git config.</summary>
+    /// <returns>The owner, or null if there's no repo, no GitHub origin or no readable git config.</returns>
+    public static string? ReadOriginOwner(Project project)
     {
         if (project.CommonGitDir == null)
             return null;
@@ -41,16 +47,17 @@ internal static partial class GitHub
         if (!File.Exists(gitConfig))
             return null;
         var text = Native.ReadRegularFile(gitConfig);
-        var url = text == null ? null : OriginUrl(text);
-        return url == null ? null : OwnerFromUrl(url);
+        var url = text == null ? null : FindOriginUrl(text);
+        return url == null ? null : ParseOwner(url);
     }
 
-    /// <summary>
-    /// The token for the project's owner, or null. When the owner has none,
-    /// prints a notice once per project, recorded by a marker in its runtime dir;
-    /// having a token clears the marker, so removing it later notices again.
-    /// </summary>
-    public static string? TokenFor(string? owner, Config userConfig, string runtimeDir, HostEnv host)
+    /// <summary>Selects the user's token for <paramref name="owner"/>, noticing once when there's none.</summary>
+    /// <returns>The token, or null if there's no owner or the user has no token for it.</returns>
+    /// <remarks>
+    /// The notice is printed once per project, recorded by a marker in its runtime dir; having a token clears the
+    /// marker, so removing the token later notices again.
+    /// </remarks>
+    public static string? SelectToken(string? owner, Config userConfig, string runtimeDir, HostEnv host)
     {
         if (owner == null)
             return null;

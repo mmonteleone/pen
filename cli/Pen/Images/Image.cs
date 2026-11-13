@@ -193,7 +193,7 @@ internal static class Image
         var tag = baseImage == Name ? "latest" : baseImage[(baseImage.LastIndexOf(':') + 1)..];
         return project.Dir == project.RepoDir
             ? $"{project.Key}:{tag}"
-            : $"{project.Key}-{Project.Hash(project.Dir)}:{tag}";
+            : $"{project.Key}-{Project.HashPath(project.Dir)}:{tag}";
     }
 
     /// <summary>

@@ -68,8 +68,8 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         // Under rootless Docker, the host user is container root: the agent
         // runs as UID 0 (with no capabilities) on a read-only root filesystem.
         var rootless = Docker.IsRootless();
-        var owner = GitHub.ProjectOwner(project, projectConfig);
-        var token = GitHub.TokenFor(owner, user, RuntimeDir, host);
+        var owner = GitHub.FindProjectOwner(project, projectConfig);
+        var token = GitHub.SelectToken(owner, user, RuntimeDir, host);
         var toolDomains = ToolSpec.DomainsOf(tools, catalog);
         var allowlist = Allowlist.Merge(Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")), user.Allow,
             projectConfig.Allow, toolDomains);

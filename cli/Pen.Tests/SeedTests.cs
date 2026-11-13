@@ -22,7 +22,7 @@ public class SeedTests
     {
         using var t = new TempDir();
         var host = t.Host();
-        Config.EnsureUserConfig(host, () => ("Ann \"A\" O'Neil", @"ann\x@example.com"));
+        Config.EnsureUserConfig(host, () => new GitIdentity("Ann \"A\" O'Neil", @"ann\x@example.com"));
 
         foreach (var rel in Expected) Assert.True(File.Exists(Path.Combine(host.SeedDir, rel)), rel);
         var gitconfig = File.ReadAllText(Path.Combine(host.SeedDir, ".gitconfig"));
@@ -38,7 +38,7 @@ public class SeedTests
     [Fact]
     public void AMissingIdentityIsLeftCommentedOut()
     {
-        var text = Seed.GitConfig(Embedded.ReadText("templates/home/.gitconfig"), null, "");
+        var text = Seed.BuildGitConfig(Embedded.ReadText("templates/home/.gitconfig"), null, "");
         Assert.Contains("#\tname = Your Name", text);
         Assert.Contains("#\temail = you@example.com", text);
     }
@@ -50,7 +50,7 @@ public class SeedTests
         var host = t.Host();
         Directory.CreateDirectory(host.ConfigDir);
         File.WriteAllText(host.UserConfigPath, "# mine\n");
-        Config.EnsureUserConfig(host, () => ("N", "e@x.io"));
+        Config.EnsureUserConfig(host, () => new GitIdentity("N", "e@x.io"));
         Assert.True(File.Exists(Path.Combine(host.SeedDir, ".claude", "settings.json")));
         Assert.Equal("# mine\n", File.ReadAllText(host.UserConfigPath));
 

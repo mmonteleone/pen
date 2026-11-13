@@ -66,7 +66,7 @@ internal sealed class Recipe
         var isAgent = false;
         if (table.TryGetValue("kind", out var kind))
         {
-            isAgent = Config.String(kind, "kind", Error) == "agent" ? true : throw Error(
+            isAgent = Config.RequireString(kind, "kind", Error) == "agent" ? true : throw Error(
                 "kind must be \"agent\" or left out");
         }
 
@@ -74,7 +74,8 @@ internal sealed class Recipe
         try
         {
             // Only ever a recipe's own pattern, on a short version: interpreted, so AOT-safe.
-            regex = new Regex(Config.String(Required("version"), "version", Error), RegexOptions.CultureInvariant);
+            regex = new Regex(Config.RequireString(Required("version"), "version", Error),
+                RegexOptions.CultureInvariant);
         }
         catch (ArgumentException)
         {
@@ -84,7 +85,7 @@ internal sealed class Recipe
         var recipe = new Recipe
         {
             Name = name,
-            Default = Config.String(Required("default"), "default", Error),
+            Default = Config.RequireString(Required("default"), "default", Error),
             Multiple = Flag("multiple"),
             Hidden = Flag("hidden"),
             IsAgent = isAgent,
@@ -108,13 +109,13 @@ internal sealed class Recipe
         }
         if (table.TryGetValue("env", out var env))
         {
-            foreach (var (variable, value) in Config.Table(env, "env", Error))
+            foreach (var (variable, value) in Config.RequireTable(env, "env", Error))
             {
                 if (!Config.EnvNameRegex().IsMatch(variable))
                     throw Error($"env.{variable} isn't a valid environment variable name");
                 if (Config.IsReservedEnv(variable))
                     throw Error($"env.{variable} is set by pen");
-                var setting = Config.String(value, $"env.{variable}", Error);
+                var setting = Config.RequireString(value, $"env.{variable}", Error);
                 if (setting.Any(char.IsControl))
                     throw Error($"env.{variable} can't hold a line break or control character");
                 recipe.Env.Add(new(variable, setting));

@@ -194,7 +194,7 @@ public class WorktreeTests
         Assert.Equal(Path.Combine(repo, ".git"), p.CommonGitDir);
         Assert.Equal(repo, p.RepoDir);
         Assert.Equal(wt, p.Dir);
-        Assert.Equal(Project.KeyFor(repo), p.Key);
+        Assert.Equal(Project.ComputeKey(repo), p.Key);
         Assert.Equal(Project.Resolve(repo, t.Host()).Key, p.Key);
     }
 
@@ -220,8 +220,8 @@ public class WorktreeTests
         using var t = new TempDir();
         var (repo, wt, _) = RepoWithWorktree(t);
         Git.Run(repo, "remote", "add", "origin", "git@github.com:acme/widgets.git");
-        Assert.Equal("acme", GitHub.ProjectOwner(Project.Resolve(wt, t.Host()), Config.Empty));
-        Assert.Null(GitHub.ProjectOwner(Project.Resolve(t.Sub("plain"), t.Host()), Config.Empty));
+        Assert.Equal("acme", GitHub.FindProjectOwner(Project.Resolve(wt, t.Host()), Config.Empty));
+        Assert.Null(GitHub.FindProjectOwner(Project.Resolve(t.Sub("plain"), t.Host()), Config.Empty));
     }
 
     [Fact]
@@ -255,7 +255,7 @@ public class WorktreeTests
         var p = Project.Resolve(wt, t.Host()); // CheckAllowed: not "inside the git repo at …"
         Assert.Equal(wt, p.Dir);
         Assert.Equal(repo, p.RepoDir);
-        Assert.Equal(Project.KeyFor(repo), p.Key);
+        Assert.Equal(Project.ComputeKey(repo), p.Key);
         RepoGuard.CheckAtStart(wt);
     }
 
@@ -416,8 +416,8 @@ public class WorktreeTests
         var main = Project.Resolve(repo, t.Host());
         var w = Project.Resolve(wt, t.Host());
         Assert.Equal($"{main.Key}:latest", Image.ProjectLayerName(main));
-        Assert.Equal($"{main.Key}-{Project.Hash(wt)}:latest", Image.ProjectLayerName(w));
-        Assert.Equal($"{Project.KeyFor(t.Sub("plain"))}:latest", Image.ProjectLayerName(Project.Resolve(t.Sub("plain"), t.Host())));
+        Assert.Equal($"{main.Key}-{Project.HashPath(wt)}:latest", Image.ProjectLayerName(w));
+        Assert.Equal($"{Project.ComputeKey(t.Sub("plain"))}:latest", Image.ProjectLayerName(Project.Resolve(t.Sub("plain"), t.Host())));
     }
 
     [Fact]
@@ -429,7 +429,7 @@ public class WorktreeTests
         var w = Project.Resolve(wt, t.Host());
         const string one = "pen-tools:0123456789abcdef", other = "pen-tools:fedcba9876543210";
         Assert.Equal($"{main.Key}:0123456789abcdef", Image.ProjectLayerName(main, one));
-        Assert.Equal($"{main.Key}-{Project.Hash(wt)}:0123456789abcdef", Image.ProjectLayerName(w, one));
+        Assert.Equal($"{main.Key}-{Project.HashPath(wt)}:0123456789abcdef", Image.ProjectLayerName(w, one));
         Assert.Equal($"{main.Key}:fedcba9876543210", Image.ProjectLayerName(main, other));
         Assert.Equal($"{main.Key}:latest", Image.ProjectLayerName(main, Image.Name));
         Assert.True(Prune.IsImageOf(main.Key, Image.ProjectLayerName(main, one)));

@@ -349,7 +349,7 @@ public class TrustGateTests
     private static string StaleContext(Fixture f)
     {
         Session.EnsureRuntimeDir(f.Host, f.Project);
-        var parent = Path.Combine(f.Host.GetRuntimeDir(f.Project.Key), "layer-" + Project.Hash(f.Project.Dir));
+        var parent = Path.Combine(f.Host.GetRuntimeDir(f.Project.Key), "layer-" + Project.HashPath(f.Project.Dir));
         var ro = Directory.CreateDirectory(Path.Combine(parent, "context", "ro")).FullName;
         File.WriteAllText(Path.Combine(ro, "stale"), "x");
         File.SetUnixFileMode(ro, UnixFileMode.UserRead | UnixFileMode.UserExecute);
@@ -382,7 +382,7 @@ public class TrustGateTests
     {
         using var f = new Fixture(projectToml: "");
         Approve(f);
-        var lockFile = Path.Combine(f.Host.GetRuntimeDir(f.Project.Key), "layer-" + Project.Hash(f.Project.Dir) + ".lock");
+        var lockFile = Path.Combine(f.Host.GetRuntimeDir(f.Project.Key), "layer-" + Project.HashPath(f.Project.Dir) + ".lock");
         var held = FileLock.TryTake(lockFile, exclusive: true)!;
         var build = Task.Factory.StartNew(() => Image.EnsureProjectLayer(f.Host, f.Project), TaskCreationOptions.LongRunning);
         await Task.Delay(TimeSpan.FromMilliseconds(500), TestContext.Current.CancellationToken);
@@ -485,7 +485,7 @@ public class TrustGateTests
     {
         using var f = new Fixture(projectToml: "");
         Session.EnsureRuntimeDir(f.Host, f.Project);
-        var prefix = Path.Combine(f.Host.GetRuntimeDir(f.Project.Key), $"layer-{Project.Hash(f.Project.Dir)}-review-");
+        var prefix = Path.Combine(f.Host.GetRuntimeDir(f.Project.Key), $"layer-{Project.HashPath(f.Project.Dir)}-review-");
         var (old, fresh) = (prefix + "old", prefix + "fresh");
         Directory.CreateDirectory(Path.Combine(old, "context"));
         Directory.CreateDirectory(Path.Combine(fresh, "context"));

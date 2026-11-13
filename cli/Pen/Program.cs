@@ -92,7 +92,7 @@ internal static class Program
                 return Prune.Run(host, Console.In);
         }
 
-        Config.EnsureUserConfig(host);
+        Config.EnsureUserConfig(host, GitIdentity.ReadFromHost);
         var user = Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User);
         switch (command.Kind)
         {

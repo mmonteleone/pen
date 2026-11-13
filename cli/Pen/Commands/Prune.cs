@@ -170,7 +170,7 @@ internal static partial class Prune
         var real = Native.RealPath(recordedDir);
         if (real == null)
             return (Status.Missing, null);
-        var current = Project.KeyFor(Project.FindRepo(real).RepoDir);
+        var current = Project.ComputeKey(Project.FindRepo(real).RepoDir);
         return current == key ? (Status.Live, null) : (Status.Moved, current);
     }
 
@@ -325,7 +325,7 @@ internal static partial class Prune
     private static List<string> Lines(string s) =>
         s.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
-    /// <summary>A project key: pen-&lt;clean name&gt;-&lt;8 hex&gt; (<see cref="Project.KeyFor"/>).</summary>
+    /// <summary>A project key: pen-&lt;clean name&gt;-&lt;8 hex&gt; (<see cref="Project.ComputeKey"/>).</summary>
     [GeneratedRegex("^pen-[a-z0-9_-]+-[0-9a-f]{8}$")]
     private static partial Regex KeyPattern();
 

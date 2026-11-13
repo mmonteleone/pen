@@ -21,14 +21,19 @@ namespace Pen.Projects;
 /// </summary>
 internal sealed record Project(string Dir, string Key, string? CommonGitDir, string RepoDir)
 {
+    /// <summary>The dir's own .git path, which may not exist.</summary>
     public string GitDir => Path.Combine(Dir, ".git");
+    /// <summary>Whether the dir is a git repo (a checkout or a linked worktree).</summary>
     public bool IsRepo => CommonGitDir != null;
-    /// <summary>A linked worktree: its .git is a file naming another repo's git dir.</summary>
+    /// <summary>Whether the dir is a linked worktree: its .git is a file naming another repo's git dir.</summary>
     public bool IsWorktree => CommonGitDir != null && CommonGitDir != GitDir;
+    /// <summary>The dir's .pen/ path.</summary>
     public string PenDir => Path.Combine(Dir, ".pen");
+    /// <summary>The dir's .pen/config.toml path.</summary>
     public string ProjectConfigPath => Path.Combine(PenDir, Config.FileName);
 
-    /// <summary>Resolves <paramref name="cwd"/> and applies the directory refusals.</summary>
+    /// <summary>Resolves <paramref name="cwd"/> to the project, applying the directory refusals.</summary>
+    /// <returns>The project at <paramref name="cwd"/>'s real path, keyed by its main checkout.</returns>
     public static Project Resolve(string cwd, HostEnv host)
     {
         var dir = Native.RealPath(cwd) ?? throw new PenException("can't resolve the " +
@@ -43,14 +48,17 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
 
         CheckAllowed(dir, host);
         var (common, repoDir) = FindRepo(dir);
-        return new Project(dir, KeyFor(repoDir), common, repoDir);
+        return new Project(dir, ComputeKey(repoDir), common, repoDir);
     }
 
     /// <summary>
-    /// The common git dir and main checkout of <paramref name="dir"/> (a real
-    /// path): its .git directory, or a linked worktree's validated common dir
-    /// (<see cref="RepoScan.ResolveWorktree"/>). Reads files; never runs git.
+    /// Finds the common git dir and main checkout of <paramref name="dir"/> (a real path), reading files and never
+    /// running git.
     /// </summary>
+    /// <returns>
+    /// The dir's .git directory and the dir itself; for a linked worktree, its validated common dir
+    /// (<see cref="RepoScan.ResolveWorktree"/>) and main checkout; otherwise no git dir and the dir itself.
+    /// </returns>
     internal static (string? CommonGitDir, string RepoDir) FindRepo(string dir)
     {
         var git = Path.Combine(dir, ".git");
@@ -65,27 +73,33 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
         return (common, RepoGuard.IsMainCheckoutGitDir(common) ? Path.GetDirectoryName(common)! : dir);
     }
 
-    public static string KeyFor(string realDir) => $"pen-{CleanName(realDir)}-{Hash(realDir)}";
+    /// <summary>
+    /// Computes the project key, pen-&lt;clean name&gt;-&lt;hash&gt;, of a main checkout's real path.
+    /// </summary>
+    public static string ComputeKey(string realDir) => $"pen-{CleanName(realDir)}-{HashPath(realDir)}";
 
-    /// <summary>The dir's last component, lowercased and reduced to [a-z0-9_-], which compose accepts.</summary>
+    /// <summary>
+    /// Cleans the dir's last component for a key: lowercased and reduced to [a-z0-9_-], which compose accepts.
+    /// </summary>
     internal static string CleanName(string realDir)
     {
         var name = Path.GetFileName(realDir.TrimEnd('/')).ToLowerInvariant();
-        var sb = new StringBuilder();
+        var builder = new StringBuilder();
         foreach (var c in name)
         {
             if (c is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '_' or '-')
-                sb.Append(c);
-            else if (sb.Length > 0 && sb[^1] != '-')
-                sb.Append('-');
+                builder.Append(c);
+            else if (builder.Length > 0 && builder[^1] != '-')
+                builder.Append('-');
         }
-        var clean = sb.ToString().Trim('-');
+        var clean = builder.ToString().Trim('-');
         if (clean.Length > 40)
             clean = clean[..40].TrimEnd('-');
         return clean.Length == 0 ? "project" : clean;
     }
 
-    internal static string Hash(string realDir) =>
+    /// <summary>Hashes a real path to the 8 hex digits that keys and per-dir file names use.</summary>
+    internal static string HashPath(string realDir) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(realDir)))[..8];
 
     /// <summary>

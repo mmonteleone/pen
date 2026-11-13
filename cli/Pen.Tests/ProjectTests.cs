@@ -5,9 +5,9 @@ public class ProjectTests
     [Fact]
     public void KeyIsCleanNameAndPathHash()
     {
-        var key = Project.KeyFor("/Users/me/source/My Project.v2");
+        var key = Project.ComputeKey("/Users/me/source/My Project.v2");
         Assert.Matches("^pen-my-project-v2-[0-9a-f]{8}$", key);
-        Assert.NotEqual(key, Project.KeyFor("/Users/me/other/My Project.v2"));
+        Assert.NotEqual(key, Project.ComputeKey("/Users/me/other/My Project.v2"));
     }
 
     [Theory]

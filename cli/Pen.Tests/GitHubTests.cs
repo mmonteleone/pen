@@ -12,7 +12,7 @@ public class GitHubTests
     [InlineData("ssh://git@github.com/acme/repo.git", "acme")]
     [InlineData("ssh://git@github.com:22/acme/repo", "acme")]
     [InlineData("git://github.com/acme/repo", "acme")]
-    public void OwnerFromUrl(string url, string owner) => Assert.Equal(owner, GitHub.OwnerFromUrl(url));
+    public void OwnerFromUrl(string url, string owner) => Assert.Equal(owner, GitHub.ParseOwner(url));
 
     [Theory]
     [InlineData("https://gitlab.com/acme/repo.git")]
@@ -21,7 +21,7 @@ public class GitHubTests
     [InlineData("git@bitbucket.org:acme/repo.git")]
     [InlineData("/srv/git/repo.git")]
     [InlineData("https://github.com/")]
-    public void NotAGitHubOwner(string url) => Assert.Null(GitHub.OwnerFromUrl(url));
+    public void NotAGitHubOwner(string url) => Assert.Null(GitHub.ParseOwner(url));
 
     [Fact]
     public void OriginUrlFromGitConfig()
@@ -38,22 +38,22 @@ public class GitHubTests
             [branch "main"]
             	remote = origin
             """;
-        Assert.Equal("git@github.com:acme/repo.git", GitHub.OriginUrl(config));
+        Assert.Equal("git@github.com:acme/repo.git", GitHub.FindOriginUrl(config));
     }
 
     [Fact]
     public void OriginUrlQuotedWithComment() =>
-        Assert.Equal("https://github.com/a b/r", GitHub.OriginUrl("[Remote \"origin\"]\n  URL = \"https://github.com/a b/r\" ; note\n"));
+        Assert.Equal("https://github.com/a b/r", GitHub.FindOriginUrl("[Remote \"origin\"]\n  URL = \"https://github.com/a b/r\" ; note\n"));
 
     [Fact]
     public void OriginSubsectionIsCaseSensitive() =>
-        Assert.Null(GitHub.OriginUrl("[remote \"Origin\"]\nurl = https://github.com/a/r\n"));
+        Assert.Null(GitHub.FindOriginUrl("[remote \"Origin\"]\nurl = https://github.com/a/r\n"));
 
     [Fact]
     public void MissingOrigin()
     {
-        Assert.Null(GitHub.OriginUrl("[core]\nbare = false\n"));
-        Assert.Null(GitHub.OriginUrl(""));
+        Assert.Null(GitHub.FindOriginUrl("[core]\nbare = false\n"));
+        Assert.Null(GitHub.FindOriginUrl(""));
     }
 
     private static Project RepoWithOrigin(TempDir t, string? url)
@@ -70,9 +70,9 @@ public class GitHubTests
     {
         using var t = new TempDir();
         var p = RepoWithOrigin(t, "https://github.com/acme/r");
-        Assert.Equal("acme", GitHub.ProjectOwner(p, Config.Empty));
-        Assert.Equal("fork", GitHub.ProjectOwner(p, Config.Parse("github_owner = \"fork\"", "x", ConfigKind.Project)));
-        Assert.Null(GitHub.ProjectOwner(RepoWithOrigin(new TempDir(), null), Config.Empty));
+        Assert.Equal("acme", GitHub.FindProjectOwner(p, Config.Empty));
+        Assert.Equal("fork", GitHub.FindProjectOwner(p, Config.Parse("github_owner = \"fork\"", "x", ConfigKind.Project)));
+        Assert.Null(GitHub.FindProjectOwner(RepoWithOrigin(new TempDir(), null), Config.Empty));
     }
 
     [Fact]
@@ -85,16 +85,16 @@ public class GitHubTests
         var none = Config.Empty;
         var with = Config.Parse("[github]\nACME = \"tok\"", "x", ConfigKind.User);
 
-        Assert.Null(GitHub.TokenFor("acme", none, runtime, host));
+        Assert.Null(GitHub.SelectToken("acme", none, runtime, host));
         Assert.True(File.Exists(marker));
-        Assert.Null(GitHub.TokenFor("acme", none, runtime, host));
+        Assert.Null(GitHub.SelectToken("acme", none, runtime, host));
 
-        Assert.Equal("tok", GitHub.TokenFor("Acme", with, runtime, host)); // owner match is case-insensitive
+        Assert.Equal("tok", GitHub.SelectToken("Acme", with, runtime, host)); // owner match is case-insensitive
         Assert.False(File.Exists(marker));
 
-        Assert.Null(GitHub.TokenFor("acme", none, runtime, host));
+        Assert.Null(GitHub.SelectToken("acme", none, runtime, host));
         Assert.True(File.Exists(marker));
 
-        Assert.Null(GitHub.TokenFor(null, with, runtime, host));
+        Assert.Null(GitHub.SelectToken(null, with, runtime, host));
     }
 }

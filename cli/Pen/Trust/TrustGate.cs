@@ -95,7 +95,7 @@ internal static class TrustGate
     {
         try
         {
-            return GitHub.OriginOwner(project);
+            return GitHub.ReadOriginOwner(project);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {

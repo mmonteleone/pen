@@ -52,7 +52,7 @@ internal static class SessionRegistry
 
     /// <summary>The lock for one dir (the main checkout or a linked worktree) of the project.</summary>
     public static string WorktreeLockFile(string runtimeDir, string dir) =>
-        Path.Combine(runtimeDir, $"worktree-{Project.Hash(dir)}.lock");
+        Path.Combine(runtimeDir, $"worktree-{Project.HashPath(dir)}.lock");
 
     /// <summary>
     /// What a session holds for its whole run: project.lock shared (pen reset

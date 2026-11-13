@@ -79,7 +79,7 @@ public class PruneTests
 
         var e = Only(Prune.Find(host, [], []), key);
         Assert.Equal(Prune.Status.Moved, e.Status);
-        Assert.Equal(Project.KeyFor(other), e.CurrentKey);
+        Assert.Equal(Project.ComputeKey(other), e.CurrentKey);
         Assert.True(e.Removable);
     }
 
@@ -95,7 +95,7 @@ public class PruneTests
         Git.Run(main, "worktree", "add", "-q", dir);
         var (status, current) = Prune.Classify(key, dir);
         Assert.Equal(Prune.Status.Moved, status);
-        Assert.Equal(Project.KeyFor(main), current);
+        Assert.Equal(Project.ComputeKey(main), current);
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public class PruneTests
         var wt = Path.Combine(t.Path, "wt");
         Git.Run(repo, "worktree", "add", "-q", wt);
         var key = Record(host, wt);
-        Assert.Equal(Project.KeyFor(repo), key);
+        Assert.Equal(Project.ComputeKey(repo), key);
         Assert.Equal(Prune.Status.Live, Only(Prune.Find(host, [], []), key).Status);
 
         // The worktree going doesn't matter; the main checkout going does.

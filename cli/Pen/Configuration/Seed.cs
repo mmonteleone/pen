@@ -14,53 +14,59 @@ internal static class Seed
     private const string Prefix = "templates/home/";
 
     /// <summary>
-    /// Creates the seed from templates/home/ when it's missing, with the
-    /// .gitconfig identity filled in from the host's global git config.
-    /// Returns whether it did. Never rewrites an existing seed.
+    /// Creates the seed from templates/home/ when it's missing, with <paramref name="identity"/> filled in to its
+    /// .gitconfig.
     /// </summary>
-    public static bool EnsureExists(HostEnv host, string? name, string? email)
+    /// <returns>Whether it created the seed; an existing one is never rewritten.</returns>
+    public static bool EnsureExists(HostEnv host, GitIdentity identity)
     {
         var seed = host.SeedDir;
         if (Path.Exists(seed) || RepoGuard.IsLink(seed))
             return false;
 
         // Built next to it, then renamed, so a failure never leaves half a seed.
-        var tmp = seed + ".tmp-" + Environment.ProcessId;
-        if (Directory.Exists(tmp))
-            Directory.Delete(tmp, recursive: true);
-        Directory.CreateDirectory(tmp);
-        foreach (var res in Embedded.ListUnder(Prefix))
+        var staging = seed + ".tmp-" + Environment.ProcessId;
+        if (Directory.Exists(staging))
+            Directory.Delete(staging, recursive: true);
+        Directory.CreateDirectory(staging);
+        foreach (var resource in Embedded.ListUnder(Prefix))
         {
-            var rel = res[Prefix.Length..];
-            var path = Path.Combine(tmp, rel);
+            var relative = resource[Prefix.Length..];
+            var path = Path.Combine(staging, relative);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            if (rel == ".gitconfig")
-                File.WriteAllText(path, GitConfig(Embedded.ReadText(res), name, email));
+            if (relative == ".gitconfig")
+                File.WriteAllText(path, BuildGitConfig(Embedded.ReadText(resource), identity.Name, identity.Email));
             else
-                File.WriteAllBytes(path, Embedded.ReadBytes(res));
+                File.WriteAllBytes(path, Embedded.ReadBytes(resource));
         }
-        Directory.Move(tmp, seed);
+        Directory.Move(staging, seed);
         return true;
     }
 
-    /// <summary>The seed's .gitconfig, with the identity filled in, or commented out where unknown.</summary>
-    internal static string GitConfig(string template, string? name, string? email)
+    /// <summary>Builds the seed's .gitconfig from its template.</summary>
+    /// <returns>
+    /// The template with its @NAME@ and @EMAIL@ lines replaced by the identity, or by commented-out examples where
+    /// it's unknown.
+    /// </returns>
+    internal static string BuildGitConfig(string template, string? name, string? email)
     {
-        string Line(string key, string? value, string example) =>
-            value is { Length: > 0 } ? $"\t{key} = {Quote(value)}" : $"#\t{key} = {example}";
-        var sb = new StringBuilder();
+        var builder = new StringBuilder();
         foreach (var line in template.Split('\n'))
         {
             if (line.Contains("@NAME@"))
-                sb.Append(Line("name", name, "Your Name"));
+                builder.Append(IdentityLine("name", name, "Your Name"));
             else if (line.Contains("@EMAIL@"))
-                sb.Append(Line("email", email, "you@example.com"));
+                builder.Append(IdentityLine("email", email, "you@example.com"));
             else
-                sb.Append(line);
-            sb.Append('\n');
+                builder.Append(line);
+            builder.Append('\n');
         }
-        return sb.ToString().TrimEnd('\n') + "\n";
+        return builder.ToString().TrimEnd('\n') + "\n";
     }
+
+    /// <summary>Formats one [user] line: the value quoted, or the example commented out if there's no value.</summary>
+    private static string IdentityLine(string key, string? value, string example) =>
+        value is { Length: > 0 } ? $"\t{key} = {Quote(value)}" : $"#\t{key} = {example}";
 
     /// <summary>A git config value, quoted, with \ and " escaped.</summary>
     internal static string Quote(string value) =>

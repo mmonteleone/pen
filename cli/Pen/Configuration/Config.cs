@@ -11,16 +11,21 @@ using Tomlyn.Parsing;
 namespace Pen.Configuration;
 
 /// <summary>
-/// config.toml in a config directory (~/.config/pen/ or a project's .pen/),
-/// which may be missing. TOML errors name the file and line; Pen's own checks
-/// name the file and key. Keys are either user-only or project-only, except
-/// allow and tools, whose lists are appended (defaults, user, project; user, project, --tool).
+/// The settings in one config.toml: ~/.config/pen/'s or a project's .pen/'s, which may be missing.
 /// </summary>
+/// <remarks>
+/// TOML errors name the file and line; Pen's own checks name the file and key. Keys are either
+/// user-only or project-only, except allow and tools, whose lists are appended (allow: defaults,
+/// user, project; tools: user, project, --tool).
+/// </remarks>
 internal sealed partial class Config
 {
     public const string FileName = "config.toml";
     /// <summary>The pre-TOML config file. Its presence is an error, so it's never silently ignored.</summary>
     public const string LegacyName = "config";
+
+    private const string UserFile = "~/.config/pen/" + FileName;
+    private const string ProjectFile = ".pen/" + FileName;
 
     /// <summary>[github] tokens, keyed by lowercased owner (user only).</summary>
     public Dictionary<string, string> GitHubTokens { get; } = new(StringComparer.Ordinal);
@@ -48,10 +53,11 @@ internal sealed partial class Config
         "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "DOCKER_HOST",
     };
 
-    /// <summary>
-    /// Loads <paramref name="dir"/>'s config.toml.
-    /// <paramref name="displayDir"/> is how messages name the directory (e.g. "~/.config/pen").
-    /// </summary>
+    /// <summary>Loads <paramref name="dir"/>'s config.toml.</summary>
+    /// <param name="dir">The config directory.</param>
+    /// <param name="displayDir">How messages name the directory (e.g. "~/.config/pen").</param>
+    /// <param name="kind">Which keys the file may hold.</param>
+    /// <returns>The settings, or empty ones if there's no config.toml.</returns>
     public static Config Load(string dir, string displayDir, ConfigKind kind)
     {
         if (File.Exists(Path.Combine(dir, LegacyName)))
@@ -67,10 +73,12 @@ internal sealed partial class Config
         return ReadText(path, display) is { } text ? Parse(text, display, kind) : new Config();
     }
 
-    /// <summary>
-    /// A config.toml's text: an in-tree worktree's .pen/ is writable from
-    /// a session, so it may be a FIFO or huge. Null if there's none.
-    /// </summary>
+    /// <summary>Reads a config.toml's text.</summary>
+    /// <returns>The text, or null if there's no file.</returns>
+    /// <remarks>
+    /// An in-tree worktree's .pen/ is writable from a session, so the file may be a FIFO or huge:
+    /// anything but a regular file of a reasonable size is refused.
+    /// </remarks>
     internal static string? ReadText(string path, string displayPath)
     {
         try
@@ -84,158 +92,210 @@ internal sealed partial class Config
         }
     }
 
-    /// <summary>TOML text as its untyped table. <paramref name="displayPath"/> names the file in errors.</summary>
+    /// <summary>Parses TOML text into its untyped table.</summary>
+    /// <param name="text">The TOML text.</param>
+    /// <param name="displayPath">Names the file in errors.</param>
     internal static TomlTable ParseToml(string text, string displayPath)
     {
         // Validating the syntax tree first enforces the whole TOML spec (e.g.
         // a key or table defined twice), with line numbers; the model built
         // afterwards would quietly let the last definition win.
-        var doc = SyntaxParser.Parse(text, displayPath, validate: true);
-        foreach (var d in doc.Diagnostics)
+        var document = SyntaxParser.Parse(text, displayPath, validate: true);
+        foreach (var diagnostic in document.Diagnostics)
         {
-            if (d.Kind == Tomlyn.Syntax.DiagnosticMessageKind.Error)
-                throw new PenException($"{displayPath}:{d.Span.Start.Line + 1}: {Out.Field(d.Message)}");
+            if (diagnostic.Kind == Tomlyn.Syntax.DiagnosticMessageKind.Error)
+            {
+                throw new PenException(
+                    $"{displayPath}:{diagnostic.Span.Start.Line + 1}: {Out.Field(diagnostic.Message)}");
+            }
         }
         try
         {
             return TomlSerializer.Deserialize(text, TomlContext.Default.TomlTable) ?? new TomlTable();
         }
-        catch (TomlException e)
+        catch (TomlException exception)
         {
-            throw new PenException($"{displayPath}: {Out.Field(e.Message)}");
+            throw new PenException($"{displayPath}: {Out.Field(exception.Message)}");
         }
     }
 
     /// <summary>Parses config.toml text. <paramref name="displayPath"/> names the file in errors.</summary>
+    /// <remarks>Keys are checked in file order, each fully before the next, so the first problem is reported.</remarks>
     public static Config Parse(string text, string displayPath, ConfigKind kind)
     {
         var table = ParseToml(text, displayPath);
         var config = new Config();
-        var userFile = "~/.config/pen/" + FileName;
-        var projectFile = ".pen/" + FileName;
+        PenException Error(string message) => new($"{displayPath}: {Out.Field(message)}");
         foreach (var (key, value) in table)
         {
-            PenException Error(string message) => new($"{displayPath}: {Out.Field(message)}");
-            PenException BelongsIn(string file, string? why = null) =>
-                Error($"\"{key}\" belongs in {file}{why}");
-
-            switch (key)
-            {
-                case "github" when kind == ConfigKind.Project:
-                case "env" when kind == ConfigKind.Project:
-                    throw BelongsIn(userFile, $", not {projectFile} (which is usually committed)");
-                case "github_owner" when kind == ConfigKind.User:
-                    throw BelongsIn(projectFile);
-                case "docker" when kind == ConfigKind.User:
-                    throw BelongsIn(projectFile, " (or use pen --docker)");
-                case "ports" when kind == ConfigKind.User:
-                    throw BelongsIn(projectFile, " (or use pen --port)");
-                case "allow":
-                    if (value is not TomlArray domains)
-                        throw Error("allow must be a list of domains, e.g. allow = [\"example.com\"]");
-                    foreach (var d in domains)
-                    {
-                        var domain = d is string ds ? ds.ToLowerInvariant() : null;
-                        if (domain == null || !Allowlist.IsValidDomain(domain))
-                        {
-                            throw Error($"allow: {(d is string ? $"\"{d}\"" : d?.ToString() ?? "null")} " +
-                                "isn't a domain (use example.com, or .example.com to include its subdomains)");
-                        }
-
-                        config.Allow.Add(domain);
-                    }
-                    break;
-
-                case "github":
-                    foreach (var (owner, token) in Table(value, key, Error))
-                    {
-                        if (!OwnerRegex().IsMatch(owner))
-                            throw Error($"github.{owner}: \"{owner}\" isn't a GitHub owner name");
-                        if (!config.GitHubTokens.TryAdd(owner.ToLowerInvariant(),
-                            String(token, $"github.{owner}", Error)))
-                        {
-                            throw Error($"github.{owner}: a token for \"{owner}\" " +
-                                "is already set (owner names ignore case)");
-                        }
-                    }
-                    break;
-
-                case "env":
-                    foreach (var (name, v) in Table(value, key, Error))
-                    {
-                        if (!EnvNameRegex().IsMatch(name))
-                            throw Error($"env.{name}: \"{name}\" isn't a valid environment variable name");
-                        if (IsReservedEnv(name))
-                            throw Error($"env.{name}: {name} is set by pen and can't be overridden");
-                        config.Env.Add(new(name, String(v, $"env.{name}", Error)));
-                    }
-                    break;
-
-                case "github_owner":
-                    var o = String(value, key, Error);
-                    if (!OwnerRegex().IsMatch(o))
-                        throw Error($"github_owner: \"{o}\" isn't a GitHub owner name");
-                    config.GitHubOwner = o;
-                    break;
-
-                case "docker":
-                    config.Docker = value as bool? ?? throw Error("docker must be true or false (unquoted)");
-                    break;
-
-                case "ports":
-                    if (value is not TomlArray ports)
-                        throw Error("ports must be a list of port numbers, e.g. ports = [3000, 5173]");
-                    foreach (var p in ports)
-                    {
-                        if (p is not long n || !Port.IsValid(n))
-                        {
-                            throw Error($"ports: {(p is string ? $"\"{p}\"" : p?.ToString() ?? "null")} " +
-                                "isn't a port number (1 to 65535, unquoted)");
-                        }
-
-                        if (!config.Ports.Contains((int)n))
-                            config.Ports.Add((int)n);
-                    }
-                    break;
-
-                case "tools":
-                    if (value is not TomlArray toolSpecs)
-                        throw Error("tools must be a list of tools, e.g. tools = [\"name\", \"name:version\"]");
-                    var parsed = new List<ToolSpec>();
-                    foreach (var t in toolSpecs)
-                    {
-                        if (t is not string spec)
-                        {
-                            throw Error($"tools: {t?.ToString() ?? "null"} isn't " +
-                                "a tool (use name or name:version, in quotes)");
-                        }
-
-                        if (ToolSpec.TryParse(spec, RecipeCatalog.Embedded, out var tool) is { } invalid)
-                            throw Error($"tools: {invalid}");
-                        parsed.Add(tool);
-                    }
-                    if (ToolSpec.TryCanonicalize(parsed, RecipeCatalog.Embedded, out var canonical) is { } conflict)
-                        throw Error($"tools: {conflict}");
-                    config.Tools = canonical;
-                    break;
-
-                default:
-                    throw Error($"unknown key \"{key}\"");
-            }
+            ThrowIfMisplaced(key, kind, Error);
+            config.ReadKey(key, value, Error);
         }
         return config;
     }
 
+    /// <summary>Refuses a key that belongs in the other kind of config file.</summary>
+    private static void ThrowIfMisplaced(string key, ConfigKind kind, Func<string, PenException> error)
+    {
+        var belongsIn = (key, kind) switch
+        {
+            ("github" or "env", ConfigKind.Project) => $"{UserFile}, not {ProjectFile} (which is usually committed)",
+            ("github_owner", ConfigKind.User) => ProjectFile,
+            ("docker", ConfigKind.User) => $"{ProjectFile} (or use pen --docker)",
+            ("ports", ConfigKind.User) => $"{ProjectFile} (or use pen --port)",
+            _ => null,
+        };
+        if (belongsIn != null)
+            throw error($"\"{key}\" belongs in {belongsIn}");
+    }
+
+    /// <summary>Validates one top-level key's value and stores it.</summary>
+    private void ReadKey(string key, object value, Func<string, PenException> error)
+    {
+        switch (key)
+        {
+            case "allow":
+                ReadAllow(value, error);
+                break;
+            case "github":
+                ReadGitHubTokens(value, error);
+                break;
+            case "env":
+                ReadEnv(value, error);
+                break;
+            case "github_owner":
+                ReadGitHubOwner(value, error);
+                break;
+            case "docker":
+                Docker = value as bool? ?? throw error("docker must be true or false (unquoted)");
+                break;
+            case "ports":
+                ReadPorts(value, error);
+                break;
+            case "tools":
+                ReadTools(value, error);
+                break;
+            default:
+                throw error($"unknown key \"{key}\"");
+        }
+    }
+
+    private void ReadAllow(object value, Func<string, PenException> error)
+    {
+        if (value is not TomlArray domains)
+            throw error("allow must be a list of domains, e.g. allow = [\"example.com\"]");
+        foreach (var item in domains)
+        {
+            var domain = item is string text ? text.ToLowerInvariant() : null;
+            if (domain == null || !Allowlist.IsValidDomain(domain))
+            {
+                throw error($"allow: {DescribeItem(item)} " +
+                    "isn't a domain (use example.com, or .example.com to include its subdomains)");
+            }
+
+            Allow.Add(domain);
+        }
+    }
+
+    private void ReadGitHubTokens(object value, Func<string, PenException> error)
+    {
+        foreach (var (owner, token) in RequireTable(value, "github", error))
+        {
+            if (!OwnerRegex().IsMatch(owner))
+                throw error($"github.{owner}: \"{owner}\" isn't a GitHub owner name");
+            var tokenText = RequireString(token, $"github.{owner}", error);
+            if (!GitHubTokens.TryAdd(owner.ToLowerInvariant(), tokenText))
+            {
+                throw error($"github.{owner}: a token for \"{owner}\" " +
+                    "is already set (owner names ignore case)");
+            }
+        }
+    }
+
+    private void ReadEnv(object value, Func<string, PenException> error)
+    {
+        foreach (var (name, setting) in RequireTable(value, "env", error))
+        {
+            if (!EnvNameRegex().IsMatch(name))
+                throw error($"env.{name}: \"{name}\" isn't a valid environment variable name");
+            if (IsReservedEnv(name))
+                throw error($"env.{name}: {name} is set by pen and can't be overridden");
+            Env.Add(new(name, RequireString(setting, $"env.{name}", error)));
+        }
+    }
+
+    private void ReadGitHubOwner(object value, Func<string, PenException> error)
+    {
+        var owner = RequireString(value, "github_owner", error);
+        if (!OwnerRegex().IsMatch(owner))
+            throw error($"github_owner: \"{owner}\" isn't a GitHub owner name");
+        GitHubOwner = owner;
+    }
+
+    private void ReadPorts(object value, Func<string, PenException> error)
+    {
+        if (value is not TomlArray ports)
+            throw error("ports must be a list of port numbers, e.g. ports = [3000, 5173]");
+        foreach (var item in ports)
+        {
+            if (item is not long number || !Port.IsValid(number))
+            {
+                throw error($"ports: {DescribeItem(item)} " +
+                    "isn't a port number (1 to 65535, unquoted)");
+            }
+
+            if (!Ports.Contains((int)number))
+                Ports.Add((int)number);
+        }
+    }
+
+    private void ReadTools(object value, Func<string, PenException> error)
+    {
+        if (value is not TomlArray toolSpecs)
+            throw error("tools must be a list of tools, e.g. tools = [\"name\", \"name:version\"]");
+        var parsed = new List<ToolSpec>();
+        foreach (var item in toolSpecs)
+        {
+            if (item is not string spec)
+            {
+                throw error($"tools: {item?.ToString() ?? "null"} isn't " +
+                    "a tool (use name or name:version, in quotes)");
+            }
+
+            if (ToolSpec.TryParse(spec, RecipeCatalog.Embedded, out var tool) is { } invalid)
+                throw error($"tools: {invalid}");
+            parsed.Add(tool);
+        }
+        if (ToolSpec.TryCanonicalize(parsed, RecipeCatalog.Embedded, out var canonical) is { } conflict)
+            throw error($"tools: {conflict}");
+        Tools = canonical;
+    }
+
+    /// <summary>Describes a list item for an error: a string in quotes, anything else as TOML shows it.</summary>
+    private static string DescribeItem(object? item)
+    {
+        if (item is string)
+            return $"\"{item}\"";
+        return item?.ToString() ?? "null";
+    }
+
+    /// <summary>Tells whether an environment variable is Pen's own, so no config may set it.</summary>
     internal static bool IsReservedEnv(string name) =>
         ReservedEnv.Contains(name)
             || name.StartsWith("PEN_", StringComparison.OrdinalIgnoreCase)
             || name.StartsWith("GIT_CONFIG", StringComparison.OrdinalIgnoreCase);
 
-    internal static TomlTable Table(object value, string key, Func<string, PenException> error) =>
+    /// <summary>Returns <paramref name="value"/> as a table, or throws <paramref name="error"/>'s exception.</summary>
+    internal static TomlTable RequireTable(object value, string key, Func<string, PenException> error) =>
         value as TomlTable ?? throw error($"{key} must be a table ([{key}])");
 
-    internal static string String(object value, string key, Func<string, PenException> error) =>
-        value is string s && s.Length > 0 ? s : throw error($"{key} must be a non-empty string (in quotes)");
+    /// <summary>
+    /// Returns <paramref name="value"/> as a non-empty string, or throws <paramref name="error"/>'s exception.
+    /// </summary>
+    internal static string RequireString(object value, string key, Func<string, PenException> error) =>
+        value is string text && text.Length > 0
+            ? text
+            : throw error($"{key} must be a non-empty string (in quotes)");
 
     [GeneratedRegex(@"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\z")]
     internal static partial Regex OwnerRegex();
@@ -244,38 +304,53 @@ internal sealed partial class Config
     internal static partial Regex EnvNameRegex();
 
     /// <summary>
-    /// Creates ~/.config/pen/ and, each only when missing, its config.toml
-    /// (600) from the template and the home seed (see
-    /// <see cref="Seed"/>), and says so in one line. Never rewrites an existing
-    /// file, and adds no config.toml next to a legacy config (Load reports that).
-    /// <paramref name="identity"/> gives the host's git user.name/user.email
-    /// for the seed's .gitconfig (default: the host's global git config).
+    /// Creates ~/.config/pen/ and, each only when missing, its config.toml (600) from the template
+    /// and the home seed (see <see cref="Seed"/>), and says so in one line.
     /// </summary>
-    public static void EnsureUserConfig(HostEnv host, Func<(string? Name, string? Email)>? identity = null)
+    /// <param name="host">The host user's environment.</param>
+    /// <param name="identity">
+    /// Gives the git user.name and user.email for the seed's .gitconfig; called only when the seed is created.
+    /// Pen passes <see cref="GitIdentity.ReadFromHost"/>.
+    /// </param>
+    /// <remarks>
+    /// Never rewrites an existing file, and adds no config.toml next to a legacy config (Load reports that).
+    /// </remarks>
+    public static void EnsureUserConfig(HostEnv host, Func<GitIdentity> identity)
     {
-        bool createdDir = false;
-        if (!Directory.Exists(host.ConfigDir))
-        {
-            Directory.CreateDirectory(host.ConfigDir,
+        var createdDir = EnsureConfigDir(host);
+        var createdConfig = EnsureUserConfigFile(host);
+        var createdSeed = EnsureSeed(host, identity);
+        ReportCreated(host, createdDir, createdConfig, createdSeed);
+    }
+
+    private static bool EnsureConfigDir(HostEnv host)
+    {
+        if (Directory.Exists(host.ConfigDir))
+            return false;
+        Directory.CreateDirectory(host.ConfigDir,
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-            createdDir = true;
-        }
+        return true;
+    }
 
-        bool createdConfig = false;
-        if (!File.Exists(host.UserConfigPath) && !File.Exists(Path.Combine(host.ConfigDir, LegacyName)))
-        {
-            CreateFromTemplate(host.UserConfigPath, "templates/" + FileName,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite);
-            createdConfig = true;
-        }
+    private static bool EnsureUserConfigFile(HostEnv host)
+    {
+        if (File.Exists(host.UserConfigPath) || File.Exists(Path.Combine(host.ConfigDir, LegacyName)))
+            return false;
+        CreateFromTemplate(host.UserConfigPath, "templates/" + FileName,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        return true;
+    }
 
-        bool createdSeed = false;
-        if (!Path.Exists(host.SeedDir) && !RepoGuard.IsLink(host.SeedDir))
-        {
-            var (name, email) = (identity ?? HostIdentity)();
-            createdSeed = Seed.EnsureExists(host, name, email);
-        }
+    private static bool EnsureSeed(HostEnv host, Func<GitIdentity> identity)
+    {
+        if (Path.Exists(host.SeedDir) || RepoGuard.IsLink(host.SeedDir))
+            return false;
+        return Seed.EnsureExists(host, identity());
+    }
 
+    /// <summary>Says what was created: only the outermost of the dir, config.toml and seed.</summary>
+    private static void ReportCreated(HostEnv host, bool createdDir, bool createdConfig, bool createdSeed)
+    {
         if (createdDir)
         {
             Out.WriteLine($"created {host.Display(host.ConfigDir)}/: add " +
@@ -296,20 +371,17 @@ internal sealed partial class Config
     {
         try
         {
-            using var f = new FileStream(path, new FileStreamOptions
+            using var file = new FileStream(path, new FileStreamOptions
             {
                 Mode = FileMode.CreateNew,
                 Access = FileAccess.Write,
                 UnixCreateMode = mode,
             });
-            Embedded.Open(template).CopyTo(f);
+            Embedded.Open(template).CopyTo(file);
         }
         catch (IOException) when (File.Exists(path))
         {
             // Another Pen created it first.
         }
     }
-
-    private static (string?, string?) HostIdentity() =>
-        (HostGit.GlobalConfig("user.name"), HostGit.GlobalConfig("user.email"));
 }

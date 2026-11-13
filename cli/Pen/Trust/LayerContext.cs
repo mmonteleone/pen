@@ -36,7 +36,7 @@ internal sealed class LayerContext : IDisposable
     {
         Session.EnsureRuntimeDir(host, project);
         var runtimeDir = host.GetRuntimeDir(project.Key);
-        var parent = Path.Combine(runtimeDir, Prefix + Project.Hash(project.Dir));
+        var parent = Path.Combine(runtimeDir, Prefix + Project.HashPath(project.Dir));
         var held = WaitForLock(parent + ".lock");
         try
         {
@@ -62,7 +62,7 @@ internal sealed class LayerContext : IDisposable
     {
         Session.EnsureRuntimeDir(host, project);
         var runtimeDir = host.GetRuntimeDir(project.Key);
-        var prefix = $"{Prefix}{Project.Hash(project.Dir)}-review-";
+        var prefix = $"{Prefix}{Project.HashPath(project.Dir)}-review-";
         foreach (var old in System.IO.Directory.GetDirectories(runtimeDir, prefix + "*"))
         {
             if (DateTime.UtcNow - System.IO.Directory.GetLastWriteTimeUtc(old) < KeepAbandonedReviews)

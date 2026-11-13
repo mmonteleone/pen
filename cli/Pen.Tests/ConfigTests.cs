@@ -198,21 +198,21 @@ public class ConfigTests
     {
         using var t = new TempDir();
         var host = t.Host();
-        Config.EnsureUserConfig(host, () => ("T", "t@example.invalid"));
+        Config.EnsureUserConfig(host, () => new GitIdentity("T", "t@example.invalid"));
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(host.UserConfigPath));
         Assert.Equal(Embedded.ReadText("templates/config.toml"), File.ReadAllText(host.UserConfigPath));
 
         File.WriteAllText(host.UserConfigPath, "[env]\nX = \"mine\"\n");
-        Config.EnsureUserConfig(host, () => ("T", "t@example.invalid"));
+        Config.EnsureUserConfig(host, () => new GitIdentity("T", "t@example.invalid"));
         Assert.Equal("[env]\nX = \"mine\"\n", File.ReadAllText(host.UserConfigPath));
 
         // A missing config.toml is recreated in an existing dir, but not next to a legacy config.
         File.Delete(host.UserConfigPath);
-        Config.EnsureUserConfig(host, () => ("T", "t@example.invalid"));
+        Config.EnsureUserConfig(host, () => new GitIdentity("T", "t@example.invalid"));
         Assert.True(File.Exists(host.UserConfigPath));
         File.Delete(host.UserConfigPath);
         File.WriteAllText(Path.Combine(host.ConfigDir, "config"), "");
-        Config.EnsureUserConfig(host, () => ("T", "t@example.invalid"));
+        Config.EnsureUserConfig(host, () => new GitIdentity("T", "t@example.invalid"));
         Assert.False(File.Exists(host.UserConfigPath));
     }
 }

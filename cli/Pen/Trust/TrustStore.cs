@@ -42,7 +42,7 @@ internal sealed class TrustStore
     }
 
     public static string PathFor(string runtimeDir, string dir) =>
-        Path.Combine(runtimeDir, $"trust-{Project.Hash(dir)}");
+        Path.Combine(runtimeDir, $"trust-{Project.HashPath(dir)}");
 
     public static TrustStore For(HostEnv host, Project project) => Load(host.GetRuntimeDir(project.Key), project.Dir);
 

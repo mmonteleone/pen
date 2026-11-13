@@ -297,7 +297,7 @@ public class SessionEndTests
         Git.Run(repo, "worktree", "add", "-q", "-b", "wt", wt);
         var gitFile = Path.Combine(wt, ".git");
         var original = File.ReadAllText(gitFile);
-        var key = Project.KeyFor(repo);
+        var key = Project.ComputeKey(repo);
         var runtime = t.Sub("runtime");
         Session.WriteProjectDir(runtime, repo);
         var session = new SessionDir(key, t.Sub("runtime", "sessions", "12345678"));
