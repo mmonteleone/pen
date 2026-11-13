@@ -148,8 +148,7 @@ internal static class Program
 
     /// <summary>Runs pen trust.</summary>
     private static int RunTrust(ProjectContext context, Command command) =>
-        TrustGate.Command(context.Host, context.Project, context.User, context.ProjectConfig, command.Yes,
-            Answers.FromProcess(), command.List);
+        new TrustCommand(context, Answers.FromProcess(), RecipeCatalog.Embedded).Run(command.Yes, command.List);
 
     /// <summary>Runs pen sign, against the base given or the default one.</summary>
     private static int RunSign(HostEnv host, Project project, Command command) =>

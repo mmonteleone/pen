@@ -96,7 +96,7 @@ public class TrustGateTests
         var e = Assert.Throws<PenException>(() => f.Run(Saying(answer)));
         Assert.Contains("not starting", e.Message);
         f.AssertNothingReached();
-        Assert.False(File.Exists(TrustStore.PathFor(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir)));
+        Assert.False(File.Exists(TrustStore.GetPath(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir)));
     }
 
     [Fact]
@@ -120,7 +120,7 @@ public class TrustGateTests
         var e = Assert.Throws<PenException>(() => f.Run(Saying("y")));
         Assert.Contains("can't approve .pen/", e.Message);
         f.AssertNothingReached();
-        Assert.Throws<PenException>(() => TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal));
+        Assert.Throws<PenException>(() => new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded).Run(yes: true, list: false));
     }
 
     [Fact]
@@ -154,7 +154,7 @@ public class TrustGateTests
     public void ADockerfileThatChangesAfterTheGateIsntBuilt()
     {
         using var f = new Fixture(projectToml: "");
-        TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal);
+        new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded).Run(yes: true, list: false);
         File.WriteAllText(Path.Combine(f.Project.PenDir, "Dockerfile"), "FROM pen:latest\nRUN worse\n");
         var e = Assert.Throws<PenException>(() => Image.EnsureProjectLayer(f.Host, f.Project));
         Assert.Contains("isn't what was approved", e.Message);
@@ -235,7 +235,7 @@ public class TrustGateTests
     }
 
     private static void Approve(Fixture f) =>
-        Assert.Equal(0, TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal));
+        Assert.Equal(0, new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded).Run(yes: true, list: false));
 
     private const string Approved = "FROM pen:latest\nRUN evil\n"; // the Fixture's default
 
@@ -434,8 +434,8 @@ public class TrustGateTests
 
         var shown = CapturingStderr(() =>
         {
-            if (throughPenTrust) Assert.Equal(0, TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: false, answers));
-            else TrustGate.RequireForSession(f.Host, f.Project, f.User, f.ProjectConfig, answers);
+            if (throughPenTrust) Assert.Equal(0, new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), answers, RecipeCatalog.Embedded).Run(yes: false, list: false));
+            else new TrustGate(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), answers, RecipeCatalog.Embedded).RequireForSession([]);
         });
 
         Assert.Contains("| RUN benign", shown);
@@ -459,10 +459,10 @@ public class TrustGateTests
         using var f = new Fixture(projectToml: "", dockerfile: "FROM pen:latest\nRUN evil-shown\n");
         var dockerfile = Path.Combine(f.Project.PenDir, "Dockerfile");
         var answers = new Answers(new DoingThenAnswering(() => File.WriteAllText(dockerfile, Benign), answer: "n"), IsTerminal: true);
-        var shown = CapturingStderr(() => Assert.Throws<PenException>(() => TrustGate.RequireForSession(f.Host, f.Project, f.User, f.ProjectConfig, answers)));
+        var shown = CapturingStderr(() => Assert.Throws<PenException>(() => new TrustGate(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), answers, RecipeCatalog.Embedded).RequireForSession([])));
         Assert.Contains("| RUN evil-shown", shown);
         Assert.Empty(Reviews(f));
-        Assert.False(File.Exists(TrustStore.PathFor(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir)));
+        Assert.False(File.Exists(TrustStore.GetPath(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir)));
     }
 
     [Fact]
@@ -472,7 +472,7 @@ public class TrustGateTests
         using var f = new Fixture(projectToml: "", dockerfile: text);
         string? copy = null;
         var answers = new Answers(new DoingThenAnswering(() => copy = Path.Combine(Assert.Single(Reviews(f)), "context"), answer: "n"), IsTerminal: true);
-        var shown = CapturingStderr(() => Assert.Throws<PenException>(() => TrustGate.RequireForSession(f.Host, f.Project, f.User, f.ProjectConfig, answers)));
+        var shown = CapturingStderr(() => Assert.Throws<PenException>(() => new TrustGate(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), answers, RecipeCatalog.Embedded).RequireForSession([])));
         Assert.DoesNotContain('\x1b', shown);
         Assert.Contains(@"\x1b[2Jhidden\r", shown);
         Assert.Contains("cut: 300 more characters", shown);
@@ -514,15 +514,15 @@ public class TrustGateTests
         var stdout = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
-        try { Assert.Equal(0, TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: false, NoTerminal, list: true)); }
+        try { Assert.Equal(0, new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded).Run(yes: false, list: true)); }
         finally { Console.SetOut(stdout); }
 
         Assert.All(domains, d => Assert.Contains(d, captured.ToString()));
         Assert.Contains("docker = true", captured.ToString());
         Assert.Contains("| RUN evil", captured.ToString());
         Assert.Empty(Reviews(f));
-        Assert.False(File.Exists(TrustStore.PathFor(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir)));
-        var after = TrustGate.Requested(f.Project, f.User, f.ProjectConfig, TrustStore.For(f.Host, f.Project));
+        Assert.False(File.Exists(TrustStore.GetPath(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir)));
+        var after = new TrustGate(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded).FindUnapproved(TrustStore.For(f.Host, f.Project), []);
         Assert.Equal(50, after.Domains.Count);
         Assert.True(after.Docker);
         Assert.NotNull(after.Layer);
@@ -534,7 +534,7 @@ public class TrustGateTests
     {
         using var f = new Fixture();
         Assert.Equal(0, f.Run(Saying("y")));
-        File.WriteAllText(TrustStore.PathFor(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir), "garbage\n");
+        File.WriteAllText(TrustStore.GetPath(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir), "garbage\n");
         File.Delete(f.CallsFile);
         Assert.Throws<PenException>(() => f.Run(NoTerminal));
         Assert.Empty(f.Calls);
@@ -561,18 +561,18 @@ public class TrustGateTests
     public void TrustYesApproves_WithoutATerminal()
     {
         using var f = new Fixture();
-        Assert.Equal(0, TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal));
+        Assert.Equal(0, new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded).Run(yes: true, list: false));
         Assert.Equal(0, f.Run(NoTerminal));
-        Assert.Equal(0, TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: false, NoTerminal)); // nothing new
+        Assert.Equal(0, new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded).Run(yes: false, list: false)); // nothing new
     }
 
     [Fact]
     public void TrustAsks_AndAnsweringNoApprovesNothing()
     {
         using var f = new Fixture();
-        Assert.Equal(1, TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: false, Saying("n")));
+        Assert.Equal(1, new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), Saying("n"), RecipeCatalog.Embedded).Run(yes: false, list: false));
         Assert.Throws<PenException>(() => f.Run(NoTerminal));
-        Assert.Equal(0, TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: false, Saying("y")));
+        Assert.Equal(0, new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), Saying("y"), RecipeCatalog.Embedded).Run(yes: false, list: false));
         Assert.Equal(0, f.Run(NoTerminal));
     }
 
@@ -580,9 +580,9 @@ public class TrustGateTests
     public void TrustWithoutATerminalOrYesRefuses()
     {
         using var f = new Fixture();
-        var e = Assert.Throws<PenException>(() => TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: false, NoTerminal));
+        var e = Assert.Throws<PenException>(() => new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded).Run(yes: false, list: false));
         Assert.Contains("--yes", e.Message);
-        Assert.False(File.Exists(TrustStore.PathFor(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir)));
+        Assert.False(File.Exists(TrustStore.GetPath(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir)));
     }
 
     // pen upgrade
@@ -608,7 +608,7 @@ public class TrustGateTests
     public void UpgradeRebuildsAnApprovedLayer_AndSkipsItOnceChanged()
     {
         using var f = new Fixture(projectToml: "");
-        TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal);
+        new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded).Run(yes: true, list: false);
         new UpgradeCommand(f.Host, Config.Empty, RecipeCatalog.Embedded).RebuildProjectLayer(f.Project, clean: false, Image.Name);
         Assert.Contains(f.Calls, c => c.StartsWith("build ", StringComparison.Ordinal));
 
@@ -674,7 +674,7 @@ public class TrustGateTests
         var (s, l) = RunningSession(f);
         using var _ = l;
         TrustStore.For(f.Host, f.Project).ApproveDomains(["ok.example"]);
-        File.WriteAllText(TrustStore.PathFor(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir), "garbage\n");
+        File.WriteAllText(TrustStore.GetPath(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir), "garbage\n");
         Assert.True(AllowCommand.Apply(f.Host, s));
         Assert.DoesNotContain("ok.example", File.ReadAllText(s.File("allowlist.txt")));
     }
@@ -919,7 +919,7 @@ public class TrustGateTests
         Assert.DoesNotContain("example.org", File.ReadAllText(s.File("allowlist.txt")));
 
         // Approved after this session started: it's for sessions that start with the tool.
-        TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal);
+        new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded).Run(yes: true, list: false);
         Assert.True(AllowCommand.Apply(f.Host, s));
         Assert.DoesNotContain("example.org", File.ReadAllText(s.File("allowlist.txt")));
     }
@@ -928,11 +928,11 @@ public class TrustGateTests
     public void TrustYesApprovesAToolAndTrustListDoesnt()
     {
         using var f = ToolsFixture();
-        Assert.Equal(0, TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: false, NoTerminal, list: true));
+        Assert.Equal(0, new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded).Run(yes: false, list: true));
         Assert.False(TrustStore.For(f.Host, f.Project).CoversTool(PenTest));
-        Assert.Equal(1, TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: false, Saying("n")));
+        Assert.Equal(1, new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), Saying("n"), RecipeCatalog.Embedded).Run(yes: false, list: false));
         Assert.False(TrustStore.For(f.Host, f.Project).CoversTool(PenTest));
-        Assert.Equal(0, TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal));
+        Assert.Equal(0, new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded).Run(yes: true, list: false));
         Assert.True(TrustStore.For(f.Host, f.Project).CoversTool(PenTest));
     }
 
@@ -953,7 +953,7 @@ public class TrustGateTests
             return captured.ToString();
         }
         Assert.Contains("example.org", Listed());
-        TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal);
+        new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded).Run(yes: true, list: false);
         Assert.DoesNotContain("example.org", Listed());
     }
 
@@ -1011,7 +1011,7 @@ public class TrustGateTests
     public void ADomainARecipeAddsAfterApprovalIsRefusedWithoutATerminal_AndNothingOfTheEntryTakesEffect()
     {
         using var f = ToolsFixture(projectToml: "tools = [\"pen-test:77\"]\n");
-        Assert.Equal(0, TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal, catalog: Recipe("example.org")));
+        Assert.Equal(0, new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, Recipe("example.org")).Run(yes: true, list: false));
         Assert.Equal(0, f.Run(NoTerminal, recipes: Recipe("example.org")));
         Assert.DoesNotContain("example.net", f.Seen("allowlist-seen"));
 
@@ -1037,7 +1037,7 @@ public class TrustGateTests
     public void AnAllowDomainPlantedInTheProjectDoesntApproveTheToolsNewDomain()
     {
         using var f = ToolsFixture(projectToml: "tools = [\"pen-test:77\"]\n");
-        TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal, catalog: Recipe("example.org"));
+        new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, Recipe("example.org")).Run(yes: true, list: false);
         TrustStore.For(f.Host, f.Project).ApproveDomains(["example.net"]);
         File.WriteAllText(f.Project.ProjectConfigPath, "tools = [\"pen-test:77\"]\nallow = [\"example.net\"]\n");
         Assert.Contains("now brings more domains", Assert.Throws<PenException>(() => f.Run(NoTerminal, recipes: Recipe("example.org", "example.net"))).Message);
@@ -1047,7 +1047,7 @@ public class TrustGateTests
     public void ADroppedDomainDoesntAsk_AndLeavesTheAllowlist()
     {
         using var f = ToolsFixture(projectToml: "tools = [\"pen-test:77\"]\n");
-        TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal, catalog: Recipe("example.org", "example.net"));
+        new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, Recipe("example.org", "example.net")).Run(yes: true, list: false);
         Assert.Equal(0, f.Run(NoTerminal, recipes: Recipe("example.org")));
         Assert.DoesNotContain("example.net", f.Seen("allowlist-seen"));
     }
@@ -1056,7 +1056,7 @@ public class TrustGateTests
     public void AFlagForTheToolStillDoesntAskOrApprove_EvenWithANewDomain()
     {
         using var f = ToolsFixture(projectToml: "tools = [\"pen-test:77\"]\n");
-        TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal, catalog: Recipe("example.org"));
+        new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, Recipe("example.org")).Run(yes: true, list: false);
         var later = Recipe("example.org", "example.net");
         Assert.Equal(0, f.Run(NoTerminal, flagTools: [new("pen-test", "77")], recipes: later));
         Assert.False(TrustStore.For(f.Host, f.Project).CoversToolDomain(new("pen-test", "77"), "example.net"));
@@ -1067,11 +1067,11 @@ public class TrustGateTests
     public void UpgradeAndTheAllowListingSkipAToolWithAnUnapprovedDomain()
     {
         using var f = ToolsFixture(projectToml: "tools = [\"pen-test:77\"]\n");
-        TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal, catalog: Recipe("example.org"));
+        new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, Recipe("example.org")).Run(yes: true, list: false);
         ToolSpec tool = new("pen-test", "77");
         Assert.Equal([tool], new UpgradeCommand(f.Host, Config.Empty, Recipe("example.org")).SelectTools(f.Project));
         Assert.Empty(new UpgradeCommand(f.Host, Config.Empty, Recipe("example.org", "example.net")).SelectTools(f.Project));
-        Assert.Equal([tool], TrustStore.For(f.Host, f.Project).ApprovedToolsOf([tool], Recipe("example.org")));
-        Assert.Empty(TrustStore.For(f.Host, f.Project).ApprovedToolsOf([tool], Recipe("example.org", "example.net")));
+        Assert.Equal([tool], TrustStore.For(f.Host, f.Project).SelectApprovedTools([tool], Recipe("example.org")));
+        Assert.Empty(TrustStore.For(f.Host, f.Project).SelectApprovedTools([tool], Recipe("example.org", "example.net")));
     }
 }

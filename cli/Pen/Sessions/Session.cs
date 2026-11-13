@@ -57,8 +57,8 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         // Tools that can't go together stop the session, whatever's approved.
         var tools = ToolSpec.Merge(catalog, user.Tools, projectConfig.Tools, flagTools ?? []);
         // Before anything below uses a setting from .pen/.
-        TrustGate.RequireForSession(host, project, user, projectConfig, answers ?? Answers.FromProcess(), flagTools,
-            catalog);
+        new TrustGate(new ProjectContext(host, project, user, projectConfig), answers ?? Answers.FromProcess(), catalog)
+            .RequireForSession(flagTools ?? []);
         var mounts = RepoGuard.PrepareMounts(project.Dir, host.Home);
         // What the session-end check takes as the submodules' own (PrepareMounts protects them).
         var modules = project.IsRepo ? RepoScan.FindModuleRepos(project.CommonGitDir!) : [];

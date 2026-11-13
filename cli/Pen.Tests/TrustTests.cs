@@ -22,11 +22,11 @@ public class TrustTests
         }
 
         public string RuntimeDir => Host.GetRuntimeDir(Project.Key);
-        public string StorePath => TrustStore.PathFor(RuntimeDir, Project.Dir);
+        public string StorePath => TrustStore.GetPath(RuntimeDir, Project.Dir);
         public TrustStore Store => TrustStore.For(Host, Project);
 
         public TrustRequest Requested(string projectToml, string userToml = "") =>
-            TrustGate.Requested(Project, Config.Parse(userToml, "u", ConfigKind.User), Config.Parse(projectToml, "p", ConfigKind.Project), Store);
+            new TrustGate(new ProjectContext(Host, Project, Config.Parse(userToml, "u", ConfigKind.User), Config.Parse(projectToml, "p", ConfigKind.Project)), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded).FindUnapproved(Store, []);
 
         public void Dockerfile(string text = "FROM pen:latest\n")
         {
@@ -401,16 +401,16 @@ public class TrustTests
     {
         using var f = new Fixture();
         f.Store.ApproveDomains(["a.example", ".wild.example"]);
-        Assert.Equal(["a.example", "x.wild.example"], f.Store.ApprovedOf(["a.example", "b.example", "x.wild.example"]));
+        Assert.Equal(["a.example", "x.wild.example"], f.Store.SelectApprovedDomains(["a.example", "b.example", "x.wild.example"]));
     }
 
     [Fact]
     public void TheListEscapesWhatItShows()
     {
         var r = new TrustRequest(["a.example\x1b[2J\nb"], true, "own\x1b]er", "ori\ngin", new(Hex, null));
-        var text = string.Join('\n', r.Lines());
+        var text = string.Join('\n', r.FormatLines());
         Assert.DoesNotContain('\x1b', text);
-        Assert.Equal(4, r.Lines().Count());
+        Assert.Equal(4, r.FormatLines().Count());
         Assert.Equal(4, text.Split('\n').Length);
         Assert.Contains(@"\x1b", text);
     }
@@ -418,7 +418,7 @@ public class TrustTests
     [Fact]
     public void EachItemSaysWhatItGrants()
     {
-        var text = string.Join('\n', new TrustRequest(["a.example"], true, "other", "acme", new(Hex, null)).Lines());
+        var text = string.Join('\n', new TrustRequest(["a.example"], true, "other", "acme", new(Hex, null)).FormatLines());
         Assert.Contains("privileged", text);
         Assert.Contains("past the proxy", text);
         Assert.Contains("pen trust shows it", text);
@@ -435,7 +435,7 @@ public class TrustTests
     public void AFloodOfDomainsIsCapped_AndCantPushOtherItemsOutOfSight()
     {
         var r = new TrustRequest(ManyDomains(30_000), true, "other", "acme", new(Hex, null));
-        var lines = r.Lines().ToList();
+        var lines = r.FormatLines().ToList();
         Assert.Equal(3 + TrustRequest.MaxListedDomains + 1, lines.Count);
         Assert.Contains(".pen/Dockerfile", lines[0]);
         Assert.Contains("docker = true", lines[1]);
@@ -444,9 +444,9 @@ public class TrustTests
         Assert.Contains("pen trust --list", lines[^1]);
         Assert.Contains("29980 domains not listed", r.Question);
 
-        Assert.Equal(3 + 30_000, r.AllLines().Count());
+        Assert.Equal(3 + 30_000, r.FormatAllLines().Count());
         Assert.Equal("approve these?", new TrustRequest(ManyDomains(20), false, null, null, null).Question);
-        Assert.Equal(20, new TrustRequest(ManyDomains(20), false, null, null, null).Lines().Count());
+        Assert.Equal(20, new TrustRequest(ManyDomains(20), false, null, null, null).FormatLines().Count());
     }
 
     [Fact]
@@ -455,12 +455,12 @@ public class TrustTests
         using var f = new Fixture();
         var toml = Config.Parse("allow = [" + string.Join(',', ManyDomains(30_000).Select(d => $"\"{d}\"")) + "]\n", "p", ConfigKind.Project);
         var watch = System.Diagnostics.Stopwatch.StartNew();
-        var request = TrustGate.Requested(f.Project, Config.Empty, toml, f.Store);
+        var request = new TrustGate(new ProjectContext(f.Host, f.Project, Config.Empty, toml), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded).FindUnapproved(f.Store, []);
         Assert.Equal(30_000, request.Domains.Count);
         f.Store.Approve(request);
         var store = f.Store;
-        Assert.True(TrustGate.Requested(f.Project, Config.Empty, toml, store).IsEmpty);
-        Assert.Equal(30_000, store.ApprovedOf(toml.Allow).Count);
+        Assert.True(new TrustGate(new ProjectContext(f.Host, f.Project, Config.Empty, toml), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded).FindUnapproved(store, []).IsEmpty);
+        Assert.Equal(30_000, store.SelectApprovedDomains(toml.Allow).Count);
         Assert.Equal(30_000 + 1, Allowlist.Merge(toml.Allow, [".wild.example"]).Count);
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(8), $"took {watch.Elapsed}");
     }
@@ -503,7 +503,7 @@ public class TrustTests
         var project = Project.Resolve(dir, host);
         Session.EnsureRuntimeDir(host, project);
         TrustStore.For(host, project).ApproveDomains(["a.example"]);
-        var path = TrustStore.PathFor(host.GetRuntimeDir(project.Key), dir);
+        var path = TrustStore.GetPath(host.GetRuntimeDir(project.Key), dir);
         Assert.True(File.Exists(path));
         Directory.Delete(dir);
         Assert.True(Prune.Remove(host, Assert.Single(Prune.Find(host, [], []), e => e.Key == project.Key)));
@@ -548,7 +548,7 @@ public class TrustTests
         Assert.True(f.Requested(toml, toml).IsEmpty);
         Assert.True(f.Requested("", toml).IsEmpty);
         var project = Config.Parse(toml, "p", ConfigKind.Project);
-        Assert.True(TrustGate.Requested(f.Project, Config.Empty, project, f.Store, [Tool1]).IsEmpty);
+        Assert.True(new TrustGate(new ProjectContext(f.Host, f.Project, Config.Empty, project), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded).FindUnapproved(f.Store, [Tool1]).IsEmpty);
 
         Assert.False(f.Store.CoversTool(Tool1));
         Assert.Equal(Tool1, Assert.Single(f.Requested(toml).Tools).Tool);
@@ -557,7 +557,7 @@ public class TrustTests
     [Fact]
     public void ThePromptShowsTheToolAndTheDomainsItBrings()
     {
-        var text = string.Join('\n', new TrustRequest([], false, null, null, null) { Tools = [new(Tool1, true, ["example.org"]), new(new("pen-test-b", "1"), true, [])] }.Lines());
+        var text = string.Join('\n', new TrustRequest([], false, null, null, null) { Tools = [new(Tool1, true, ["example.org"]), new(new("pen-test-b", "1"), true, [])] }.FormatLines());
         Assert.Contains("tool pen-test:1: sessions run with it installed, and the sandbox can reach example.org", text);
         Assert.Contains("tool pen-test-b:1: sessions run with it installed\n", text + "\n");
     }
@@ -567,12 +567,12 @@ public class TrustTests
     {
         var tools = Enumerable.Range(1, 500).Select(i => new ToolRequest(new("pen-test-b", i.ToString(System.Globalization.CultureInfo.InvariantCulture)), true, [])).ToList();
         var r = new TrustRequest(["a.example"], true, null, null, null) { Tools = tools };
-        var lines = r.Lines().ToList();
+        var lines = r.FormatLines().ToList();
         Assert.Equal(1 + TrustRequest.MaxListedTools + 1 + 1, lines.Count);
         Assert.Contains("480 more tools", lines[^2]);
         Assert.Contains("allow a.example", lines[^1]);
         Assert.Contains("480 tools not listed", r.Question);
-        Assert.Equal(502, r.AllLines().Count());
+        Assert.Equal(502, r.FormatAllLines().Count());
     }
 
     [Theory]
@@ -616,7 +616,7 @@ public class TrustTests
     });
 
     private TrustRequest RequestedWith(Fixture f, string projectToml, RecipeCatalog catalog) =>
-        TrustGate.Requested(f.Project, Config.Empty, Config.Parse(projectToml, "p", ConfigKind.Project), f.Store, catalog: catalog);
+        new TrustGate(new ProjectContext(f.Host, f.Project, Config.Empty, Config.Parse(projectToml, "p", ConfigKind.Project)), new Answers(TextReader.Null, IsTerminal: false), catalog).FindUnapproved(f.Store, []);
 
     private const string ToolToml = "tools = [\"pen-test:1\"]\n";
 
@@ -631,8 +631,8 @@ public class TrustTests
         var tool = Assert.Single(r.Tools);
         Assert.False(tool.IsNew);
         Assert.Equal(["example.net"], tool.Domains);
-        Assert.Contains(r.Lines(), l => l.Contains("pen-test:1 now brings more domains") && l.Contains("example.net") && !l.Contains("example.org"));
-        Assert.Contains(r.AllLines(), l => l.Contains("example.net"));
+        Assert.Contains(r.FormatLines(), l => l.Contains("pen-test:1 now brings more domains") && l.Contains("example.net") && !l.Contains("example.org"));
+        Assert.Contains(r.FormatAllLines(), l => l.Contains("example.net"));
 
         f.Store.Approve(r);
         Assert.True(RequestedWith(f, ToolToml, Bringing("example.org", "example.net")).IsEmpty);

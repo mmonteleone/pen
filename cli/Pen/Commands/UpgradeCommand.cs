@@ -74,7 +74,7 @@ internal sealed class UpgradeCommand(HostEnv host, Config user, RecipeCatalog ca
             return user.Tools;
         }
         var store = TrustStore.For(host, project);
-        var unapproved = TrustGate.UnapprovedTools(context.ProjectConfig, user.Tools, store, catalog)
+        var unapproved = TrustGate.FindUnapprovedTools(context.ProjectConfig, user.Tools, store, catalog)
             .Select(request => request.Tool)
             .ToList();
         if (unapproved.Count > 0)
@@ -101,7 +101,7 @@ internal sealed class UpgradeCommand(HostEnv host, Config user, RecipeCatalog ca
     {
         if (!TrustGate.HasDockerfile(project))
             return;
-        if (TrustGate.UnapprovedLayer(project, TrustStore.For(host, project)) != null)
+        if (TrustGate.FindUnapprovedLayer(project, TrustStore.For(host, project)) != null)
         {
             Out.WriteLine("skipping the project layer: .pen/ isn't approved (pen trust reviews it)");
             return;

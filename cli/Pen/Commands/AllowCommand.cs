@@ -152,7 +152,7 @@ internal static class AllowCommand
             var projectConfig = Config.Load(Path.Combine(projectDir, ".pen"),
                 Out.Field(Path.Combine(projectDir, ".pen")), ConfigKind.Project);
             var approved = TrustStore.Load(host.GetRuntimeDir(s.ProjectKey), projectDir)
-                .ApprovedOf(projectConfig.Allow);
+                .SelectApprovedDomains(projectConfig.Allow);
             var merged = Allowlist.Merge(Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")), user.Allow,
                 approved, s.ReadToolDomains());
             // Truncate and write, never rename: the proxy's single-file bind
@@ -232,9 +232,9 @@ internal static class AllowCommand
             .Select(d => new SessionDir(project.Key, d).ProxyLogLines());
         // What a session would get: an unapproved domain in .pen/ stays listed.
         var store = TrustStore.For(host, project);
-        var approved = store.ApprovedOf(projectConfig.Allow);
+        var approved = store.SelectApprovedDomains(projectConfig.Allow);
         var toolDomains = ToolSpec.ListDomains(
-            user.Tools.Concat(store.ApprovedToolsOf(projectConfig.Tools, RecipeCatalog.Embedded)),
+            user.Tools.Concat(store.SelectApprovedTools(projectConfig.Tools, RecipeCatalog.Embedded)),
             RecipeCatalog.Embedded);
         var allowed = Allowlist.Merge(Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")), user.Allow,
                 approved, toolDomains)
