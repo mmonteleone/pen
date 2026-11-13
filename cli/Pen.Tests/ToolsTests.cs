@@ -32,7 +32,7 @@ public class ToolsTests
     }
 
     private static string? Implied(string[] command, params string[] named) =>
-        ToolSpec.ImpliedAgent(command, Catalog, named.Select(Tool))?.ToString();
+        ToolSpec.FindImpliedAgent(command, Catalog, named.Select(Tool))?.ToString();
 
     [Fact]
     public void ACommandNamingAnAgentImpliesItsDefault() =>
@@ -73,7 +73,7 @@ public class ToolsTests
     {
         var command = CommandParser.Parse(args);
         Assert.Equal(CommandKind.Run, command.Kind);
-        return ToolSpec.ImpliedAgent(command.Args, RecipeCatalog.Embedded, command.Tools)?.ToString();
+        return ToolSpec.FindImpliedAgent(command.Args, RecipeCatalog.Embedded, command.Tools)?.ToString();
     }
 
     [Theory]

@@ -8,43 +8,46 @@ using Pen.Tools;
 
 namespace Pen.Images;
 
-/// <summary>
-/// pen-tools:&lt;hash&gt;: pen:latest with a set of tools installed. The hash depends only
-/// on what goes into the image, never on a project, so projects with the same tools share it.
-/// If pen:latest moves during a build, the image gets the name of the old base, which
-/// nothing asks for once the new base is current.
-/// </summary>
+/// <summary>Builds pen-tools:&lt;hash&gt; images: pen:latest with a set of tools installed.</summary>
+/// <remarks>
+/// The hash depends only on what goes into the image, never on a project, so projects with the same tools
+/// share it. If pen:latest moves during a build, the image gets the name of the old base, which nothing asks
+/// for once the new base is current.
+/// </remarks>
 internal static class ToolsImage
 {
     public const string Repository = "pen-tools";
     public const string BaseIdLabel = "pen.base-id";
     private const string MountPoint = "/pen-recipe";
 
+    /// <summary>One recipe to run, with the versions to pass its install.sh.</summary>
     private readonly record struct Install(Recipe Recipe, List<string> Versions);
 
-    /// <summary>
-    /// The recipes to run, in canonical order, each with its versions. The tools may have
-    /// come from .pen/, and their versions reach a Dockerfile and a root script, so they're
-    /// checked again here rather than trusted to have been parsed.
-    /// </summary>
-    private static List<Install> Plan(IEnumerable<ToolSpec> tools, RecipeCatalog catalog)
+    /// <summary>Plans the installs for <paramref name="tools"/>.</summary>
+    /// <returns>The recipes to run, in canonical order, each with its versions.</returns>
+    /// <remarks>
+    /// The tools may have come from .pen/, and their versions reach a Dockerfile and a root script,
+    /// so they're checked again here rather than trusted to have been parsed.
+    /// </remarks>
+    private static List<Install> PlanInstalls(IEnumerable<ToolSpec> tools, RecipeCatalog catalog)
     {
         var plan = new List<Install>();
         foreach (var versions in ToolSpec.Merge(catalog, tools).GroupBy(t => t.Name, StringComparer.Ordinal))
         {
             if (!catalog.TryGet(versions.Key, out var recipe))
-                throw new PenException($"unknown tool \"{Out.Field(versions.Key)}\" ({catalog.Available()})");
-            foreach (var t in versions)
+                throw new PenException($"unknown tool \"{Out.Field(versions.Key)}\" ({catalog.DescribeAvailable()})");
+            foreach (var tool in versions)
             {
-                if (!ToolSpec.IsVersionSyntax(t.Version) || !recipe.AcceptsVersion(t.Version))
-                    throw new PenException($"\"{Out.Field(t.Version)}\" isn't a valid version of {recipe.Name}");
+                if (!ToolSpec.IsVersionSyntax(tool.Version) || !recipe.AcceptsVersion(tool.Version))
+                    throw new PenException($"\"{Out.Field(tool.Version)}\" isn't a valid version of {recipe.Name}");
             }
-            plan.Add(new(recipe, versions.Select(t => t.Version).ToList()));
+            plan.Add(new(recipe, versions.Select(tool => tool.Version).ToList()));
         }
         return plan;
     }
 
-    /// <summary>
+    /// <summary>Generates the Dockerfile that installs <paramref name="plan"/> on pen:latest.</summary>
+    /// <remarks>
     /// One RUN per recipe, in JSON (exec) form: no shell parses it, each version is
     /// one JSON string and so one argument, and Dockerfile variables aren't expanded in it.
     /// Only that recipe's directory is mounted, read-only, so a script can't see another's
@@ -52,12 +55,12 @@ internal static class ToolsImage
     /// scripts rely on. Each recipe's [env] is ENV after all the RUNs, so installs don't
     /// depend on each other, sessions and a .pen/Dockerfile's RUNs get it, and that
     /// Dockerfile or the user's [env] can still override it. A value is literal.
-    /// </summary>
-    private static string Dockerfile(List<Install> plan)
+    /// </remarks>
+    private static string GenerateDockerfile(List<Install> plan)
     {
-        static string Quoted(string s) =>
-            $"\"{JsonEncodedText.Encode(s, JavaScriptEncoder.UnsafeRelaxedJsonEscaping)}\"";
-        static string EnvValue(string s) => $"\"{s
+        static string Quoted(string text) =>
+            $"\"{JsonEncodedText.Encode(text, JavaScriptEncoder.UnsafeRelaxedJsonEscaping)}\"";
+        static string EnvValue(string value) => $"\"{value
             .Replace(@"\", @"\\", StringComparison.Ordinal)
             .Replace("\"", "\\\"", StringComparison.Ordinal)
             .Replace("$", @"\$", StringComparison.Ordinal)}\"";
@@ -76,22 +79,25 @@ internal static class ToolsImage
         return text.ToString();
     }
 
-    internal static string Dockerfile(IEnumerable<ToolSpec> tools, RecipeCatalog catalog) =>
-        Dockerfile(Plan(tools, catalog));
+    /// <summary>Generates the Dockerfile that installs <paramref name="tools"/> on pen:latest.</summary>
+    internal static string GenerateDockerfile(IEnumerable<ToolSpec> tools, RecipeCatalog catalog) =>
+        GenerateDockerfile(PlanInstalls(tools, catalog));
 
-    /// <summary>
-    /// The image's name, whatever order the tools are in: from the base image's ID,
-    /// the canonical list, the recipes' files and the Dockerfile generated from them.
-    /// </summary>
-    internal static string Tag(string baseId, IEnumerable<ToolSpec> tools, RecipeCatalog catalog)
+    /// <summary>Computes the name of the image for <paramref name="tools"/> on <paramref name="baseId"/>.</summary>
+    /// <returns>pen-tools:&lt;hash&gt;, the same whatever order the tools are in.</returns>
+    /// <remarks>
+    /// The hash covers the base image's ID, the canonical list, the recipes' files and the Dockerfile
+    /// generated from them.
+    /// </remarks>
+    internal static string ComputeTag(string baseId, IEnumerable<ToolSpec> tools, RecipeCatalog catalog)
     {
-        var plan = Plan(tools, catalog);
-        using var h = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var plan = PlanInstalls(tools, catalog);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         void Add(string kind, string value)
         {
             var bytes = Encoding.UTF8.GetBytes(value);
-            h.AppendData(Encoding.UTF8.GetBytes($"{kind}\0{bytes.Length}\0"));
-            h.AppendData(bytes);
+            hash.AppendData(Encoding.UTF8.GetBytes($"{kind}\0{bytes.Length}\0"));
+            hash.AppendData(bytes);
         }
         Add("base", baseId);
         foreach (var (recipe, versions) in plan)
@@ -102,14 +108,14 @@ internal static class ToolsImage
             Add(RecipeCatalog.SettingsFile, recipe.Settings);
             Add(RecipeCatalog.InstallFile, recipe.Script);
         }
-        Add("Dockerfile", Dockerfile(plan));
-        return $"{Repository}:{Convert.ToHexStringLower(h.GetHashAndReset())[..16]}";
+        Add("Dockerfile", GenerateDockerfile(plan));
+        return $"{Repository}:{Convert.ToHexStringLower(hash.GetHashAndReset())[..16]}";
     }
 
     /// <summary>Writes the tar build context: the Dockerfile and each recipe's script.</summary>
     internal static void WriteContext(Stream output, IEnumerable<ToolSpec> tools, RecipeCatalog catalog)
     {
-        var plan = Plan(tools, catalog);
+        var plan = PlanInstalls(tools, catalog);
         using var tar = new TarWriter(output, TarEntryFormat.Ustar, leaveOpen: true);
         void Write(string path, string text, UnixFileMode mode) =>
             tar.WriteEntry(new UstarTarEntry(TarEntryType.RegularFile, path)
@@ -118,13 +124,14 @@ internal static class ToolsImage
                 Mode = mode,
                 ModificationTime = DateTimeOffset.UnixEpoch,
             });
-        Write("Dockerfile", Dockerfile(plan), (UnixFileMode)0b110_100_100);
+        Write("Dockerfile", GenerateDockerfile(plan), (UnixFileMode)0b110_100_100);
         foreach (var (recipe, _) in plan)
             Write(recipe.InstallPath, recipe.Script, (UnixFileMode)0b111_101_101);
     }
 
-    /// <summary>pen:latest's image ID, or null if it can't be read.</summary>
-    internal static string? CurrentBaseId()
+    /// <summary>Reads the image ID of the current pen:latest.</summary>
+    /// <returns>The ID, or null if it can't be read.</returns>
+    internal static string? ReadCurrentBaseId()
     {
         var ids = Proc.Capture("docker", ["image", "inspect", "--format", "{{.Id}}", Image.Name]);
         var id = ids.StandardOutput.Trim();
@@ -132,18 +139,19 @@ internal static class ToolsImage
     }
 
     /// <summary>
-    /// The image to run for these tools, built if its tag doesn't exist, or always without
-    /// the build cache with <paramref name="noCache"/> (pen upgrade --clean). pen:latest with
-    /// no tools. pen:latest has to be up to date already (<see cref="Image.EnsureCurrent"/>).
+    /// Builds the tools image for <paramref name="tools"/> if its tag doesn't exist, or always, without the
+    /// build cache, with <paramref name="noCache"/> (pen upgrade --clean).
     /// </summary>
+    /// <returns>The image to run: the tools image, or pen:latest with no tools.</returns>
+    /// <remarks>pen:latest has to be up to date already (<see cref="Image.EnsureCurrent"/>).</remarks>
     public static string Ensure(IReadOnlyList<ToolSpec> tools, RecipeCatalog catalog, bool noCache = false)
     {
         if (tools.Count == 0)
             return Image.Name;
-        var baseId = CurrentBaseId() ?? throw new PenException("can't " +
+        var baseId = ReadCurrentBaseId() ?? throw new PenException("can't " +
             $"read the ID of {Image.Name}: is Docker running?");
 
-        var name = Tag(baseId, tools, catalog);
+        var name = ComputeTag(baseId, tools, catalog);
         if (!noCache
             && Proc.Capture("docker", ["image", "inspect", "--format", "{{.Id}}", name]).ExitStatus.ExitCode == 0)
         {

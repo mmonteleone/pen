@@ -233,7 +233,7 @@ internal static class AllowCommand
         // What a session would get: an unapproved domain in .pen/ stays listed.
         var store = TrustStore.For(host, project);
         var approved = store.ApprovedOf(projectConfig.Allow);
-        var toolDomains = ToolSpec.DomainsOf(
+        var toolDomains = ToolSpec.ListDomains(
             user.Tools.Concat(store.ApprovedToolsOf(projectConfig.Tools, RecipeCatalog.Embedded)),
             RecipeCatalog.Embedded);
         var allowed = Allowlist.Merge(Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")), user.Allow,

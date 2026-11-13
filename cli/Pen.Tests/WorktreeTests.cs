@@ -415,9 +415,9 @@ public class WorktreeTests
         var (repo, wt, _) = RepoWithWorktree(t);
         var main = Project.Resolve(repo, t.Host());
         var w = Project.Resolve(wt, t.Host());
-        Assert.Equal($"{main.Key}:latest", Image.ProjectLayerName(main));
-        Assert.Equal($"{main.Key}-{Project.HashPath(wt)}:latest", Image.ProjectLayerName(w));
-        Assert.Equal($"{Project.ComputeKey(t.Sub("plain"))}:latest", Image.ProjectLayerName(Project.Resolve(t.Sub("plain"), t.Host())));
+        Assert.Equal($"{main.Key}:latest", Image.GetProjectLayerName(main));
+        Assert.Equal($"{main.Key}-{Project.HashPath(wt)}:latest", Image.GetProjectLayerName(w));
+        Assert.Equal($"{Project.ComputeKey(t.Sub("plain"))}:latest", Image.GetProjectLayerName(Project.Resolve(t.Sub("plain"), t.Host())));
     }
 
     [Fact]
@@ -428,11 +428,11 @@ public class WorktreeTests
         var main = Project.Resolve(repo, t.Host());
         var w = Project.Resolve(wt, t.Host());
         const string one = "pen-tools:0123456789abcdef", other = "pen-tools:fedcba9876543210";
-        Assert.Equal($"{main.Key}:0123456789abcdef", Image.ProjectLayerName(main, one));
-        Assert.Equal($"{main.Key}-{Project.HashPath(wt)}:0123456789abcdef", Image.ProjectLayerName(w, one));
-        Assert.Equal($"{main.Key}:fedcba9876543210", Image.ProjectLayerName(main, other));
-        Assert.Equal($"{main.Key}:latest", Image.ProjectLayerName(main, Image.Name));
-        Assert.True(Prune.IsImageOf(main.Key, Image.ProjectLayerName(main, one)));
-        Assert.True(Prune.IsImageOf(main.Key, Image.ProjectLayerName(w, one)));
+        Assert.Equal($"{main.Key}:0123456789abcdef", Image.GetProjectLayerName(main, one));
+        Assert.Equal($"{main.Key}-{Project.HashPath(wt)}:0123456789abcdef", Image.GetProjectLayerName(w, one));
+        Assert.Equal($"{main.Key}:fedcba9876543210", Image.GetProjectLayerName(main, other));
+        Assert.Equal($"{main.Key}:latest", Image.GetProjectLayerName(main, Image.Name));
+        Assert.True(Prune.IsImageOf(main.Key, Image.GetProjectLayerName(main, one)));
+        Assert.True(Prune.IsImageOf(main.Key, Image.GetProjectLayerName(w, one)));
     }
 }

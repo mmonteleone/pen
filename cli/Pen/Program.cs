@@ -2,7 +2,6 @@ using System.Reflection;
 using Pen.CommandLine;
 using Pen.Commands;
 using Pen.Configuration;
-using Pen.Images;
 using Pen.Platform;
 using Pen.Projects;
 using Pen.Sessions;
@@ -73,7 +72,7 @@ internal static class Program
             case CommandKind.Help:
                 return WriteHelp(command);
             case CommandKind.ToolList:
-                Console.Out.Write(RecipeCatalog.Embedded.Listing());
+                Console.Out.Write(RecipeCatalog.Embedded.FormatListing());
                 return 0;
             case CommandKind.Allow when command.Defaults:
                 Console.Out.Write(AllowCommand.Defaults());
@@ -97,8 +96,7 @@ internal static class Program
         switch (command.Kind)
         {
             case CommandKind.Upgrade:
-                Image.Upgrade(host, user, command.Clean);
-                return 0;
+                return new UpgradeCommand(host, user, RecipeCatalog.Embedded).Run(command.Clean);
             case CommandKind.Allow when command.Args.Count > 0:
                 return AllowCommand.Add(host, command.Args, command.Global);
         }

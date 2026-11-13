@@ -63,7 +63,7 @@ internal static class TrustGate
         foreach (var tool in projectConfig.Tools.Where(t => !asked.Contains(t)))
         {
             var isNew = !store.CoversTool(tool);
-            var domains = ToolSpec.DomainsOf([tool], catalog).Distinct(StringComparer.Ordinal)
+            var domains = ToolSpec.ListDomains([tool], catalog).Distinct(StringComparer.Ordinal)
                 .Where(d => isNew || !store.CoversToolDomain(tool, d)).ToList();
             if (isNew || domains.Count > 0)
                 requests.Add(new(tool, isNew, domains));

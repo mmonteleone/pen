@@ -29,8 +29,8 @@ public class RecipeTests
     {
         Assert.True(RecipeCatalog.Embedded.TryGet("pen-test", out var recipe));
         Assert.True(recipe.Hidden);
-        Assert.DoesNotContain("pen-test", RecipeCatalog.Embedded.Listing());
-        Assert.DoesNotContain("pen-test", RecipeCatalog.Embedded.Available());
+        Assert.DoesNotContain("pen-test", RecipeCatalog.Embedded.FormatListing());
+        Assert.DoesNotContain("pen-test", RecipeCatalog.Embedded.DescribeAvailable());
     }
 
     [Fact]
@@ -40,7 +40,7 @@ public class RecipeTests
         Assert.False(recipe.Hidden);
         Assert.True(recipe.Multiple);
         Assert.Equal("10", recipe.Default);
-        Assert.Contains("dotnet", RecipeCatalog.Embedded.Available());
+        Assert.Contains("dotnet", RecipeCatalog.Embedded.DescribeAvailable());
         Assert.Equal(
             [".nuget.org", "builds.dotnet.microsoft.com", "aka.ms", "www.microsoft.com", "crl3.digicert.com", "ocsp.digicert.com"],
             recipe.Allow);
@@ -87,7 +87,7 @@ public class RecipeTests
     {
         Assert.True(RecipeCatalog.Embedded.TryGet(name, out var recipe), name);
         Assert.False(recipe.Hidden);
-        Assert.Contains(name, RecipeCatalog.Embedded.Available());
+        Assert.Contains(name, RecipeCatalog.Embedded.DescribeAvailable());
         return recipe;
     }
 
@@ -488,8 +488,8 @@ public class RecipeTests
             ("tools/go/install.sh", "#!/bin/sh\n"),
             ("tools/hid/tool.toml", "default = \"1\"\nversion = '.*'\nhidden = true\n"),
             ("tools/hid/install.sh", "#!/bin/sh\n"));
-        Assert.Equal("dotnet  default 10, several versions can be installed together\ngo      default 1.24\n", catalog.Listing());
-        Assert.Equal("available: dotnet, go", catalog.Available());
+        Assert.Equal("dotnet  default 10, several versions can be installed together\ngo      default 1.24\n", catalog.FormatListing());
+        Assert.Equal("available: dotnet, go", catalog.DescribeAvailable());
     }
 
     [Fact]
@@ -521,28 +521,28 @@ public class RecipeTests
             ("tools/go/install.sh", "#!/bin/sh\n"),
             ("tools/hid/tool.toml", "default = \"1\"\nversion = '.*'\nkind = \"agent\"\nhidden = true\n"),
             ("tools/hid/install.sh", "#!/bin/sh\n"));
-        Assert.Equal("agents:\nai     default latest\nrobot  default 2\n\ntools:\ngo  default 1.24\n", catalog.Listing());
-        Assert.Equal("available: ai, go, robot", catalog.Available());
+        Assert.Equal("agents:\nai     default latest\nrobot  default 2\n\ntools:\ngo  default 1.24\n", catalog.FormatListing());
+        Assert.Equal("available: ai, go, robot", catalog.DescribeAvailable());
     }
 
     [Fact]
     public void AnEmptyGroupIsLeftOut()
     {
         var agents = LoadToml(Good + "kind = \"agent\"\n");
-        Assert.Equal("agents:\nx  default 10\n", agents.Listing());
+        Assert.Equal("agents:\nx  default 10\n", agents.FormatListing());
         var hiddenTools = Load(
             ("tools/ai/tool.toml", "default = \"latest\"\nversion = '.*'\nkind = \"agent\"\n"),
             ("tools/ai/install.sh", "#!/bin/sh\n"),
             ("tools/hid/tool.toml", "default = \"1\"\nversion = '.*'\nhidden = true\n"),
             ("tools/hid/install.sh", "#!/bin/sh\n"));
-        Assert.Equal("agents:\nai  default latest\n", hiddenTools.Listing());
+        Assert.Equal("agents:\nai  default latest\n", hiddenTools.FormatListing());
     }
 
     [Fact]
     public void WithOnlyHiddenRecipesTheListingSaysSo()
     {
         var catalog = LoadToml(Good + "hidden = true\n");
-        Assert.Equal("no tools are available yet\n", catalog.Listing());
-        Assert.Equal("none are available yet", catalog.Available());
+        Assert.Equal("no tools are available yet\n", catalog.FormatListing());
+        Assert.Equal("none are available yet", catalog.DescribeAvailable());
     }
 }

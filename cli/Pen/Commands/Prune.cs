@@ -33,7 +33,7 @@ internal static partial class Prune
     {
         var images = ListImages();
         var entries = Find(host, ListVolumes(), images);
-        var staleTools = StaleToolsImages(images, ToolsImage.CurrentBaseId(), ReadBaseId);
+        var staleTools = StaleToolsImages(images, ToolsImage.ReadCurrentBaseId(), ReadBaseId);
         if (entries.Count == 0 && staleTools.Count == 0)
         {
             Out.WriteLine("nothing to prune: no project has volumes or state");
@@ -194,7 +194,7 @@ internal static partial class Prune
     /// <summary>
     /// Whether <paramref name="image"/> (repository:tag) is a project layer of
     /// <paramref name="key"/>: &lt;key&gt;, or &lt;key&gt;-&lt;hash&gt; for a linked worktree,
-    /// tagged latest or with a tools image's hash (<see cref="Image.ProjectLayerName"/>).
+    /// tagged latest or with a tools image's hash (<see cref="Image.GetProjectLayerName"/>).
     /// </summary>
     internal static bool IsImageOf(string key, string image) =>
         image.StartsWith(key, StringComparison.Ordinal) && LayerSuffix().IsMatch(image[key.Length..]);

@@ -124,7 +124,7 @@ internal sealed class TrustStore
 
     /// <summary>The ones among a project's tools approved along with every domain they bring.</summary>
     public List<ToolSpec> ApprovedToolsOf(IEnumerable<ToolSpec> tools, RecipeCatalog catalog) =>
-        tools.Where(t => CoversTool(t) && ToolSpec.DomainsOf([t], catalog).All(d => CoversToolDomain(t, d))).ToList();
+        tools.Where(t => CoversTool(t) && ToolSpec.ListDomains([t], catalog).All(d => CoversToolDomain(t, d))).ToList();
 
     /// <summary>The approved ones among a project's allow list: all of it that may reach an allowlist.</summary>
     public List<string> ApprovedOf(IEnumerable<string> allow) => allow.Where(CoversDomain).ToList();

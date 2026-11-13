@@ -49,7 +49,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         RepoGuard.CheckAtStart(project.Dir);
         // A command naming an agent brings it, like --tool, unless a tool from user config, .pen/ or --tool already
         // names it.
-        if (ToolSpec.ImpliedAgent(command, catalog, [.. user.Tools, .. projectConfig.Tools, .. flagTools ?? []])
+        if (ToolSpec.FindImpliedAgent(command, catalog, [.. user.Tools, .. projectConfig.Tools, .. flagTools ?? []])
             is { } implied)
         {
             flagTools = [.. flagTools ?? [], implied];
@@ -70,7 +70,7 @@ internal sealed class Session(HostEnv host, Project project, Config user, Config
         var rootless = Docker.IsRootless();
         var owner = GitHub.FindProjectOwner(project, projectConfig);
         var token = GitHub.SelectToken(owner, user, RuntimeDir, host);
-        var toolDomains = ToolSpec.DomainsOf(tools, catalog);
+        var toolDomains = ToolSpec.ListDomains(tools, catalog);
         var allowlist = Allowlist.Merge(Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")), user.Allow,
             projectConfig.Allow, toolDomains);
 

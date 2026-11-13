@@ -1,33 +1,33 @@
-using Pen.Configuration;
+using System.Diagnostics;
 using Pen.Platform;
 using Pen.Projects;
-using Pen.Tools;
 using Pen.Trust;
 
 namespace Pen.Images;
 
-/// <summary>
-/// pen:latest, built from the embedded image/ files and labeled with their
-/// hash, so a launch can tell when it's missing or stale.
-/// </summary>
+/// <summary>Builds pen:latest from the embedded image/ files, and project layers on top of it.</summary>
+/// <remarks>
+/// pen:latest is labeled with the hash of its image files, so a launch can tell when it's missing or stale.
+/// </remarks>
 internal static class Image
 {
     public const string Name = "pen:latest";
     public const string HashLabel = "pen.image-hash";
 
-    /// <summary>The label of the current image, or null if there's no image.</summary>
-    public static string? CurrentHash()
+    /// <summary>Reads the image-files hash label of the current pen:latest.</summary>
+    /// <returns>The label, or null if there's no image.</returns>
+    public static string? ReadCurrentHash()
     {
-        var r = Proc.Capture("docker",
+        var result = Proc.Capture("docker",
             ["image", "inspect", "--format", $"{{{{ index .Config.Labels \"{HashLabel}\" }}}}", Name]);
-        return r.ExitStatus.ExitCode == 0 ? r.StandardOutput.Trim() : null;
+        return result.ExitStatus.ExitCode == 0 ? result.StandardOutput.Trim() : null;
     }
 
     /// <summary>Builds pen:latest first when it's missing or doesn't match this CLI's image files.</summary>
     public static void EnsureCurrent()
     {
         var want = Embedded.ComputeImageHash();
-        var have = CurrentHash();
+        var have = ReadCurrentHash();
         if (have == want)
             return;
         Out.WriteLine(have == null
@@ -36,6 +36,11 @@ internal static class Image
         Build(want, refresh: null, pull: false, noCache: false);
     }
 
+    /// <summary>Builds pen:latest from the embedded image context, labeled with <paramref name="hash"/>.</summary>
+    /// <param name="hash">The hash of the image files, for the label.</param>
+    /// <param name="refresh">The PEN_REFRESH build argument, which gives the base a new ID, or null.</param>
+    /// <param name="pull">Whether to pull a newer base image (--pull).</param>
+    /// <param name="noCache">Whether to build without the cache (--no-cache).</param>
     public static void Build(string hash, string? refresh, bool pull, bool noCache)
     {
         var args = new List<string> { "build", "-t", Name, "--label", $"{HashLabel}={hash}" };
@@ -47,40 +52,46 @@ internal static class Image
             args.AddRange(["--build-arg", $"PEN_REFRESH={refresh}"]);
         args.Add("-");
 
-        var psi = Proc.CreateStartInfo("docker", args);
-        psi.RedirectStandardInput = true;
-        using var p = Proc.Start(psi);
+        var startInfo = Proc.CreateStartInfo("docker", args);
+        startInfo.RedirectStandardInput = true;
+        using var process = Proc.Start(startInfo);
         try
         {
-            using (var stdin = p.StandardInput.BaseStream)
+            using (var stdin = process.StandardInput.BaseStream)
                 Embedded.WriteImageContext(stdin);
         }
         catch (IOException)
         {
             // docker exited before reading the whole context; its exit code says why.
         }
-        p.WaitForExit();
-        if (p.ExitCode != 0)
-            throw new PenException($"building {Name} failed (docker build exited {p.ExitCode})");
+        process.WaitForExit();
+        if (process.ExitCode != 0)
+            throw new PenException($"building {Name} failed (docker build exited {process.ExitCode})");
     }
 
     /// <summary>
-    /// The project layer: .pen/Dockerfile (FROM pen:latest), built with .pen/
-    /// as its context as <see cref="ProjectLayerName"/>. Built on every launch; the
-    /// cache makes that near-instant, and a rebuilt pen:latest invalidates it.
-    /// Returns the image to run, or null when the project has no layer.
-    /// Output is shown as <see cref="RunBuild"/> does.
+    /// Builds the project layer, .pen/Dockerfile (FROM pen:latest) with .pen/ as its context, as
+    /// <see cref="GetProjectLayerName"/>, with its output shown as <see cref="RunBuild"/> does.
+    /// </summary>
+    /// <param name="host">The host user's environment.</param>
+    /// <param name="project">The project whose .pen/ to build.</param>
+    /// <param name="noCache">Whether to build without the cache (--no-cache).</param>
+    /// <param name="baseImage">The image that stands in for pen:latest in the Dockerfile, which stays as it is.</param>
+    /// <returns>The image to run, or null when the project has no layer.</returns>
+    /// <remarks>
+    /// <para>
+    /// It's built on every launch; the cache makes that near-instant, and a rebuilt pen:latest invalidates it.
+    /// </para>
     /// <para>
     /// Docker only ever reads a private copy, whose hash has to be the approved
     /// one: a session in the main checkout can write to an in-tree worktree's .pen/
     /// at any moment, so checking .pen/ itself would prove nothing about the build.
     /// </para>
     /// <para>
-    /// <paramref name="baseImage"/> stands in for pen:latest in the Dockerfile, which
-    /// stays as it is. A tag says nothing about which .pen/ made it, so an existing
-    /// image must never skip the build: only building is what ties it to the approved copy.
+    /// A tag says nothing about which .pen/ made it, so an existing image must never
+    /// skip the build: only building is what ties it to the approved copy.
     /// </para>
-    /// </summary>
+    /// </remarks>
     public static string? EnsureProjectLayer(
         HostEnv host,
         Project project,
@@ -91,16 +102,9 @@ internal static class Image
         if (!File.Exists(dockerfile))
             return null;
         using var context = LayerContext.Take(host, project);
-        if (context.Result.Hash == null)
-            throw new PenException($"can't build from .pen/: {context.Result.Problem}");
-        if (context.Result.Hash != TrustStore.For(host, project).LayerHash)
-        {
-            throw new PenException(".pen/ isn't what was approved (it may " +
-                "have just changed): review it with pen trust, then rerun");
-        }
+        RequireApproved(context, host, project);
 
-        var name = ProjectLayerName(project, baseImage);
-
+        var name = GetProjectLayerName(project, baseImage);
         var args = new List<string>
         {
             "build", "--progress", "plain", "-t", name, "--label", $"pen.project={project.Key}"
@@ -115,80 +119,74 @@ internal static class Image
         return name;
     }
 
-    /// <summary>
-    /// Runs docker build with <paramref name="args"/>, with its output hidden unless
-    /// the build is slow, when <paramref name="announce"/> and the output are shown,
-    /// or fails, when the end of the output and <paramref name="failure"/> are.
-    /// <paramref name="context"/>, if given, writes the tar context to its stdin.
-    /// </summary>
-    internal static void RunBuild(IReadOnlyList<string> args, Action<Stream>? context, string announce, string failure)
+    /// <summary>Throws unless the private copy of .pen/ in <paramref name="context"/> is the approved one.</summary>
+    private static void RequireApproved(LayerContext context, HostEnv host, Project project)
     {
-        var psi = Proc.CreateStartInfo("docker", args);
-        psi.RedirectStandardOutput = psi.RedirectStandardError = true;
-        psi.RedirectStandardInput = context != null;
-
-        var gate = new object();
-        var buffered = new List<string>();
-        bool live = false;
-        void OnLine(string? line)
+        if (context.Result.Hash == null)
+            throw new PenException($"can't build from .pen/: {context.Result.Problem}");
+        if (context.Result.Hash != TrustStore.For(host, project).LayerHash)
         {
-            if (line == null)
-                return;
-            lock (gate)
-            {
-                if (live)
-                    Out.WriteRaw(line);
-                else
-                    buffered.Add(line);
-            }
-        }
-
-        using var p = Proc.Start(psi);
-        p.OutputDataReceived += (_, e) => OnLine(e.Data);
-        p.ErrorDataReceived += (_, e) => OnLine(e.Data);
-        p.BeginOutputReadLine();
-        p.BeginErrorReadLine();
-        if (context != null)
-        {
-            try
-            {
-                using var stdin = p.StandardInput.BaseStream;
-                context(stdin);
-            }
-            catch (IOException)
-            {
-                // docker exited before reading the whole context; its exit code says why.
-            }
-        }
-        if (!p.WaitForExit(TimeSpan.FromSeconds(1.5)))
-        {
-            lock (gate)
-            {
-                Out.WriteLine(announce);
-                foreach (var l in buffered)
-                    Out.WriteRaw(l);
-                buffered.Clear();
-                live = true;
-            }
-        }
-        p.WaitForExit(); // also drains the output
-        if (p.ExitCode != 0)
-        {
-            lock (gate)
-            {
-                foreach (var l in buffered.TakeLast(40))
-                    Out.WriteRaw(l);
-            }
-            throw new PenException($"{failure} (docker build exited {p.ExitCode})");
+            throw new PenException(".pen/ isn't what was approved (it may " +
+                "have just changed): review it with pen trust, then rerun");
         }
     }
 
     /// <summary>
-    /// &lt;key&gt; for the main checkout (or a plain dir), and &lt;key&gt;-&lt;hash(dir)&gt;
-    /// for a linked worktree, whose .pen/ is its own. Tagged latest on pen:latest, and
-    /// on a tools image with that image's hash, so tool sets and bases don't share a tag.
+    /// Runs docker build with <paramref name="args"/>, with its output hidden unless the build is slow,
+    /// when <paramref name="announce"/> and the output are shown, or fails, when the end of the output
+    /// and <paramref name="failure"/> are.
     /// </summary>
-    public static string ProjectLayerName(Project project, string baseImage = Name)
+    /// <param name="args">The docker arguments.</param>
+    /// <param name="context">Writes the tar context to docker's stdin, if given.</param>
+    /// <param name="announce">The line shown before the output of a slow build.</param>
+    /// <param name="failure">The start of the error when the build fails.</param>
+    internal static void RunBuild(IReadOnlyList<string> args, Action<Stream>? context, string announce, string failure)
+    {
+        var startInfo = Proc.CreateStartInfo("docker", args);
+        startInfo.RedirectStandardOutput = true;
+        startInfo.RedirectStandardError = true;
+        startInfo.RedirectStandardInput = context != null;
+
+        var output = new BuildOutput();
+        using var process = Proc.Start(startInfo);
+        process.OutputDataReceived += (_, e) => output.Add(e.Data);
+        process.ErrorDataReceived += (_, e) => output.Add(e.Data);
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+        if (context != null)
+            WriteContext(process, context);
+        if (!process.WaitForExit(TimeSpan.FromSeconds(1.5)))
+            output.GoLive(announce);
+        process.WaitForExit(); // also drains the output
+        if (process.ExitCode != 0)
+        {
+            output.WriteTail();
+            throw new PenException($"{failure} (docker build exited {process.ExitCode})");
+        }
+    }
+
+    /// <summary>Writes the build context to the stdin of <paramref name="process"/>.</summary>
+    private static void WriteContext(Process process, Action<Stream> context)
+    {
+        try
+        {
+            using var stdin = process.StandardInput.BaseStream;
+            context(stdin);
+        }
+        catch (IOException)
+        {
+            // docker exited before reading the whole context; its exit code says why.
+        }
+    }
+
+    /// <summary>Gets the name of the project layer built on <paramref name="baseImage"/>.</summary>
+    /// <returns>
+    /// &lt;key&gt; for the main checkout (or a plain dir), and &lt;key&gt;-&lt;hash(dir)&gt; for a linked
+    /// worktree, whose .pen/ is its own; tagged latest on pen:latest, and on a tools image with that
+    /// image's hash.
+    /// </returns>
+    /// <remarks>The tag keeps tool sets and bases from sharing a project layer.</remarks>
+    public static string GetProjectLayerName(Project project, string baseImage = Name)
     {
         var tag = baseImage == Name ? "latest" : baseImage[(baseImage.LastIndexOf(':') + 1)..];
         return project.Dir == project.RepoDir
@@ -196,108 +194,48 @@ internal static class Image
             : $"{project.Key}-{Project.HashPath(project.Dir)}:{tag}";
     }
 
-    /// <summary>
-    /// The tools pen upgrade rebuilds: what a session started here with no --tool would have,
-    /// less what isn't approved, as pen upgrade doesn't ask. Outside a project, the user's alone.
-    /// A problem with the project's only costs its tools, with a note.
-    /// </summary>
-    internal static IReadOnlyList<ToolSpec> UpgradeTools(
-        HostEnv host,
-        Project? project,
-        Config user,
-        RecipeCatalog? recipes = null)
+    /// <summary>Holds a build's output lines: held back while the build is quick, shown once it's slow.</summary>
+    private sealed class BuildOutput
     {
-        var catalog = recipes ?? RecipeCatalog.Embedded;
-        if (project == null)
-            return user.Tools;
-        Config projectConfig;
-        try
+        private readonly object _gate = new();
+        private readonly List<string> _buffered = [];
+        private bool _live;
+
+        /// <summary>Shows <paramref name="line"/>, or holds it back while the build isn't live.</summary>
+        public void Add(string? line)
         {
-            projectConfig = Config.Load(project.PenDir, ".pen", ConfigKind.Project);
-        }
-        catch (PenException e)
-        {
-            Out.WriteLine($"skipping this project's tools: {e.Message}");
-            return user.Tools;
-        }
-        var unapproved = TrustGate.UnapprovedTools(projectConfig, user.Tools, TrustStore.For(host, project), catalog)
-            .Select(r => r.Tool)
-            .ToList();
-        if (unapproved.Count > 0)
-        {
-            Out.WriteLine("skipping tools that .pen/ asks for and aren't approved (pen trust reviews " +
-                $"them): {string.Join(' ', unapproved.Select(t => Out.Field(t.ToString())))}");
+            if (line == null)
+                return;
+            lock (_gate)
+            {
+                if (_live)
+                    Out.WriteRaw(line);
+                else
+                    _buffered.Add(line);
+            }
         }
 
-        if (ToolSpec.TryCanonicalize(user.Tools.Concat(projectConfig.Tools.Except(unapproved)), catalog,
-            out var tools) is { } conflict)
+        /// <summary>Shows <paramref name="announce"/> and the lines held back, and every line from now on.</summary>
+        public void GoLive(string announce)
         {
-            Out.WriteLine($"skipping this project's tools: {conflict}");
-            return user.Tools;
+            lock (_gate)
+            {
+                Out.WriteLine(announce);
+                foreach (var line in _buffered)
+                    Out.WriteRaw(line);
+                _buffered.Clear();
+                _live = true;
+            }
         }
-        return tools;
-    }
 
-    /// <summary>
-    /// Rebuilds the project's layer on <paramref name="baseImage"/>,
-    /// if it has one and it's approved; pen upgrade doesn't ask.
-    /// </summary>
-    internal static void UpgradeProjectLayer(HostEnv host, Project project, bool clean, string baseImage = Name)
-    {
-        if (!TrustGate.HasDockerfile(project))
-            return;
-        if (TrustGate.UnapprovedLayer(project, TrustStore.For(host, project)) != null)
+        /// <summary>Shows the last 40 lines still held back, for a failed build.</summary>
+        public void WriteTail()
         {
-            Out.WriteLine("skipping the project layer: .pen/ isn't approved (pen trust reviews it)");
-            return;
+            lock (_gate)
+            {
+                foreach (var line in _buffered.TakeLast(40))
+                    Out.WriteRaw(line);
+            }
         }
-        Out.WriteLine($"rebuilding the project layer {ProjectLayerName(project, baseImage)}");
-        EnsureProjectLayer(host, project, noCache: clean, baseImage: baseImage);
-    }
-
-    /// <summary>
-    /// pen upgrade: a newer base image, always with a new ID (PEN_REFRESH sets its last
-    /// layer), so every tools image, the agents' included, rebuilds on it: the ones from
-    /// config here, any other on its next use. Then newer sidecar images.
-    /// </summary>
-    public static void Upgrade(HostEnv host, Config user, bool clean)
-    {
-        Out.WriteLine($"upgrading {Name}{(clean ? " from scratch (--clean)" : "")}");
-        Build(Embedded.ComputeImageHash(), refresh: DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(), pull: true,
-            noCache: clean);
-
-        // The project layer too, when run in a project that has one.
-        Project? project = null;
-        try
-        {
-            project = Project.Resolve(StartDir.Get(), host);
-        }
-        catch (PenException) { }
-        var tools = ToolsImage.Ensure(UpgradeTools(host, project, user), RecipeCatalog.Embedded, noCache: clean);
-        if (project != null)
-            UpgradeProjectLayer(host, project, clean, tools);
-
-        Out.WriteLine("pulling sidecar images");
-        // compose reads the embedded compose.yaml from stdin. Its required
-        // variables only need values for interpolation; nothing is started.
-        var env = new Dictionary<string, string>
-        {
-            ["PROJECT_DIR"] = "/nonexistent",
-            ["PEN_PROJECT"] = "pen-upgrade",
-            ["PEN_UID"] = "1",
-            ["PEN_GID"] = "1",
-            ["NUGET_PACKAGES"] = "/nonexistent",
-            ["PEN_SEED"] = "/nonexistent",
-        };
-        var psi = Proc.CreateStartInfo("docker",
-            ["compose", "--profile", "docker", "-f", "-", "-p", "pen-upgrade", "pull", "proxy", "dind"], env);
-        psi.RedirectStandardInput = true;
-        using var p = Proc.Start(psi);
-        using (var stdin = p.StandardInput)
-            stdin.Write(Embedded.ReadText("compose.yaml"));
-        p.WaitForExit();
-        if (p.ExitCode != 0)
-            throw new PenException($"docker compose pull failed (exit {p.ExitCode})");
-        Out.WriteLine("upgrade done");
     }
 }

@@ -25,21 +25,21 @@ public class ToolsImageTests
     [Fact]
     public void TheTagIgnoresOrderAndDuplicates()
     {
-        var want = ToolsImage.Tag(BaseId, Tools, Catalog());
+        var want = ToolsImage.ComputeTag(BaseId, Tools, Catalog());
         Assert.Matches("^pen-tools:[0-9a-f]{16}$", want);
-        Assert.Equal(want, ToolsImage.Tag(BaseId, [Tools[2], Tools[1], Tools[0]], Catalog()));
-        Assert.Equal(want, ToolsImage.Tag(BaseId, [Tools[1], Tools[2], Tools[0], Tools[1]], Catalog()));
+        Assert.Equal(want, ToolsImage.ComputeTag(BaseId, [Tools[2], Tools[1], Tools[0]], Catalog()));
+        Assert.Equal(want, ToolsImage.ComputeTag(BaseId, [Tools[1], Tools[2], Tools[0], Tools[1]], Catalog()));
     }
 
     [Fact]
     public void TheTagChangesWithTheBaseTheToolsAndTheRecipeFiles()
     {
-        var want = ToolsImage.Tag(BaseId, Tools, Catalog());
-        Assert.NotEqual(want, ToolsImage.Tag("sha256:bbbb", Tools, Catalog()));
-        Assert.NotEqual(want, ToolsImage.Tag(BaseId, Tools[..2], Catalog()));
-        Assert.NotEqual(want, ToolsImage.Tag(BaseId, [Tools[0], new("a", "9"), Tools[2]], Catalog()));
-        Assert.NotEqual(want, ToolsImage.Tag(BaseId, Tools, Catalog(script: "#!/bin/sh\necho changed\n")));
-        Assert.NotEqual(want, ToolsImage.Tag(BaseId, Tools, Catalog(settings: "default = \"1\"\nversion = '^\\d+$'\nmultiple = true\nallow = [\"example.org\"]\n")));
+        var want = ToolsImage.ComputeTag(BaseId, Tools, Catalog());
+        Assert.NotEqual(want, ToolsImage.ComputeTag("sha256:bbbb", Tools, Catalog()));
+        Assert.NotEqual(want, ToolsImage.ComputeTag(BaseId, Tools[..2], Catalog()));
+        Assert.NotEqual(want, ToolsImage.ComputeTag(BaseId, [Tools[0], new("a", "9"), Tools[2]], Catalog()));
+        Assert.NotEqual(want, ToolsImage.ComputeTag(BaseId, Tools, Catalog(script: "#!/bin/sh\necho changed\n")));
+        Assert.NotEqual(want, ToolsImage.ComputeTag(BaseId, Tools, Catalog(settings: "default = \"1\"\nversion = '^\\d+$'\nmultiple = true\nallow = [\"example.org\"]\n")));
     }
 
     [Fact]
@@ -53,22 +53,22 @@ public class ToolsImageTests
             ["tools/b/install.sh"] = "#!/bin/sh\necho changed\n",
         });
         ToolSpec[] onlyA = [new("a", "1")];
-        Assert.Equal(ToolsImage.Tag(BaseId, onlyA, Catalog()), ToolsImage.Tag(BaseId, onlyA, more));
+        Assert.Equal(ToolsImage.ComputeTag(BaseId, onlyA, Catalog()), ToolsImage.ComputeTag(BaseId, onlyA, more));
     }
 
     [Fact]
     public void AVersionReachesTheHashAndTheScriptExactlyAsWritten()
     {
         ToolSpec[] zero = [new("anything", "24.04")], none = [new("anything", "24.4")];
-        Assert.NotEqual(ToolsImage.Tag(BaseId, zero, Catalog()), ToolsImage.Tag(BaseId, none, Catalog()));
-        var run = ToolsImage.Dockerfile(zero, Catalog()).TrimEnd('\n').Split('\n')[2];
+        Assert.NotEqual(ToolsImage.ComputeTag(BaseId, zero, Catalog()), ToolsImage.ComputeTag(BaseId, none, Catalog()));
+        var run = ToolsImage.GenerateDockerfile(zero, Catalog()).TrimEnd('\n').Split('\n')[2];
         Assert.Equal(["/pen-recipe/install.sh", "24.04"], Run(run).Argv);
     }
 
     [Fact]
     public void EachRecipeRunsOnceInCanonicalOrderWithItsVersionsAsArguments()
     {
-        var lines = ToolsImage.Dockerfile([Tools[2], Tools[1], Tools[0]], Catalog()).TrimEnd('\n').Split('\n');
+        var lines = ToolsImage.GenerateDockerfile([Tools[2], Tools[1], Tools[0]], Catalog()).TrimEnd('\n').Split('\n');
         Assert.Equal(["FROM pen:latest", "USER root"], lines[..2]);
         Assert.Equal(4, lines.Length);
         var (argv, mounted) = Run(lines[2]);
@@ -101,16 +101,16 @@ public class ToolsImageTests
     {
         // This recipe's own pattern accepts anything, so only Pen's version syntax stops these.
         ToolSpec[] tools = [new("anything", version)];
-        Assert.Contains("isn't a valid version", Assert.Throws<PenException>(() => ToolsImage.Dockerfile(tools, Catalog())).Message);
-        Assert.Throws<PenException>(() => ToolsImage.Tag(BaseId, tools, Catalog()));
+        Assert.Contains("isn't a valid version", Assert.Throws<PenException>(() => ToolsImage.GenerateDockerfile(tools, Catalog())).Message);
+        Assert.Throws<PenException>(() => ToolsImage.ComputeTag(BaseId, tools, Catalog()));
         Assert.Throws<PenException>(() => ToolsImage.WriteContext(Stream.Null, tools, Catalog()));
     }
 
     [Fact]
     public void AVersionItsRecipeDoesntAcceptIsRefused()
     {
-        Assert.Throws<PenException>(() => ToolsImage.Dockerfile([new("a", "x")], Catalog()));
-        Assert.Throws<PenException>(() => ToolsImage.Dockerfile([new("nope", "1")], Catalog()));
+        Assert.Throws<PenException>(() => ToolsImage.GenerateDockerfile([new("a", "x")], Catalog()));
+        Assert.Throws<PenException>(() => ToolsImage.GenerateDockerfile([new("nope", "1")], Catalog()));
     }
 
     [Fact]
@@ -120,7 +120,7 @@ public class ToolsImageTests
         ToolsImage.WriteContext(tar, [new("b", "3")], Catalog());
         var entries = ReadTar(tar);
         Assert.Equal(["Dockerfile", "tools/b/install.sh"], entries.Keys);
-        Assert.Equal(ToolsImage.Dockerfile([new("b", "3")], Catalog()), entries["Dockerfile"].Text);
+        Assert.Equal(ToolsImage.GenerateDockerfile([new("b", "3")], Catalog()), entries["Dockerfile"].Text);
         Assert.Equal("#!/bin/sh\necho b\n", entries["tools/b/install.sh"].Text);
         Assert.True(entries["tools/b/install.sh"].Mode.HasFlag(UnixFileMode.UserExecute));
         Assert.False(entries["Dockerfile"].Mode.HasFlag(UnixFileMode.UserExecute));
@@ -143,7 +143,7 @@ public class ToolsImageTests
     public void ARecipesEnvIsLiteralAndComesAfterEveryInstall()
     {
         var catalog = Catalog(settings: "default = \"1\"\nversion = '^\\d+$'\n[env]\nPLAIN = \"1\"\nODD = 'a \"b\" $HOME \\ c'\n");
-        var lines = ToolsImage.Dockerfile([new("a", "1"), new("b", "1")], catalog).TrimEnd('\n').Split('\n');
+        var lines = ToolsImage.GenerateDockerfile([new("a", "1"), new("b", "1")], catalog).TrimEnd('\n').Split('\n');
         Assert.StartsWith("RUN ", lines[2]);
         Assert.StartsWith("RUN ", lines[3]);
         Assert.Equal(["ENV PLAIN=\"1\"", "ENV ODD=\"a \\\"b\\\" \\$HOME \\\\ c\""], lines[4..]);
@@ -175,7 +175,7 @@ public class ToolsImageTests
     {
         using var t = new TempDir();
         using var fake = new FakeDocker(t, "if [ \"$1\" = build ]; then exit 9; fi\necho sha256:aaaa\n");
-        Assert.Equal(ToolsImage.Tag(BaseId, Tools, Catalog()), ToolsImage.Ensure(Tools, Catalog()));
+        Assert.Equal(ToolsImage.ComputeTag(BaseId, Tools, Catalog()), ToolsImage.Ensure(Tools, Catalog()));
         Assert.DoesNotContain("build", File.ReadAllText(Path.Combine(t.Path, "calls")));
     }
 
@@ -192,7 +192,7 @@ public class ToolsImageTests
 
             """);
         var name = ToolsImage.Ensure(Tools, Catalog());
-        Assert.Equal(ToolsImage.Tag(BaseId, Tools, Catalog()), name);
+        Assert.Equal(ToolsImage.ComputeTag(BaseId, Tools, Catalog()), name);
         Assert.Contains($"build --progress plain -t {name} --label pen.base-id={BaseId} -", File.ReadAllText(Path.Combine(t.Path, "calls")));
         using var tar = File.OpenRead(Path.Combine(t.Path, "context.tar"));
         Assert.Contains("Dockerfile", ReadTar(tar).Keys);

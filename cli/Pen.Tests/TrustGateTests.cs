@@ -591,7 +591,7 @@ public class TrustGateTests
     public void UpgradeSkipsAnUnapprovedLayer()
     {
         using var f = new Fixture();
-        Image.UpgradeProjectLayer(f.Host, f.Project, clean: false);
+        new UpgradeCommand(f.Host, Config.Empty, RecipeCatalog.Embedded).RebuildProjectLayer(f.Project, clean: false, Image.Name);
         Assert.Empty(f.Calls);
     }
 
@@ -600,7 +600,7 @@ public class TrustGateTests
     {
         using var f = new Fixture();
         File.CreateSymbolicLink(Path.Combine(f.Project.PenDir, "out"), "/etc/passwd");
-        Image.UpgradeProjectLayer(f.Host, f.Project, clean: false);
+        new UpgradeCommand(f.Host, Config.Empty, RecipeCatalog.Embedded).RebuildProjectLayer(f.Project, clean: false, Image.Name);
         Assert.Empty(f.Calls);
     }
 
@@ -609,12 +609,12 @@ public class TrustGateTests
     {
         using var f = new Fixture(projectToml: "");
         TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal);
-        Image.UpgradeProjectLayer(f.Host, f.Project, clean: false);
+        new UpgradeCommand(f.Host, Config.Empty, RecipeCatalog.Embedded).RebuildProjectLayer(f.Project, clean: false, Image.Name);
         Assert.Contains(f.Calls, c => c.StartsWith("build ", StringComparison.Ordinal));
 
         File.Delete(f.CallsFile);
         File.WriteAllText(Path.Combine(f.Project.PenDir, "Dockerfile"), "FROM pen:latest\nRUN worse\n");
-        Image.UpgradeProjectLayer(f.Host, f.Project, clean: false);
+        new UpgradeCommand(f.Host, Config.Empty, RecipeCatalog.Embedded).RebuildProjectLayer(f.Project, clean: false, Image.Name);
         Assert.Empty(f.Calls);
     }
 
@@ -624,7 +624,7 @@ public class TrustGateTests
         using var f = new Fixture(projectToml: "");
         Approve(f);
         File.WriteAllText(Path.Combine(f.T.Path, "swap-in"), "FROM pen:latest\nRUN worse\n");
-        Image.UpgradeProjectLayer(f.Host, f.Project, clean: false);
+        new UpgradeCommand(f.Host, Config.Empty, RecipeCatalog.Embedded).RebuildProjectLayer(f.Project, clean: false, Image.Name);
         Assert.Equal(Approved, f.Seen("seen-context/Dockerfile"));
         Assert.StartsWith(f.Host.GetRuntimeDir(f.Project.Key) + "/", f.Seen("context-path"));
     }
@@ -966,11 +966,11 @@ public class TrustGateTests
         Session.EnsureRuntimeDir(f.Host, f.Project);
         var user = Config.Parse("tools = [\"pen-test-b:1\"]\n", "u", ConfigKind.User);
         ToolSpec userTool = new("pen-test-b", "1");
-        Assert.Equal([userTool], Image.UpgradeTools(f.Host, f.Project, user));
-        Assert.Equal([userTool], Image.UpgradeTools(f.Host, null, user));
+        Assert.Equal([userTool], new UpgradeCommand(f.Host, user, RecipeCatalog.Embedded).SelectTools(f.Project));
+        Assert.Equal([userTool], new UpgradeCommand(f.Host, user, RecipeCatalog.Embedded).SelectTools(null));
 
         TrustStore.For(f.Host, f.Project).Approve(new TrustRequest([], false, null, null, null) { Tools = [new(PenTest, true, ["example.org"])] });
-        Assert.Equal([userTool, PenTest], Image.UpgradeTools(f.Host, f.Project, user));
+        Assert.Equal([userTool, PenTest], new UpgradeCommand(f.Host, user, RecipeCatalog.Embedded).SelectTools(f.Project));
         Assert.Empty(f.Calls); // nothing's built from an unapproved entry on the way
     }
 
@@ -981,10 +981,10 @@ public class TrustGateTests
         Session.EnsureRuntimeDir(f.Host, f.Project);
         var user = Config.Parse("tools = [\"pen-test:2\"]\n", "u", ConfigKind.User);
         TrustStore.For(f.Host, f.Project).Approve(new TrustRequest([], false, null, null, null) { Tools = [new(PenTest, true, ["example.org"])] });
-        Assert.Equal([new ToolSpec("pen-test", "2")], Image.UpgradeTools(f.Host, f.Project, user));
+        Assert.Equal([new ToolSpec("pen-test", "2")], new UpgradeCommand(f.Host, user, RecipeCatalog.Embedded).SelectTools(f.Project));
 
         File.WriteAllText(f.Project.ProjectConfigPath, "nonsense = 1\n");
-        Assert.Equal([new ToolSpec("pen-test", "2")], Image.UpgradeTools(f.Host, f.Project, user));
+        Assert.Equal([new ToolSpec("pen-test", "2")], new UpgradeCommand(f.Host, user, RecipeCatalog.Embedded).SelectTools(f.Project));
     }
 
     [Fact]
@@ -992,7 +992,7 @@ public class TrustGateTests
     {
         using var f = ToolsFixture(projectToml: "", dockerfile: "FROM pen:latest\n");
         Approve(f);
-        Image.UpgradeProjectLayer(f.Host, f.Project, clean: true, baseImage: "pen-tools:0123456789abcdef");
+        new UpgradeCommand(f.Host, Config.Empty, RecipeCatalog.Embedded).RebuildProjectLayer(f.Project, clean: true, baseImage: "pen-tools:0123456789abcdef");
         var build = Assert.Single(f.Calls, c => c.StartsWith("build ", StringComparison.Ordinal));
         Assert.Contains($"-t {f.Project.Key}:0123456789abcdef", build);
         Assert.Contains("--no-cache", build);
@@ -1069,8 +1069,8 @@ public class TrustGateTests
         using var f = ToolsFixture(projectToml: "tools = [\"pen-test:77\"]\n");
         TrustGate.Command(f.Host, f.Project, f.User, f.ProjectConfig, yes: true, NoTerminal, catalog: Recipe("example.org"));
         ToolSpec tool = new("pen-test", "77");
-        Assert.Equal([tool], Image.UpgradeTools(f.Host, f.Project, Config.Empty, Recipe("example.org")));
-        Assert.Empty(Image.UpgradeTools(f.Host, f.Project, Config.Empty, Recipe("example.org", "example.net")));
+        Assert.Equal([tool], new UpgradeCommand(f.Host, Config.Empty, Recipe("example.org")).SelectTools(f.Project));
+        Assert.Empty(new UpgradeCommand(f.Host, Config.Empty, Recipe("example.org", "example.net")).SelectTools(f.Project));
         Assert.Equal([tool], TrustStore.For(f.Host, f.Project).ApprovedToolsOf([tool], Recipe("example.org")));
         Assert.Empty(TrustStore.For(f.Host, f.Project).ApprovedToolsOf([tool], Recipe("example.org", "example.net")));
     }
