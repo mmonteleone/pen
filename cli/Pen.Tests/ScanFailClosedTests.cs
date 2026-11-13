@@ -104,7 +104,7 @@ public class ScanFailClosedTests
         using var t = new TempDir();
         var repo = RepoWithHiddenRepo(t, out var sub);
         using var _ = new Chmod(sub, Mode311);
-        Assert.Equal([sub], RepoScan.ScanNested(repo, tryOpen: p => claimsOpened).Unlistable);
+        Assert.Equal([sub], RepoScan.ScanNested(repo, Path.Combine(repo, ".git"), [], p => claimsOpened).UnlistableDirs);
     }
 
     [Fact]
@@ -315,7 +315,7 @@ public class ScanFailClosedTests
         try
         {
             Assert.Equal(0, r.ExitStatus.ExitCode);
-            var deep = RepoScan.ScanNested(repo).Unlistable;
+            var deep = RepoScan.ScanNested(repo, Path.Combine(repo, ".git")).UnlistableDirs;
             Assert.StartsWith(Path.Combine(repo, name), Assert.Single(deep));
             Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(repo));
         }

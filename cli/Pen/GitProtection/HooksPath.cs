@@ -3,10 +3,12 @@ using Pen.Projects;
 
 namespace Pen.GitProtection;
 
-/// <summary>
-/// Warns when core.hooksPath leads somewhere the sandbox can write: hooks there
-/// run on this machine, and a read-only mount wouldn't help much, since a hook
-/// can run any project file. Reads files directly and never runs git.
+/// <summary>Warns when core.hooksPath leads somewhere the sandbox can write.</summary>
+/// <remarks>
+/// <para>
+/// Hooks there run on this machine, and a read-only mount wouldn't help much, since a hook can run any project file.
+/// Reads files directly and never runs git.
+/// </para>
 /// <para>
 /// What this follows, checked against git 2.56. Config is read as system, global
 /// ($XDG_CONFIG_HOME/git/config, then ~/.gitconfig, or just $GIT_CONFIG_GLOBAL),
@@ -37,7 +39,7 @@ namespace Pen.GitProtection;
 /// a real directory. So it warns if the path as written, any name on the walk,
 /// or the real path is in reach. Only .git/hooks, mounted read-only, is exempt.
 /// </para>
-/// </summary>
+/// </remarks>
 internal static class HooksPath
 {
     /// <summary>git's own limit: past it, git refuses the config.</summary>
@@ -59,28 +61,37 @@ internal static class HooksPath
         "/Applications/Xcode.app/Contents/Developer/usr/share/git-core/gitconfig",
     ];
 
-    /// <summary>
-    /// A value the key may have, from <paramref name="File"/>; or,
-    /// with a <paramref name="Problem"/>, why one can't be known.
-    /// </summary>
+    /// <summary>A value core.hooksPath may have, or why one can't be known.</summary>
+    /// <param name="Value">The value, or null with a <paramref name="Problem"/>.</param>
+    /// <param name="File">Where it's set: a config file, or the environment variable.</param>
+    /// <param name="Problem">Why a value can't be known, if it can't.</param>
     private readonly record struct Candidate(string? Value, string File, string? Problem = null);
 
+    /// <summary>Where a path leads, as far as the sandbox is concerned.</summary>
     private enum Place { Elsewhere, Writable, Unknown }
 
-    public static void WarnIfWritable(
-        Project project,
-        HostEnv host,
-        Action<string> warn,
-        Func<string, string?>? env = null)
+    /// <summary>The core.worktree the config files themselves set.</summary>
+    /// <param name="Value">The last value, or null if there's none.</param>
+    /// <param name="IsKnown">Whether every file it could be in could be read.</param>
+    private readonly record struct WorkTreeSetting(string? Value, bool IsKnown);
+
+    /// <summary>Warns if core.hooksPath may lead somewhere the sandbox can write, or can't be placed.</summary>
+    /// <param name="project">The project.</param>
+    /// <param name="host">The host environment, for the user's home and how paths are shown.</param>
+    /// <param name="warn">Where the warning goes.</param>
+    /// <param name="env">
+    /// Reads an environment variable: <see cref="Environment.GetEnvironmentVariable(string)"/> in production.
+    /// </param>
+    /// <remarks>This warns on every session and blocks nothing.</remarks>
+    public static void WarnIfWritable(Project project, HostEnv host, Action<string> warn, Func<string, string?> env)
     {
-        if (Warning(project, host, env ?? Environment.GetEnvironmentVariable) is { } warning)
+        if (FindWarning(project, host, env) is { } warning)
             warn(warning);
     }
 
-    /// <summary>
-    /// The warning for this session, if there's one to give. Never more than one, however many values qualify.
-    /// </summary>
-    internal static string? Warning(Project project, HostEnv host, Func<string, string?> env)
+    /// <summary>Finds the warning for this session, if there's one to give.</summary>
+    /// <returns>The warning, or null if there's none. Never more than one, however many values qualify.</returns>
+    internal static string? FindWarning(Project project, HostEnv host, Func<string, string?> env)
     {
         var walk = new Walk(host.Home);
         ReadUserConfig(project, host.Home, env, walk);
@@ -90,43 +101,74 @@ internal static class HooksPath
         if (project.CommonGitDir is not { } common)
         {
             ReadEnvironmentConfig(env, walk);
-            return Decide(walk.Found, project, host, null, relativeKnown: true);
+            return DecideWarning(walk.Found, project, host, null, relativeKnown: true);
         }
 
         var config = Path.Combine(common, "config");
-        walk.Read(config);
-        var commonEntries = TryParse(config);
-        var gitDir = project.IsWorktree ? RepoScan.WorktreeEntry(project.GitDir) : common;
+        walk.Read(config, conditional: false);
+        var commonEntries = ParseOrNull(config);
+        var gitDir = project.IsWorktree ? RepoScan.ReadWorktreeEntry(project.GitDir) : common;
         if (gitDir == null)
         {
             walk.Add(new(null, project.GitDir, "it can't read this worktree's .git file"));
-            return Decide(walk.Found, project, host, null, relativeKnown: false);
+            return DecideWarning(walk.Found, project, host, null, relativeKnown: false);
         }
 
-        var workTree = project.IsWorktree ? null : LastWorkTree(commonEntries);
+        var workTree = ReadWorkTree(project, gitDir, commonEntries, walk);
+        ReadEnvironmentConfig(env, walk);
+        var top = FindWorkTreeTop(project, gitDir, workTree);
+        return DecideWarning(walk.Found, project, host, top, relativeKnown: top != null);
+    }
+
+    /// <summary>
+    /// Reads core.worktree from the common config's own entries and, if extensions.worktreeConfig is on there, from
+    /// the checkout's config.worktree, which the walk then follows too.
+    /// </summary>
+    /// <param name="project">The project.</param>
+    /// <param name="gitDir">The checkout's own git dir: the common dir, or a linked worktree's entry.</param>
+    /// <param name="commonEntries">The common config's entries, or null if it can't be read.</param>
+    /// <param name="walk">The walk so far.</param>
+    /// <remarks>For a linked worktree, core.worktree comes only from its config.worktree.</remarks>
+    private static WorkTreeSetting ReadWorkTree(
+        Project project,
+        string gitDir,
+        List<GitConfigFile.Entry>? commonEntries,
+        Walk walk)
+    {
+        var workTree = project.IsWorktree ? null : FindLastWorkTree(commonEntries);
         bool known = commonEntries != null;
         var extension = commonEntries
             ?.LastOrDefault(e => e.Section == "extensions" && e.Subsection == null && e.Key == "worktreeconfig").Value;
         if (extension != null && GitConfigFile.IsTrue(extension))
         {
             var worktreeFile = Path.Combine(gitDir, "config.worktree");
-            walk.Read(worktreeFile);
-            var own = TryParse(worktreeFile);
+            walk.Read(worktreeFile, conditional: false);
+            var own = ParseOrNull(worktreeFile);
             known &= own != null;
-            workTree = LastWorkTree(own) ?? workTree;
+            workTree = FindLastWorkTree(own) ?? workTree;
         }
-        ReadEnvironmentConfig(env, walk);
+        return new(workTree, known);
+    }
 
+    /// <summary>Finds the work tree's top, which a relative hooksPath is taken from.</summary>
+    /// <returns>
+    /// The top's real path: the project dir unless core.worktree moves it; null if it can't be known.
+    /// </returns>
+    private static string? FindWorkTreeTop(Project project, string gitDir, WorkTreeSetting workTree)
+    {
+        if (!workTree.IsKnown)
+            return null;
+        if (workTree.Value == null)
+            return project.Dir;
+        if (workTree.Value.Contains('\ufffd'))
+            return null;
         // core.worktree is relative to the git dir holding it.
-        var top = !known ? null
-            : workTree == null ? project.Dir
-            : workTree.Contains('\ufffd') ? null
-            : RealPathWalk(Path.Combine(gitDir, workTree), _ => false, out _);
-        return Decide(walk.Found, project, host, top, relativeKnown: top != null);
+        return WalkRealPath(Path.Combine(gitDir, workTree.Value), _ => false, out _);
     }
 
     /// <summary>
-    /// GIT_CONFIG_COUNT and its keys and values, which outrank every file, in the environment Pen was started from.
+    /// Reads GIT_CONFIG_COUNT and its keys and values, which outrank every file, from the environment Pen was started
+    /// from.
     /// </summary>
     private static void ReadEnvironmentConfig(Func<string, string?> env, Walk walk)
     {
@@ -143,13 +185,14 @@ internal static class HooksPath
         }
     }
 
+    /// <summary>Reads the system and global config files, as the environment selects them.</summary>
     private static void ReadUserConfig(Project project, string home, Func<string, string?> env, Walk walk)
     {
         if (!GitConfigFile.IsTrue(env("GIT_CONFIG_NOSYSTEM") ?? ""))
         {
             if (env("GIT_CONFIG_SYSTEM") is { } system)
             {
-                walk.Read(FromEnv(system, project));
+                walk.Read(ResolveEnvConfigFile(system, project), conditional: false);
             }
             else
             {
@@ -159,26 +202,27 @@ internal static class HooksPath
         }
         if (env("GIT_CONFIG_GLOBAL") is { } global)
         {
-            walk.Read(FromEnv(global, project));
+            walk.Read(ResolveEnvConfigFile(global, project), conditional: false);
             return;
         }
         var xdg = env("XDG_CONFIG_HOME");
-        walk.Read(Path.Combine(string.IsNullOrEmpty(xdg) ? Path.Combine(home, ".config") : xdg, "git", "config"));
-        walk.Read(Path.Combine(home, ".gitconfig"));
+        var configHome = string.IsNullOrEmpty(xdg) ? Path.Combine(home, ".config") : xdg;
+        walk.Read(Path.Combine(configHome, "git", "config"), conditional: false);
+        walk.Read(Path.Combine(home, ".gitconfig"), conditional: false);
     }
 
-    /// <summary>
-    /// A config file named by the environment, relative to where git would
-    /// run. Null for /dev/null and empty, which are no config at all.
-    /// </summary>
-    private static string? FromEnv(string value, Project project) =>
+    /// <summary>Resolves a config file named by the environment, relative to where git would run.</summary>
+    /// <returns>The file, or null for /dev/null and empty, which are no config at all.</returns>
+    private static string? ResolveEnvConfigFile(string value, Project project) =>
         value.Length == 0 || value == "/dev/null" ? null : Path.Combine(project.Dir, value);
 
-    /// <summary>The last core.worktree in a file's own entries, not its includes.</summary>
-    private static string? LastWorkTree(List<GitConfigFile.Entry>? entries) =>
+    /// <summary>Finds the last core.worktree in a file's own entries, not its includes.</summary>
+    private static string? FindLastWorkTree(List<GitConfigFile.Entry>? entries) =>
         entries?.LastOrDefault(e => e.Section == "core" && e.Subsection == null && e.Key == "worktree").Value;
 
-    private static List<GitConfigFile.Entry>? TryParse(string file)
+    /// <summary>Parses a config file's own entries.</summary>
+    /// <returns>The entries, or null if the file can't be read or parsed.</returns>
+    private static List<GitConfigFile.Entry>? ParseOrNull(string file)
     {
         try
         {
@@ -191,39 +235,48 @@ internal static class HooksPath
     }
 
     /// <summary>
-    /// The warning for the most decisive candidate: the last one in reach, otherwise the last that can't be placed.
+    /// Decides the warning for the most decisive candidate: the last one in reach, otherwise the last that can't be
+    /// placed.
     /// </summary>
-    private static string? Decide(List<Candidate> found, Project project, HostEnv host, string? top, bool relativeKnown)
+    /// <returns>The warning, or null if no candidate is in reach or unplaceable.</returns>
+    private static string? DecideWarning(
+        List<Candidate> found,
+        Project project,
+        HostEnv host,
+        string? top,
+        bool relativeKnown)
     {
         Candidate? unknown = null;
-        foreach (var c in Enumerable.Reverse(found))
+        foreach (var candidate in Enumerable.Reverse(found))
         {
-            var place = c.Value == null ? Place.Unknown : Locate(c.Value, project, host.Home, top, relativeKnown);
+            var place = candidate.Value == null
+                ? Place.Unknown
+                : Locate(candidate.Value, project, host.Home, top, relativeKnown);
             if (place == Place.Writable)
             {
-                return $"warning: core.hooksPath ({PausedGit.Shown(c.Value!)}, in {Out.Field(host.Display(c.File))}) " +
+                return $"warning: core.hooksPath ({PausedGit.Shown(candidate.Value!)}, " +
+                    $"in {Out.Field(host.Display(candidate.File))}) " +
                     $"is inside this {(project.IsWorktree ? "worktree or its repo's git dir" : "project")}: those " +
                     "hooks can be changed from the sandbox, and git on this machine will run them. Check them before " +
                     "running git here";
             }
 
             if (place == Place.Unknown)
-                unknown ??= c;
+                unknown ??= candidate;
         }
-        if (unknown is not { } u)
+        if (unknown is not { } first)
             return null;
-        var why = u.Problem ?? $"{PausedGit.Shown(u.Value!)}, in {Out.Field(host.Display(u.File))}";
+        var why = first.Problem ?? $"{PausedGit.Shown(first.Value!)}, in {Out.Field(host.Display(first.File))}";
         return $"warning: pen can't tell where core.hooksPath leads ({why}): those hooks " +
             "may be inside this project, where they can be changed from the sandbox, and " +
             "git on this machine would run them. Check them before running git here";
     }
 
-    /// <summary>
-    /// Where a value of core.hooksPath leads. A relative one starts at the work
-    /// tree's top, but also at the git dir: hooks for a push into this repo run
-    /// there. So "../x" reaches project/x that way, though it's outside as a work
-    /// tree path.
-    /// </summary>
+    /// <summary>Finds where a value of core.hooksPath leads.</summary>
+    /// <remarks>
+    /// A relative one starts at the work tree's top, but also at the git dir: hooks for a push into this repo run
+    /// there. So "../x" reaches project/x that way, though it's outside as a work tree path.
+    /// </remarks>
     private static Place Locate(string raw, Project project, string home, string? top, bool relativeKnown)
     {
         var value = raw.StartsWith(Optional, StringComparison.Ordinal) ? raw[Optional.Length..] : raw;
@@ -240,13 +293,17 @@ internal static class HooksPath
         if (Path.IsPathRooted(value))
             return LocatePath(value, project);
 
-        var fromTop = !relativeKnown ? Place.Unknown
-            : top == null ? Place.Elsewhere
-            : LocatePath(top + "/" + value, project);
+        Place fromTop;
+        if (!relativeKnown)
+            fromTop = Place.Unknown;
+        else if (top == null)
+            fromTop = Place.Elsewhere;
+        else
+            fromTop = LocatePath(top + "/" + value, project);
         if (fromTop == Place.Writable || project.CommonGitDir is not { } common)
             return fromTop;
         // .git/hooks, as a work tree path: the read-only one is the one meant.
-        if (top != null && RealPathWalk(top + "/" + value, _ => false, out _) is { } real
+        if (top != null && WalkRealPath(top + "/" + value, _ => false, out _) is { } real
             && RepoGuard.IsInside(Path.Combine(common, "hooks"), real))
         {
             return fromTop;
@@ -256,9 +313,10 @@ internal static class HooksPath
         return fromGitDir == Place.Elsewhere ? fromTop : fromGitDir;
     }
 
+    /// <summary>Finds where an absolute path leads: anywhere on its walk in reach makes it writable.</summary>
     private static Place LocatePath(string path, Project project)
     {
-        var real = RealPathWalk(path, p => CanBeReplaced(p, project), out bool replaceable);
+        var real = WalkRealPath(path, p => CanBeReplaced(p, project), out bool replaceable);
         if (replaceable)
             return Place.Writable;
         if (real == null)
@@ -287,55 +345,72 @@ internal static class HooksPath
     }
 
     /// <summary>
-    /// The real path of <paramref name="path"/> as the OS would walk it, one name
-    /// at a time. A missing name is taken as it reads, since the sandbox may be
-    /// able to create it; a dangling symlink is followed for the same reason.
-    /// Null if a directory on the way can't be entered, so what's in it can't be
-    /// seen, or the path passes through too many links. <paramref name="replaceable"/>
-    /// says whether <paramref name="canBeReplaced"/> held for any name on the walk
-    /// so far, links included, even if the walk then fails.
+    /// Resolves the real path of <paramref name="path"/> as the OS would walk it, one name at a time.
     /// </summary>
-    internal static string? RealPathWalk(string path, Func<string, bool> canBeReplaced, out bool replaceable)
+    /// <param name="path">The path to walk.</param>
+    /// <param name="canBeReplaced">Whether the sandbox can change what's at a path met on the walk.</param>
+    /// <param name="replaceable">
+    /// Whether <paramref name="canBeReplaced"/> held for any name on the walk so far, links included, even if the
+    /// walk then fails.
+    /// </param>
+    /// <returns>
+    /// The real path, or null if a directory on the way can't be entered, so what's in it can't be seen, or the path
+    /// passes through too many links.
+    /// </returns>
+    /// <remarks>
+    /// A missing name is taken as it reads, since the sandbox may be able to create it; a dangling symlink is
+    /// followed for the same reason.
+    /// </remarks>
+    internal static string? WalkRealPath(string path, Func<string, bool> canBeReplaced, out bool replaceable)
     {
         replaceable = false;
-        var pending = new Stack<string>(path.Split('/').Reverse());
-        var current = "/";
-        int links = 0;
         try
         {
-            while (pending.TryPop(out var name))
-            {
-                if (name is "" or ".")
-                    continue;
-                if (name == "..")
-                {
-                    current = Path.GetDirectoryName(current) ?? "/";
-                    continue;
-                }
-                if (Directory.Exists(current) && !Native.CanEnter(current))
-                    return null;
-                var next = Path.Combine(current, name);
-                var target = new FileInfo(next).LinkTarget;
-                if (target == null)
-                {
-                    current = next;
-                    replaceable |= canBeReplaced(RepoGuard.ResolveExisting(next));
-                    continue;
-                }
-                replaceable |= canBeReplaced(Path.Combine(RepoGuard.ResolveExisting(current), name));
-                if (++links > MaxLinks || target.Contains('\ufffd'))
-                    return null;
-                if (Path.IsPathRooted(target))
-                    current = "/";
-                foreach (var part in target.Split('/').Reverse())
-                    pending.Push(part);
-            }
-            return RepoGuard.ResolveExisting(current);
+            return WalkNames(path, canBeReplaced, ref replaceable);
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Walks <paramref name="path"/> one name at a time, following symlinks, for <see cref="WalkRealPath"/>.
+    /// </summary>
+    /// <returns>The real path, or null if a directory can't be entered or there are too many links.</returns>
+    private static string? WalkNames(string path, Func<string, bool> canBeReplaced, ref bool replaceable)
+    {
+        var pending = new Stack<string>(path.Split('/').Reverse());
+        var current = "/";
+        int links = 0;
+        while (pending.TryPop(out var name))
+        {
+            if (name is "" or ".")
+                continue;
+            if (name == "..")
+            {
+                current = Path.GetDirectoryName(current) ?? "/";
+                continue;
+            }
+            if (Directory.Exists(current) && !Native.CanEnter(current))
+                return null;
+            var next = Path.Combine(current, name);
+            var target = new FileInfo(next).LinkTarget;
+            if (target == null)
+            {
+                current = next;
+                replaceable |= canBeReplaced(RepoGuard.ResolveExisting(next));
+                continue;
+            }
+            replaceable |= canBeReplaced(Path.Combine(RepoGuard.ResolveExisting(current), name));
+            if (++links > MaxLinks || target.Contains('\ufffd'))
+                return null;
+            if (Path.IsPathRooted(target))
+                current = "/";
+            foreach (var part in target.Split('/').Reverse())
+                pending.Push(part);
+        }
+        return RepoGuard.ResolveExisting(current);
     }
 
     /// <summary>Follows the config files in git's order, collecting what core.hooksPath may be.</summary>
@@ -345,7 +420,8 @@ internal static class HooksPath
 
         public List<Candidate> Found { get; } = [];
 
-        public void Add(Candidate c) => Found.Add(c);
+        /// <summary>Adds a candidate after those found so far.</summary>
+        public void Add(Candidate candidate) => Found.Add(candidate);
 
         /// <summary>A definite value, replacing what came before.</summary>
         public void Set(string value, string source)
@@ -354,10 +430,12 @@ internal static class HooksPath
             Found.Add(new(value, source));
         }
 
-        /// <param name="file">a config file; null for none</param>
-        /// <param name="conditional">whether git may not read this file at all</param>
-        public void Read(string? file, bool conditional = false) => Read(file, conditional, 0);
+        /// <summary>Reads a config file and the files it includes.</summary>
+        /// <param name="file">The config file; null for none.</param>
+        /// <param name="conditional">Whether git may not read this file at all.</param>
+        public void Read(string? file, bool conditional) => Read(file, conditional, 0);
 
+        /// <summary>Reads a config file at <paramref name="depth"/> includes down, and the files it includes.</summary>
         private void Read(string? file, bool conditional, int depth)
         {
             if (file == null)
@@ -381,34 +459,43 @@ internal static class HooksPath
                 return;
             }
 
-            foreach (var e in entries)
+            ReadEntries(file, entries, conditional, depth);
+        }
+
+        /// <summary>
+        /// Takes in a config file's entries: its hooksPath values and the files it includes, in order.
+        /// </summary>
+        private void ReadEntries(string file, List<GitConfigFile.Entry> entries, bool conditional, int depth)
+        {
+            foreach (var entry in entries)
             {
-                if (e.Section == "core" && e.Subsection == null && e.Key == "hookspath")
+                if (entry.Section == "core" && entry.Subsection == null && entry.Key == "hookspath")
                 {
                     if (!conditional)
                         Found.Clear();
-                    Found.Add(new(e.Value, file));
+                    Found.Add(new(entry.Value, file));
                 }
-                else if (e.Key == "path" && e.Value.Length > 0
-                    && ((e.Section == "include" && e.Subsection == null)
-                        || (e.Section == "includeif" && e.Subsection != null)))
+                else if (entry.Key == "path" && entry.Value.Length > 0
+                    && ((entry.Section == "include" && entry.Subsection == null)
+                        || (entry.Section == "includeif" && entry.Subsection != null)))
                 {
-                    var included = IncludePath(e.Value, file);
+                    var included = ResolveInclude(entry.Value, file);
                     if (included == null)
                     {
                         Found.Add(new(null, file, "it can't resolve the include " +
-                            $"{PausedGit.Shown(e.Value)} in {Out.Field(file)}"));
+                            $"{PausedGit.Shown(entry.Value)} in {Out.Field(file)}"));
                     }
                     else
                     {
-                        Read(included, conditional || e.Section == "includeif", depth + 1);
+                        Read(included, conditional || entry.Section == "includeif", depth + 1);
                     }
                 }
             }
         }
 
-        /// <summary>The file an include names, or null if Pen can't tell.</summary>
-        private string? IncludePath(string value, string from)
+        /// <summary>Resolves the file an include names.</summary>
+        /// <returns>The file, or null if Pen can't tell.</returns>
+        private string? ResolveInclude(string value, string from)
         {
             if (value.Contains('\ufffd') || value.StartsWith("%(prefix)/", StringComparison.Ordinal))
                 return null;

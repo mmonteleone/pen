@@ -163,7 +163,7 @@ public class UndecodableNameTests
         Git.Run(repo, "init", "-q", "--bare", good);
         var scan = RepoScan.ScanModules(Path.Combine(repo, ".git"));
         Assert.Equal([good], scan.Repos);
-        Assert.Empty(scan.Unreadable);
+        Assert.Empty(scan.UnreadableDirs);
         Assert.Single(scan.BadNames);
     }
 

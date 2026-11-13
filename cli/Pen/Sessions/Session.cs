@@ -67,8 +67,8 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
 
         // Past the refusals, so a session that won't start doesn't warn, and with
         // signals held, so Ctrl-C can't end Pen between the probe's create and delete.
-        RepoGuard.WarnIfCaseMayFold(Project, Out.WriteLine);
-        HooksPath.WarnIfWritable(Project, context.Host, Out.WriteLine);
+        RepoGuard.WarnIfCaseMayFold(Project, Out.WriteLine, RepoGuard.MayFoldCase);
+        HooksPath.WarnIfWritable(Project, context.Host, Out.WriteLine, Environment.GetEnvironmentVariable);
 
         var session = CreateSessionDir();
         using var sessionLock = FileLock.TryTake(session.LockFile, exclusive: true)

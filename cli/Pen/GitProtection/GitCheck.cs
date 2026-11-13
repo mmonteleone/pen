@@ -115,7 +115,7 @@ internal static class GitCheck
         if (unlistable.Count > 0)
         {
             failures.Add("pen can't list these directories, so it can't see a repo inside one: "
-                + string.Join(", ", unlistable.Take(RepoGuard.MaxListed).Select(u => RepoGuard.Rel(dir, u)))
+                + string.Join(", ", unlistable.Take(RepoGuard.MaxListed).Select(u => RepoGuard.FormatPath(dir, u)))
                 + (unlistable.Count > RepoGuard.MaxListed
                     ? $" and {unlistable.Count - RepoGuard.MaxListed} more"
                     : ""));
@@ -125,7 +125,7 @@ internal static class GitCheck
         {
             failures.Add("these names aren't valid UTF-8, so pen can't look inside them or rename them, though git on "
                 + "this machine can still enter them and run what's there (shown with octal escapes): "
-                + string.Join(", ", RepoGuard.ListedBadNames(dir, badNames)));
+                + string.Join(", ", RepoGuard.FormatBadNames(dir, badNames)));
         }
         if (moved.Any(q => q.To.Length == 0))
             failures.Add("a file named above couldn't be moved out of git's way or restored");
@@ -215,10 +215,10 @@ internal static class GitCheck
             known = CheckModuleRepos(git, modulesAtStart, moved, badNames, tryOpen, tryOpenForWriting);
         }
 
-        var scan = RepoScan.ScanNested(dir, startedWithGit ? commonGitDir : null, known, tryOpen);
-        unlistable.AddRange(scan.Unlistable);
+        var scan = RepoScan.ScanNested(dir, git, known, tryOpen);
+        unlistable.AddRange(scan.UnlistableDirs);
         badNames.AddRange(scan.BadNames);
-        foreach (var n in scan.Found)
+        foreach (var n in scan.Repos)
         {
             var why = n.Kind switch
             {
@@ -264,7 +264,7 @@ internal static class GitCheck
         var gone = new List<string>();
         var scan = RepoScan.ScanModules(gitDir);
         // Each can only open once, so this ends.
-        while (tryOpen != null && scan.Unreadable.Any(d => Path.GetFileName(d) == "worktrees" && tryOpen(d)))
+        while (tryOpen != null && scan.UnreadableDirs.Any(d => Path.GetFileName(d) == "worktrees" && tryOpen(d)))
             scan = RepoScan.ScanModules(gitDir);
         badNames.AddRange(scan.BadNames);
         foreach (var repo in scan.Repos)
@@ -296,7 +296,7 @@ internal static class GitCheck
                     known.Add(repo);
             }
         }
-        foreach (var dir in scan.Unreadable)
+        foreach (var dir in scan.UnreadableDirs)
         {
             if (gone.Any(g => RepoGuard.IsInside(g, dir)))
                 continue;
@@ -446,9 +446,9 @@ internal static class GitCheck
         sb.AppendLine("pen: They've been moved out of git's way:");
         foreach (var q in moved)
         {
-            sb.Append("  ").Append(RepoGuard.Rel(dir, q.From));
+            sb.Append("  ").Append(RepoGuard.FormatPath(dir, q.From));
             if (q.To.Length > 0)
-                sb.Append(" → ").Append(RepoGuard.Rel(dir, q.To));
+                sb.Append(" → ").Append(RepoGuard.FormatPath(dir, q.To));
             sb.AppendLine().Append("      ").AppendLine(q.Why);
         }
         var restorable = moved.Where(q => q.To.Length > 0).ToList();
@@ -524,10 +524,10 @@ internal static class GitCheck
         if (check.Moved.Count > 0)
             Out.WriteRaw(Warning(dir, check.Moved));
         foreach (var r in check.Restored ?? [])
-            Out.WriteLine($"{RepoGuard.Rel(dir, r.Path)}: {r.What}");
+            Out.WriteLine($"{RepoGuard.FormatPath(dir, r.Path)}: {r.What}");
         foreach (var c in check.Opened ?? [])
         {
-            Out.WriteLine($"changed {RepoGuard.Rel(dir, c.Path)} from mode {Octal(c.Was)} " +
+            Out.WriteLine($"changed {RepoGuard.FormatPath(dir, c.Path)} from mode {Octal(c.Was)} " +
                 $"to {Octal(c.Now)} so it could be checked, and left it that way");
         }
 

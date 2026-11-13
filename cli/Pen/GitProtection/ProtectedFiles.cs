@@ -485,13 +485,13 @@ internal static class ProtectedFiles
         {
             return Native.ReadProtected(path)
                 ?? throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't save a copy " +
-                    $"of {RepoGuard.Rel(dir, path)}: it isn't a regular file of at most 1 MB, so it " +
+                    $"of {RepoGuard.FormatPath(dir, path)}: it isn't a regular file of at most 1 MB, so it " +
                     "couldn't be restored at the end of the session. Inspect it and remove it, then rerun");
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't read " +
-                $"{RepoGuard.Rel(dir, path)} to save a copy of it: fix its permissions, then rerun");
+                $"{RepoGuard.FormatPath(dir, path)} to save a copy of it: fix its permissions, then rerun");
         }
     }
 
@@ -504,7 +504,7 @@ internal static class ProtectedFiles
         var real = Native.RealPath(path);
         if (real == null || !string.Equals(real, path, StringComparison.OrdinalIgnoreCase))
         {
-            throw new PenException($"refusing to run in {Out.Field(dir)}: {RepoGuard.Rel(dir, path)} " +
+            throw new PenException($"refusing to run in {Out.Field(dir)}: {RepoGuard.FormatPath(dir, path)} " +
                 "isn't where pen expected it (a symlink, or it's gone): inspect it, then rerun");
         }
 

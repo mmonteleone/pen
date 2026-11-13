@@ -451,7 +451,7 @@ internal static class PausedGit
             "sandbox could write to them, and continuing one runs what it says on this machine:");
         foreach (var op in paused.Take(RepoGuard.MaxListed))
         {
-            sb.Append("  ").Append(RepoGuard.Rel(dir, op.Path)).Append(": ").AppendLine(op.Kind);
+            sb.Append("  ").Append(RepoGuard.FormatPath(dir, op.Path)).Append(": ").AppendLine(op.Kind);
             foreach (var note in op.Notes)
             {
                 sb.Append("      ").AppendLine(note.Text);

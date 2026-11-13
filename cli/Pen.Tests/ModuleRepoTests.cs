@@ -29,10 +29,10 @@ public class ModuleRepoTests
     }
 
     private static List<string> Found(string repo) =>
-        RepoScan.FindModuleRepos(Path.Combine(repo, ".git")).Select(p => RepoGuard.Rel(repo, p)).ToList();
+        RepoScan.FindModuleRepos(Path.Combine(repo, ".git")).Select(p => RepoGuard.FormatPath(repo, p)).ToList();
 
     private static List<(string, bool)> Mounts(string dir) =>
-        RepoGuard.PrepareMounts(dir, "/nonexistent-home").Select(m => (RepoGuard.Rel(dir, m.Path), m.ReadOnly)).ToList();
+        RepoGuard.PrepareMounts(dir, "/nonexistent-home").Select(m => (RepoGuard.FormatPath(dir, m.Path), m.ReadOnly)).ToList();
 
     [Fact]
     public void FindsSlashNamedAndNestedModuleRepos_ParentsFirst()
@@ -272,7 +272,7 @@ public class ModuleRepoTests
     // --- E2: submodule checkouts in the tree, and the session-end check ---
 
     private static List<string> Nested(string repo, IReadOnlyCollection<string>? modules = null) =>
-        RepoScan.FindNested(repo, moduleRepos: modules).Select(n => RepoGuard.Rel(repo, n.Path)).ToList();
+        (modules == null ? RepoScan.FindNested(repo) : RepoScan.FindNested(repo, modules)).Select(n => RepoGuard.FormatPath(repo, n.Path)).ToList();
 
     private static void SetWorktree(string super, string module, string value) =>
         Git.Run(super, "config", "-f", Path.Combine(super, ".git", "modules", module, "config"), "core.worktree", value);
@@ -388,7 +388,7 @@ public class ModuleRepoTests
         var moved = GitCheck.Run(super, startedWithGit: true, modulesAtStart: atStart);
         Assert.Equal(
             [".git/modules/libs/mid/modules/deps/new", ".git/modules/libs/new", "libs/mid/deps/new/.git", "libs/new/.git"],
-            moved.Select(q => RepoGuard.Rel(super, q.From)).Order(StringComparer.Ordinal));
+            moved.Select(q => RepoGuard.FormatPath(super, q.From)).Order(StringComparer.Ordinal));
         Assert.All(moved, q => Assert.NotEqual("", q.To));
         Assert.Equal(atStart, RepoScan.FindModuleRepos(Path.Combine(super, ".git")));
         Assert.True(File.Exists(Path.Combine(super, "libs", "mid", ".git")));
@@ -404,7 +404,7 @@ public class ModuleRepoTests
         var moved = GitCheck.Run(super, startedWithGit: true, modulesAtStart: []);
         // mid goes, and leaf with it: only one move for the pair, then both checkouts.
         Assert.Equal([".git/modules/libs/mid", "libs/mid/.git", "libs/mid/deps/leaf/.git"],
-            moved.Select(q => RepoGuard.Rel(super, q.From)).Order(StringComparer.Ordinal));
+            moved.Select(q => RepoGuard.FormatPath(super, q.From)).Order(StringComparer.Ordinal));
         Assert.False(Directory.Exists(mid));
         Assert.Empty(RepoScan.FindModuleRepos(Path.Combine(super, ".git")));
     }
@@ -422,7 +422,7 @@ public class ModuleRepoTests
 
         var moved = GitCheck.Run(super, startedWithGit: true, modulesAtStart: atStart);
         Assert.Equal([".git/modules/evil", ".git/modules/libs/mid/commondir"],
-            moved.Select(q => RepoGuard.Rel(super, q.From)).Order(StringComparer.Ordinal));
+            moved.Select(q => RepoGuard.FormatPath(super, q.From)).Order(StringComparer.Ordinal));
         // With the commondir gone, mid's checkout is still the project's own.
         Assert.True(File.Exists(Path.Combine(super, "libs", "mid", ".git")));
     }

@@ -1,5 +1,6 @@
 namespace Pen.GitProtection;
 
+/// <summary>What makes a directory below the project root a repo.</summary>
 internal enum NestedKind
 {
     /// <summary>A .git directory: a repo with its own config and hooks.</summary>

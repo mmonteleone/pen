@@ -3,7 +3,7 @@ namespace Pen.Tests;
 public class GitCheckTests
 {
     private static List<(string From, string To)> Check(string dir, bool startedWithGit = true) =>
-        GitCheck.Run(dir, startedWithGit).Select(q => (RepoGuard.Rel(dir, q.From), RepoGuard.Rel(dir, q.To))).ToList();
+        GitCheck.Run(dir, startedWithGit).Select(q => (RepoGuard.FormatPath(dir, q.From), RepoGuard.FormatPath(dir, q.To))).ToList();
 
     [Fact]
     public void NothingFlaggedForCommitsBranchesAndWorktrees()
@@ -53,9 +53,9 @@ public class GitCheckTests
         var x = t.Sub("repo", ".git", "modules", "x");
         Git.Run(x, "init", "-q", "--bare");
         var moved = GitCheck.Run(repo, startedWithGit: true, modulesAtStart: []);
-        Assert.Equal([(".git/modules/x", ".git/modules/x.pen-quarantine")], moved.Select(q => (RepoGuard.Rel(repo, q.From), RepoGuard.Rel(repo, q.To))));
+        Assert.Equal([(".git/modules/x", ".git/modules/x.pen-quarantine")], moved.Select(q => (RepoGuard.FormatPath(repo, q.From), RepoGuard.FormatPath(repo, q.To))));
         Assert.Equal((".git/modules/x.pen-quarantine/HEAD", ".git/modules/x.pen-quarantine/HEAD.pen-quarantine"),
-            (RepoGuard.Rel(repo, moved[0].Inner!.Value.From), RepoGuard.Rel(repo, moved[0].Inner!.Value.To)));
+            (RepoGuard.FormatPath(repo, moved[0].Inner!.Value.From), RepoGuard.FormatPath(repo, moved[0].Inner!.Value.To)));
         // An empty directory in modules/ isn't a repo, and isn't flagged.
         Directory.CreateDirectory(Path.Combine(repo, ".git", "modules", "empty"));
         Assert.Empty(GitCheck.Run(repo, startedWithGit: true, modulesAtStart: []));

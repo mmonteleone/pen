@@ -62,7 +62,7 @@ public class CaseProbeTests
     {
         using var t = new TempDir();
         var git = GitDir(t);
-        var name = RepoGuard.NewCaseProbeName();
+        var name = RepoGuard.GenerateCaseProbeName();
         var upper = Path.Combine(git, name.ToUpperInvariant());
         File.WriteAllText(upper, "someone else's");
         var before = Listing(git);
@@ -80,7 +80,7 @@ public class CaseProbeTests
         var git = GitDir(t);
         foreach (var upper in new[] { false, true })
         {
-            var name = RepoGuard.NewCaseProbeName();
+            var name = RepoGuard.GenerateCaseProbeName();
             var taken = Path.Combine(git, upper ? name.ToUpperInvariant() : name);
             var inside = Path.Combine(taken, "inside");
             Directory.CreateDirectory(inside);
@@ -100,7 +100,7 @@ public class CaseProbeTests
         var target = Path.Combine(t.Path, "target");
         foreach (var upper in new[] { false, true })
         {
-            var name = RepoGuard.NewCaseProbeName();
+            var name = RepoGuard.GenerateCaseProbeName();
             var link = Path.Combine(git, upper ? name.ToUpperInvariant() : name);
             File.CreateSymbolicLink(link, target); // dangling, so only lstat sees it
 
@@ -118,8 +118,8 @@ public class CaseProbeTests
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
         var git = Path.Combine(repo, ".git");
-        var name = RepoGuard.NewCaseProbeName();
-        Assert.NotEqual(name, RepoGuard.NewCaseProbeName());
+        var name = RepoGuard.GenerateCaseProbeName();
+        Assert.NotEqual(name, RepoGuard.GenerateCaseProbeName());
         Assert.NotEqual(name, name.ToUpperInvariant());
         Assert.StartsWith(".", name);
 

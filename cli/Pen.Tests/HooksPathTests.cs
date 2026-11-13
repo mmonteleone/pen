@@ -29,7 +29,7 @@ public class HooksPathTests
         {
             dir ??= Dir;
             var (common, repoDir) = Project.FindRepo(dir);
-            return HooksPath.Warning(new Project(dir, "key", common, repoDir), T.Host(Home), name => Env.GetValueOrDefault(name));
+            return HooksPath.FindWarning(new Project(dir, "key", common, repoDir), T.Host(Home), name => Env.GetValueOrDefault(name));
         }
 
         /// <summary>Real git's hooks dir here, so a test can hold Pen's reading against it.</summary>
