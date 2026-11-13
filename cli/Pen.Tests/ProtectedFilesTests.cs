@@ -202,7 +202,7 @@ public class ProtectedFilesTests
     [InlineData("/p/\u0001\u0000/config")]
     public void TheManifest_RoundTripsAnyPath(string path)
     {
-        var parsed = ProtectedFiles.Parse(ProtectedFiles.Serialize(new([new(path, "0", (UnixFileMode)0b110_100_100)], [path])));
+        var parsed = ProtectedFiles.Parse(ProtectedFiles.Serialize(new([new(path, "0", (UnixFileMode)0b110_100_100, Adopted: false)], [path])));
         Assert.Equal(path, Assert.Single(parsed.Files).Path);
         Assert.Equal((UnixFileMode)0b110_100_100, parsed.Files[0].Mode);
         Assert.Equal(path, Assert.Single(parsed.ReadOnlyDirs));
@@ -211,7 +211,7 @@ public class ProtectedFilesTests
     [Fact]
     public void TheManifest_RefusesAPathItCouldntReadBack()
     {
-        var e = Assert.Throws<PenException>(() => ProtectedFiles.Serialize(new([new("/p/\ud800/config", "0", Rw)], [])));
+        var e = Assert.Throws<PenException>(() => ProtectedFiles.Serialize(new([new("/p/\ud800/config", "0", Rw, Adopted: false)], [])));
         Assert.Contains("isn't valid text", e.Message);
     }
 

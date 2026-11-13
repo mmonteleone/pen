@@ -21,13 +21,13 @@ public class PausedGitTests
 
     private static string Warning(string repo)
     {
-        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true);
+        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
         Assert.Empty(check.Moved);
         Assert.Null(check.Failure);
         return PausedGit.Warning(repo, check.Paused!);
     }
 
-    private static List<PausedOp> Paused(string repo) => GitCheck.RunWithoutOpening(repo, startedWithGit: true).Paused!;
+    private static List<PausedOp> Paused(string repo) => GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Paused!;
 
     private static void MkFifo(string path)
     {
@@ -103,7 +103,7 @@ public class PausedGitTests
     {
         using var t = new TempDir();
         var repo = PausedRebase(t);
-        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: false);
+        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: false, commonGitDir: null, modulesAtStart: null);
         Assert.Single(check.Moved);
         Assert.Empty(check.Paused!);
     }
@@ -312,7 +312,7 @@ public class PausedGitTests
         var repo = Git.Repo(t.Sub("repo"));
         var state = Path.Combine(repo, ".git", name);
         Directory.CreateSymbolicLink(state, t.Sub("elsewhere"));
-        var moved = Assert.Single(GitCheck.Run(repo, startedWithGit: true));
+        var moved = Assert.Single(GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null));
         Assert.Equal(state, moved.From);
         Assert.False(RepoGuard.Exists(state));
     }
@@ -327,7 +327,7 @@ public class PausedGitTests
         var quarantined = state + GitCheck.Suffix;
         try
         {
-            var moved = Assert.Single(GitCheck.Run(repo, startedWithGit: true));
+            var moved = Assert.Single(GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null));
             Assert.Equal(quarantined, moved.To);
             Assert.Contains("can't be read", moved.Why);
         }
@@ -382,7 +382,7 @@ public class PausedGitTests
             PlantState(t.Sub("repo", ".git", "modules", "sub", "worktrees", "w"), file),
         };
 
-        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true);
+        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
 
         Assert.Equal(paths.Order(StringComparer.Ordinal), check.Moved.Select(q => q.From).Order(StringComparer.Ordinal));
         foreach (var path in paths)
@@ -427,7 +427,7 @@ public class PausedGitTests
             case "no-newline": File.WriteAllText(path, Planted.TrimEnd()); break;
         }
 
-        var moved = Within10s(() => GitCheck.Run(repo, startedWithGit: true));
+        var moved = Within10s(() => GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null));
 
         Assert.Equal(path, Assert.Single(moved).From);
         Assert.False(RepoGuard.Exists(path));
@@ -546,7 +546,7 @@ public class PausedGitTests
         Assert.True(Directory.Exists(state));
         Assert.True(File.Exists(Path.Combine(state, how is "apply" or "am" ? "next" : "msgnum")));
 
-        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true);
+        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
 
         Assert.Empty(check.Moved);
         Assert.Null(check.Failure);
@@ -630,7 +630,7 @@ public class PausedGitTests
         if (!File.Exists(canary)) Assert.Skip($"{shell} didn't draw a prompt that expands the planted file here, so there's nothing to compare against");
         File.Delete(canary);
 
-        var moved = GitCheck.Run(repo, startedWithGit: true);
+        var moved = GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
         Assert.Equal(path, Assert.Single(moved).From);
 
         DrawPrompt(t, shell, repo, script);
@@ -675,7 +675,7 @@ public class PausedGitTests
 
         Assert.False(File.Exists(Path.Combine(repo, "canary")));
         if (file.StartsWith("rebase-", StringComparison.Ordinal))
-            Assert.Empty(GitCheck.Run(repo, startedWithGit: true)); // a legal ref name, so it stays
+            Assert.Empty(GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null)); // a legal ref name, so it stays
     }
 
     private const UnixFileMode ReadOnlyDir = (UnixFileMode)0b101_101_101;
@@ -928,7 +928,7 @@ public class PausedGitTests
         using var restore = new ReadOnlyDirs(repo);
         File.SetUnixFileMode(dir, (UnixFileMode)mode);
 
-        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true);
+        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
 
         // pen sign changes no modes: it moved the plant by name, or it says so and refuses.
         Assert.True(!RepoGuard.Exists(plant) || check.Failure != null);
@@ -946,7 +946,7 @@ public class PausedGitTests
         using var _ = new ReadOnlyDirs(repo);
         File.SetUnixFileMode(git, (UnixFileMode)0b011_001_001);
 
-        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true);
+        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
 
         Assert.NotNull(check.Failure);
         Assert.Contains("can't read", check.Failure);
@@ -963,7 +963,7 @@ public class PausedGitTests
         using var _ = new ReadOnlyDirs(repo);
         File.SetUnixFileMode(entry, UnixFileMode.None);
 
-        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true);
+        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
 
         Assert.NotNull(check.Failure);
         Assert.Contains("worktrees/n", check.Failure);
@@ -994,7 +994,7 @@ public class PausedGitTests
         var state = Path.GetDirectoryName(path)!;
         using var _ = new ReadOnlyDirs(repo, state);
 
-        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true);
+        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
 
         Assert.Null(check.Failure);
         Assert.Equal(state, Assert.Single(check.Moved).From);
@@ -1014,7 +1014,7 @@ public class PausedGitTests
         string[] readOnly = symlinkedState ? [git] : [Path.GetDirectoryName(path)!, git];
         using var _ = new ReadOnlyDirs(repo, readOnly);
 
-        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true);
+        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
 
         Assert.NotNull(check.Failure); // pen sign can't change modes while other sessions run, so it stops here
         Assert.Contains(check.Moved, q => q.To.Length == 0);
@@ -1047,7 +1047,7 @@ public class PausedGitTests
         File.SetUnixFileMode(git, UnixFileMode.None);
         try
         {
-            var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true);
+            var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
             Assert.NotNull(check.Failure);
             var warning = CapturingStderr(() => GitCheck.Report(repo, check));
             Assert.Contains("don't run git", warning);
@@ -1203,7 +1203,7 @@ public class PausedGitTests
     {
         var moved = new List<Quarantined> { new("/p/.git/commondir", "/p/.git/commondir.pen-quarantine", "why") };
         var paused = new List<PausedOp> { new("/p/.git/rebase-merge", "a paused rebase", []) };
-        var output = CapturingStderr(() => GitCheck.Report("/p", new CheckResult(moved, "reason", Paused: paused)));
+        var output = CapturingStderr(() => GitCheck.Report("/p", new CheckResult { Moved = moved, Failure = "reason", Paused = paused }));
         var at = output.IndexOf("a paused rebase", StringComparison.Ordinal);
         Assert.True(output.IndexOf("mv '", StringComparison.Ordinal) < at);
         Assert.True(at < output.IndexOf("wasn't checked", StringComparison.Ordinal));
@@ -1211,7 +1211,7 @@ public class PausedGitTests
 
     [Fact]
     public void ACleanCheckReportsNothing() =>
-        Assert.Empty(CapturingStderr(() => GitCheck.Report("/p", new CheckResult([], null, Paused: []))));
+        Assert.Empty(CapturingStderr(() => GitCheck.Report("/p", new CheckResult { Moved = [], Failure = null, Paused = [] })));
 
     [Fact]
     public void PenSignPrintsItAndStillGoesOn()

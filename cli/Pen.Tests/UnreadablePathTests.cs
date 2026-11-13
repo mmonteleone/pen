@@ -44,14 +44,14 @@ public class UnreadablePathTests
         var repo = RepoWithModule(t, out var foo);
         using var _ = new Chmod(foo);
 
-        var moved = GitCheck.Run(repo, startedWithGit: true, modulesAtStart: thereAtStart ? [foo] : []);
+        var moved = GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: thereAtStart ? [foo] : []);
 
         var q = Assert.Single(moved);
         Assert.Equal(foo, q.From);
         Assert.Equal(foo + GitCheck.Suffix, q.To);
         Assert.Contains("can't be read", q.Why);
         Assert.False(Path.Exists(foo));
-        Assert.Empty(GitCheck.Run(repo, startedWithGit: true, modulesAtStart: []));
+        Assert.Empty(GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: []));
         RepoGuard.CheckAtStart(repo); // the next pen command works
     }
 
@@ -61,7 +61,7 @@ public class UnreadablePathTests
         using var t = new TempDir();
         var repo = RepoWithModule(t, out var foo);
         using var _ = new Chmod(foo);
-        Assert.Equal(foo, Assert.Single(GitCheck.Run(repo, startedWithGit: true)).From);
+        Assert.Equal(foo, Assert.Single(GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null)).From);
     }
 
     [Fact]
@@ -76,7 +76,7 @@ public class UnreadablePathTests
         Assert.Equal([module], atStart);
         using var _ = new Chmod(module);
 
-        var moved = GitCheck.Run(repo, startedWithGit: true, modulesAtStart: atStart).Select(q => RepoGuard.FormatPath(repo, q.From)).ToList();
+        var moved = GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: atStart).Select(q => RepoGuard.FormatPath(repo, q.From)).ToList();
 
         Assert.Equal([".git/modules/lib", "lib/.git"], moved);
     }
@@ -102,7 +102,7 @@ public class UnreadablePathTests
         using var _ = new Chmod(dir);
 
         Assert.Contains($"  .git/{name}", Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(repo)).Message);
-        Assert.Equal(dir, Assert.Single(GitCheck.Run(repo, startedWithGit: true, modulesAtStart: [])).From);
+        Assert.Equal(dir, Assert.Single(GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: [])).From);
         RepoGuard.CheckAtStart(repo);
     }
 
@@ -167,7 +167,7 @@ public class UnreadablePathTests
         Git.Run(repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", lib, "lib");
         var atStart = RepoScan.FindModuleRepos(Path.Combine(repo, ".git"));
         using var _ = new Chmod(Path.Combine(repo, ".git", "modules", "lib", "config"));
-        var moved = GitCheck.Run(repo, startedWithGit: true, modulesAtStart: atStart);
+        var moved = GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: atStart);
         Assert.Equal("lib/.git", RepoGuard.FormatPath(repo, Assert.Single(moved).From));
     }
 

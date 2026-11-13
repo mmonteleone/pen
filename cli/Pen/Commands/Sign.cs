@@ -402,7 +402,8 @@ internal static class Sign
         if (!Session.FinishDeadSessions(project.Key, host.GetRuntimeDir(project.Key)))
             throw new PenException("not signing: deal with the warning above first");
 
-        var check = GitCheck.RunWithoutOpening(project.Dir, startedWithGit: true, project.CommonGitDir);
+        var check = GitCheck.RunWithoutOpening(project.Dir, startedWithGit: true, project.CommonGitDir,
+            modulesAtStart: null);
         if (check.Moved.Count > 0 || check.Failure != null)
         {
             GitCheck.Report(project.Dir, check);

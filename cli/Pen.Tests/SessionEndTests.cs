@@ -642,7 +642,7 @@ public class SessionEndTests
         // No known file-system state stops the walk midway, so this covers only
         // the printing: both warnings, what moved first.
         var moved = new List<Quarantined> { new("/p/.git/commondir", "/p/.git/commondir.pen-quarantine", "why") };
-        var output = CapturingStderr(() => GitCheck.Report("/p", new CheckResult(moved, "reason")));
+        var output = CapturingStderr(() => GitCheck.Report("/p", new CheckResult { Moved = moved, Failure = "reason" }));
         Assert.Contains("mv '/p/.git/commondir.pen-quarantine' '/p/.git/commondir'", output);
         Assert.Contains("git wasn't checked: don't run git here (/p)", output);
         Assert.Contains("reason", output);

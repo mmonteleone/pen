@@ -91,7 +91,7 @@ public class ScanFailClosedTests
         var stderr = Console.Error;
         var captured = new StringWriter();
         Console.SetError(captured);
-        try { GitCheck.Report("/p", new CheckResult([], null, opened)); }
+        try { GitCheck.Report("/p", new CheckResult { Moved = [], Failure = null, Opened = opened }); }
         finally { Console.SetError(stderr); }
         Assert.Contains("changed sub from mode 311 to 711", captured.ToString());
     }
@@ -113,7 +113,7 @@ public class ScanFailClosedTests
         using var t = new TempDir();
         var repo = RepoWithHiddenRepo(t, out var sub);
         using var _ = new Chmod(sub, Mode311);
-        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true);
+        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
         Assert.Contains("can't list", check.Failure);
         Assert.Contains("sub", check.Failure);
         Assert.Equal(Mode311, File.GetUnixFileMode(sub));
@@ -293,13 +293,11 @@ public class ScanFailClosedTests
         var link = Path.Combine(t.Path, "link");
         File.CreateSymbolicLink(link, target);
         using var _ = new Chmod(target, Mode311);
-        var opened = new List<ModeChange>();
+        Assert.False(GitCheck.TryOpen(link, write: false, out var opened));
 
-        Assert.False(GitCheck.TryOpen(link, opened));
-
-        Assert.Empty(opened);
+        Assert.Null(opened);
         Assert.Equal(Mode311, File.GetUnixFileMode(target));
-        Assert.True(GitCheck.TryOpen(target, opened)); // the check above is what stopped it
+        Assert.True(GitCheck.TryOpen(target, write: false, out var reopened)); // the check above is what stopped it
     }
 
     [Fact]
@@ -341,7 +339,7 @@ public class ScanFailClosedTests
         File.WriteAllText(file, string.Concat(Enumerable.Repeat(Inc("config.worktree"), 64)));
 
         Assert.True(ReadOnly(Mounts(t, repo), file));
-        Assert.Empty(Within10s(() => GitCheck.Run(repo, startedWithGit: true)));
+        Assert.Empty(Within10s(() => GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null)));
         Assert.Null(Within10s(() => GitCheck.RunAtSessionEnd(repo, Session(t, Path.Combine(repo, ".git")))).Failure);
     }
 
@@ -430,9 +428,8 @@ public class ScanFailClosedTests
     public void AnOpenDirectoryWithTheBitsAlreadySetRecordsNoChange()
     {
         using var t = new TempDir();
-        var opened = new List<ModeChange>();
-        Assert.False(GitCheck.TryOpen(t.Sub("d"), opened));
-        Assert.Empty(opened);
+        Assert.False(GitCheck.TryOpen(t.Sub("d"), write: false, out var opened));
+        Assert.Null(opened);
     }
 
     [Fact]
@@ -441,7 +438,7 @@ public class ScanFailClosedTests
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
         var dirs = Enumerable.Range(0, RepoGuard.MaxListed + 2).Select(i => new Chmod(t.Sub("repo", $"d{i}"), Mode311)).ToList();
-        try { Assert.Contains("and 2 more", GitCheck.RunWithoutOpening(repo, startedWithGit: true).Failure); }
+        try { Assert.Contains("and 2 more", GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Failure); }
         finally { dirs.ForEach(d => d.Dispose()); }
     }
 
@@ -460,9 +457,9 @@ public class ScanFailClosedTests
         var foo = Path.Combine(t.Sub("repo", ".git", "modules"), "foo");
         File.CreateSymbolicLink(foo, t.Sub("elsewhere"));
 
-        Assert.Equal(foo + GitCheck.Suffix, Assert.Single(GitCheck.Run(repo, startedWithGit: true)).To);
+        Assert.Equal(foo + GitCheck.Suffix, Assert.Single(GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null)).To);
 
-        Assert.Empty(GitCheck.Run(repo, startedWithGit: true));
+        Assert.Empty(GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null));
         Assert.Empty(RepoScan.FindModuleRepos(Path.Combine(repo, ".git")));
         Assert.True(RepoGuard.IsLink(foo + GitCheck.Suffix));
     }

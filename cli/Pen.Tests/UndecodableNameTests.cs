@@ -50,7 +50,7 @@ public class UndecodableNameTests
         Assert.Contains(@"sub/bad\377dir", e.Message);
         Assert.Contains("rename or remove", e.Message);
 
-        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true);
+        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
         AssertCouldNotCheck(check);
         Assert.Contains("don't run git here", GitCheck.NotCheckedWarning(repo, check.Failure!));
     }
@@ -92,7 +92,7 @@ public class UndecodableNameTests
         Plant(repo, "echo x > \"$b\"", "caf\\351.txt");
 
         RepoGuard.CheckAtStart(repo);
-        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true);
+        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
         Assert.Null(check.Failure);
         Assert.Empty(check.Moved);
     }
@@ -128,7 +128,7 @@ public class UndecodableNameTests
         File.WriteAllText(Path.Combine(dir, "plain�.txt"), "x");
 
         RepoGuard.CheckAtStart(repo);
-        Assert.Null(GitCheck.RunWithoutOpening(repo, startedWithGit: true).Failure);
+        Assert.Null(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Failure);
 
         var nested = Git.Repo(Path.Combine(dir, "nested"));
         Assert.Equal(Path.Combine(nested, ".git"), Assert.Single(RepoScan.FindNested(repo)).Path);
@@ -148,7 +148,7 @@ public class UndecodableNameTests
 
         var e = Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(repo));
         Assert.Contains(@"bad\377dir", e.Message);
-        AssertCouldNotCheck(GitCheck.RunWithoutOpening(repo, startedWithGit: true));
+        AssertCouldNotCheck(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null));
     }
 
     [Fact]
@@ -194,7 +194,7 @@ public class UndecodableNameTests
         Assert.Contains(@"trail\377\012 (it ends in a newline", e.Message);
         Assert.Contains("rename it by hand", e.Message);
         Assert.DoesNotContain("printf", e.Message);
-        Assert.Contains("rename it by hand", GitCheck.RunWithoutOpening(repo, startedWithGit: true).Failure);
+        Assert.Contains("rename it by hand", GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Failure);
     }
 
     [Fact]

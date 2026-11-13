@@ -375,7 +375,7 @@ public class WorktreeTests
         var common = Path.Combine(repo, ".git");
         Git.Run(wt, "commit", "-q", "--allow-empty", "-m", "in wt");
         Git.Run(repo, "worktree", "add", "-q", Path.Combine(wt, ".claude", "worktrees", "y"));
-        Assert.Empty(GitCheck.Run(wt, startedWithGit: true, common));
+        Assert.Empty(GitCheck.Run(wt, startedWithGit: true, common, modulesAtStart: null));
         Assert.True(File.Exists(Path.Combine(wt, ".git")));
         // Without the common dir, the inner worktree would look foreign.
         Assert.Single(RepoScan.FindNested(wt));

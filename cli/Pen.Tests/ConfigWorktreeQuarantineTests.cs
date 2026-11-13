@@ -668,16 +668,17 @@ public class ConfigWorktreeQuarantineTests
         TurnOn(repo, git, "directly");
         ForgeWorktree(repo, git, "forged", "[core]\n");
         var entry = Path.Combine(git, "worktrees", "forged");
-        var reached = new List<string>();
-        var hazards = PausedGit.PromptHazards(git, tryOpen: null, reached, new ProtectedManifest([], []));
+        var scan = new PromptHazardScan(git, tryOpen: null, new ProtectedManifest([], []));
+        scan.Run();
+        var hazards = scan.Hazards;
         Assert.Contains(hazards, h => h.Path == Path.Combine(entry, "config.worktree"));
 
-        reached.Clear();
         File.SetUnixFileMode(entry, UnixFileMode.None);
         try
         {
-            PausedGit.PromptHazards(git, tryOpen: null, reached, new ProtectedManifest([], []));
-            Assert.Contains(entry, reached);
+            var reached = new PromptHazardScan(git, tryOpen: null, new ProtectedManifest([], []));
+            reached.Run();
+            Assert.Contains(entry, reached.UnreachableDirs);
         }
         finally { File.SetUnixFileMode(entry, Dir755); }
     }
@@ -712,7 +713,7 @@ public class ConfigWorktreeQuarantineTests
         File.WriteAllText(file, "[user]\n\tname = mine\n");
         var (_, forged) = ForgeWorktree(repo, git, "forged", "[user]\n\tname = mine\n");
 
-        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, git);
+        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, git, modulesAtStart: null);
 
         Assert.Null(check.Failure);
         Assert.Empty(check.Moved);

@@ -254,7 +254,7 @@ internal static class HooksPath
                 : Locate(candidate.Value, project, host.Home, top, relativeKnown);
             if (place == Place.Writable)
             {
-                return $"warning: core.hooksPath ({PausedGit.Shown(candidate.Value!)}, " +
+                return $"warning: core.hooksPath ({PausedGit.FormatLine(candidate.Value!)}, " +
                     $"in {Out.Field(host.Display(candidate.File))}) " +
                     $"is inside this {(project.IsWorktree ? "worktree or its repo's git dir" : "project")}: those " +
                     "hooks can be changed from the sandbox, and git on this machine will run them. Check them before " +
@@ -266,7 +266,7 @@ internal static class HooksPath
         }
         if (unknown is not { } first)
             return null;
-        var why = first.Problem ?? $"{PausedGit.Shown(first.Value!)}, in {Out.Field(host.Display(first.File))}";
+        var why = first.Problem ?? $"{PausedGit.FormatLine(first.Value!)}, in {Out.Field(host.Display(first.File))}";
         return $"warning: pen can't tell where core.hooksPath leads ({why}): those hooks " +
             "may be inside this project, where they can be changed from the sandbox, and " +
             "git on this machine would run them. Check them before running git here";
@@ -483,7 +483,7 @@ internal static class HooksPath
                     if (included == null)
                     {
                         Found.Add(new(null, file, "it can't resolve the include " +
-                            $"{PausedGit.Shown(entry.Value)} in {Out.Field(file)}"));
+                            $"{PausedGit.FormatLine(entry.Value)} in {Out.Field(file)}"));
                     }
                     else
                     {
