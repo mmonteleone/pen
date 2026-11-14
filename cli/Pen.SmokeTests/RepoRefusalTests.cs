@@ -4,7 +4,7 @@ namespace Pen.SmokeTests;
 /// list, a FIFO named .git, nested and bare repos, a folder of repos, and worktrees under .claude/.</summary>
 public sealed class RepoRefusalTests(RepoRefusalTests.Fixture fixture) : IClassFixture<RepoRefusalTests.Fixture>
 {
-    [Fact(DisplayName = "refuses a .git file that isn't a valid linked worktree (section 21 runs in one)")]
+    [Fact(DisplayName = "refuses a .git file that isn't a valid linked worktree (see LinkedWorktreeTests)")]
     public void ForgedWorktreeIsRefused() => SmokeAssert.Refused(fixture.Forged, "isn't a valid linked worktree");
 
     [Fact(DisplayName = "refuses a directory it can enter but not list, naming it")]
@@ -16,7 +16,7 @@ public sealed class RepoRefusalTests(RepoRefusalTests.Fixture fixture) : IClassF
     [Fact(DisplayName = "refuses a FIFO named .git rather than hanging on it")]
     public void FifoIsRefused() => SmokeAssert.Refused(fixture.Fifo, "fifo");
 
-    [Fact(DisplayName = "a repo with .gitmodules starts (section 26 runs with real submodules)")]
+    [Fact(DisplayName = "a repo with .gitmodules starts (WorktreeSubmoduleCheckoutTests runs with real submodules)")]
     public void GitmodulesStarts() => SmokeAssert.Succeeded(fixture.Gitmodules);
 
     [Fact(DisplayName = "refuses a repo with another repo inside it, naming it")]

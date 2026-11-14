@@ -9,7 +9,6 @@ namespace Pen.SmokeTests.Harness;
 internal sealed class SmokeProject : IDisposable
 {
     private readonly List<string> _homes = [SmokeEnvironment.RealHome];
-    private readonly List<string> _extraKeys = [];
     private string? _key;
 
     private SmokeProject(string dir)
@@ -69,10 +68,6 @@ internal sealed class SmokeProject : IDisposable
     /// <param name="home">The HOME pen ran with.</param>
     public void CleanUpUnder(string home) => _homes.Add(home);
 
-    /// <summary>Has cleanup also remove another key's state, e.g. one whose directory a test deleted.</summary>
-    /// <param name="key">The project key.</param>
-    public void ForgetKeyOnDispose(string key) => _extraKeys.Add(key);
-
     /// <summary>Finds the runtime dirs pen made for this path under a HOME (pen-*-hash).</summary>
     /// <param name="home">The HOME.</param>
     /// <returns>Their paths.</returns>
@@ -110,7 +105,7 @@ internal sealed class SmokeProject : IDisposable
     /// <exception cref="InvalidOperationException">Git exited non-zero.</exception>
     public string RunGit(params string[] args) => SmokeGit.Run(Dir, args);
 
-    /// <summary>Removes the project's state under every HOME it knows, the extra keys' state and the project.</summary>
+    /// <summary>Removes the project's state under every HOME it knows, and the project.</summary>
     /// <remarks>Every step runs even if an earlier one fails; the first error is thrown at the end.</remarks>
     public void Dispose()
     {
@@ -122,7 +117,7 @@ internal sealed class SmokeProject : IDisposable
     }
 
     /// <summary>Finds every key this project's state is under: the resolved one, those of its runtime dirs under each
-    /// HOME and the extra ones.</summary>
+    /// HOME.</summary>
     /// <param name="cleanup">Keeps the error if a HOME can't be read.</param>
     /// <returns>The keys, without duplicates.</returns>
     public IReadOnlyList<string> FindKeys(Cleanup cleanup)
@@ -132,7 +127,6 @@ internal sealed class SmokeProject : IDisposable
             keys.Add(_key);
         foreach (var home in _homes.Distinct())
             cleanup.Run(() => keys.AddRange(FindRuntimeDirs(home).Select(dir => Path.GetFileName(dir))));
-        keys.AddRange(_extraKeys);
         return [.. keys.Distinct()];
     }
 

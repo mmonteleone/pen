@@ -10,16 +10,16 @@ public sealed class AgentTests(AgentTests.Fixture fixture) : IClassFixture<Agent
 
     private ProbeResult Agents => fixture.Agents;
 
-    [Fact(DisplayName = "claude --version works as agent ($version)")]
+    [Fact(DisplayName = "claude --version works as agent")]
     public void ClaudeVersionWorks() => AssertVersion("claude");
 
-    [Fact(DisplayName = "codex --version works as agent ($version)")]
+    [Fact(DisplayName = "codex --version works as agent")]
     public void CodexVersionWorks() => AssertVersion("codex");
 
-    [Fact(DisplayName = "opencode --version works as agent ($version)")]
+    [Fact(DisplayName = "opencode --version works as agent")]
     public void OpenCodeVersionWorks() => AssertVersion("opencode");
 
-    [Fact(DisplayName = "pi --version works as agent ($version)")]
+    [Fact(DisplayName = "pi --version works as agent")]
     public void PiVersionWorks() => AssertVersion("pi");
 
     [Fact(DisplayName = "agents live in system paths, not $HOME")]
@@ -84,7 +84,7 @@ public sealed class AgentTests(AgentTests.Fixture fixture) : IClassFixture<Agent
         Assert.True(upgrade.BaseBefore != upgrade.BaseAfter, $"base {upgrade.BaseBefore} → {upgrade.BaseAfter}");
     }
 
-    [SlowFact(DisplayName = "...so a session's agent is reinstalled on next use ($t1 → $t2)")]
+    [SlowFact(DisplayName = "...so a session's agent is reinstalled on next use (install time changes)")]
     public void UpgradeReinstallsTheAgent()
     {
         var upgrade = fixture.Upgrade;

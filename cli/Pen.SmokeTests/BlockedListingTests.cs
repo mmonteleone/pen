@@ -20,7 +20,7 @@ public sealed class BlockedListingTests(BlockedListingTests.Fixture fixture)
     [Fact(DisplayName = "...with the line to paste")]
     public void ListsTheLineToPaste() => AssertStdoutHas(fixture.WhileRunning, "pen allow example.org example.edu");
 
-    [Fact(DisplayName = "...leaving out domains allowed since (example.com, by section 15)")]
+    [Fact(DisplayName = "...leaving out domains allowed since (example.com, by AllowCommandTests)")]
     public void LeavesOutDomainsAllowedSince() =>
         Assert.True(
             !fixture.WhileRunning.Stdout.Contains("example.com", StringComparison.Ordinal),

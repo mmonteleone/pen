@@ -19,7 +19,7 @@ public sealed class ProxyNetworkTests(ProxyNetworkTests.Fixture fixture) : IClas
     [Fact(DisplayName = "plain http://example.com → 403 from the proxy")]
     public void PlainHttpIsDenied() => AssertCode("plain", "403", connect: false);
 
-    [Fact(DisplayName = "bare IP ($gh_ip) → 403 from the proxy")]
+    [Fact(DisplayName = "bare IP → 403 from the proxy")]
     public void BareIpIsDenied() => AssertCode("bare_ip", "403", connect: true);
 
     [Fact(DisplayName = "--noproxy '*' fails (fail-closed)")]

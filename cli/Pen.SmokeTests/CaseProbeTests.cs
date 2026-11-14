@@ -8,7 +8,7 @@ public sealed class CaseProbeTests(CaseProbeTests.Fixture fixture) : IClassFixtu
 
     private int WantWarnings => fixture.WantWarnings;
 
-    [Fact(DisplayName = "a session warns $want_warnings time(s) about case on this filesystem")]
+    [Fact(DisplayName = "a session warns as often as case on this filesystem says")]
     public void SessionWarnsAsTheFilesystemSays() =>
         AssertWarnings(fixture.InRepo, WantWarnings, $"a session warns {WantWarnings} time(s) about case");
 

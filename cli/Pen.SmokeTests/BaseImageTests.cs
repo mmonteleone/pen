@@ -9,7 +9,7 @@ public sealed class BaseImageTests(BaseImageTests.Fixture fixture) : IClassFixtu
 
     private ProbeResult Probes => fixture.Probes;
 
-    [Fact(DisplayName = "uname -m matches the host ($host_arch)")]
+    [Fact(DisplayName = "uname -m matches the host's architecture")]
     public void ArchitectureMatchesTheHost()
     {
         var hostArch = RuntimeInformation.OSArchitecture switch

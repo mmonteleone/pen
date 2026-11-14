@@ -12,11 +12,11 @@ public sealed class EntrypointHardeningTests(EntrypointHardeningTests.Fixture fi
 
     private CommandResult Session => fixture.Hardening;
 
-    [Fact(DisplayName = "runs as the host user (inside: $AGENT_UID:$AGENT_GID)")]
+    [Fact(DisplayName = "runs as the host user (inside: the agent's UID and GID)")]
     public void RunsAsTheHostUser() =>
         AssertLine($"id={AgentUid}:{AgentGid}", $"runs as the host user (inside: {AgentUid}:{AgentGid})");
 
-    [Fact(DisplayName = "user $AGENT_USER, HOME=/home/agent")]
+    [Fact(DisplayName = "the agent user, HOME=/home/agent")]
     public void UserAndHome() =>
         AssertLine(
             $"user={SmokeEnvironment.AgentUser} home=/home/agent",
@@ -110,7 +110,7 @@ public sealed class EntrypointHardeningTests(EntrypointHardeningTests.Fixture fi
     [Fact(DisplayName = "a repo with commit.gpgsign=true still has signing off")]
     public void SigningStaysOff() => AssertLine("gpgsign_effective=false");
 
-    [Fact(DisplayName = "under $home_root only the project and NuGet paths exist")]
+    [Fact(DisplayName = "under the host's home root only the project and NuGet paths exist")]
     public void OnlyTheProjectAndNuGetPathsAreUnderTheHomeRoot()
     {
         var project = fixture.Project.Dir;

@@ -9,11 +9,6 @@ internal sealed record ProbeResult(CommandResult Session)
     /// <returns>True if the output has the line "ok: name".</returns>
     public bool HasPassed(string name) => HasLine($"ok: {name}");
 
-    /// <summary>Checks whether a probe reported "fail".</summary>
-    /// <param name="name">The probe's name.</param>
-    /// <returns>True if the output has the line "fail: name"; false if it passed or never ran.</returns>
-    public bool HasFailed(string name) => HasLine($"fail: {name}");
-
     /// <summary>Checks whether the session's output has exactly this line (grep -qxF).</summary>
     /// <param name="line">The whole line.</param>
     /// <returns>True if it's there.</returns>

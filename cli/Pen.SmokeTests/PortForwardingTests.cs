@@ -205,7 +205,7 @@ public sealed class PortForwardingTests(PortForwardingTests.Fixture fixture)
             if (IsPortOpen(Port))
             {
                 throw new InvalidOperationException(
-                    $"port {Port} is already in use on this machine: free it to run this section");
+                    $"port {Port} is already in use on this machine: free it to run these tests");
             }
             _pen = PenCli.CreateForRealHome(Project.Dir);
             ProjectDisplay = PsTable.FormatProjectDir(Project.Dir);
