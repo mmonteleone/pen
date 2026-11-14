@@ -55,4 +55,22 @@ internal sealed class FakeHome
 
     /// <summary>Gives sessions no tools: a config.toml with nothing in it.</summary>
     public void MakeToolFree() => WriteConfig("# none");
+
+    /// <summary>Sets a value in the HOME's global git config (git config --file ~/.gitconfig name value).</summary>
+    /// <param name="name">The setting, e.g. commit.gpgsign.</param>
+    /// <param name="value">Its value.</param>
+    /// <exception cref="InvalidOperationException">Git failed.</exception>
+    public void SetGitConfig(string name, string value) =>
+        new HostCommand("git", ["config", "--file", System.IO.Path.Combine(Path, ".gitconfig"), name, value]).Run()
+            .RequireSuccess();
+
+    /// <summary>Has git in this HOME sign with an SSH key through ssh-keygen, as smoke.sh's sign sections set
+    /// up: gpg.format, user.signingkey and gpg.ssh.program.</summary>
+    /// <param name="key">The key.</param>
+    public void UseSigningKey(SigningKey key)
+    {
+        SetGitConfig("gpg.format", "ssh");
+        SetGitConfig("user.signingkey", key.Path);
+        SetGitConfig("gpg.ssh.program", "ssh-keygen");
+    }
 }

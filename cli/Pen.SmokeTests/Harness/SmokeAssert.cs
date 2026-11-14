@@ -9,6 +9,23 @@ internal static class SmokeAssert
     public static void Contains(CommandResult result, string text) =>
         Assert.True(result.Output.Contains(text, StringComparison.Ordinal), $"no \"{text}\"; {result.Describe()}");
 
+    /// <summary>Asserts that the combined output has every one of <paramref name="texts"/> in it (has_all).</summary>
+    /// <param name="result">The command's result.</param>
+    /// <param name="texts">The texts.</param>
+    public static void ContainsAll(CommandResult result, params string[] texts)
+    {
+        var missing = texts.Where(text => !result.Output.Contains(text, StringComparison.Ordinal)).ToList();
+        Assert.True(missing.Count == 0, $"no \"{string.Join("\", \"", missing)}\"; {result.Describe()}");
+    }
+
+    /// <summary>Asserts that stderr alone has <paramref name="text"/> in it, as smoke.sh's holding captured
+    /// it.</summary>
+    /// <param name="result">The command's result.</param>
+    /// <param name="text">The text.</param>
+    public static void StderrContains(CommandResult result, string text) =>
+        Assert.True(
+            result.Stderr.Contains(text, StringComparison.Ordinal), $"no \"{text}\" on stderr; {result.Describe()}");
+
     /// <summary>Asserts that the combined output is all there and doesn't have <paramref name="text"/> in it (not
     /// contains).</summary>
     /// <param name="result">The command's result.</param>
