@@ -27,18 +27,27 @@ public sealed class ShutProjectDirTests(ShutProjectDirTests.Fixture fixture)
         Assert.True(fixture.FixLine.Contains("chmod u+rwx", StringComparison.Ordinal), fixture.Shut.Describe());
 
     [Fact(DisplayName = "...which restores the config")]
-    public void FixRestoresTheConfig() => Assert.True(fixture.FixRan && !fixture.ConfigHasFsmonitor, NoFix);
+    public void FixRestoresTheConfig() => AssertFixThen(
+        !fixture.ConfigHasFsmonitor, "the config still has the planted fsmonitor");
 
     [Fact(DisplayName = "...so the planted fsmonitor doesn't run")]
-    public void FsmonitorDoesntRun() => Assert.True(fixture.FixRan && !fixture.CanaryRan, NoFix);
+    public void FsmonitorDoesntRun() => AssertFixThen(!fixture.CanaryRan, "the planted fsmonitor ran");
 
     [Fact(DisplayName = "...and ends that session")]
-    public void FixEndsTheSession() => Assert.True(fixture.FixRan && fixture.ContainersAfterFix == 0, NoFix);
+    public void FixEndsTheSession() => AssertFixThen(
+            fixture.ContainersAfterFix == 0, $"{fixture.ContainersAfterFix} containers were still running");
 
     [Fact(DisplayName = "...and the next session starts normally")]
     public void NextSessionStarts() => SmokeAssert.Succeeded(fixture.Next);
 
     private const string NoFix = "no fix line was printed, so the fix was not run";
+
+    /// <summary>Asserts that the fix ran and then that a condition holds, saying which one failed.</summary>
+    private void AssertFixThen(bool condition, string failure)
+    {
+        Assert.True(fixture.FixRan, NoFix);
+        Assert.True(condition, $"the fix ran, but {failure}");
+    }
 
     /// <summary>Runs the session that shuts the project, then pen from a shell already in it, then the fix line from
     /// outside, host git in the project and the next session.</summary>
@@ -73,7 +82,7 @@ public sealed class ShutProjectDirTests(ShutProjectDirTests.Fixture fixture)
             var hook = Path.Combine(Scratch, "shut-hook");
             File.WriteAllText(hook, $"#!/bin/sh\ntouch {ShellQuote.Quote(canary)}\n");
             File.SetUnixFileMode(hook, Files.Mode755);
-            // smoke.sh's next pen ran from its shell, which was in the project before it was shut: a shell started
+            // The next pen runs from a shell that was in the project before it was shut: a shell started
             // there now, waiting for a line, stands in for it.
             const string WaitThenRun = "read -r _ && exec \"$0\" run true </dev/null";
             var waiting = Cli.Wrap("/bin/sh", "-c", WaitThenRun, SmokeEnvironment.PenPath);

@@ -124,7 +124,7 @@ public sealed class AgentTests(AgentTests.Fixture fixture) : IClassFixture<Agent
         Assert.True(prompt.Session.Output.Contains('4', StringComparison.Ordinal), prompt.Session.Describe());
     }
 
-    /// <summary>A prompt session's result and the hosts its proxy denied (the note smoke.sh printed).</summary>
+    /// <summary>A prompt session's result and the hosts its proxy denied (printed as a note).</summary>
     /// <param name="Agent">The agent, e.g. claude.</param>
     /// <param name="Session">The session.</param>
     /// <param name="DeniedHosts">The host:port of each TCP_DENIED line in its proxy.log, sorted, once each.</param>

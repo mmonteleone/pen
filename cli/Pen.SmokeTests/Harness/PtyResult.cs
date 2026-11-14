@@ -3,7 +3,7 @@ using System.Globalization;
 namespace Pen.SmokeTests.Harness;
 
 /// <summary>What pty-run.py printed: the terminal's output, then EXIT, TIMEOUT and AFTER-HANGUP lines.</summary>
-/// <param name="Text">Everything it printed to stdout, as smoke.sh's $out held it.</param>
+/// <param name="Text">Everything it printed to stdout.</param>
 /// <param name="Stderr">What pty-run.py itself wrote to stderr, such as a Python error if it crashed.</param>
 /// <param name="ExitCode">The command's exit code from its EXIT line, or null if there's none.</param>
 /// <param name="AfterHangupSeconds">How long the command took to exit after the hangup, if there was one.</param>

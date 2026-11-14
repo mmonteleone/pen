@@ -124,8 +124,7 @@ public sealed class PausedGitStateTests(PausedGitStateTests.Fixture fixture)
 
         protected override void Prepare()
         {
-            // As in smoke.sh, where the worktree the read-only checks made was still there: its entry is mounted
-            // read-only, and the end check visits it.
+            // The worktree's entry is mounted read-only, and the end check visits it.
             Project.RunGit("worktree", "add", "-q", Path.Combine(Scratch, "wt"));
             RunPausedRebase();
             RunCount();
@@ -146,8 +145,8 @@ public sealed class PausedGitStateTests(PausedGitStateTests.Fixture fixture)
         private CommandResult RunAndRequireSuccess(string script) =>
             Cli.Run("run", "bash", "-c", script).RequireSuccess();
 
-        /// <summary>Runs a session that changes .git's mode, then adds <paramref name="added"/> to it, as smoke.sh's
-        /// chmod u+w or u+rwx did, even if the session failed.</summary>
+        /// <summary>Runs a session that changes .git's mode, then adds <paramref name="added"/> to it,
+        /// as chmod u+w or u+rwx does, even if the session failed.</summary>
         private CommandResult RunWithGitDirModeAdded(UnixFileMode added, string script)
         {
             try

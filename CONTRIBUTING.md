@@ -6,7 +6,7 @@ For installation and everyday use, start with the [README](README.md#get-started
 
 ## Development setup
 
-You need Docker with Compose v2, Python 3 for smoke tests, and the .NET 11 SDK pinned in [`cli/global.json`](cli/global.json). On macOS, also install Xcode command-line tools (`xcode-select --install`).
+You need Docker with Compose v2, Python 3 for the smoke tests that need a terminal, and the .NET 11 SDK pinned in [`cli/global.json`](cli/global.json). On macOS, also install Xcode command-line tools (`xcode-select --install`).
 
 On Linux, the installer can build without a host SDK, but the `dotnet` commands below need one. The default installer image is Azure Linux 3.0; its binary runs on glibc 2.34+ (Ubuntu 22.04+, Debian 12+). Set `PEN_BUILD_IMAGE` to use a different build image.
 
@@ -25,21 +25,15 @@ Check `command -v pen` and `pen --version` to confirm you're using the binary yo
 After building, running unit tests and reinstalling:
 
 ```sh
-SMOKE_ONLY="7 13" tests/smoke.sh  # sections your change touches
-tests/smoke.sh                    # full suite before finishing a larger change
-```
-
-Section numbers are in [`tests/smoke.sh`](tests/smoke.sh). The fixture setup always runs. For tools, run section 28; for .NET, also run section 11. The suite needs Docker and uses throwaway projects and a throwaway `HOME` for config checks; it doesn't edit your existing `~/.config/pen` (a first run may create it). Set `PEN=/absolute/path/to/pen` to test a different binary.
-
-The smoke checks are moving to test classes in [`cli/Pen.SmokeTests`](cli/Pen.SmokeTests), named for what they cover (section 5, for example, is `CliDispatchTests` and `DirectoryRuleTests`). They test the installed pen the same way, or `$PEN`, and need Docker, so `dotnet test` leaves them out. Run them from `cli/`, with any filters after `--`:
-
-```sh
-dotnet run --project Pen.SmokeTests                                        # every class
+cd cli
+dotnet run --project Pen.SmokeTests                                        # every class: the full suite
 dotnet run --project Pen.SmokeTests -- --filter-class "*CliDispatchTests"  # one class
 dotnet run --project Pen.SmokeTests -- --filter-method "*Symlink*"         # methods by name, in any class
 ```
 
-With no filter it runs every class. Each check's description is its test's display name, so `--filter-display-name "refuses*"` picks checks by description, and `--output detailed` lists each one as it passes. Each class gets its own throwaway project and `HOME`, so any class runs on its own. Checks that need credentials are skipped without them, and the slow ones (trait `Category=Slow`) are skipped unless `SMOKE_SLOW=1`; `--filter-trait "Category=Slow"` selects them.
+The smoke tests are the classes in [`cli/Pen.SmokeTests`](cli/Pen.SmokeTests), named for what they cover; run the classes your change touches, and the full suite before finishing a larger change. Filters go after `--`. For tools, run `ToolsImageTests` and `AgentTests`; for .NET, also `DotNetTests`. They test the installed pen, or `$PEN`, so set `PEN=/absolute/path/to/pen` to test a different binary. They need Docker, so `dotnet test` leaves them out. They use throwaway projects and a throwaway `HOME` for config checks, and each class gets its own, so any class runs on its own; they don't edit your existing `~/.config/pen` (a first run may create it).
+
+Each check's description is its test's display name, so `--filter-display-name "refuses*"` picks checks by description, and `--output detailed` lists each one as it passes. Checks that need credentials are skipped without them, and the slow ones (trait `Category=Slow`) are skipped unless `SMOKE_SLOW=1`; `--filter-trait "Category=Slow"` selects them.
 
 To narrow unit tests or run the CLI without installing (from `cli/`):
 
@@ -51,8 +45,8 @@ dotnet run --project Pen/Pen.csproj -- <args>
 
 Optional smoke checks:
 
-- `SMOKE_SLOW=1 tests/smoke.sh` also tests `pen upgrade`.
-- `CLAUDE_CODE_OAUTH_TOKEN` and `OPENAI_API_KEY` enable agent-prompt checks. The suite writes them only to a throwaway config file (mode 600) and removes it on exit.
+- `SMOKE_SLOW=1` also runs the slow checks, such as `pen upgrade`.
+- `CLAUDE_CODE_OAUTH_TOKEN` and `OPENAI_API_KEY` enable agent-prompt checks, which are skipped without them. The suite writes them only to a throwaway config file (mode 600) and removes it on exit.
 - [`tests/pty-run.py`](tests/pty-run.py) runs commands on a real pseudo-terminal for signal and hangup checks; see its header for options.
 
 Before merging, run the suite on macOS arm64 and Linux amd64, with both rootful and rootless Docker on Linux. macOS testing so far uses OrbStack; results from other engines are welcome.
@@ -70,7 +64,7 @@ Before merging, run the suite on macOS arm64 and Linux amd64, with both rootful 
 | `proxy/` | Squid proxy config and default domain allowlist |
 | `templates/` | Initial user config and agent home seed |
 | `tools/` | Tool and agent recipes: `tools/<name>/tool.toml` and `install.sh` |
-| `tests/` | Container smoke tests and helpers |
+| `tests/` | Helpers for the smoke tests (`pty-run.py`) |
 
 **Container files and templates are embedded in the CLI.** The installed pen never reads this checkout. Reinstall after changing `compose.yaml`, `image/`, `proxy/`, `templates/` or `tools/`, just as you would after a CLI change. Changes under `image/` trigger an image rebuild on the next session.
 
@@ -78,7 +72,7 @@ Before merging, run the suite on macOS arm64 and Linux amd64, with both rootful 
 
 Keep code AOT/trim-safe: use source-generated serialization rather than reflection-based APIs. Native calls belong in `Native.cs`. Tests access internals through `InternalsVisibleTo`; use the `TempDir` and `Git` helpers in `Pen.TestSupport`.
 
-Tool recipes pair a `tool.toml` (default version, accepted versions, domains and environment) with an `install.sh` that receives versions as separate arguments and runs as root during the image build. Recipes must work independently. To add one, create `tools/<name>/` with those two files, reinstall and try `pen --tool <name>`. `kind = "agent"` marks a recipe that installs an AI agent: `pen --tool list` shows it apart from tools, and a command that starts with its name (`pen <name>`) brings it in at its default version. `hidden = true` keeps a recipe out of listings, as for `pen-test` and `pen-test-b`, which the tests use. An agent distributed through npm needs only a few lines of `install.sh`: the base's `/opt/pen/lib/npm-agent.sh` (from `image/npm-agent.sh`, off `PATH`) installs the package with Pen's private Node into `/opt/pen/<command>`, links its native binary or wraps its JavaScript entry into `/usr/local/bin`, refuses releases older than the oldest supported one and checks `<command> --version` against a pinned version; its header documents the flags, and the `claude`, `codex`, `opencode` and `pi` recipes show both kinds. The recipe exports its agent's auto-update switches before running it and keeps anything else of its own (Codex's managed config) in its `install.sh`. Changing the helper rebuilds the base, so every agent reinstalls on next use. When adding or changing one, update the [tools reference](docs/usage.md#tools) and run smoke section 28 under rootful and rootless Docker.
+Tool recipes pair a `tool.toml` (default version, accepted versions, domains and environment) with an `install.sh` that receives versions as separate arguments and runs as root during the image build. Recipes must work independently. To add one, create `tools/<name>/` with those two files, reinstall and try `pen --tool <name>`. `kind = "agent"` marks a recipe that installs an AI agent: `pen --tool list` shows it apart from tools, and a command that starts with its name (`pen <name>`) brings it in at its default version. `hidden = true` keeps a recipe out of listings, as for `pen-test` and `pen-test-b`, which the tests use. An agent distributed through npm needs only a few lines of `install.sh`: the base's `/opt/pen/lib/npm-agent.sh` (from `image/npm-agent.sh`, off `PATH`) installs the package with Pen's private Node into `/opt/pen/<command>`, links its native binary or wraps its JavaScript entry into `/usr/local/bin`, refuses releases older than the oldest supported one and checks `<command> --version` against a pinned version; its header documents the flags, and the `claude`, `codex`, `opencode` and `pi` recipes show both kinds. The recipe exports its agent's auto-update switches before running it and keeps anything else of its own (Codex's managed config) in its `install.sh`. Changing the helper rebuilds the base, so every agent reinstalls on next use. When adding or changing one, update the [tools reference](docs/usage.md#tools) and run `ToolsImageTests` and `AgentTests` under rootful and rootless Docker.
 
 ## Code style
 

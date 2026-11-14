@@ -14,8 +14,8 @@ Full details in CONTRIBUTING.md. The essentials (.NET commands run from `cli/`; 
 cd cli && dotnet build         # warnings are errors
 cd cli && dotnet test          # unit tests; --filter-class Pen.Tests.CliTests / --filter-method "*Name*"
 cli/install.sh                 # AOT-publish and install ~/.local/bin/pen
-tests/smoke.sh                 # end-to-end checks against the *installed* pen; needs Docker
-SMOKE_ONLY="7 13" tests/smoke.sh   # only those sections (the fixture setup always runs)
+cd cli && dotnet run --project Pen.SmokeTests   # end-to-end checks against the *installed* pen; needs Docker
+cd cli && dotnet run --project Pen.SmokeTests -- --filter-class "*CliDispatchTests"   # one class (--filter-method too)
 ```
 
 ## Architecture
@@ -42,7 +42,7 @@ SMOKE_ONLY="7 13" tests/smoke.sh   # only those sections (the fixture setup alwa
 
 ## Conventions
 
-- Verifying a change: after each change, build, unit tests and the smoke sections it touches (`SMOKE_ONLY`); the full smoke suite before finishing a larger piece of work.
+- Verifying a change: after each change, build, unit tests and the smoke test classes it touches (`--filter-class`); the full smoke suite before finishing a larger piece of work.
 
 - Code must stay AOT/trim-safe (`PublishAot`, `IsAotCompatible`): no reflection-based JSON serialization etc. Native calls live in `Native.cs`.
 - Tests access internals via `InternalsVisibleTo`; use the `TempDir` and `Git` helpers in `Pen.TestSupport`.

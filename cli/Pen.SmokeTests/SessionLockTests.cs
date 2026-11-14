@@ -6,7 +6,7 @@ namespace Pen.SmokeTests;
 /// <summary>A running session's locks and its line in pen ps, and how the next pen ends a session whose pen was
 /// killed.</summary>
 /// <remarks>
-/// These sessions run with the real HOME, as smoke.sh's did, so that pen ps shows the project, which is under
+/// These sessions run with the real HOME, so that pen ps shows the project, which is under
 /// it, as ~/…. The real ~/.config/pen's tools go into them, which the TOOLS cell allows for.
 /// </remarks>
 public sealed class SessionLockTests(SessionLockTests.Fixture fixture) : IClassFixture<SessionLockTests.Fixture>

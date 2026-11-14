@@ -58,8 +58,8 @@ public sealed class BlockedListingTests(BlockedListingTests.Fixture fixture)
     /// was blocked from example.edu and then example.org waits, after it's SIGKILL'd, and after a session that
     /// exits normally.</summary>
     /// <remarks>
-    /// smoke.sh left out example.com only when section 15 had run first, which had a session blocked from it and
-    /// then allowed it. The fixture does the same first, so the check always runs.
+    /// example.com is left out only after a session was blocked from it and it was then allowed. The fixture does
+    /// that first, so the check always runs.
     /// </remarks>
     public sealed class Fixture : SmokeFixture
     {

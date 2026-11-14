@@ -1,6 +1,6 @@
 namespace Pen.SmokeTests.Harness;
 
-/// <summary>Assertions on a command's output that smoke.sh's checks shared, each failing with the output.</summary>
+/// <summary>Assertions on a command's output that checks share, each failing with the output.</summary>
 internal static class SmokeAssert
 {
     /// <summary>Asserts that the combined output has <paramref name="text"/> in it (contains).</summary>
@@ -18,8 +18,7 @@ internal static class SmokeAssert
         Assert.True(missing.Count == 0, $"no \"{string.Join("\", \"", missing)}\"; {result.Describe()}");
     }
 
-    /// <summary>Asserts that stderr alone has <paramref name="text"/> in it, as smoke.sh's holding captured
-    /// it.</summary>
+    /// <summary>Asserts that stderr alone has <paramref name="text"/> in it.</summary>
     /// <param name="result">The command's result.</param>
     /// <param name="text">The text.</param>
     public static void StderrContains(CommandResult result, string text) =>

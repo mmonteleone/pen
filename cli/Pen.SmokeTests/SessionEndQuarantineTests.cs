@@ -197,7 +197,7 @@ public sealed class SessionEndQuarantineTests(SessionEndQuarantineTests.Fixture 
             Files.DeleteTree(Path.Combine(Project.Dir, "sub2"));
         }
 
-        /// <summary>Runs <paramref name="command"/> in a session, as smoke.sh's quarantine_case did, and records
+        /// <summary>Runs <paramref name="command"/> in a session, and records
         /// what's left.</summary>
         private Quarantine RunQuarantine(string command, string path, string quarantined)
         {

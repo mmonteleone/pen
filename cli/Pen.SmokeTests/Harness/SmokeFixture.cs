@@ -21,7 +21,7 @@ public class SmokeFixture : IAsyncLifetime
     private IReadOnlySet<string>? _imagesBefore;
     private TempDir? _scratch;
 
-    /// <summary>Gets a scratch directory outside the project (smoke.sh's $SCRATCH), real path.</summary>
+    /// <summary>Gets a scratch directory outside the project as a real path.</summary>
     internal string Scratch => _scratch?.Path ?? throw NotInitialized();
 
     /// <summary>Gets the throwaway HOME, in <see cref="Scratch"/>/home.</summary>
@@ -82,7 +82,7 @@ public class SmokeFixture : IAsyncLifetime
     internal SmokeProject CreateEmptyProject(string prefix) => TrackProject(SmokeProject.CreateEmpty(prefix));
 
     /// <summary>Creates a directory, not a repo, in <see cref="Scratch"/>, whose projects' state is removed with the
-    /// fixture as smoke.sh's forget did.</summary>
+    /// fixture.</summary>
     /// <param name="name">Its name in <see cref="Scratch"/>.</param>
     /// <returns>The project.</returns>
     internal SmokeProject CreateScratchProject(string name) =>
@@ -119,7 +119,7 @@ public class SmokeFixture : IAsyncLifetime
 
     private void StartFirstSession()
     {
-        // As smoke.sh's fixture: it builds pen:latest if it's missing or stale, and fixes the project key.
+        // It builds pen:latest if it's missing or stale, and fixes the project key.
         var first = Cli.Run("run", "true");
         if (Project.FindRuntimeDirs(Home.Path).Count == 0)
             throw new InvalidOperationException($"the first session made no runtime dir: {first.Describe()}");

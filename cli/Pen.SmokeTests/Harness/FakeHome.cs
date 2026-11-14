@@ -64,8 +64,8 @@ internal sealed class FakeHome
         new HostCommand("git", ["config", "--file", System.IO.Path.Combine(Path, ".gitconfig"), name, value]).Run()
             .RequireSuccess();
 
-    /// <summary>Has git in this HOME sign with an SSH key through ssh-keygen, as smoke.sh's sign sections set
-    /// up: gpg.format, user.signingkey and gpg.ssh.program.</summary>
+    /// <summary>Has git in this HOME sign with an SSH key through ssh-keygen, by setting
+    /// gpg.format, user.signingkey and gpg.ssh.program.</summary>
     /// <param name="key">The key.</param>
     public void UseSigningKey(SigningKey key)
     {

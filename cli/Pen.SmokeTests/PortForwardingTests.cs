@@ -6,7 +6,7 @@ namespace Pen.SmokeTests;
 /// <summary>Forwarded ports: the ports service that publishes them on the host's loopback, what it can't be used
 /// for, a port that's taken, and ports from .pen/config.toml.</summary>
 /// <remarks>
-/// These sessions run with the real HOME, as smoke.sh's did, so that pen ps shows the project, which is under
+/// These sessions run with the real HOME, so that pen ps shows the project, which is under
 /// it, as ~/…. The real ~/.config/pen's tools go into them, which the TOOLS cell allows for.
 /// </remarks>
 public sealed class PortForwardingTests(PortForwardingTests.Fixture fixture)

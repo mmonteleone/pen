@@ -185,6 +185,8 @@ public sealed class LinkedWorktreeTests(LinkedWorktreeTests.Fixture fixture)
 
         private PenCli _worktreePen = null!;
 
+        private SmokeProject _worktreeProject = null!;
+
         internal string Worktree { get; private set; } = null!;
 
         internal string MainHead { get; private set; } = null!;
@@ -262,10 +264,11 @@ public sealed class LinkedWorktreeTests(LinkedWorktreeTests.Fixture fixture)
         protected override void Prepare()
         {
             // pen sign runs below; nothing here signs through the user's SSH agent.
-            _pen = Cli.WithEnvironment("SSH_AUTH_SOCK", null);
+            _pen = SigningKey.WithoutAgentFor(Cli);
             Files.DeleteTree(Path.Combine(Project.Dir, ".pen"));
             // A tracked scratch project, so any state pen made for the worktree's own path goes with the fixture.
-            Worktree = CreateScratchProject("wt21").Dir;
+            _worktreeProject = CreateScratchProject("wt21");
+            Worktree = _worktreeProject.Dir;
             Project.RunGit("worktree", "add", "-q", "-b", "smoke-wt", Worktree);
             _worktreePen = _pen.WithWorkingDirectory(Worktree);
             var worktreeBase = SmokeGit.Run(Worktree, "rev-parse", "HEAD").TrimEnd('\n');
@@ -302,11 +305,9 @@ public sealed class LinkedWorktreeTests(LinkedWorktreeTests.Fixture fixture)
             WorktreeRuntimeDirs =
             [
                 .. new[] { SmokeEnvironment.RealHome, Home.Path }
-                    .Select(home => Path.Combine(home, ".local", "state", "pen"))
-                    .Where(Directory.Exists)
-                    .SelectMany(root => Directory.EnumerateDirectories(root, $"pen-*-{worktreeHash}")),
+                    .SelectMany(home => _worktreeProject.FindRuntimeDirs(home)),
             ];
-            // smoke.sh looked for pen-wt21-<hash>_home; any key ending in the worktree's hash is checked here.
+            // Any key ending in the worktree's hash is checked, such as pen-wt21-<hash>_home.
             WorktreeVolumes =
             [
                 .. Docker.ReadLines("volume", "ls", "-q")
@@ -375,8 +376,7 @@ public sealed class LinkedWorktreeTests(LinkedWorktreeTests.Fixture fixture)
             Docker.Run("rm", "-f", WorktreeAgent).RequireSuccess();
             worktreeSession.WaitForExit();
             SignWhileMainOpen = _worktreePen.Run("sign", worktreeBase);
-            WorktreeBranchSigned = Project.RunGit("cat-file", "commit", "smoke-wt").Split('\n')
-                .Any(line => line.StartsWith("gpgsig", StringComparison.Ordinal));
+            WorktreeBranchSigned = SmokeGit.HasSignatureHeader(Project.RunGit("cat-file", "commit", "smoke-wt"));
             MainHeadAfterSign = Project.RunGit("rev-parse", "HEAD").TrimEnd('\n');
             Docker.Run("rm", "-f", MainAgent).RequireSuccess();
             mainSession.WaitForExit();

@@ -246,7 +246,7 @@ public sealed class PenSignTests(PenSignTests.Fixture fixture) : IClassFixture<P
 
         protected override void Prepare()
         {
-            _pen = Cli.WithEnvironment("SSH_AUTH_SOCK", null);
+            _pen = SigningKey.WithoutAgentFor(Cli);
             Files.DeleteTree(Path.Combine(Project.Dir, ".pen"));
             _key = SigningKey.Create(Path.Combine(Scratch, "signkey"), "pen-smoke");
             Home.UseSigningKey(_key);
@@ -415,11 +415,9 @@ public sealed class PenSignTests(PenSignTests.Fixture fixture) : IClassFixture<P
                 ListCommits().Select(commit =>
                     Project.RunGit("log", "-1", "--format=%T %an <%ae> %ad", commit).TrimEnd('\n')));
 
-        /// <summary>Checks whether a commit's header has a gpgsig line, as grep -q "^gpgsig" on git cat-file
-        /// commit does, looking only at the header.</summary>
+        /// <summary>Checks whether a commit's header has a gpgsig line.</summary>
         private bool IsSigned(string commit) =>
-            Project.RunGit("cat-file", "commit", commit).Split('\n').TakeWhile(line => line.Length > 0)
-                .Any(line => line.StartsWith("gpgsig ", StringComparison.Ordinal));
+            SmokeGit.HasSignatureHeader(Project.RunGit("cat-file", "commit", commit));
 
         /// <summary>Verifies HEAD's signature with ssh-keygen and the given allowed signers file.</summary>
         private CommandResult Verify(string signers) =>

@@ -130,7 +130,7 @@ public sealed class DirectoryMountSpellingTests(DirectoryMountSpellingTests.Fixt
         Assert.True(text == "smoke27", $"{path}: {text ?? "(can't be read)"}");
     }
 
-    /// <summary>Skips a check that only means something where the session folds case, with smoke.sh's note.</summary>
+    /// <summary>Skips a check that only means something where the session folds case, with a note saying why.</summary>
     private void RequireFolding() => Assert.SkipWhen(fixture.Folds == 0, fixture.NoFoldingNote);
 
     /// <summary>Puts a marker with a random token in .git, .git/hooks, .pen and .git/config, then runs a session
@@ -147,7 +147,7 @@ public sealed class DirectoryMountSpellingTests(DirectoryMountSpellingTests.Fixt
         /// <summary>Gets how many of the other spellings the session read the marker through.</summary>
         internal int Folds { get; private set; }
 
-        /// <summary>Gets smoke.sh's note for a session that doesn't fold case.</summary>
+        /// <summary>Gets the skip note for a session that doesn't fold case.</summary>
         internal string NoFoldingNote { get; private set; } = null!;
 
         internal string ConfigHashBefore { get; private set; } = null!;

@@ -28,7 +28,7 @@ internal sealed class SmokeProject : IDisposable
     /// <exception cref="InvalidOperationException">No session has fixed the key yet.</exception>
     public string Key => _key ?? throw new InvalidOperationException($"no project key resolved for {Dir} yet");
 
-    /// <summary>Creates a git repo with one empty commit, as smoke.sh's fixture project is (.pen-smoke.*).</summary>
+    /// <summary>Creates a git repo with one empty commit, like a fixture project (.pen-smoke.*).</summary>
     /// <remarks>If git fails, the directory is deleted before the error is thrown: nothing tracks it yet.</remarks>
     /// <returns>The project.</returns>
     public static SmokeProject CreateRepo()
@@ -104,7 +104,7 @@ internal sealed class SmokeProject : IDisposable
         new DirectoryInfo(Path.Combine(runtimeDir, "sessions")).EnumerateDirectories()
             .OrderByDescending(dir => dir.LastWriteTimeUtc).First().FullName;
 
-    /// <summary>Runs host git in the project with the user's own config, as smoke.sh's bare git does.</summary>
+    /// <summary>Runs host git in the project with the user's own config.</summary>
     /// <param name="args">Git's arguments.</param>
     /// <returns>Git's stdout.</returns>
     /// <exception cref="InvalidOperationException">Git exited non-zero.</exception>

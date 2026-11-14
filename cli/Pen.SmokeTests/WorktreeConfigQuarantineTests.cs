@@ -6,7 +6,7 @@ namespace Pen.SmokeTests;
 /// at session end whatever the entry's mode, not taken as a baseline by a session started alongside, and gone for
 /// good once the planting session ends; the repo's own config.worktree stays.</summary>
 /// <remarks>
-/// As in smoke.sh, a linked worktree outside the project is there too, and extensions.worktreeConfig is on. The
+/// A linked worktree outside the project is there too, and extensions.worktreeConfig is on. The
 /// plant sets core.fsmonitor to a host script that touches a canary, so "git there runs it" is seen, not
 /// guessed. <see cref="LinkedWorktreeTests"/> has the rest of the linked worktree checks.
 /// </remarks>
@@ -161,7 +161,7 @@ public sealed class WorktreeConfigQuarantineTests(WorktreeConfigQuarantineTests.
         protected override void Prepare()
         {
             Files.DeleteTree(Path.Combine(Project.Dir, ".pen"));
-            // As in smoke.sh, where these checks ran with section 21's worktree still there.
+            // A linked worktree outside the project is still there.
             var worktree = CreateScratchProject("wt21").Dir;
             Project.RunGit("worktree", "add", "-q", "-b", "smoke-wt", worktree);
             var mainOnly = Path.Combine(Project.Dir, "main-only.txt");

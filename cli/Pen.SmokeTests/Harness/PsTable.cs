@@ -6,7 +6,7 @@ namespace Pen.SmokeTests.Harness;
 internal static class PsTable
 {
     /// <summary>Builds the regex for a session's TOOLS cell and the spaces after it, from the tools its session
-    /// dir recorded, as smoke.sh's tools_cell did.</summary>
+    /// dir recorded.</summary>
     /// <param name="sessionDir">The session's dir.</param>
     /// <returns>The tools joined by commas and the spaces after them, or nothing if it recorded none.</returns>
     public static string BuildToolsCell(string sessionDir)

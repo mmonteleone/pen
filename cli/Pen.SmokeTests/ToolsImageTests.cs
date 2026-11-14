@@ -456,7 +456,7 @@ public sealed class ToolsImageTests(ToolsImageTests.Fixture fixture) : IClassFix
         private static string InspectBuilt(string image) =>
             InspectImage("{{.Created}} {{json .RootFS.Layers}}", image);
 
-        /// <summary>Runs a script in an image with sh, as smoke.sh's in_image did, and gets its stdout.</summary>
+        /// <summary>Runs a script in an image with sh and gets its stdout.</summary>
         private static string RunInImage(string image, string script) =>
             Docker.Run("run", "--rm", "--entrypoint", "sh", image, "-c", script).RequireSuccess().CapturedStdout;
     }

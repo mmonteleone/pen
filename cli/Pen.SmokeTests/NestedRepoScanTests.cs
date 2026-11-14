@@ -19,23 +19,24 @@ public sealed class NestedRepoScanTests(NestedRepoScanTests.Fixture fixture)
     public void ScanIsQuick()
     {
         var seconds = fixture.RefusalTime.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture);
+        var sessionSeconds = fixture.SessionTime.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture);
         TestContext.Current.TestOutputHelper?.WriteLine(
-            $"a whole session with that tree (start and end scans included): {fixture.SessionSeconds}s");
+            $"a whole session with that tree (start and end scans included): {sessionSeconds}s");
 
         Assert.True(
             fixture.RefusalTime.TotalSeconds < 1.2, $"...in under about 1 s with 100k+ files (took {seconds}s)");
     }
 
     /// <summary>Fills the project with the trees, times a refused session with a repo planted at the bottom, then a
-    /// whole session without it (only noted, as smoke.sh did).</summary>
+    /// whole session without it (only noted).</summary>
     public sealed class Fixture : SmokeFixture
     {
         internal CommandResult Refusal { get; private set; } = null!;
 
         internal TimeSpan RefusalTime { get; private set; }
 
-        /// <summary>Gets how long a whole session with the trees took, in seconds, for the note.</summary>
-        internal string SessionSeconds { get; private set; } = null!;
+        /// <summary>Gets how long a whole session with the trees took, for the note.</summary>
+        internal TimeSpan SessionTime { get; private set; }
 
         protected override void Prepare()
         {
@@ -51,7 +52,7 @@ public sealed class NestedRepoScanTests(NestedRepoScanTests.Fixture fixture)
             Files.DeleteTree(Path.Combine(Project.Dir, deep, ".git"));
             clock.Restart();
             Cli.Run("run", "true").RequireSuccess();
-            SessionSeconds = clock.Elapsed.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture);
+            SessionTime = clock.Elapsed;
         }
 
         /// <summary>Creates top/pkgN/lib (odd N) or top/pkgN/dist (even N), each with empty files f0.js….</summary>

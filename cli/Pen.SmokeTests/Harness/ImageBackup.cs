@@ -6,9 +6,9 @@ namespace Pen.SmokeTests.Harness;
 /// The backup tag is new for each backup, so an image already under a tag like it is never moved or removed. The
 /// images that stood in for the original are only those a test names with <see cref="RemoveWithRestore"/>: whatever
 /// else is under the original's tag when it's restored, which the test can't tell from an image another process put
-/// there, is left untagged, as smoke.sh does. Only the named ones that are untagged once the original is back are
+/// there, is left untagged. Only the named ones that are untagged once the original is back are
 /// removed, and never one that was there before the backup was taken: a build gives the same ID as an identical
-/// earlier one. Restoring is idempotent, so a test restores before its checks, as smoke.sh does, and disposal makes
+/// earlier one. Restoring is idempotent, so a test restores before its checks, and disposal makes
 /// sure of it if the test fails first.
 /// </remarks>
 internal sealed class ImageBackup : IDisposable

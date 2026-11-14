@@ -81,7 +81,7 @@ public sealed class ProxyNetworkTests(ProxyNetworkTests.Fixture fixture) : IClas
     /// <summary>Runs the requests and name lookups in one session, then ten sessions that each make one request
     /// right after start.</summary>
     /// <remarks>
-    /// Each request was a session of its own in smoke.sh; the proxy decides each request on its own, so one
+    /// The proxy decides each request on its own, so one
     /// session makes them all. The first-request check still needs its ten sessions.
     /// </remarks>
     public sealed class Fixture : SmokeFixture

@@ -26,9 +26,9 @@ public sealed class ImageBuildInterruptTests(ImageBuildInterruptTests.Fixture fi
     /// session starts, then puts the real image back.</summary>
     /// <remarks>
     /// The real image is kept under a pen:smoke-backup-… tag meanwhile. The fixture puts it back right after the
-    /// launch, as smoke.sh did, and cleanup does if anything fails first, so pen:latest ends up with its own ID and
+    /// launch, and cleanup does if anything fails first, so pen:latest ends up with its own ID and
     /// labels whatever happens, and the stale image is removed. An image that the interrupted rebuild left under the
-    /// tag isn't named, so it stays, untagged, as with smoke.sh.
+    /// tag isn't named, so it stays, untagged.
     /// </remarks>
     public sealed class Fixture : SmokeFixture
     {

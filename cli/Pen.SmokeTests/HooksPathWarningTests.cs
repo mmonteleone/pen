@@ -73,8 +73,7 @@ public sealed class HooksPathWarningTests(HooksPathWarningTests.Fixture fixture)
             None = RunSession(Cli);
         }
 
-        /// <summary>Runs pen run true, which must succeed, as smoke.sh's out=$(pen_run true 2&gt;&amp;1 &gt;/dev/null)
-        /// had to.</summary>
+        /// <summary>Runs pen run true, which must succeed.</summary>
         private static CommandResult RunSession(PenCli pen) => pen.Run("run", "true").RequireSuccess();
     }
 }

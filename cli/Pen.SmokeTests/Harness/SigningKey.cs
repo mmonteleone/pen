@@ -2,8 +2,7 @@ using System.Collections.Immutable;
 
 namespace Pen.SmokeTests.Harness;
 
-/// <summary>An SSH signing key made with ssh-keygen in a test's scratch directory, as smoke.sh's signkey and
-/// agentkey are.</summary>
+/// <summary>An SSH signing key made with ssh-keygen in a test's scratch directory.</summary>
 /// <remarks>
 /// It has no passphrase and lives only in the scratch directory, so signing with it needs no agent. Commands that
 /// sign run without SSH_AUTH_SOCK (<see cref="WithoutAgent"/>), so ssh-keygen never asks the user's agent whether
@@ -16,6 +15,11 @@ internal sealed class SigningKey
     /// <summary>Gets the environment change that keeps a signing command away from the user's SSH agent.</summary>
     public static ImmutableDictionary<string, string?> WithoutAgent { get; } =
         ImmutableDictionary<string, string?>.Empty.Add("SSH_AUTH_SOCK", null);
+
+    /// <summary>Keeps a pen away from the user's SSH agent.</summary>
+    /// <param name="pen">The pen.</param>
+    /// <returns>A pen that runs without SSH_AUTH_SOCK.</returns>
+    public static PenCli WithoutAgentFor(PenCli pen) => pen.WithEnvironment("SSH_AUTH_SOCK", null);
 
     /// <summary>Gets the private key's path; the public key is beside it, with .pub added.</summary>
     public string Path { get; }

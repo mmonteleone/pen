@@ -115,7 +115,7 @@ public sealed class DotNetTests(DotNetTests.Fixture fixture) : IClassFixture<Dot
     /// <summary>Gets the first field of a line split on spaces, as cut -d' ' -f does (fields count from 0).</summary>
     private static string FieldOf(string? line, int field) => line?.Split(' ').ElementAtOrDefault(field) ?? "";
 
-    /// <summary>Formats the major versions of dotnet --list-sdks lines as smoke.sh's majors did: each line's first
+    /// <summary>Formats the major versions of dotnet --list-sdks lines as the session's majors are: each line's first
     /// word up to its first dot, sorted numerically, once each, each followed by a space.</summary>
     private static string FormatMajors(IEnumerable<string> lines)
     {
