@@ -1,4 +1,6 @@
 <Solution>
   <Project Path="Pen/Pen.csproj" />
+  <Project Path="Pen.SmokeTests/Pen.SmokeTests.csproj" />
+  <Project Path="Pen.TestSupport/Pen.TestSupport.csproj" />
   <Project Path="Pen.Tests/Pen.Tests.csproj" />
 </Solution>

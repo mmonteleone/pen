@@ -39,8 +39,8 @@ indent_style = tab
 [*.{gitignore,conf}]
 indent_size = 2
 
-# Style enforced in the build (EnforceCodeStyleInBuild in Pen.csproj).
-[cli/Pen/**.cs]
+# Style enforced in the build (EnforceCodeStyleInBuild in each of these projects).
+[cli/{Pen,Pen.SmokeTests,Pen.TestSupport}/**.cs]
 # Unnecessary usings and formatting.
 dotnet_diagnostic.IDE0005.severity = warning
 dotnet_diagnostic.IDE0055.severity = warning

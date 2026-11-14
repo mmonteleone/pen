@@ -7,5 +7,6 @@ global using Pen.Platform;
 global using Pen.Projects;
 global using Pen.Proxy;
 global using Pen.Sessions;
+global using Pen.TestSupport;
 global using Pen.Tools;
 global using Pen.Trust;

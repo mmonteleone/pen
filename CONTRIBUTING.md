@@ -13,7 +13,7 @@ On Linux, the installer can build without a host SDK, but the `dotnet` commands 
 ```sh
 cd cli
 dotnet build      # warnings are errors
-dotnet test
+dotnet test       # unit tests (not the smoke tests)
 cd ..
 cli/install.sh    # install the dev build to ~/.local/bin/pen
 ```
@@ -30,6 +30,14 @@ tests/smoke.sh                    # full suite before finishing a larger change
 ```
 
 Section numbers are in [`tests/smoke.sh`](tests/smoke.sh). The fixture setup always runs. For tools, run section 28; for .NET, also run section 11. The suite needs Docker and uses throwaway projects and a throwaway `HOME` for config checks; it doesn't edit your existing `~/.config/pen` (a first run may create it). Set `PEN=/absolute/path/to/pen` to test a different binary.
+
+The smoke checks are moving to test classes in [`cli/Pen.SmokeTests`](cli/Pen.SmokeTests), named for what they cover (section 5 is `CliDispatchTests` and `DirectoryRuleTests`). They test the installed pen the same way, or `$PEN`, and need Docker, so `dotnet test` leaves them out. Run them from `cli/`, with any filters after `--`:
+
+```sh
+dotnet run --project Pen.SmokeTests -- [--filter-class "*CliDispatchTests"] [--filter-method "*Symlink*"]
+```
+
+With no filter it runs every class. Each check's description is its test's display name, so `--filter-display-name "refuses*"` picks checks by description, and `--output detailed` lists each one as it passes. Each class gets its own throwaway project and `HOME`, so any class runs on its own. Checks that need credentials are skipped without them, and the slow ones (trait `Category=Slow`) are skipped unless `SMOKE_SLOW=1`; `--filter-trait "Category=Slow"` selects them.
 
 To narrow unit tests or run the CLI without installing (from `cli/`):
 
@@ -53,6 +61,8 @@ Before merging, run the suite on macOS arm64 and Linux amd64, with both rootful 
 |---|---|
 | `cli/Pen/` | Host CLI (.NET 11, Native AOT) |
 | `cli/Pen.Tests/` | Unit tests (xunit v3 on Microsoft.Testing.Platform) |
+| `cli/Pen.SmokeTests/` | Smoke tests against the installed pen (xunit v3, run with `dotnet run`) |
+| `cli/Pen.TestSupport/` | Helpers both test projects share (`TempDir`, `Git`) |
 | `compose.yaml` | Agent, proxy and optional Docker-in-Docker services |
 | `image/` | Base image and entrypoint |
 | `proxy/` | Squid proxy config and default domain allowlist |
@@ -64,22 +74,22 @@ Before merging, run the suite on macOS arm64 and Linux amd64, with both rootful 
 
 [AGENTS.md](AGENTS.md) explains command flow, sessions, locking and git protection. Read it before changing session handling or anything that touches the host repo.
 
-Keep code AOT/trim-safe: use source-generated serialization rather than reflection-based APIs. Native calls belong in `Native.cs`. Tests access internals through `InternalsVisibleTo`; use the existing `TempDir` and `Git` helpers.
+Keep code AOT/trim-safe: use source-generated serialization rather than reflection-based APIs. Native calls belong in `Native.cs`. Tests access internals through `InternalsVisibleTo`; use the `TempDir` and `Git` helpers in `Pen.TestSupport`.
 
 Tool recipes pair a `tool.toml` (default version, accepted versions, domains and environment) with an `install.sh` that receives versions as separate arguments and runs as root during the image build. Recipes must work independently. To add one, create `tools/<name>/` with those two files, reinstall and try `pen --tool <name>`. `kind = "agent"` marks a recipe that installs an AI agent: `pen --tool list` shows it apart from tools, and a command that starts with its name (`pen <name>`) brings it in at its default version. `hidden = true` keeps a recipe out of listings, as for `pen-test` and `pen-test-b`, which the tests use. An agent distributed through npm needs only a few lines of `install.sh`: the base's `/opt/pen/lib/npm-agent.sh` (from `image/npm-agent.sh`, off `PATH`) installs the package with Pen's private Node into `/opt/pen/<command>`, links its native binary or wraps its JavaScript entry into `/usr/local/bin`, refuses releases older than the oldest supported one and checks `<command> --version` against a pinned version; its header documents the flags, and the `claude`, `codex`, `opencode` and `pi` recipes show both kinds. The recipe exports its agent's auto-update switches before running it and keeps anything else of its own (Codex's managed config) in its `install.sh`. Changing the helper rebuilds the base, so every agent reinstalls on next use. When adding or changing one, update the [tools reference](docs/usage.md#tools) and run smoke section 28 under rootful and rootless Docker.
 
 ## Code style
 
-These rules apply to `cli/Pen/`. The build enforces what it can: `Pen.csproj` sets `EnforceCodeStyleInBuild`, and the `[cli/Pen/**.cs]` section of [`.editorconfig`](.editorconfig) puts its rules (usings, formatting, embedded statements, braces, blank lines, field naming, accessibility modifiers, readonly fields, unused members and parameters, expression bodies) at warning, which the build treats as an error. `SourceStyleTests` fails on any line over 120 characters outside raw strings. `cli/Pen.Tests/` isn't held to this style: its `.editorconfig` section turns these diagnostics down to suggestions, and the test build doesn't check code style.
+These rules apply to `cli/Pen/`, `cli/Pen.SmokeTests/` and `cli/Pen.TestSupport/`. The build enforces what it can: each of their project files sets `EnforceCodeStyleInBuild`, and their section of [`.editorconfig`](.editorconfig) puts its rules (usings, formatting, embedded statements, braces, blank lines, field naming, accessibility modifiers, readonly fields, unused members and parameters, expression bodies) at warning, which the build treats as an error. `SourceStyleTests` fails on any line over 120 characters outside raw strings in those projects. `cli/Pen.Tests/` isn't held to this style: its `.editorconfig` section turns these diagnostics down to suggestions, and the test build doesn't check code style.
 
 - **Files:** one top-level type per file, named after the type, in a folder matching its namespace. A small type used only by one class may be nested in it.
 - **Static or instance:** static for stateless helpers (`Allowlist.IsValidDomain`, `Out.Field`, `Native`, `Proc`); instances wherever there's context or accumulated state.
-- **Commands:** each is a sealed `…Command` class in `Pen.Commands` that gets its context and dependencies through its constructor and has one `Run(...)` returning the exit code. Code that needs the host, project, user config and project config takes one `ProjectContext`.
+- **Commands:** each subcommand other than run is a sealed `…Command` class in `Pen.Commands` (run is `Session`, in `Pen.Sessions`). Each gets its context and dependencies through its constructor and has one `Run(...)` returning the exit code. Code that needs the host, project, user config and project config takes one `ProjectContext`.
 - **Collected results:** a check or planner that collects results keeps them in its own fields and returns a result object, instead of taking lists to fill in.
 - **Dependencies:** whatever production code would otherwise get by default (`Answers`, `RecipeCatalog`, stdin) is passed explicitly, through constructors. No optional parameters as test seams.
 - **Signatures:** at most about 5 parameters, or a parameter object. Records with more than 3 optional members use `init` properties instead of positional optionals. Return a result type rather than a tuple whenever the meaning of its parts isn't obvious.
 - **Statements:** one statement per line, and an embedded statement goes on its own line. A multi-line body has braces. No one-line `try { } catch { }`, nested ternaries or conditional collection spreads (`[.. (c ? new[] { … } : [])]`): use `if`, `yield` or a list.
-- **Line length:** at most 120 characters. Raw-string help text is exempt.
+- **Line length:** at most 120 characters. Raw strings are exempt (help text, multi-line messages, scripts).
 - **Method and property names:** methods are verbs (`FindUnapproved`, `SaveWith`), or `Is`/`Has`/`Try` predicates. Properties are nouns.
 - **Local and parameter names:** words (`result`, `dindLock`). Single letters are fine only for short lambda parameters and loop indices.
 - **Field names:** private instance fields are `_camelCase`; constants and static readonly fields are `PascalCase`.

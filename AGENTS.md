@@ -45,7 +45,7 @@ SMOKE_ONLY="7 13" tests/smoke.sh   # only those sections (the fixture setup alwa
 - Verifying a change: after each change, build, unit tests and the smoke sections it touches (`SMOKE_ONLY`); the full smoke suite before finishing a larger piece of work.
 
 - Code must stay AOT/trim-safe (`PublishAot`, `IsAotCompatible`): no reflection-based JSON serialization etc. Native calls live in `Native.cs`.
-- Tests access internals via `InternalsVisibleTo`; use the `TempDir` and `Git` helpers in `Pen.Tests`.
+- Tests access internals via `InternalsVisibleTo`; use the `TempDir` and `Git` helpers in `Pen.TestSupport`.
 - Keep architecture comments tied to current invariants or documentation, rather than the removed historical architecture plan.
 - Naming: the project is "Pen" in prose, docs and comments; the command stays `pen` (also `pen sign`, `pen:latest`, `.pen/`, `PEN_*`).
 - Markdown: don't hard-wrap prose. Each paragraph and list item is one line, left to the editor's soft wrap; line breaks only where they change the rendering (code blocks, tables, list items, headings).

@@ -14,8 +14,15 @@
   </ItemGroup>
 
   <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.Versioning.UnsupportedOSPlatformAttribute">
+      <_Parameter1>windows</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="Xunit" />
     <ProjectReference Include="../Pen/Pen.csproj" />
+    <ProjectReference Include="../Pen.TestSupport/Pen.TestSupport.csproj" />
   </ItemGroup>
 
 </Project>

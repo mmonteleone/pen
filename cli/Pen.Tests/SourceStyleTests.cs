@@ -9,14 +9,19 @@ public class SourceStyleTests
     // A run of three or more quotes, with any $ in front: opens a raw string literal, or closes one.
     private static readonly Regex RawDelimiter = new("\\$*(\"{3,})", RegexOptions.Compiled);
 
+    // The projects held to the code style in CONTRIBUTING.md (Pen.Tests isn't).
+    private static readonly string[] StyledProjects = ["Pen", "Pen.SmokeTests", "Pen.TestSupport"];
+
     [Fact]
     public void NoLineInTheCliSourcesIsOverMaxLength()
     {
-        var root = FindSourceDir();
+        var cli = FindCliDir();
 
         var offenders = new List<string>();
-        var files = Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
-            .Where(f => !IsBuildOutput(Path.GetRelativePath(root, f)))
+        var files = StyledProjects
+            .Select(project => Path.Combine(cli, project))
+            .SelectMany(root => Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
+                .Where(f => !IsBuildOutput(Path.GetRelativePath(root, f))))
             .Order(StringComparer.Ordinal);
         foreach (var file in files)
         {
@@ -28,13 +33,13 @@ public class SourceStyleTests
                 var line = lines[i];
                 // Lines that start inside a raw string (its text and closing line) are exempt.
                 if (closing == null && line.Length > MaxLineLength)
-                    offenders.Add($"{Path.GetRelativePath(root, file)}:{i + 1}");
+                    offenders.Add($"{Path.GetRelativePath(cli, file)}:{i + 1}");
                 closing = FindClosingAfter(line, closing);
             }
         }
 
         Assert.True(offenders.Count == 0,
-            $"lines over {MaxLineLength} characters in cli/Pen:\n" + string.Join("\n", offenders));
+            $"lines over {MaxLineLength} characters in cli/:\n" + string.Join("\n", offenders));
     }
 
     /// <summary>Finds the raw string literal a line ends inside, given the one it starts inside.</summary>
@@ -70,14 +75,13 @@ public class SourceStyleTests
         return first is "bin" or "obj";
     }
 
-    /// <summary>Finds cli/Pen by walking up from the test assembly (cli/Pen.Tests/bin/…).</summary>
-    private static string FindSourceDir()
+    /// <summary>Finds cli/ by walking up from the test assembly (cli/Pen.Tests/bin/…).</summary>
+    private static string FindCliDir()
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
         {
-            var candidate = Path.Combine(dir.FullName, "Pen");
-            if (File.Exists(Path.Combine(candidate, "Pen.csproj")))
-                return candidate;
+            if (File.Exists(Path.Combine(dir.FullName, "Pen", "Pen.csproj")))
+                return dir.FullName;
         }
         throw new InvalidOperationException($"no Pen/Pen.csproj above {AppContext.BaseDirectory}");
     }
