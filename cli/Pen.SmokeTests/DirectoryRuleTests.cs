@@ -41,7 +41,7 @@ public sealed class DirectoryRuleTests(SmokeFixture fixture) : IClassFixture<Smo
         var sessions = Path.Combine(fixture.RuntimeDir, "sessions");
         var sessionsBefore = Directory.EnumerateDirectories(sessions).Count();
 
-        var result = fixture.Pen.WithWorkingDirectory(link).Run("run", "true");
+        var result = fixture.Cli.WithWorkingDirectory(link).Run("run", "true");
 
         // The HOME is the class's own, so a key pen made for the link's path, whatever its hash, is a second
         // directory here, and the session counts only if it went to the project's key.
@@ -53,7 +53,7 @@ public sealed class DirectoryRuleTests(SmokeFixture fixture) : IClassFixture<Smo
 
     private void AssertRefused(string dir, string message)
     {
-        var result = fixture.Pen.WithWorkingDirectory(dir).Run("run", "true");
+        var result = fixture.Cli.WithWorkingDirectory(dir).Run("run", "true");
 
         Assert.True(result.IsRefusal(message), $"expected a refusal saying \"{message}\"; {result.Describe()}");
     }

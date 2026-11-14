@@ -6,8 +6,17 @@ public class SourceStyleTests
 {
     private const int MaxLineLength = 120;
 
+    // The project whose lines may hold nothing but a long string literal.
+    private const string LoneLiteralProject = "Pen.SmokeTests";
+
     // A run of three or more quotes, with any $ in front: opens a raw string literal, or closes one.
     private static readonly Regex RawDelimiter = new("\\$*(\"{3,})", RegexOptions.Compiled);
+
+    // A line that holds nothing but one regular string literal, and the brackets, comma or semicolon that close
+    // it: a smoke check's description is one literal, and some are longer than a line. Only the smoke tests'
+    // sources may have one.
+    private static readonly Regex LoneStringLiteral =
+        new("^\\s*\"(?:[^\"\\\\]|\\\\.)*\"[)\\]]*[,;]?$", RegexOptions.Compiled);
 
     // The projects held to the code style in CONTRIBUTING.md (Pen.Tests isn't).
     private static readonly string[] StyledProjects = ["Pen", "Pen.SmokeTests", "Pen.TestSupport"];
@@ -19,12 +28,14 @@ public class SourceStyleTests
 
         var offenders = new List<string>();
         var files = StyledProjects
-            .Select(project => Path.Combine(cli, project))
-            .SelectMany(root => Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
-                .Where(f => !IsBuildOutput(Path.GetRelativePath(root, f))))
-            .Order(StringComparer.Ordinal);
-        foreach (var file in files)
+            .SelectMany(project => Directory
+                .EnumerateFiles(Path.Combine(cli, project), "*.cs", SearchOption.AllDirectories)
+                .Where(f => !IsBuildOutput(Path.GetRelativePath(Path.Combine(cli, project), f)))
+                .Select(f => (Project: project, File: f)))
+            .OrderBy(entry => entry.File, StringComparer.Ordinal);
+        foreach (var (project, file) in files)
         {
+            var loneLiteralAllowed = project == LoneLiteralProject;
             var lines = File.ReadAllLines(file);
             // The closing quotes of the raw string the line starts in, or null outside one.
             string? closing = null;
@@ -32,7 +43,8 @@ public class SourceStyleTests
             {
                 var line = lines[i];
                 // Lines that start inside a raw string (its text and closing line) are exempt.
-                if (closing == null && line.Length > MaxLineLength)
+                if (closing == null && line.Length > MaxLineLength
+                    && !(loneLiteralAllowed && LoneStringLiteral.IsMatch(line)))
                     offenders.Add($"{Path.GetRelativePath(cli, file)}:{i + 1}");
                 closing = FindClosingAfter(line, closing);
             }

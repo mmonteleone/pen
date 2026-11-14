@@ -13,6 +13,16 @@ internal static class Files
     public static string GetMode(string path) =>
         Convert.ToString((int)File.GetUnixFileMode(path) & 0b111_111_111, 8);
 
+    /// <summary>Gets the UID that owns a file, as stat -c %u (or BSD stat -f %u) prints it.</summary>
+    /// <param name="path">The file.</param>
+    /// <returns>The UID, or null if stat failed, e.g. because the file is missing.</returns>
+    public static uint? GetOwnerUid(string path)
+    {
+        var stat = new HostCommand("/bin/sh", ["-c", "stat -c %u \"$1\" 2>/dev/null || stat -f %u \"$1\"", "_", path])
+            .Run();
+        return stat.ExitCode == 0 && uint.TryParse(stat.CapturedStdout, out var uid) ? uid : null;
+    }
+
     /// <summary>Hashes a path as pen names project keys: the first 8 hex digits of its SHA-256.</summary>
     /// <param name="path">The path, as a real path.</param>
     /// <returns>The hash.</returns>

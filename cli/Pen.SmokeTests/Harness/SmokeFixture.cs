@@ -30,7 +30,7 @@ public class SmokeFixture : IAsyncLifetime
     internal SmokeProject Project { get; private set; } = null!;
 
     /// <summary>Gets pen with the throwaway HOME, in the project.</summary>
-    internal PenCli Pen { get; private set; } = null!;
+    internal PenCli Cli { get; private set; } = null!;
 
     /// <summary>Gets the project key, fixed by the first session.</summary>
     internal string Key => Project.Key;
@@ -47,7 +47,7 @@ public class SmokeFixture : IAsyncLifetime
             _scratch = new TempDir("pen-smoke.");
             Home = new FakeHome(Path.Combine(_scratch.Path, "home"));
             Project = CreateProject();
-            Pen = PenCli.CreateFor(Home, Project.Dir);
+            Cli = PenCli.CreateFor(Home, Project.Dir);
             StartFirstSession();
             Prepare();
         }
@@ -111,7 +111,7 @@ public class SmokeFixture : IAsyncLifetime
     private void StartFirstSession()
     {
         // As smoke.sh's fixture: it builds pen:latest if it's missing or stale, and fixes the project key.
-        var first = Pen.Run("run", "true");
+        var first = Cli.Run("run", "true");
         if (Project.FindRuntimeDirs(Home.Path).Count == 0)
             throw new InvalidOperationException($"the first session made no runtime dir: {first.Describe()}");
         Project.ResolveKey(Home.Path);

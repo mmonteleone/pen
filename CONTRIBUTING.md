@@ -31,10 +31,12 @@ tests/smoke.sh                    # full suite before finishing a larger change
 
 Section numbers are in [`tests/smoke.sh`](tests/smoke.sh). The fixture setup always runs. For tools, run section 28; for .NET, also run section 11. The suite needs Docker and uses throwaway projects and a throwaway `HOME` for config checks; it doesn't edit your existing `~/.config/pen` (a first run may create it). Set `PEN=/absolute/path/to/pen` to test a different binary.
 
-The smoke checks are moving to test classes in [`cli/Pen.SmokeTests`](cli/Pen.SmokeTests), named for what they cover (section 5 is `CliDispatchTests` and `DirectoryRuleTests`). They test the installed pen the same way, or `$PEN`, and need Docker, so `dotnet test` leaves them out. Run them from `cli/`, with any filters after `--`:
+The smoke checks are moving to test classes in [`cli/Pen.SmokeTests`](cli/Pen.SmokeTests), named for what they cover (section 5, for example, is `CliDispatchTests` and `DirectoryRuleTests`). They test the installed pen the same way, or `$PEN`, and need Docker, so `dotnet test` leaves them out. Run them from `cli/`, with any filters after `--`:
 
 ```sh
-dotnet run --project Pen.SmokeTests -- [--filter-class "*CliDispatchTests"] [--filter-method "*Symlink*"]
+dotnet run --project Pen.SmokeTests                                        # every class
+dotnet run --project Pen.SmokeTests -- --filter-class "*CliDispatchTests"  # one class
+dotnet run --project Pen.SmokeTests -- --filter-method "*Symlink*"         # methods by name, in any class
 ```
 
 With no filter it runs every class. Each check's description is its test's display name, so `--filter-display-name "refuses*"` picks checks by description, and `--output detailed` lists each one as it passes. Each class gets its own throwaway project and `HOME`, so any class runs on its own. Checks that need credentials are skipped without them, and the slow ones (trait `Category=Slow`) are skipped unless `SMOKE_SLOW=1`; `--filter-trait "Category=Slow"` selects them.
@@ -80,7 +82,7 @@ Tool recipes pair a `tool.toml` (default version, accepted versions, domains and
 
 ## Code style
 
-These rules apply to `cli/Pen/`, `cli/Pen.SmokeTests/` and `cli/Pen.TestSupport/`. The build enforces what it can: each of their project files sets `EnforceCodeStyleInBuild`, and their section of [`.editorconfig`](.editorconfig) puts its rules (usings, formatting, embedded statements, braces, blank lines, field naming, accessibility modifiers, readonly fields, unused members and parameters, expression bodies) at warning, which the build treats as an error. `SourceStyleTests` fails on any line over 120 characters outside raw strings in those projects. `cli/Pen.Tests/` isn't held to this style: its `.editorconfig` section turns these diagnostics down to suggestions, and the test build doesn't check code style.
+These rules apply to `cli/Pen/`, `cli/Pen.SmokeTests/` and `cli/Pen.TestSupport/`. The build enforces what it can: each of their project files sets `EnforceCodeStyleInBuild`, and their section of [`.editorconfig`](.editorconfig) puts its rules (usings, formatting, embedded statements, braces, blank lines, field naming, accessibility modifiers, readonly fields, unused members and parameters, expression bodies) at warning, which the build treats as an error. `SourceStyleTests` fails on any line over 120 characters in those projects, outside raw strings and, in `cli/Pen.SmokeTests/`, lines that hold only a string literal. `cli/Pen.Tests/` isn't held to this style: its `.editorconfig` section turns these diagnostics down to suggestions, and the test build doesn't check code style.
 
 - **Files:** one top-level type per file, named after the type, in a folder matching its namespace. A small type used only by one class may be nested in it.
 - **Static or instance:** static for stateless helpers (`Allowlist.IsValidDomain`, `Out.Field`, `Native`, `Proc`); instances wherever there's context or accumulated state.
@@ -89,7 +91,7 @@ These rules apply to `cli/Pen/`, `cli/Pen.SmokeTests/` and `cli/Pen.TestSupport/
 - **Dependencies:** whatever production code would otherwise get by default (`Answers`, `RecipeCatalog`, stdin) is passed explicitly, through constructors. No optional parameters as test seams.
 - **Signatures:** at most about 5 parameters, or a parameter object. Records with more than 3 optional members use `init` properties instead of positional optionals. Return a result type rather than a tuple whenever the meaning of its parts isn't obvious.
 - **Statements:** one statement per line, and an embedded statement goes on its own line. A multi-line body has braces. No one-line `try { } catch { }`, nested ternaries or conditional collection spreads (`[.. (c ? new[] { … } : [])]`): use `if`, `yield` or a list.
-- **Line length:** at most 120 characters. Raw strings are exempt (help text, multi-line messages, scripts).
+- **Line length:** at most 120 characters. Raw strings are exempt (help text, multi-line messages, scripts), as is, in `cli/Pen.SmokeTests/` only, a line that holds nothing but one string literal (a smoke check's description must stay one literal, and a few are longer than a line).
 - **Method and property names:** methods are verbs (`FindUnapproved`, `SaveWith`), or `Is`/`Has`/`Try` predicates. Properties are nouns.
 - **Local and parameter names:** words (`result`, `dindLock`). Single letters are fine only for short lambda parameters and loop indices.
 - **Field names:** private instance fields are `_camelCase`; constants and static readonly fields are `PascalCase`.

@@ -18,6 +18,17 @@ internal sealed record CommandResult(int ExitCode, string Stdout, string Stderr,
     /// <summary>Gets the combined output's lines.</summary>
     public IReadOnlyList<string> OutputLines => Output.TrimEnd('\n').Split('\n');
 
+    /// <summary>Gets stdout's lines, as $(…) captures them.</summary>
+    public IReadOnlyList<string> StdoutLines => CapturedStdout.Split('\n');
+
+    /// <summary>Gets stderr's lines, as 2&gt;&amp;1 &gt;/dev/null captures them.</summary>
+    public IReadOnlyList<string> StderrLines => Stderr.TrimEnd('\n').Split('\n');
+
+    /// <summary>Checks whether stdout has exactly this line, as grep -qxF on $(…) does.</summary>
+    /// <param name="line">The whole line.</param>
+    /// <returns>True if it's there.</returns>
+    public bool HasStdoutLine(string line) => StdoutLines.Contains(line, StringComparer.Ordinal);
+
     /// <summary>Checks whether a line of the combined output starts with <paramref name="prefix"/>.</summary>
     /// <param name="prefix">The start of the line.</param>
     /// <returns>True if some line starts with it.</returns>

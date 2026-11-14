@@ -14,6 +14,10 @@ internal sealed partial class SandboxProbe
     /// <summary>The default runner: the probe's command, run by the session's own shell.</summary>
     public const string Eval = "eval \"$1\"";
 
+    /// <summary>A runner for probes that exit or change directory, as their own bash -c would: the probe's command
+    /// in a subshell.</summary>
+    public const string EvalInSubshell = "(eval \"$1\")";
+
     private readonly List<(string Name, string Command)> _probes = [];
 
     /// <summary>Gets the shell that runs before the probes, in the same session.</summary>
