@@ -16,7 +16,7 @@ public sealed class SessionLockTests(SessionLockTests.Fixture fixture) : IClassF
     {
         var project = fixture.Project.Dir;
         var line = new Regex(
-            $"^~{Regex.Escape(project[SmokeEnvironment.RealHome.Length..])} +[0-9a-f]{{8}} +{fixture.ToolsCell}"
+            $"^{Regex.Escape(PsTable.FormatProjectDir(project))} +[0-9a-f]{{8}} +{fixture.ToolsCell}"
             + "[0-9]+[smh][0-9m]* +sleep 120$",
             RegexOptions.Multiline);
 
@@ -134,7 +134,7 @@ public sealed class SessionLockTests(SessionLockTests.Fixture fixture) : IClassF
 
             Ps = pen.Run("ps");
             var sessionDir = SmokeProject.FindLastSession(runtime);
-            ToolsCell = FindToolsCell(sessionDir);
+            ToolsCell = PsTable.BuildToolsCell(sessionDir);
             var projectLock = Path.Combine(runtime, "project.lock");
             var worktreeLock = Path.Combine(runtime, $"worktree-{Project.Hash}.lock");
             ProjectLockSharedFree = Locks.IsFree(projectLock, exclusive: false);
@@ -156,15 +156,6 @@ public sealed class SessionLockTests(SessionLockTests.Fixture fixture) : IClassF
             ContainersAfterNext = Docker.CountContainers(Key);
             DeadSessionEntries =
                 [.. Directory.EnumerateFileSystemEntries(sessionDir).Select(entry => Path.GetFileName(entry))];
-        }
-
-        /// <summary>Builds the TOOLS cell's regex from the session dir's tools file, as smoke.sh's tools_cell
-        /// did.</summary>
-        private static string FindToolsCell(string sessionDir)
-        {
-            var file = Path.Combine(sessionDir, "tools");
-            var tools = File.Exists(file) ? string.Join(',', File.ReadAllLines(file)) : "";
-            return tools.Length == 0 ? "" : Regex.Escape(tools) + " +";
         }
 
         private static LsofResult? ReadLsof(int penPid)

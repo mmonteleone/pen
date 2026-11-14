@@ -18,6 +18,7 @@ public class SmokeFixture : IAsyncLifetime
     private readonly List<SmokeProject> _projects = [];
     private readonly List<IDisposable> _tracked = [];
     private readonly List<string> _images = [];
+    private IReadOnlySet<string>? _imagesBefore;
     private TempDir? _scratch;
 
     /// <summary>Gets a scratch directory outside the project (smoke.sh's $SCRATCH), real path.</summary>
@@ -44,6 +45,7 @@ public class SmokeFixture : IAsyncLifetime
     {
         try
         {
+            _imagesBefore = new HashSet<string>(Docker.ReadLines("image", "ls", "-aq", "--no-trunc"));
             _scratch = new TempDir("pen-smoke.");
             Home = new FakeHome(Path.Combine(_scratch.Path, "home"));
             Project = CreateProject();
@@ -125,9 +127,13 @@ public class SmokeFixture : IAsyncLifetime
         _tracked.Clear();
         cleanup.Run(() => Docker.RemoveImages(_images));
         _images.Clear();
+        List<string> keys = [];
+        foreach (var project in _projects)
+            keys.AddRange(project.FindKeys(cleanup));
         foreach (var project in Enumerable.Reverse(_projects))
             cleanup.Run(project.Dispose);
         _projects.Clear();
+        cleanup.Run(() => RemoveReplacedLayers(keys.Distinct()));
         if (_scratch is { } scratch)
         {
             cleanup.Run(() => Files.DeleteTree(scratch.Path));
@@ -135,6 +141,24 @@ public class SmokeFixture : IAsyncLifetime
             _scratch = null;
         }
         return cleanup;
+    }
+
+    /// <summary>Removes the untagged project layers of the keys that weren't there when the fixture started.</summary>
+    /// <remarks>
+    /// A session rebuilds the project layer every time and only moves its tag, so each replaced layer is left
+    /// untagged, labeled pen.project=&lt;key&gt;. Without a listing from before, every one would look new.
+    /// </remarks>
+    /// <param name="keys">The project keys.</param>
+    private void RemoveReplacedLayers(IEnumerable<string> keys)
+    {
+        if (_imagesBefore is not { } before)
+            return;
+        foreach (var key in keys)
+        {
+            var layers = Docker.ReadLines(
+                "image", "ls", "-q", "--no-trunc", "--filter", "dangling=true", "--filter", $"label=pen.project={key}");
+            Docker.RemoveImages(layers.Distinct().Where(id => !before.Contains(id)));
+        }
     }
 
     private static InvalidOperationException NotInitialized() => new("the fixture isn't initialized");

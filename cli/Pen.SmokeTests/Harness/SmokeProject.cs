@@ -112,16 +112,25 @@ internal sealed class SmokeProject : IDisposable
     public void Dispose()
     {
         var cleanup = new Cleanup();
+        foreach (var key in FindKeys(cleanup))
+            ForgetKey(key, cleanup);
+        cleanup.Run(() => Files.DeleteTree(Dir));
+        cleanup.ThrowIfFailed();
+    }
+
+    /// <summary>Finds every key this project's state is under: the resolved one, those of its runtime dirs under each
+    /// HOME and the extra ones.</summary>
+    /// <param name="cleanup">Keeps the error if a HOME can't be read.</param>
+    /// <returns>The keys, without duplicates.</returns>
+    public IReadOnlyList<string> FindKeys(Cleanup cleanup)
+    {
         List<string> keys = [];
         if (_key != null)
             keys.Add(_key);
         foreach (var home in _homes.Distinct())
             cleanup.Run(() => keys.AddRange(FindRuntimeDirs(home).Select(dir => Path.GetFileName(dir))));
         keys.AddRange(_extraKeys);
-        foreach (var key in keys.Distinct())
-            ForgetKey(key, cleanup);
-        cleanup.Run(() => Files.DeleteTree(Dir));
-        cleanup.ThrowIfFailed();
+        return [.. keys.Distinct()];
     }
 
     private void ForgetKey(string key, Cleanup cleanup)

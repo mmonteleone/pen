@@ -45,6 +45,13 @@ internal sealed record CommandResult(int ExitCode, string Stdout, string Stderr,
     /// <returns>True if it exited 2 and said so.</returns>
     public bool IsUsageError(string message) => ExitCode == 2 && Output.Contains(message, StringComparison.Ordinal);
 
+    /// <summary>Requires a zero exit, as smoke.sh's set -e did for a command whose status no check read.</summary>
+    /// <remarks>A fixture calls it, so a failure there fails the whole class, as it stopped smoke.sh.</remarks>
+    /// <returns>This result.</returns>
+    /// <exception cref="InvalidOperationException">The command exited non-zero.</exception>
+    public CommandResult RequireSuccess() =>
+        ExitCode == 0 ? this : throw new InvalidOperationException($"a command that must succeed failed: {Describe()}");
+
     /// <summary>Describes the result for an assertion message: the exit code, then the combined output.</summary>
     /// <returns>The description.</returns>
     public string Describe() =>

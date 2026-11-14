@@ -55,6 +55,15 @@ internal static class Docker
             Run(["image", "rm", "-f", .. names]);
     }
 
+    /// <summary>Removes containers by name or ID (docker rm -f), ignoring failures.</summary>
+    /// <param name="containers">The containers.</param>
+    public static void RemoveContainers(IEnumerable<string> containers)
+    {
+        string[] names = [.. containers];
+        if (names.Length > 0)
+            Run(["rm", "-f", .. names]);
+    }
+
     private static void RemoveEach(string[] command, CommandResult listed)
     {
         string[] ids = [.. listed.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries).Distinct()];
