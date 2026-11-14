@@ -7,6 +7,11 @@ namespace Pen.SmokeTests.Harness;
 /// <summary>File helpers the checks share: modes, hashes and removal of trees a test may have locked down.</summary>
 internal static class Files
 {
+    /// <summary>Gets the mode of a normal directory or script, rwxr-xr-x.</summary>
+    public const UnixFileMode Mode755 =
+        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead
+        | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
+
     /// <summary>Gets a file's permission bits in octal, as stat -c %a prints them (e.g. 700).</summary>
     /// <param name="path">The file.</param>
     /// <returns>The mode.</returns>
@@ -21,6 +26,47 @@ internal static class Files
         var stat = new HostCommand("/bin/sh", ["-c", "stat -c %u \"$1\" 2>/dev/null || stat -f %u \"$1\"", "_", path])
             .Run();
         return stat.ExitCode == 0 && uint.TryParse(stat.CapturedStdout, out var uid) ? uid : null;
+    }
+
+    /// <summary>Checks whether a path exists, following symlinks, as test -e does.</summary>
+    /// <param name="path">The path.</param>
+    /// <returns>True if it does.</returns>
+    public static bool Exists(string path) => Test("-e", path);
+
+    /// <summary>Checks whether a path is a regular file, following symlinks, as test -f does.</summary>
+    /// <param name="path">The path.</param>
+    /// <returns>True if it is.</returns>
+    public static bool IsRegularFile(string path) => Test("-f", path);
+
+    /// <summary>Checks whether a path is a directory, following symlinks, as test -d does.</summary>
+    /// <param name="path">The path.</param>
+    /// <returns>True if it is.</returns>
+    public static bool IsDirectory(string path) => Test("-d", path);
+
+    /// <summary>Checks whether a path is a file that isn't empty, following symlinks, as test -s does.</summary>
+    /// <param name="path">The path.</param>
+    /// <returns>True if it is.</returns>
+    public static bool IsNonEmpty(string path) => Test("-s", path);
+
+    /// <summary>Hashes a file's bytes with SHA-256, as cksum &lt; file compares contents.</summary>
+    /// <param name="path">The file.</param>
+    /// <returns>The hash in hex.</returns>
+    public static string HashFile(string path) => Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)));
+
+    /// <summary>Lists a directory's entries by name, sorted, as ls -A does (without its locale's order).</summary>
+    /// <param name="dir">The directory.</param>
+    /// <returns>The names, or an empty list if it can't be listed.</returns>
+    public static IReadOnlyList<string> ListNames(string dir)
+    {
+        try
+        {
+            return [.. Directory.EnumerateFileSystemEntries(dir).Select(Path.GetFileName).OfType<string>()
+                .Order(StringComparer.Ordinal)];
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
     }
 
     /// <summary>Hashes a path as pen names project keys: the first 8 hex digits of its SHA-256.</summary>
@@ -58,4 +104,7 @@ internal static class Files
         new HostCommand("chmod", ["-R", "u+rwx", path]).Run();
         new HostCommand("rm", ["-rf", path]).Run();
     }
+
+    private static bool Test(string flag, string path) =>
+        new HostCommand("/bin/sh", ["-c", "test \"$1\" \"$2\"", "_", flag, path]).Run().ExitCode == 0;
 }

@@ -56,6 +56,15 @@ internal sealed class SmokeProject : IDisposable
     public static SmokeProject CreateEmpty(string prefix) =>
         new(Files.CreateUniqueDir(SmokeEnvironment.RealHome, prefix));
 
+    /// <summary>Creates a directory, not a repo, at a given path, e.g. in a fixture's scratch directory.</summary>
+    /// <param name="path">The directory, as a real path; its parent must exist.</param>
+    /// <returns>The project.</returns>
+    public static SmokeProject CreateAt(string path)
+    {
+        Directory.CreateDirectory(path);
+        return new(path);
+    }
+
     /// <summary>Has cleanup also remove the project's state under a throwaway HOME.</summary>
     /// <param name="home">The HOME pen ran with.</param>
     public void CleanUpUnder(string home) => _homes.Add(home);
@@ -99,13 +108,7 @@ internal sealed class SmokeProject : IDisposable
     /// <param name="args">Git's arguments.</param>
     /// <returns>Git's stdout.</returns>
     /// <exception cref="InvalidOperationException">Git exited non-zero.</exception>
-    public string RunGit(params string[] args)
-    {
-        var result = new HostCommand("git", ["-C", Dir, .. args]).Run();
-        if (result.ExitCode != 0)
-            throw new InvalidOperationException($"git {string.Join(' ', args)} failed: {result.Output}");
-        return result.Stdout;
-    }
+    public string RunGit(params string[] args) => SmokeGit.Run(Dir, args);
 
     /// <summary>Removes the project's state under every HOME it knows, the extra keys' state and the project.</summary>
     /// <remarks>Every step runs even if an earlier one fails; the first error is thrown at the end.</remarks>

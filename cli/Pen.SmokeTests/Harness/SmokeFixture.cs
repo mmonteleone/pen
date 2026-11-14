@@ -81,6 +81,13 @@ public class SmokeFixture : IAsyncLifetime
     /// <returns>The project.</returns>
     internal SmokeProject CreateEmptyProject(string prefix) => TrackProject(SmokeProject.CreateEmpty(prefix));
 
+    /// <summary>Creates a directory, not a repo, in <see cref="Scratch"/>, whose projects' state is removed with the
+    /// fixture as smoke.sh's forget did.</summary>
+    /// <param name="name">Its name in <see cref="Scratch"/>.</param>
+    /// <returns>The project.</returns>
+    internal SmokeProject CreateScratchProject(string name) =>
+        TrackProject(SmokeProject.CreateAt(Path.Combine(Scratch, name)));
+
     /// <summary>Has cleanup dispose something, e.g. a background <see cref="RunningCommand"/> or a disposable that
     /// puts back an image a fixture re-tagged, before the projects are removed. Later ones are disposed
     /// first.</summary>
