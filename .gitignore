@@ -480,3 +480,11 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Local agent and planning files
+.claude/
+docs/plans/
+PLAN*.md
+progress*.md
+REVIEW.md
+Design.md
