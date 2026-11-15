@@ -583,6 +583,16 @@ public class HooksPathTests
     }
 
     [Fact]
+    public void TheExtension_InASubsection_DoesntEnableIt()
+    {
+        using var f = new Fixture();
+        File.WriteAllText(Path.Combine(f.GitDir, "config.worktree"), "[core]\n\thooksPath = .husky\n");
+        f.Add("[extensions \"x\"]\n\tworktreeConfig = true\n");
+        Assert.Equal(".git/hooks", f.GitSays());
+        Assert.Null(f.Warning());
+    }
+
+    [Fact]
     public void ConfigWorktree_FollowsItsIncludes()
     {
         using var f = new Fixture();
@@ -644,6 +654,17 @@ public class HooksPathTests
         File.WriteAllText(Path.Combine(f.GitDir, "inc"), $"[core]\n\tworktree = {other}\n");
         f.Add("[include]\n\tpath = inc\n[core]\n\thooksPath = .husky\n");
         Assert.NotNull(f.Warning());
+    }
+
+    [Fact]
+    public void CoreWorktree_InASubsection_IsIgnored()
+    {
+        using var f = new Fixture();
+        var deep = Path.Combine(f.Dir, "a", "b");
+        Directory.CreateDirectory(deep);
+        f.Add($"[core \"x\"]\n\tworktree = {deep}\n[core]\n\thooksPath = ../../hk\n");
+        Assert.Equal("../../hk", f.GitSays());
+        Assert.Null(f.Warning());
     }
 
     // The environment

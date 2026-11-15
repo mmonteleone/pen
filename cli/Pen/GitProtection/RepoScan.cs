@@ -212,25 +212,21 @@ internal static class RepoScan
         {
             return null;
         }
-        catch (PenException)
-        {
-            // An unreadable config: not a checkout Pen can vouch for.
-            return null;
-        }
     }
 
     /// <summary>
     /// Whether the core.worktree in <paramref name="repo"/>'s own config leads to <paramref name="checkout"/>.
     /// </summary>
+    /// <returns>Whether it does; false if the config can't be read or parsed.</returns>
     private static bool HasWorktreeAt(string repo, string checkout)
     {
         var config = Path.Combine(repo, "config");
         if (RepoGuard.IsLink(config))
             return false;
-        var worktree = GitConfigFile.ParseFile(config)
-            .Where(e => e.Section == "core" && e.Subsection == null && e.Key == "worktree")
-            .Select(e => e.Value)
-            .LastOrDefault();
+        // An unreadable config: not a checkout Pen can vouch for.
+        if (GitConfigFile.TryParseFile(config) is not { } entries)
+            return false;
+        var worktree = GitConfigFile.FindLast(entries, "core", "worktree");
         if (string.IsNullOrEmpty(worktree))
             return false;
         if (!Path.IsPathRooted(worktree))

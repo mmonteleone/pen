@@ -336,23 +336,17 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// </exception>
     private Include ResolveInclude(string configFile, string value)
     {
-        if (value.Contains('\ufffd'))
+        var expanded = GitConfigFile.ExpandPath(value, hostHome);
+        var path = expanded.Refusal switch
         {
-            throw new PenException($"{FormatPath(configFile)} includes a path that isn't valid UTF-8, so pen " +
-                "can't tell which file git would read: remove the include or rename the file, then rerun");
-        }
-
-        var path = value;
-        if (path == "~" || path.StartsWith("~/", StringComparison.Ordinal))
-        {
-            path = hostHome + path[1..];
-        }
-        else if (path.StartsWith('~') || path.StartsWith("%(prefix)/", StringComparison.Ordinal))
-        {
-            throw new PenException($"{FormatPath(configFile)} includes {Out.Field(path)}, and " +
+            GitConfigFile.PathRefusal.None => expanded.Path!,
+            GitConfigFile.PathRefusal.NotUtf8 => throw new PenException($"{FormatPath(configFile)} includes a " +
+                "path that isn't valid UTF-8, so pen can't tell which file git would read: remove the include or " +
+                "rename the file, then rerun"),
+            _ => throw new PenException($"{FormatPath(configFile)} includes {Out.Field(value)}, and " +
                 "pen can't resolve that form of path, so it can't tell which file git " +
-                "would read: write the path out in full or remove the include, then rerun");
-        }
+                "would read: write the path out in full or remove the include, then rerun"),
+        };
 
         if (!Path.IsPathRooted(path))
             path = Path.Combine(Path.GetDirectoryName(configFile)!, path);

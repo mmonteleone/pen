@@ -235,15 +235,9 @@ internal static class RepoGuard
         if (!File.Exists(gitmodules) || IsLink(gitmodules))
             return false;
         var relative = Path.GetRelativePath(super, repoDir);
-        try
-        {
-            return GitConfigFile.ParseFile(gitmodules).Any(e =>
-                e.Section == "submodule" && e.Key == "path" && e.Value.TrimEnd('/') == relative);
-        }
-        catch (PenException)
-        {
-            return false; // no advice from a file that can't be read
-        }
+        // No advice from a file that can't be read.
+        return GitConfigFile.TryParseFile(gitmodules)?.Any(e =>
+            e.Section == "submodule" && e.Key == "path" && e.Value.TrimEnd('/') == relative) ?? false;
     }
 
     /// <summary>Finds the common git dir of the linked worktree whose .git file is <paramref name="git"/>.</summary>

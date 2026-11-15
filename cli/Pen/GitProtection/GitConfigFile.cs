@@ -19,6 +19,27 @@ internal static class GitConfigFile
     /// <param name="Value">The value; a key with no "=" has the value "true".</param>
     internal readonly record struct Entry(string Section, string? Subsection, string Key, string Value);
 
+    /// <summary>Why <see cref="ExpandPath"/> can't give the path a value names.</summary>
+    internal enum PathRefusal
+    {
+        /// <summary>Nothing: the path was expanded.</summary>
+        None,
+
+        /// <summary>
+        /// The value wasn't valid UTF-8: decoded, it has U+FFFD where git has other bytes, so it would name a
+        /// different file from the one git reads.
+        /// </summary>
+        NotUtf8,
+
+        /// <summary>The value is a "~user" or "%(prefix)/" path, which Pen doesn't resolve.</summary>
+        UnknownForm,
+    }
+
+    /// <summary>A path value as git would expand it, or why Pen can't tell.</summary>
+    /// <param name="Path">The expanded path, or null with a <paramref name="Refusal"/>.</param>
+    /// <param name="Refusal">Why it can't be expanded, or <see cref="PathRefusal.None"/>.</param>
+    internal readonly record struct ExpandedPath(string? Path, PathRefusal Refusal);
+
     /// <summary>Parses the entries in <paramref name="text"/>.</summary>
     /// <returns>The entries, in file order.</returns>
     /// <exception cref="PenException">It isn't what git would read.</exception>
@@ -68,6 +89,65 @@ internal static class GitConfigFile
             throw new PenException("can't read the git config file " +
                 $"{Out.Field(path)}: fix its permissions, then rerun");
         }
+    }
+
+    /// <summary>Parses the entries of the file at <paramref name="path"/>, as <see cref="ParseFile"/> does.</summary>
+    /// <returns>
+    /// The entries, in file order; none if the file is missing; null where <see cref="ParseFile"/> throws a
+    /// <see cref="PenException"/>, because the file can't be read or parsed.
+    /// </returns>
+    /// <remarks>
+    /// Only <see cref="PenException"/> (what <see cref="ParseFile"/> turns read and parse failures into) gives
+    /// null; anything else propagates on purpose.
+    /// </remarks>
+    public static List<Entry>? TryParseFile(string path)
+    {
+        try
+        {
+            return ParseFile(path);
+        }
+        catch (PenException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Finds the value of the last entry with this section, key and subsection.</summary>
+    /// <param name="entries">The entries, in file order.</param>
+    /// <param name="section">The section, lowercased as <see cref="Entry.Section"/> holds it.</param>
+    /// <param name="key">The key, lowercased as <see cref="Entry.Key"/> holds it.</param>
+    /// <param name="subsection">The subsection, matched exactly; null matches only entries outside one.</param>
+    /// <returns>The value, or null if no entry matches.</returns>
+    public static string? FindLast(List<Entry> entries, string section, string key, string? subsection = null)
+    {
+        for (int i = entries.Count - 1; i >= 0; i--)
+        {
+            var entry = entries[i];
+            if (entry.Section == section && entry.Subsection == subsection && entry.Key == key)
+                return entry.Value;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Expands a path value the way git does for "~" and "~/", refusing the forms Pen can't resolve.
+    /// </summary>
+    /// <param name="value">The value, as read from a config file.</param>
+    /// <param name="home">The user's home, absolute.</param>
+    /// <returns>
+    /// The home for "~", the home followed by the rest for "~/…", or any other value as it is (relative and empty
+    /// values are left to the caller); otherwise a refusal, checked for invalid UTF-8 first.
+    /// </returns>
+    public static ExpandedPath ExpandPath(string value, string home)
+    {
+        if (value.Contains('\ufffd'))
+            return new(null, PathRefusal.NotUtf8);
+        if (value == "~" || value.StartsWith("~/", StringComparison.Ordinal))
+            return new(home + value[1..], PathRefusal.None);
+        // ~user needs another user's home looked up; %(prefix) depends on how git was built.
+        if (value.StartsWith('~') || value.StartsWith("%(prefix)/", StringComparison.Ordinal))
+            return new(null, PathRefusal.UnknownForm);
+        return new(value, PathRefusal.None);
     }
 
     /// <summary>Whether <paramref name="value"/> is true as a git boolean.</summary>

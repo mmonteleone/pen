@@ -109,7 +109,7 @@ internal static class HooksPath
 
         var config = Path.Combine(common, "config");
         walk.Read(config, conditional: false);
-        var commonEntries = ParseOrNull(config);
+        var commonEntries = GitConfigFile.TryParseFile(config);
         var gitDir = project.IsWorktree ? RepoScan.ReadWorktreeEntry(project.GitDir) : common;
         if (gitDir == null)
         {
@@ -140,13 +140,14 @@ internal static class HooksPath
     {
         var workTree = project.IsWorktree ? null : FindLastWorkTree(commonEntries);
         bool known = commonEntries != null;
-        var extension = commonEntries
-            ?.LastOrDefault(e => e.Section == "extensions" && e.Subsection == null && e.Key == "worktreeconfig").Value;
+        var extension = commonEntries == null
+            ? null
+            : GitConfigFile.FindLast(commonEntries, "extensions", "worktreeconfig");
         if (extension != null && GitConfigFile.IsTrue(extension))
         {
             var worktreeFile = Path.Combine(gitDir, "config.worktree");
             walk.Read(worktreeFile, conditional: false);
-            var own = ParseOrNull(worktreeFile);
+            var own = GitConfigFile.TryParseFile(worktreeFile);
             known &= own != null;
             workTree = FindLastWorkTree(own) ?? workTree;
         }
@@ -221,21 +222,7 @@ internal static class HooksPath
 
     /// <summary>Finds the last core.worktree in a file's own entries, not its includes.</summary>
     private static string? FindLastWorkTree(List<GitConfigFile.Entry>? entries) =>
-        entries?.LastOrDefault(e => e.Section == "core" && e.Subsection == null && e.Key == "worktree").Value;
-
-    /// <summary>Parses a config file's own entries.</summary>
-    /// <returns>The entries, or null if the file can't be read or parsed.</returns>
-    private static List<GitConfigFile.Entry>? ParseOrNull(string file)
-    {
-        try
-        {
-            return GitConfigFile.ParseFile(file);
-        }
-        catch (PenException)
-        {
-            return null;
-        }
-    }
+        entries == null ? null : GitConfigFile.FindLast(entries, "core", "worktree");
 
     /// <summary>
     /// Decides the warning for the most decisive candidate: the last one in reach, otherwise the last that can't be
@@ -282,15 +269,11 @@ internal static class HooksPath
     /// </remarks>
     private static Place Locate(string raw, Project project, string home, string? top, bool relativeKnown)
     {
-        var value = raw.StartsWith(Optional, StringComparison.Ordinal) ? raw[Optional.Length..] : raw;
-        if (value.Contains('\ufffd'))
+        var written = raw.StartsWith(Optional, StringComparison.Ordinal) ? raw[Optional.Length..] : raw;
+        // HostEnv.Home is always absolute (HostEnv.FromProcess refuses anything else), so the rooted check
+        // takes the expanded path as written.
+        if (GitConfigFile.ExpandPath(written, home).Path is not { } value)
             return Place.Unknown;
-        if (value.StartsWith("%(prefix)/", StringComparison.Ordinal))
-            return Place.Unknown;
-        if (value == "~" || value.StartsWith("~/", StringComparison.Ordinal))
-            return LocatePath(home + value[1..], project);
-        if (value.StartsWith('~'))
-            return Place.Unknown; // ~user/: Pen doesn't look up other users' homes
         if (value.Length == 0)
             return LocatePath("/", project); // git looks for /pre-commit
         if (Path.IsPathRooted(value))
@@ -462,12 +445,7 @@ internal static class HooksPath
                 return;
             }
 
-            List<GitConfigFile.Entry> entries;
-            try
-            {
-                entries = GitConfigFile.ParseFile(file);
-            }
-            catch (PenException)
+            if (GitConfigFile.TryParseFile(file) is not { } entries)
             {
                 Found.Add(new(null, file, $"it can't read the config file {Out.Field(file)}"));
                 return;
@@ -511,13 +489,11 @@ internal static class HooksPath
         /// <returns>The file, or null if Pen can't tell.</returns>
         private string? ResolveInclude(string value, string from)
         {
-            if (value.Contains('\ufffd') || value.StartsWith("%(prefix)/", StringComparison.Ordinal))
+            // HostEnv.Home is always absolute (HostEnv.FromProcess refuses anything else), so the rooted check
+            // takes the expanded path as written.
+            if (GitConfigFile.ExpandPath(value, home).Path is not { } path)
                 return null;
-            if (value == "~" || value.StartsWith("~/", StringComparison.Ordinal))
-                return home + value[1..];
-            if (value.StartsWith('~'))
-                return null;
-            return Path.IsPathRooted(value) ? value : Path.Combine(Path.GetDirectoryName(from)!, value);
+            return Path.IsPathRooted(path) ? path : Path.Combine(Path.GetDirectoryName(from)!, path);
         }
     }
 }
