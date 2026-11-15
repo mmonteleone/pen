@@ -282,8 +282,10 @@ internal static class RepoGuard
     {
         if (Path.GetFileName(common) != ".git" || !Directory.Exists(common))
             return false;
-        var bare = GitConfigFile.ParseFile(Path.Combine(common, "config"))
-            .Where(e => e.Section == "core" && e.Key == "bare").Select(e => e.Value).LastOrDefault();
+        // Reads only the common config, not config.worktree (git also reads core.bare there when
+        // extensions.worktreeConfig is on); one the agent planted is quarantined by the session-end check.
+        // Only core.bare itself: git ignores a bare key in a subsection such as [core "x"].
+        var bare = GitConfigFile.FindLast(GitConfigFile.ParseFile(Path.Combine(common, "config")), "core", "bare");
         return bare == null || !GitConfigFile.IsTrue(bare);
     }
 

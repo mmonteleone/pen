@@ -283,6 +283,31 @@ public class WorktreeTests
     }
 
     [Fact]
+    public void ABareKeyInACoreSubsection_LeavesTheMainCheckoutNonBare()
+    {
+        using var t = new TempDir();
+        var (repo, wt, _) = RepoWithWorktree(t);
+        var dotgit = Path.Combine(repo, ".git");
+        var config = Path.Combine(dotgit, "config");
+        File.AppendAllText(config, "[core \"x\"]\n\tbare = true\n[core.y]\n\tbare = true\n");
+        Assert.Equal("false\n", Git.Run(repo, "rev-parse", "--is-bare-repository")); // git ignores them too
+        Assert.True(RepoGuard.IsMainCheckoutGitDir(dotgit));
+        RepoGuard.CheckAtStart(wt);
+        Assert.Equal(repo, Project.Resolve(wt, t.Host()).RepoDir);
+
+        // core.bare itself still counts, after them as before them.
+        File.AppendAllText(config, "[core]\n\tbare = true\n");
+        Assert.False(RepoGuard.IsMainCheckoutGitDir(dotgit));
+        Assert.Contains("bare repo", Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(wt)).Message);
+
+        // A later subsection key doesn't unset it: git still reads core.bare = true.
+        File.AppendAllText(config, "[core \"z\"]\n\tbare = false\n");
+        Assert.Equal("true\n", Git.Run(dotgit, "rev-parse", "--is-bare-repository"));
+        Assert.False(RepoGuard.IsMainCheckoutGitDir(dotgit));
+        Assert.Contains("bare repo", Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(wt)).Message);
+    }
+
+    [Fact]
     public void CheckAtStartRunsTheGitDirChecksOnTheMainRepo()
     {
         using var t = new TempDir();
