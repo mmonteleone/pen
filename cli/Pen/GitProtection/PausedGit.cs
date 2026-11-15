@@ -400,3 +400,15 @@ internal static class PausedGit
         }
     }
 }
+
+/// <summary>A detail of a paused operation.</summary>
+/// <param name="Text">The heading.</param>
+/// <param name="Lines">The lines under it, already safe to print.</param>
+/// <param name="More">How many more lines there were than are listed.</param>
+internal sealed record PausedNote(string Text, List<string> Lines, int More = 0);
+
+/// <summary>State for a paused operation in a git dir, as found.</summary>
+/// <param name="Path">The state directory.</param>
+/// <param name="Kind">What kind of operation it is, as words.</param>
+/// <param name="Notes">What in it is worth a look.</param>
+internal sealed record PausedOp(string Path, string Kind, List<PausedNote> Notes);

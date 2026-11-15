@@ -613,3 +613,53 @@ internal static class RepoScan
         }
     }
 }
+
+/// <summary>What the walk of a project's tree found.</summary>
+/// <param name="Repos">The repos below the root, in ordinal order of their paths.</param>
+/// <param name="UnlistableDirs">The directories it could enter but not list, in ordinal order.</param>
+/// <param name="BadNames">The entries it couldn't name that could hold a repo, in ordinal order.</param>
+internal sealed record NestedScan(List<NestedRepo> Repos, List<string> UnlistableDirs, List<BadName> BadNames);
+
+/// <summary>A repo below the project root.</summary>
+/// <param name="Path">The entry that makes it one: the .git, or a bare repo's HEAD.</param>
+/// <param name="Kind">What sort of entry <paramref name="Path"/> is.</param>
+internal sealed record NestedRepo(string Path, NestedKind Kind)
+{
+    /// <summary>Gets the repo's directory, for messages.</summary>
+    public string RepoDir => System.IO.Path.GetDirectoryName(Path)!;
+}
+
+/// <summary>What makes a directory below the project root a repo.</summary>
+internal enum NestedKind
+{
+    /// <summary>A .git directory: a repo with its own config and hooks.</summary>
+    GitDir,
+    /// <summary>A .git file (gitfile) that isn't one of the project's own worktrees or submodule checkouts.</summary>
+    GitFile,
+    /// <summary>A .git symlink.</summary>
+    GitLink,
+    /// <summary>A directory git takes for a bare repo: HEAD plus objects/ and refs/, or HEAD plus commondir.</summary>
+    Bare,
+}
+
+/// <summary>What the walk of a git dir's submodule repos found.</summary>
+/// <param name="Repos">The module repos, parents before their nested repos.</param>
+/// <param name="UnreadableDirs">The directories it couldn't read, so what's in them is unknown.</param>
+/// <param name="BadNames">The entries whose names aren't valid UTF-8, of any type.</param>
+internal sealed record ModuleScan(List<string> Repos, List<string> UnreadableDirs, List<BadName> BadNames);
+
+/// <summary>An entry a scan can't look inside, since its name isn't valid UTF-8.</summary>
+/// <param name="DisplayPath">
+/// The entry's path for messages, with its name exact (<see cref="UndecodableEntry.EscapedName"/>).
+/// </param>
+/// <param name="EndsInNewline">Whether its name ends in a newline, so no command Pen could print would name it.</param>
+/// <remarks>
+/// .NET's listing has U+FFFD in place of the bad bytes, so that string names nothing (or another entry), while git
+/// on this machine can still enter it.
+/// </remarks>
+internal sealed record BadName(string DisplayPath, bool EndsInNewline)
+{
+    /// <summary>Creates the bad name for <paramref name="entry"/>, listed in <paramref name="dir"/>.</summary>
+    public static BadName FromEntry(string dir, UndecodableEntry entry) =>
+        new(Path.Combine(dir, entry.EscapedName), entry.EndsInNewline);
+}
