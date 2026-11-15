@@ -106,6 +106,17 @@ public class GitCheckTests
         Assert.Empty(NestedScans.Find(dir));
     }
 
+    /// <summary>Only a session's end treats a dir that's gone as a failure.</summary>
+    [Fact]
+    public void WithoutASession_ADirThatsGone_FindsNothing()
+    {
+        using var t = new TempDir();
+        var check = GitCheck.RunWithoutOpening(Path.Combine(t.Path, "gone"), startedWithGit: true, commonGitDir: null, modulesAtStart: null);
+        Assert.Null(check.Failure);
+        Assert.Empty(check.Moved);
+        Assert.False(check.RestoreIncomplete);
+    }
+
     [Fact]
     public void PicksAFreeName()
     {

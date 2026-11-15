@@ -45,17 +45,7 @@ internal sealed class PromptHazardScan(string gitDir, Func<string, bool>? tryOpe
     /// <remarks>
     /// If it throws, what it found before stays in <see cref="Hazards"/> and <see cref="UnreachableDirs"/>.
     /// </remarks>
-    public void Run()
-    {
-        if (!Directory.Exists(gitDir))
-            return;
-        PausedGit.VisitWithWorktrees(gitDir, Visit, AddUnreachable, tryOpen);
-        foreach (var repo in RepoScan.FindModuleRepos(gitDir))
-        {
-            if (!RepoGuard.IsLink(repo))
-                PausedGit.VisitWithWorktrees(repo, Visit, AddUnreachable, tryOpen);
-        }
-    }
+    public void Run() => GitDirWalk.Visit(gitDir, Visit, AddUnreachable, tryOpen);
 
     /// <summary>Looks for hazards in one git dir or worktree entry.</summary>
     private void Visit(string dir)

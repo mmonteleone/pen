@@ -277,6 +277,8 @@ public class PausedGitTests
         Assert.Contains(".git/rebase-merge: a paused rebase", warning);
         Assert.Contains($"couldn't read git-rebase-todo, so pen can't say what it would run: {problem}", warning);
         Assert.DoesNotContain("never read", warning);
+        if (how == "unreadable")
+            Assert.DoesNotContain("permission denied:", warning); // no path: the file is named already
     }
 
     [Theory]
@@ -1191,6 +1193,27 @@ public class PausedGitTests
         var shown = warning.Split('\n').Single(l => l.Contains("yyy", StringComparison.Ordinal));
         Assert.Contains($"… ({"x ".Length + 5000 + "; evil".Length - PausedGit.MaxLineLength} more characters)", shown);
         Assert.True(shown.Length < PausedGit.MaxLineLength + 50);
+    }
+
+    [Fact]
+    public void PausedStateIsListedFromTheGitDirThenItsWorktreesThenEachModuleRepoAndItsWorktrees()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        var module = ModuleRepo(t, ".git", "modules", "sub");
+        var gitDirs = new[]
+        {
+            Path.Combine(repo, ".git"),
+            t.Sub("repo", ".git", "worktrees", "wt"),
+            module,
+            t.Sub("repo", ".git", "modules", "sub", "worktrees", "w"),
+        };
+        foreach (var gitDir in gitDirs.Reverse())
+            Directory.CreateDirectory(Path.Combine(gitDir, "rebase-merge"));
+
+        var paths = Paused(repo).Select(op => op.Path);
+
+        Assert.Equal(gitDirs.Select(gitDir => Path.Combine(gitDir, "rebase-merge")), paths);
     }
 
     [Fact]

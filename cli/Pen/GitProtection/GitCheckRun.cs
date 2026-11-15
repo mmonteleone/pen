@@ -25,8 +25,8 @@ internal sealed class GitCheckRun
     /// <summary>Adds u+rx to a directory so it can be listed, or null when this run may not change modes.</summary>
     private readonly Func<string, bool>? _tryOpen;
 
-    /// <summary>What it renamed, or couldn't rename, in order: the protected files' first.</summary>
-    private readonly List<Quarantined> _moved = [];
+    /// <summary>What it renamed or couldn't, put back and opened, in order: the protected files' first.</summary>
+    private readonly CheckChanges _changes = new();
 
     /// <summary>The directories it couldn't list, so what's in them can't be vouched for.</summary>
     private readonly List<string> _unlistable = [];
@@ -36,15 +36,6 @@ internal sealed class GitCheckRun
 
     /// <summary>The paused operations found, which stay in place.</summary>
     private readonly List<PausedOp> _paused = [];
-
-    /// <summary>The directories it opened and left so, in order: the protected files' first.</summary>
-    private readonly List<ModeChange> _opened = [];
-
-    /// <summary>The protected files that changed with nothing to set aside.</summary>
-    private readonly List<RestoredFile> _restored = [];
-
-    /// <summary>The directories whose modes kept protected files from being put back.</summary>
-    private readonly List<string> _blocked = [];
 
     /// <summary>Whether the protected files are all back, or there were none to put back.</summary>
     private bool _restoreDone;
@@ -67,23 +58,12 @@ internal sealed class GitCheckRun
     /// <param name="startedWithGit">Whether the session started with a .git there.</param>
     /// <param name="commonGitDir">The git dir it started with, or null for dir/.git.</param>
     /// <param name="modulesAtStart">The module repos in that git dir at the start, or null for those there now.</param>
-    /// <returns>The result, with Opened, Restored and RestoreBlocked empty.</returns>
+    /// <returns>The result, with Restored and RestoreBlocked empty, and Opened empty if mayOpen was false.</returns>
     public CheckResult RunWithoutRestoring(
         bool startedWithGit,
         string? commonGitDir,
-        IReadOnlyCollection<string>? modulesAtStart)
-    {
-        string? stopped = null;
-        try
-        {
-            CheckSweepingIfItStops(startedWithGit, commonGitDir, modulesAtStart);
-        }
-        catch (Exception exception)
-        {
-            stopped = Out.Describe(exception);
-        }
-        return Summarize(stopped);
-    }
+        IReadOnlyCollection<string>? modulesAtStart) =>
+        Run(session: null, () => (startedWithGit, commonGitDir), () => modulesAtStart);
 
     /// <summary>
     /// Checks the dir for a session that's ending, against what <paramref name="session"/> recorded at its start.
@@ -101,13 +81,32 @@ internal sealed class GitCheckRun
     /// retrying wouldn't help.
     /// </para>
     /// </remarks>
-    public CheckResult RunAtSessionEnd(SessionDir session)
+    public CheckResult RunAtSessionEnd(SessionDir session) =>
+        // A session from a Pen that didn't record its module repos keeps none.
+        Run(session, session.ReadGit, () => session.ReadModules() ?? []);
+
+    /// <summary>Runs the check, first putting back the protected files of the session that's ending, if any.</summary>
+    /// <param name="session">The session that's ending, or null when no session's end is being checked.</param>
+    /// <param name="readGit">Reads whether there was a .git there and its git dir (null for dir/.git).</param>
+    /// <param name="readModules">
+    /// Reads the module repos in that git dir to keep, or null for those there now. It's called after the restore,
+    /// and not if the restore stops.
+    /// </param>
+    /// <returns>
+    /// The result; without a session, Restored and RestoreBlocked are empty and RestoreIncomplete is false.
+    /// </returns>
+    /// <remarks>Never throws: what stops the check is its Failure.</remarks>
+    private CheckResult Run(
+        SessionDir? session,
+        Func<(bool StartedWithGit, string? CommonGitDir)> readGit,
+        Func<IReadOnlyCollection<string>?> readModules)
     {
-        _restoreDone = !File.Exists(session.ProtectedManifest);
+        // Decides RestoreIncomplete if the run stops before the restore does.
+        _restoreDone = session == null || !File.Exists(session.ProtectedManifest);
         string? stopped = null;
         try
         {
-            RestoreAndCheck(session);
+            RestoreAndCheck(session, readGit, readModules);
         }
         catch (Exception exception)
         {
@@ -115,10 +114,10 @@ internal sealed class GitCheckRun
         }
         return Summarize(stopped) with
         {
-            Opened = _opened,
-            Restored = _restored,
+            Opened = _changes.Opened,
+            Restored = _changes.Restored,
             RestoreIncomplete = !_restoreDone,
-            RestoreBlocked = _blocked.Distinct(StringComparer.Ordinal).ToList(),
+            RestoreBlocked = _changes.Blocked.Distinct(StringComparer.Ordinal).ToList(),
         };
     }
 
@@ -139,10 +138,10 @@ internal sealed class GitCheckRun
                 + "this machine can still enter them and run what's there (shown with octal escapes): "
                 + string.Join(", ", RepoGuard.FormatBadNames(_dir, _badNames)));
         }
-        if (_moved.Any(quarantined => quarantined.Failed))
+        if (_changes.Moved.Any(quarantined => quarantined.Failed))
             failures.Add("a file named above couldn't be moved out of git's way or restored");
         var failure = failures.Count == 0 ? null : string.Join("; ", failures);
-        return new() { Moved = _moved, Failure = failure, Paused = _paused };
+        return new() { Moved = _changes.Moved, Failure = failure, Paused = _paused };
     }
 
     /// <summary>Words the failure for the directories it couldn't list, naming the first few.</summary>
@@ -155,43 +154,30 @@ internal sealed class GitCheckRun
         return text;
     }
 
-    /// <summary>Runs the check for <see cref="RunWithoutRestoring"/>, sweeping prompt hazards if it stops.</summary>
-    private void CheckSweepingIfItStops(
-        bool startedWithGit,
-        string? commonGitDir,
-        IReadOnlyCollection<string>? modulesAtStart)
-    {
-        var swept = FindSweptGitDir(startedWithGit, commonGitDir);
-        try
-        {
-            Check(startedWithGit, commonGitDir, modulesAtStart, atStart: null);
-        }
-        catch (Exception)
-        {
-            SweepHazardsAfterStop(swept, atStart: null);
-            throw;
-        }
-    }
-
     /// <summary>
-    /// Reads what the session recorded, puts its protected files back and checks the dir, sweeping prompt hazards if
-    /// any of the last two stops.
+    /// Reads what the check is against, puts the session's protected files back if there's a session, and checks
+    /// the dir, sweeping prompt hazards if either of the last two stops.
     /// </summary>
-    private void RestoreAndCheck(SessionDir session)
+    private void RestoreAndCheck(
+        SessionDir? session,
+        Func<(bool StartedWithGit, string? CommonGitDir)> readGit,
+        Func<IReadOnlyCollection<string>?> readModules)
     {
-        var (startedWithGit, commonGitDir) = session.ReadGit();
-        var atStart = ProtectedFiles.AtStart(session);
+        var (startedWithGit, commonGitDir) = readGit();
+        var atStart = session == null ? null : ProtectedFiles.AtStart(session);
         var swept = FindSweptGitDir(startedWithGit, commonGitDir);
         try
         {
-            RestoreProtectedFiles(session, commonGitDir);
-            if (!Directory.Exists(_dir))
+            if (session != null)
             {
-                throw new PenException($"{Out.Field(_dir)} isn't there any more or can't be reached, so pen " +
-                    "couldn't check it. If it was moved, inspect its .git by hand before running git in it");
+                RestoreProtectedFiles(session, commonGitDir);
+                if (!Directory.Exists(_dir))
+                {
+                    throw new PenException($"{Out.Field(_dir)} isn't there any more or can't be reached, so pen " +
+                        "couldn't check it. If it was moved, inspect its .git by hand before running git in it");
+                }
             }
-            // A session from a Pen that didn't record its module repos keeps none.
-            Check(startedWithGit, commonGitDir, session.ReadModules() ?? [], atStart);
+            Check(startedWithGit, commonGitDir, readModules(), atStart);
         }
         catch (Exception)
         {
@@ -200,22 +186,9 @@ internal sealed class GitCheckRun
         }
     }
 
-    /// <summary>Puts the session's protected files back, keeping what the restore did even if it stops.</summary>
-    private void RestoreProtectedFiles(SessionDir session, string? commonGitDir)
-    {
-        var restore = new ProtectedFileRestore(session, _dir, commonGitDir);
-        try
-        {
-            _restoreDone = restore.Run();
-        }
-        finally
-        {
-            _moved.AddRange(restore.Moved);
-            _opened.AddRange(restore.Opened);
-            _restored.AddRange(restore.Restored);
-            _blocked.AddRange(restore.Blocked);
-        }
-    }
+    /// <summary>Puts the session's protected files back, recording what the restore does even if it stops.</summary>
+    private void RestoreProtectedFiles(SessionDir session, string? commonGitDir) =>
+        _restoreDone = new ProtectedFileRestore(session, _dir, commonGitDir, _changes).Run();
 
     /// <summary>Finds the git dir whose prompt hazards are swept if the check stops.</summary>
     /// <returns>The git dir the session started with, or null if it started with none.</returns>
@@ -491,27 +464,17 @@ internal sealed class GitCheckRun
     private bool TryRenameWithOpening(string path, string why, bool breakLayout)
     {
         var attempt = GitCheck.Move(path, why, breakLayout);
-        if (attempt.Failed && _mayOpen && TryOpenRecording(Path.GetDirectoryName(path)!, write: true))
+        if (attempt.Failed && _mayOpen && _changes.TryOpenRecording(Path.GetDirectoryName(path)!, write: true))
             attempt = GitCheck.Move(path, why, breakLayout);
         if (attempt.Failed)
             return false;
-        _moved.Add(attempt);
+        _changes.Moved.Add(attempt);
         return true;
     }
 
     /// <summary>Renames <paramref name="path"/> aside and records it, or records that it couldn't.</summary>
     private void Quarantine(string path, string why, bool breakLayout) =>
-        _moved.Add(GitCheck.Move(path, why, breakLayout));
+        _changes.Moved.Add(GitCheck.Move(path, why, breakLayout));
 
-    private bool TryOpenToRead(string path) => TryOpenRecording(path, write: false);
-
-    /// <summary>Opens a directory with <see cref="GitCheck.TryOpen"/> and records the mode change.</summary>
-    /// <returns>Whether it changed the mode.</returns>
-    private bool TryOpenRecording(string path, bool write)
-    {
-        if (!GitCheck.TryOpen(path, write, out var change))
-            return false;
-        _opened.Add(change);
-        return true;
-    }
+    private bool TryOpenToRead(string path) => _changes.TryOpenRecording(path, write: false);
 }

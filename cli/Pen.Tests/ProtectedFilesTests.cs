@@ -715,6 +715,99 @@ public class ProtectedFilesTests
         Assert.Equal(original, File.ReadAllBytes(config));
     }
 
+    [Fact]
+    public void WhenTheRestoreStopsAfterPuttingFilesBack_WhatItDidIsReported_AndHazardsAreStillSwept()
+    {
+        Assert.SkipWhen(Native.GetUid() == 0, "root writes to any directory");
+        using var t = new TempDir();
+        var (repo, git) = Repo(t);
+        var config = Path.Combine(git, "config");
+        var original = File.ReadAllBytes(config);
+        var s = Started(t, repo, git);
+        File.AppendAllText(config, "[core]\n fsmonitor = /evil\n");
+        var msgnum = Path.Combine(t.Sub("repo", ".git", "rebase-merge"), "msgnum");
+        File.WriteAllText(msgnum, "$(evil)\n");
+        var commondir = Path.Combine(git, "commondir");
+        File.WriteAllText(commondir, "planted\n");
+        File.SetUnixFileMode(git, (UnixFileMode)0b101_101_101);
+        // The manifest can't be renamed, so the restore throws once every file is back.
+        File.SetUnixFileMode(s.Path, (UnixFileMode)0b101_101_101);
+        try
+        {
+            var check = End(repo, s);
+
+            Assert.NotNull(check.Failure);
+            Assert.True(check.RestoreIncomplete);
+            Assert.Equal(original, File.ReadAllBytes(config));
+            // The restore's entry first, then the sweep's; the rest of the check didn't run.
+            Assert.Equal([config, msgnum], check.Moved.Select(q => q.From));
+            Assert.Equal(config + GitCheck.Suffix, check.Moved[0].To);
+            Assert.Equal(msgnum + GitCheck.Suffix, check.Moved[1].To);
+            Assert.Equal(git, Assert.Single(check.Opened).Path);
+            Assert.Empty(check.Restored);
+            Assert.Empty(check.RestoreBlocked);
+            Assert.True(File.Exists(commondir));
+            Assert.True(File.Exists(s.ProtectedManifest));
+        }
+        finally
+        {
+            File.SetUnixFileMode(s.Path, (UnixFileMode)0b111_101_101);
+            File.SetUnixFileMode(git, (UnixFileMode)0b111_101_101);
+        }
+    }
+
+    [Fact]
+    public void WhenWhereTheSessionStartedCantBeRead_NothingIsRestored_AndItsAFailure()
+    {
+        Assert.SkipWhen(Native.GetUid() == 0, "root reads any file");
+        using var t = new TempDir();
+        var (repo, git) = Repo(t);
+        var config = Path.Combine(git, "config");
+        var s = Started(t, repo, git);
+        File.AppendAllText(config, "# changed\n");
+        File.WriteAllText(Path.Combine(t.Sub("repo", ".git", "rebase-merge"), "msgnum"), "$(evil)\n");
+        File.SetUnixFileMode(s.StartedWithGit, UnixFileMode.None);
+        try
+        {
+            var check = End(repo, s);
+
+            Assert.NotNull(check.Failure);
+            Assert.True(check.RestoreIncomplete);
+            Assert.Empty(check.Moved);
+            Assert.Contains("# changed", File.ReadAllText(config));
+            Assert.True(File.Exists(s.ProtectedManifest));
+        }
+        finally { File.SetUnixFileMode(s.StartedWithGit, Rw); }
+    }
+
+    [Fact]
+    public void WhenTheModuleListCantBeRead_TheFilesAreBack_AndHazardsAreStillSwept()
+    {
+        Assert.SkipWhen(Native.GetUid() == 0, "root reads any file");
+        using var t = new TempDir();
+        var (repo, git) = Repo(t);
+        var config = Path.Combine(git, "config");
+        var original = File.ReadAllBytes(config);
+        var s = Started(t, repo, git);
+        File.AppendAllText(config, "# changed\n");
+        var msgnum = Path.Combine(t.Sub("repo", ".git", "rebase-merge"), "msgnum");
+        File.WriteAllText(msgnum, "$(evil)\n");
+        var commondir = Path.Combine(git, "commondir");
+        File.WriteAllText(commondir, "planted\n");
+        File.SetUnixFileMode(s.ModulesFile, UnixFileMode.None);
+        try
+        {
+            var check = End(repo, s);
+
+            Assert.NotNull(check.Failure);
+            Assert.False(check.RestoreIncomplete);
+            Assert.Equal(original, File.ReadAllBytes(config));
+            Assert.Equal([config, msgnum], check.Moved.Select(q => q.From));
+            Assert.True(File.Exists(commondir)); // the rest of the check didn't run
+        }
+        finally { File.SetUnixFileMode(s.ModulesFile, Rw); }
+    }
+
     /// <summary>The review's replay: the plant can't stop the write-back by denying the quarantine file.</summary>
     [Fact]
     public void Replay_Chmod555OnTheGitDir_DoesntStopTheRestore()

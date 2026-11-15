@@ -28,33 +28,25 @@ internal sealed class ProtectedFileRestore
     private readonly SessionDir _session;
     private readonly string _dir;
     private readonly string? _commonGitDir;
-    private readonly List<Quarantined> _moved = [];
-    private readonly List<RestoredFile> _restored = [];
-    private readonly List<ModeChange> _opened = [];
-    private readonly List<string> _blocked = [];
+    private readonly CheckChanges _changes;
 
     /// <summary>Prepares to put back the protected files of <paramref name="session"/>.</summary>
     /// <param name="session">The session that's ending.</param>
     /// <param name="dir">The project dir.</param>
     /// <param name="commonGitDir">The git dir the session started with, or null for dir/.git.</param>
-    public ProtectedFileRestore(SessionDir session, string dir, string? commonGitDir)
+    /// <param name="changes">
+    /// Where it records, as it goes: in Moved what it renamed, or couldn't rename or restore; in Restored the files
+    /// that changed with nothing to set aside (missing, directory gone, or only mode); in Opened the directories it
+    /// added u+rwx to so it could write in them, and left so; in Blocked the directories whose modes kept a file from
+    /// being put back, for advice on what to fix.
+    /// </param>
+    public ProtectedFileRestore(SessionDir session, string dir, string? commonGitDir, CheckChanges changes)
     {
         _session = session;
         _dir = dir;
         _commonGitDir = commonGitDir;
+        _changes = changes;
     }
-
-    /// <summary>Gets what it renamed, or couldn't rename or restore, in order.</summary>
-    public IReadOnlyList<Quarantined> Moved => _moved;
-
-    /// <summary>Gets the files that changed with nothing to set aside: missing, directory gone, or only mode.</summary>
-    public IReadOnlyList<RestoredFile> Restored => _restored;
-
-    /// <summary>Gets the directories it added u+rwx to so it could write in them, and left so.</summary>
-    public IReadOnlyList<ModeChange> Opened => _opened;
-
-    /// <summary>Gets the directories whose modes kept a file from being put back, for advice on what to fix.</summary>
-    public IReadOnlyList<string> Blocked => _blocked;
 
     /// <summary>Puts each file in the session's manifest back. Call it once per instance.</summary>
     /// <returns>Whether that's all done, or there was no manifest.</returns>
@@ -65,14 +57,15 @@ internal sealed class ProtectedFileRestore
     /// need to know what this one vouched for.
     /// </para>
     /// <para>
-    /// If not, an entry in <see cref="Moved"/> with no destination fails the check, and the caller must keep the
-    /// session's files: they're the only good copies, and a new session would otherwise take what's on disk as its
-    /// baseline. Whatever goes wrong, the original goes back before anything that could stop it, such as keeping the
-    /// changed version.
+    /// If not, an entry it added to <see cref="CheckChanges.Moved"/> with no destination fails the check, and the
+    /// caller must keep the session's files: they're the only good copies, and a new session would otherwise take
+    /// what's on disk as its baseline. Whatever goes wrong, the original goes back before anything that could stop
+    /// it, such as keeping the changed version.
     /// </para>
     /// </remarks>
     public bool Run()
     {
+        var firstMoved = _changes.Moved.Count;
         ProtectedManifest? manifest;
         try
         {
@@ -80,15 +73,16 @@ internal sealed class ProtectedFileRestore
         }
         catch (Exception exception) when (ProtectedFiles.IsDamage(exception))
         {
-            _moved.Add(new(_session.ProtectedManifest, "", "pen's list of protected files couldn't be read, so " +
-                "they weren't compared. COULD NOT RESTORE THEM: don't run git here until you've checked them"));
+            _changes.Moved.Add(new(_session.ProtectedManifest, "", "pen's list of protected files couldn't be " +
+                "read, so they weren't compared. COULD NOT RESTORE THEM: " +
+                "don't run git here until you've checked them"));
             return false;
         }
         if (manifest == null)
             return true;
         foreach (var file in manifest.Files.Where(file => !file.Adopted))
             RestoreOrRecord(file);
-        if (_moved.Any(quarantined => quarantined.Failed))
+        if (_changes.Moved.Skip(firstMoved).Any(quarantined => quarantined.Failed))
             return false;
         File.Move(_session.ProtectedManifest, _session.RestoredManifest, overwrite: true);
         Directory.Delete(_session.ProtectedDir, recursive: true);
@@ -105,7 +99,7 @@ internal sealed class ProtectedFileRestore
         catch (Exception exception)
             when (exception is IOException or UnauthorizedAccessException or PenException)
         {
-            _moved.Add(new(file.Path, "", "a protected file that may have changed. COULD NOT " +
+            _changes.Moved.Add(new(file.Path, "", "a protected file that may have changed. COULD NOT " +
                 $"RESTORE IT ({Out.Describe(exception)}): don't run git here until you've dealt with it"));
         }
     }
@@ -153,7 +147,7 @@ internal sealed class ProtectedFileRestore
     {
         OpenParent(file.Path);
         ProtectedFiles.WriteNew(file.Path, original, file.Mode);
-        _restored.Add(new(file.Path, "it was deleted during the session, and has been recreated"));
+        _changes.Restored.Add(new(file.Path, "it was deleted during the session, and has been recreated"));
     }
 
     /// <summary>Writes the original back into the regular file that's there now, with its mode.</summary>
@@ -193,7 +187,7 @@ internal sealed class ProtectedFileRestore
         var quarantined = GitCheck.Move(file.Path, "it's no longer the regular file it was at the " +
             "start of the session (a symlink, a directory, or too big or unreadable " +
             "to compare), so it was moved aside and the original put back", breakLayout: false);
-        _moved.Add(quarantined);
+        _changes.Moved.Add(quarantined);
         if (!quarantined.Failed)
             ProtectedFiles.WriteNew(file.Path, original, file.Mode);
     }
@@ -206,12 +200,12 @@ internal sealed class ProtectedFileRestore
         try
         {
             ProtectedFiles.WriteNew(to, changed, ProtectedFiles.File600);
-            _moved.Add(new(file.Path, to, "it changed during the session, so the original was written back and " +
-                "the changed version kept here (git config on this machine during a session does this too)"));
+            _changes.Moved.Add(new(file.Path, to, "it changed during the session, so the original was written back " +
+                "and the changed version kept here (git config on this machine during a session does this too)"));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            _moved.Add(new(file.Path, "", "it changed during the session. The original was " +
+            _changes.Moved.Add(new(file.Path, "", "it changed during the session. The original was " +
                 $"written back, but the changed version couldn't be kept ({Out.Describe(exception)})"));
         }
     }
@@ -225,10 +219,9 @@ internal sealed class ProtectedFileRestore
         var parent = Path.GetDirectoryName(path)!;
         if (Native.CanWriteIn(parent))
             return;
-        if (GitCheck.TryOpen(parent, write: true, out var change))
-            _opened.Add(change);
+        _changes.TryOpenRecording(parent, write: true);
         if (!Native.CanWriteIn(parent))
-            _blocked.Add(parent);
+            _changes.Blocked.Add(parent);
     }
 
     /// <summary>Checks that the file's directory is still the real one it was.</summary>
@@ -249,7 +242,7 @@ internal sealed class ProtectedFileRestore
         {
             if (root != null && directory != root && RepoGuard.IsLink(directory))
             {
-                _moved.Add(GitCheck.Move(directory, "a symlink in place of a directory holding the protected " +
+                _changes.Moved.Add(GitCheck.Move(directory, "a symlink in place of a directory holding the protected " +
                     $"file {Out.Field(file.Path)}: it points git at a file somewhere else", breakLayout: false));
                 return false;
             }
@@ -260,7 +253,7 @@ internal sealed class ProtectedFileRestore
             }
             if (!Native.CanEnter(directory))
             {
-                _blocked.Add(FindTopmostShut(directory));
+                _changes.Blocked.Add(FindTopmostShut(directory));
                 throw new UnauthorizedAccessException($"Access to the path '{directory}' is denied.");
             }
         }
@@ -301,7 +294,7 @@ internal sealed class ProtectedFileRestore
     private void RecordDirectoryGone(ProtectedFile file, string directory)
     {
         var what = RepoGuard.Exists(directory) ? "was replaced by a file" : "was removed";
-        _restored.Add(new(file.Path, $"not put back: {Out.Field(directory)} {what} during the session"));
+        _changes.Restored.Add(new(file.Path, $"not put back: {Out.Field(directory)} {what} during the session"));
     }
 
     /// <summary>Puts back the mode of a file whose contents didn't change.</summary>
@@ -310,7 +303,7 @@ internal sealed class ProtectedFileRestore
         using var handle = Native.OpenProtected(file.Path, write: false)
             ?? throw new PenException("it can't be opened");
         File.SetUnixFileMode(handle, file.Mode);
-        _restored.Add(new(file.Path, "its mode was changed during the session to " +
+        _changes.Restored.Add(new(file.Path, "its mode was changed during the session to " +
             $"{GitCheck.Octal(was)}, and is back to {GitCheck.Octal(file.Mode)}"));
     }
 }
