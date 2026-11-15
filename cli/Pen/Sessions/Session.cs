@@ -1,12 +1,12 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
-using Pen.Commands;
 using Pen.Configuration;
 using Pen.GitProtection;
 using Pen.Images;
 using Pen.Platform;
 using Pen.Projects;
 using Pen.Proxy;
+using Pen.Signing;
 using Pen.Tools;
 using Pen.Trust;
 

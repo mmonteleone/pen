@@ -1,4 +1,4 @@
-using Pen.GitProtection;
+using Pen.Signing;
 
 namespace Pen.Configuration;
 

@@ -1,4 +1,4 @@
-namespace Pen.GitProtection;
+namespace Pen.Signing;
 
 /// <summary>
 /// Builds command-line settings for verifying and making signatures, from the user's global git config.

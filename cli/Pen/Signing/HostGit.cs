@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using Pen.Platform;
 
-namespace Pen.GitProtection;
+namespace Pen.Signing;
 
 /// <summary>Runs git on the host, with overrides that keep the repo's own config from running anything.</summary>
 /// <remarks>

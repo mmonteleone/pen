@@ -1,4 +1,4 @@
-namespace Pen.GitProtection;
+namespace Pen.Signing;
 
 /// <summary>Re-creates commits signed, with the same trees, messages and authors.</summary>
 /// <param name="signing">The repo's git with the signing settings added, which every call here uses.</param>

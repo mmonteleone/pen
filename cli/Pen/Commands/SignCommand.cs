@@ -1,6 +1,7 @@
 using Pen.GitProtection;
 using Pen.Platform;
 using Pen.Projects;
+using Pen.Signing;
 using Pen.Sessions;
 
 namespace Pen.Commands;

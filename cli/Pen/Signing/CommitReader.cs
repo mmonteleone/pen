@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Pen.GitProtection;
+namespace Pen.Signing;
 
 /// <summary>Reads commit objects through host git and checks that git reads them the same way.</summary>
 /// <param name="git">The repo's git; its extra settings, if any, go on every call.</param>

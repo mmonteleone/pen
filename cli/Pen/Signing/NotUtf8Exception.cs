@@ -1,4 +1,4 @@
-namespace Pen.GitProtection;
+namespace Pen.Signing;
 
 /// <summary>The exception thrown when a commit header field isn't valid UTF-8.</summary>
 /// <param name="what">The field, such as "author name".</param>

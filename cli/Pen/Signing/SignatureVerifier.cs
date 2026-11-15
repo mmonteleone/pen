@@ -1,7 +1,7 @@
 using System.Text;
 using Pen.Platform;
 
-namespace Pen.GitProtection;
+namespace Pen.Signing;
 
 /// <summary>Finds which commits carry a signature that verifies under the user's global git settings.</summary>
 /// <param name="git">The repo's git, without verification settings: they're added from the global config.</param>

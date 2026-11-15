@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Pen.GitProtection;
+namespace Pen.Signing;
 
 /// <summary>The result of a git call: exit code, raw stdout, and stderr text.</summary>
 /// <param name="ExitCode">git's exit code.</param>

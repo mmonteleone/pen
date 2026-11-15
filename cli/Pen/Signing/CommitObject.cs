@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Pen.GitProtection;
+namespace Pen.Signing;
 
 /// <summary>A commit object as stored, parsed just enough to re-create it.</summary>
 internal sealed record CommitObject

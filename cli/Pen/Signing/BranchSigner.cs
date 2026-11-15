@@ -1,7 +1,6 @@
-using Pen.GitProtection;
 using Pen.Platform;
 
-namespace Pen.Commands;
+namespace Pen.Signing;
 
 /// <summary>Signs the checked-out branch's unpushed commits, and counts the unsigned ones for the reminder.</summary>
 /// <param name="git">The repo's git, which has passed the session-end check if this signs.</param>
