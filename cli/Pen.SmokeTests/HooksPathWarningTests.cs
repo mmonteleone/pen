@@ -17,12 +17,6 @@ public sealed class HooksPathWarningTests(HooksPathWarningTests.Fixture fixture)
     [Fact(DisplayName = "...and once in a linked worktree, where it's that worktree's")]
     public void InWorktreeWarnsOnce() => AssertWarnings(fixture.InWorktree, 1);
 
-    [Fact(DisplayName = ".git/hooks by its full path doesn't warn")]
-    public void FullHooksPathDoesntWarn() => AssertWarnings(fixture.FullHooksPath, 0);
-
-    [Fact(DisplayName = "a path outside the project doesn't warn")]
-    public void OutsidePathDoesntWarn() => AssertWarnings(fixture.Outside, 0);
-
     [Fact(DisplayName = "global config that leads into the project warns once")]
     public void GlobalConfigWarnsOnce() => AssertWarnings(fixture.Global, 1);
 
@@ -39,16 +33,14 @@ public sealed class HooksPathWarningTests(HooksPathWarningTests.Fixture fixture)
     }
 
     /// <summary>Runs pen run true with core.hooksPath set each way in turn: in the project, from a linked worktree,
-    /// to .git/hooks by its full path, outside the project, in a global config, and unset.</summary>
+    /// in a global config, and unset.</summary>
+    /// <remarks>Paths that don't warn (.git/hooks by its full path, outside the project) are covered by the unit
+    /// tests.</remarks>
     public sealed class Fixture : SmokeFixture
     {
         internal CommandResult InProject { get; private set; } = null!;
 
         internal CommandResult InWorktree { get; private set; } = null!;
-
-        internal CommandResult FullHooksPath { get; private set; } = null!;
-
-        internal CommandResult Outside { get; private set; } = null!;
 
         internal CommandResult Global { get; private set; } = null!;
 
@@ -62,10 +54,6 @@ public sealed class HooksPathWarningTests(HooksPathWarningTests.Fixture fixture)
             Project.RunGit("worktree", "add", "-q", worktree);
             InWorktree = RunSession(Cli.WithWorkingDirectory(worktree));
             Project.RunGit("worktree", "remove", "--force", worktree);
-            Project.RunGit("config", "core.hooksPath", Path.Combine(Project.Dir, ".git", "hooks"));
-            FullHooksPath = RunSession(Cli);
-            Project.RunGit("config", "core.hooksPath", "/dev/null");
-            Outside = RunSession(Cli);
             Project.RunGit("config", "--unset", "core.hooksPath");
             var global = Path.Combine(Scratch, "hooks-global");
             File.WriteAllText(global, $"[core]\n\thooksPath = {Project.Dir}/hooks\n");

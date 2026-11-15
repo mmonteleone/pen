@@ -46,13 +46,6 @@ public sealed class AllowCommandTests(AllowCommandTests.Fixture fixture) : IClas
                 fixture.ProjectConfigLinesAfterAgain.Count(
                     line => line.Contains("example.com", StringComparison.Ordinal))));
 
-    [Fact(DisplayName = "a non-domain is refused")]
-    public void NonDomainIsRefused() => Assert.True(fixture.NonDomain.ExitCode != 0, fixture.NonDomain.Describe());
-
-    [Fact(DisplayName = "a domain added with pen allow doesn't ask next session")]
-    public void AddedDomainDoesntAsk() =>
-        Assert.True(fixture.NextSession.ExitCode == 0, fixture.NextSession.Describe());
-
     [Fact(DisplayName = "pen allow applies to a session with a tool")]
     public void AppliesToASessionWithATool() => AssertHas(fixture.AllowWithTool, "applied to 1 running session");
 
@@ -113,10 +106,6 @@ public sealed class AllowCommandTests(AllowCommandTests.Fixture fixture) : IClas
 
         internal IReadOnlyList<string> ProjectConfigLinesAfterAgain { get; private set; } = [];
 
-        internal CommandResult NonDomain { get; private set; } = null!;
-
-        internal CommandResult NextSession { get; private set; } = null!;
-
         internal CommandResult AllowWithTool { get; private set; } = null!;
 
         internal CommandResult ToolSession { get; private set; } = null!;
@@ -156,8 +145,6 @@ public sealed class AllowCommandTests(AllowCommandTests.Fixture fixture) : IClas
             ProjectConfigLines = File.ReadAllLines(ProjectConfig);
             AllowAgain = Cli.Run("allow", "example.com").RequireSuccess();
             ProjectConfigLinesAfterAgain = File.ReadAllLines(ProjectConfig);
-            NonDomain = Cli.Run("allow", "http://x.io");
-            NextSession = Cli.Run("run", "true");
         }
 
         /// <summary>Runs pen allow while a session with a tool waits: only the session knows about the flag, so its

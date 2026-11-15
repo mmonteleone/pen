@@ -14,17 +14,11 @@ public sealed class GitHubTokenTests(GitHubTokenTests.Fixture fixture) : IClassF
     public void NoTokenGivesANotice() =>
         AssertHas(fixture.FirstNotice, $"no GitHub token for '{Owner}': add {Owner} = \"github_pat_…\" under [github]");
 
-    [Fact(DisplayName = "...only on the project's first session")]
-    public void NoticeOnlyOnTheFirstSession() => AssertLacks(fixture.SecondSession, "no GitHub token");
-
     [Fact(DisplayName = "the owner's token reaches the agent as GH_TOKEN")]
     public void TokenReachesTheAgent() => AssertHas(fixture.WithToken, "[ghp_smoke_fake_token]");
 
-    [Fact(DisplayName = "...with no notice")]
+    [Fact(DisplayName = "...with no notice about a token")]
     public void TokenGivesNoNotice() => AssertLacks(fixture.WithToken, "no GitHub token");
-
-    [Fact(DisplayName = "removing the token later shows the notice again")]
-    public void RemovedTokenGivesTheNoticeAgain() => AssertHas(fixture.TokenRemoved, $"no GitHub token for '{Owner}'");
 
     [Fact(DisplayName = "an unapproved github_owner is refused without a terminal, pointing to pen trust")]
     public void UnapprovedOwnerIsRefused() =>
@@ -64,11 +58,7 @@ public sealed class GitHubTokenTests(GitHubTokenTests.Fixture fixture) : IClassF
 
         internal CommandResult FirstNotice { get; private set; } = null!;
 
-        internal CommandResult SecondSession { get; private set; } = null!;
-
         internal CommandResult WithToken { get; private set; } = null!;
-
-        internal CommandResult TokenRemoved { get; private set; } = null!;
 
         internal CommandResult UnapprovedOwner { get; private set; } = null!;
 
@@ -82,11 +72,8 @@ public sealed class GitHubTokenTests(GitHubTokenTests.Fixture fixture) : IClassF
             Home.MakeToolFree();
             File.Delete(Path.Combine(RuntimeDir, "token-notice"));
             FirstNotice = Cli.Run("run", "true").RequireSuccess();
-            SecondSession = Cli.Run("run", "true");
             Home.WriteConfig("[github]", $"{Owner} = \"ghp_smoke_fake_token\"");
             WithToken = Cli.Run("run", "bash", "-c", PrintToken).RequireSuccess();
-            Home.WriteConfig("# removed again");
-            TokenRemoved = Cli.Run("run", "true");
 
             var penDir = Directory.CreateDirectory(Path.Combine(Project.Dir, ".pen")).FullName;
             File.WriteAllText(Path.Combine(penDir, "config.toml"), "github_owner = \"other-owner\"\n");

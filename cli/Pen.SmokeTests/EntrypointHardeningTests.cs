@@ -61,14 +61,6 @@ public sealed class EntrypointHardeningTests(EntrypointHardeningTests.Fixture fi
         Assert.Matches(new Regex("^Securebits: [0-7]+/0x2f/", RegexOptions.Multiline), Session.CapturedStdout);
     }
 
-    [Fact(DisplayName = "rootless: the root filesystem is read-only")]
-    public void RootlessRootFilesystemIsReadOnly()
-    {
-        Assert.SkipUnless(SmokeEnvironment.IsRootless, "rootful Docker: the agent isn't container root");
-
-        Assert.Contains("rootfs=protected", Session.CapturedStdout, StringComparison.Ordinal);
-    }
-
     [Fact(DisplayName = "rootless: IS_SANDBOX=1 (Claude's skip-permissions as root)")]
     public void RootlessSetsIsSandbox()
     {

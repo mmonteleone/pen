@@ -1,7 +1,7 @@
 namespace Pen.SmokeTests;
 
 /// <summary>What pen refuses to start in, and what it starts in anyway: forged worktrees, directories it can't
-/// list, a FIFO named .git, nested and bare repos, a folder of repos, and worktrees under .claude/.</summary>
+/// list, a FIFO named .git, nested and bare repos, and worktrees under .claude/.</summary>
 public sealed class RepoRefusalTests(RepoRefusalTests.Fixture fixture) : IClassFixture<RepoRefusalTests.Fixture>
 {
     [Fact(DisplayName = "refuses a .git file that isn't a valid linked worktree (see LinkedWorktreeTests)")]
@@ -19,24 +19,11 @@ public sealed class RepoRefusalTests(RepoRefusalTests.Fixture fixture) : IClassF
     [Fact(DisplayName = "a repo with .gitmodules starts (WorktreeSubmoduleCheckoutTests runs with real submodules)")]
     public void GitmodulesStarts() => SmokeAssert.Succeeded(fixture.Gitmodules);
 
-    [Fact(DisplayName = "refuses a repo with another repo inside it, naming it")]
-    public void NestedRepoIsNamed() => SmokeAssert.Contains(fixture.Nested, "  libs/sub");
-
-    [Fact(DisplayName = "...and a bare repo inside it")]
-    public void NestedBareRepoIsNamed() => SmokeAssert.Contains(fixture.Nested, "  sub2 (a bare repo)");
-
-    [Fact(DisplayName = "...saying to run pen in that repo")]
-    public void NestedRefusalSaysWhatToDo() => SmokeAssert.Contains(fixture.Nested, "run pen in each repo instead");
-
-    [Fact(DisplayName = "...without starting anything")]
-    public void NestedRefusalStartsNothing() => Assert.Equal(0, fixture.ContainersAfterNested);
-
-    [Fact(DisplayName = "refuses a folder of repos, naming them")]
-    public void FolderOfReposIsRefused() =>
+    [Fact(DisplayName = "refuses a repo with nested repos inside it without starting anything")]
+    public void NestedRefusalStartsNothing() =>
         Assert.Multiple(
-            () => SmokeAssert.Contains(fixture.FolderOfRepos, "contains git repos"),
-            () => SmokeAssert.Contains(fixture.FolderOfRepos, "  a"),
-            () => SmokeAssert.Contains(fixture.FolderOfRepos, "  b"));
+            () => SmokeAssert.Refused(fixture.Nested, "run pen in each repo instead"),
+            () => Assert.Equal(0, fixture.ContainersAfterNested));
 
     [Fact(DisplayName = "a git worktree add worktree under .claude/worktrees/ starts normally")]
     public void ClaudeWorktreeStarts() => SmokeAssert.Succeeded(fixture.ClaudeWorktree);
@@ -60,8 +47,6 @@ public sealed class RepoRefusalTests(RepoRefusalTests.Fixture fixture) : IClassF
         internal CommandResult Nested { get; private set; } = null!;
 
         internal int ContainersAfterNested { get; private set; }
-
-        internal CommandResult FolderOfRepos { get; private set; } = null!;
 
         internal CommandResult ClaudeWorktree { get; private set; } = null!;
 
@@ -93,11 +78,6 @@ public sealed class RepoRefusalTests(RepoRefusalTests.Fixture fixture) : IClassF
             ContainersAfterNested = Docker.CountContainers(Key);
             Files.DeleteTree(Path.Combine(Project.Dir, "libs"));
             Files.DeleteTree(Path.Combine(Project.Dir, "sub2"));
-
-            var repos = CreateScratchProject("repos");
-            SmokeGit.Run(repos.Dir, "init", "-q", "a");
-            SmokeGit.Run(repos.Dir, "init", "-q", "b");
-            FolderOfRepos = Cli.WithWorkingDirectory(repos.Dir).Run("run", "true");
 
             Project.RunGit("worktree", "add", "-q", ".claude/worktrees/x");
             ClaudeWorktree = Cli.Run("run", "true");

@@ -49,7 +49,7 @@ public sealed class ProjectSubmoduleTests(ProjectSubmoduleTests.Fixture fixture)
 
     [Fact(DisplayName = "...suggesting git submodule absorbgitdirs")]
     public void RefusalSuggestsAbsorbgitdirs() =>
-        SmokeAssert.Refused(fixture.OwnGitDirAgain, "git submodule absorbgitdirs");
+        SmokeAssert.Refused(fixture.OwnGitDir, "git submodule absorbgitdirs");
 
     [Fact(DisplayName = "after absorbgitdirs, pen starts")]
     public void StartsAfterAbsorbgitdirs() => SmokeAssert.Succeeded(fixture.Absorbed);
@@ -81,8 +81,6 @@ public sealed class ProjectSubmoduleTests(ProjectSubmoduleTests.Fixture fixture)
         internal CommandResult AfterPutBack { get; private set; } = null!;
 
         internal CommandResult OwnGitDir { get; private set; } = null!;
-
-        internal CommandResult OwnGitDirAgain { get; private set; } = null!;
 
         internal CommandResult Absorbed { get; private set; } = null!;
 
@@ -143,7 +141,6 @@ public sealed class ProjectSubmoduleTests(ProjectSubmoduleTests.Fixture fixture)
             Project.RunGit("clone", "-q", library, "libs/y");
             SmokeGit.RunHostGit(Project.Dir, "submodule", "add", "-q", library, "libs/y");
             OwnGitDir = Cli.Run("run", "true");
-            OwnGitDirAgain = Cli.Run("run", "true");
             SmokeGit.RunHostGit(Project.Dir, "submodule", "absorbgitdirs");
             Absorbed = Cli.Run("run", "true");
         }

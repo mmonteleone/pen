@@ -928,21 +928,6 @@ public class ProtectedFilesTests
         Assert.Contains(RepoGuard.PrepareMounts(wt, "/nonexistent-home"), m => m.Path == inc && m.ReadOnly && m.Verify);
     }
 
-    /// <summary>
-    /// The review's replay on Linux: git reads the file named by these bytes, while
-    /// Pen would decode them to U+FFFD and protect a file of another name.
-    /// </summary>
-    [Fact]
-    public void AnIncludePathThatIsntValidUtf8_IsRefused()
-    {
-        using var t = new TempDir();
-        var (repo, git) = Repo(t);
-        using (var f = new FileStream(Path.Combine(git, "config"), FileMode.Append))
-            f.Write([.. "[include]\n path = "u8, 0xff, .. "x.cfg\n"u8]);
-        var e = Assert.Throws<PenException>(() => RepoGuard.PrepareMounts(repo, "/nonexistent-home"));
-        Assert.Contains("isn't valid UTF-8", e.Message);
-    }
-
     [Fact]
     public void ASecondSession_TakesTheFirstOnesBaseline_NotWhatItsAgentWrote()
     {

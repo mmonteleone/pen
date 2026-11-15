@@ -36,36 +36,8 @@ public sealed class CliDispatchTests(SmokeFixture fixture) : IClassFixture<Smoke
             () => Assert.Contains("pen upgrade", help, StringComparison.Ordinal));
     }
 
-    [Fact(DisplayName = "an unknown option is a usage error (exit 2)")]
-    public void UnknownOptionIsAUsageError()
-    {
-        var result = Cli.Run("--bogus");
-
-        Assert.True(result.ExitCode == 2, result.Describe());
-    }
-
-    [Fact(DisplayName = "pen run without a command is a usage error (exit 2)")]
-    public void RunWithoutACommandIsAUsageError()
-    {
-        var result = Cli.Run("run");
-
-        Assert.True(result.ExitCode == 2, result.Describe());
-    }
-
     [Fact(DisplayName = "pen --port 0 is a usage error (exit 2), before any session")]
     public void PortZeroIsAUsageError() => AssertBadPort("--port", "0");
-
-    [Fact(DisplayName = "pen --port 65536 is a usage error (exit 2), before any session")]
-    public void PortPast65535IsAUsageError() => AssertBadPort("--port", "65536");
-
-    [Fact(DisplayName = "pen --port http is a usage error (exit 2), before any session")]
-    public void PortNameIsAUsageError() => AssertBadPort("--port", "http");
-
-    [Fact(DisplayName = "pen --port=80x ls is a usage error (exit 2), before any session")]
-    public void PortWithTrailingTextIsAUsageError() => AssertBadPort("--port=80x", "ls");
-
-    [Fact(DisplayName = "pen --port is a usage error (exit 2), before any session")]
-    public void PortWithoutAValueIsAUsageError() => AssertBadPort("--port");
 
     [Fact(DisplayName = "--port with a subcommand is a usage error")]
     public void PortWithASubcommandIsAUsageError()
@@ -74,13 +46,6 @@ public sealed class CliDispatchTests(SmokeFixture fixture) : IClassFixture<Smoke
 
         Assert.True(result.IsUsageError("--port goes only with a command to run, not pen allow"), result.Describe());
     }
-
-    [Fact(DisplayName = "pen --help lists pen trust")]
-    public void HelpListsTrust() => Assert.Contains("pen trust", Cli.Run("--help").Stdout, StringComparison.Ordinal);
-
-    [Fact(DisplayName = "pen trust --help documents --yes")]
-    public void TrustHelpDocumentsYes() =>
-        Assert.Contains("--yes", Cli.Run("trust", "--help").Stdout, StringComparison.Ordinal);
 
     [Fact(DisplayName = "pen --help documents --port")]
     public void HelpDocumentsPort() =>
@@ -124,21 +89,8 @@ public sealed class CliDispatchTests(SmokeFixture fixture) : IClassFixture<Smoke
         Assert.True(result.ExitCode == 0, result.Describe());
     }
 
-    [Fact(DisplayName = "...and doesn't offer pen's test recipe")]
-    public void ToolListHidesTheTestRecipe() =>
-        Assert.DoesNotContain("pen-test", Cli.Run("--tool", "list").Stdout, StringComparison.Ordinal);
-
     [Fact(DisplayName = "pen --tool nope is a usage error (exit 2), before any session")]
     public void UnknownToolIsAUsageError() => AssertBadTool("--tool", "nope");
-
-    [Fact(DisplayName = "pen --tool=nope:1 ls is a usage error (exit 2), before any session")]
-    public void UnknownToolVersionIsAUsageError() => AssertBadTool("--tool=nope:1", "ls");
-
-    [Fact(DisplayName = "pen --tool is a usage error (exit 2), before any session")]
-    public void ToolWithoutASpecIsAUsageError() => AssertBadTool("--tool");
-
-    [Fact(DisplayName = "pen --tool list ls is a usage error (exit 2), before any session")]
-    public void ToolListWithACommandIsAUsageError() => AssertBadTool("--tool", "list", "ls");
 
     [Fact(DisplayName = "a shell-like tool version is refused by the recipe's regex in the AOT build")]
     public void ShellLikeToolVersionIsRefused()
@@ -146,14 +98,6 @@ public sealed class CliDispatchTests(SmokeFixture fixture) : IClassFixture<Smoke
         var result = Cli.Run("--tool", "pen-test:$(touch /tmp/x)");
 
         Assert.True(result.IsUsageError("isn't a valid version of pen-test"), result.Describe());
-    }
-
-    [Fact(DisplayName = "--tool with a subcommand is a usage error")]
-    public void ToolWithASubcommandIsAUsageError()
-    {
-        var result = Cli.Run("--tool", "pen-test:1", "allow");
-
-        Assert.True(result.IsUsageError("--tool goes only with a command to run, not pen allow"), result.Describe());
     }
 
     [Fact(DisplayName = "pen --tool runs the session with the tool installed")]

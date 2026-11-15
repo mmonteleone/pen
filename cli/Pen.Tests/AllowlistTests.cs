@@ -89,4 +89,17 @@ public class AllowlistTests
         Assert.Contains("…", line);
         Assert.DoesNotContain("pen allow", line);
     }
+
+    [Theory]
+    [InlineData("x.com", "x.com", true)]
+    [InlineData(".x.com", "x.com", true)]
+    [InlineData(".x.com", ".x.com", true)]
+    [InlineData(".x.com", "a.b.x.com", true)]
+    [InlineData(".x.com", ".a.x.com", true)]
+    [InlineData(".x.com", "badx.com", false)]
+    [InlineData("x.com", ".x.com", false)]
+    [InlineData("x.com", "a.x.com", false)]
+    [InlineData("a.x.com", "x.com", false)]
+    public void CoverageByADomainOrWildcard(string entry, string host, bool allowed) =>
+        Assert.Equal(allowed, Allowlist.IsAllowed([entry], host));
 }

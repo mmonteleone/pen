@@ -39,22 +39,9 @@ public sealed class AgentTests(AgentTests.Fixture fixture) : IClassFixture<Agent
     public void ClaudeIsImplied() =>
         AssertImplied(fixture.ImpliedClaude, @"^[0-9]+\.[0-9]+\.[0-9]+ \(Claude Code\)");
 
-    [Fact(DisplayName = "...and so does pen run claude --version")]
-    public void ClaudeIsImpliedWithRun() =>
-        AssertImplied(fixture.ImpliedClaudeWithRun, @"^[0-9]+\.[0-9]+\.[0-9]+ \(Claude Code\)");
-
     [Fact(DisplayName = "...but a shell has no agents (pen run bash -c 'command -v claude codex opencode pi')")]
     public void ShellHasNoAgents() =>
         Assert.True(fixture.ShellAgents.CapturedStdout == "none", fixture.ShellAgents.Describe());
-
-    [Fact(DisplayName = "with an empty config, pen codex --version runs Codex (implied)")]
-    public void CodexIsImplied() => AssertImplied(fixture.ImpliedCodex, @"^codex-cli [0-9]+\.[0-9]+\.[0-9]+$");
-
-    [Fact(DisplayName = "...and pen pi --version runs Pi (implied)")]
-    public void PiIsImplied() => AssertImplied(fixture.ImpliedPi, @"^[0-9]+\.[0-9]+\.[0-9]+$");
-
-    [Fact(DisplayName = "...and pen opencode --version runs OpenCode (implied)")]
-    public void OpenCodeIsImplied() => AssertImplied(fixture.ImpliedOpenCode, @"^[0-9]+\.[0-9]+\.[0-9]+$");
 
     [Fact(DisplayName = "pen ps shows claude:latest for an implied agent")]
     public void PsShowsTheImpliedAgent()
@@ -157,15 +144,7 @@ public sealed class AgentTests(AgentTests.Fixture fixture) : IClassFixture<Agent
 
         internal CommandResult ImpliedClaude { get; private set; } = null!;
 
-        internal CommandResult ImpliedClaudeWithRun { get; private set; } = null!;
-
         internal CommandResult ShellAgents { get; private set; } = null!;
-
-        internal CommandResult ImpliedCodex { get; private set; } = null!;
-
-        internal CommandResult ImpliedPi { get; private set; } = null!;
-
-        internal CommandResult ImpliedOpenCode { get; private set; } = null!;
 
         internal CommandResult PsWithImpliedAgent { get; private set; } = null!;
 
@@ -199,14 +178,11 @@ public sealed class AgentTests(AgentTests.Fixture fixture) : IClassFixture<Agent
                     """)
                 .Run(Cli, AgentTools);
 
-            // A command named after an agent brings it, with no config at all.
+            // A command named after an agent brings it, with no config at all. Which agent doesn't matter to
+            // how it's implied, so Claude stands for all four; each one's --version is checked above.
             Home.MakeToolFree();
             ImpliedClaude = Cli.Run("claude", "--version");
-            ImpliedClaudeWithRun = Cli.Run("run", "claude", "--version");
             ShellAgents = Cli.Run("run", "bash", "-c", "command -v claude codex opencode pi || echo none");
-            ImpliedCodex = Cli.Run("codex", "--version");
-            ImpliedPi = Cli.Run("pi", "--version");
-            ImpliedOpenCode = Cli.Run("opencode", "--version");
             PsWithImpliedAgent = RunPsWithImpliedAgent();
 
             // Trivial prompts, only when credentials are in the environment. They reach the agent as [env]

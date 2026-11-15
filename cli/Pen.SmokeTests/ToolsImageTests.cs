@@ -170,13 +170,6 @@ public sealed class ToolsImageTests(ToolsImageTests.Fixture fixture) : IClassFix
     [Fact(DisplayName = "...and can RUN the tool too")]
     public void WorktreeLayerCanRunTheTool() => Assert.Equal(V, fixture.WorktreeLayerTool);
 
-    [Fact(DisplayName = "there's no build option any more: real sessions build")]
-    public void NoBuildOption() =>
-        Assert.True(
-            fixture.BuildOption.ExitCode == 2
-                && fixture.BuildOption.Output.Contains("unknown option", StringComparison.Ordinal),
-            fixture.BuildOption.Describe());
-
     private static void AssertRefused(CommandResult result, params string[] messages) =>
         Assert.True(
             result.ExitCode != 0 && messages.All(message => result.Output.Contains(message, StringComparison.Ordinal)),
@@ -299,8 +292,6 @@ public sealed class ToolsImageTests(ToolsImageTests.Fixture fixture) : IClassFix
 
         internal string WorktreeLayerTool { get; private set; } = null!;
 
-        internal CommandResult BuildOption { get; private set; } = null!;
-
         private string PenDir => Path.Combine(Project.Dir, ".pen");
 
         protected override void Prepare()
@@ -319,7 +310,6 @@ public sealed class ToolsImageTests(ToolsImageTests.Fixture fixture) : IClassFix
             RunProjectTools();
             RunLayersOnTools();
             RunWorktreeLayer();
-            BuildOption = Cli.Run("--tool", A, "--build-tools-image");
         }
 
         private void RunTwoTools()

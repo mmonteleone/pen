@@ -60,7 +60,6 @@ public class RecipeTests
     [InlineData("8.0", false)]
     [InlineData("10.0.100", false)]
     [InlineData("100", false)]
-    [InlineData("8\n", false)]
     [InlineData("latest", false)]
     [InlineData("lts", false)]
     public void TheDotnetRecipeAcceptsOnlyMajorVersionsThatInstall(string version, bool accepted)
@@ -113,7 +112,6 @@ public class RecipeTests
     [InlineData("1.021", false)]
     [InlineData("go1.27", false)]
     [InlineData("1", false)]
-    [InlineData("1.27\n", false)]
     [InlineData("latest", false)]
     public void TheGoRecipeAcceptsOnlyMinorVersionsThatInstall(string version, bool accepted) =>
         Assert.Equal(accepted, Get("go").AcceptsVersion(version));
@@ -149,7 +147,6 @@ public class RecipeTests
     [InlineData("1.085", false)]
     [InlineData("beta", false)]
     [InlineData("nightly", false)]
-    [InlineData("stable\n", false)]
     [InlineData("1", false)]
     public void TheRustRecipeAcceptsOnlyReleasesThatInstall(string version, bool accepted) =>
         Assert.Equal(accepted, Get("rust").AcceptsVersion(version));
@@ -179,7 +176,6 @@ public class RecipeTests
     [InlineData("1.8", false)]
     [InlineData("21.0", false)]
     [InlineData("021", false)]
-    [InlineData("21\n", false)]
     [InlineData("latest", false)]
     public void TheJavaRecipeAcceptsOnlyUbuntusJdks(string version, bool accepted) =>
         Assert.Equal(accepted, Get("java").AcceptsVersion(version));
@@ -210,7 +206,6 @@ public class RecipeTests
     [InlineData("22.1", false)]
     [InlineData("22.1.0", false)]
     [InlineData("022", false)]
-    [InlineData("22\n", false)]
     [InlineData("lts", false)]
     [InlineData("latest", false)]
     public void TheNodeRecipeAcceptsOnlyLtsMajorVersions(string version, bool accepted) =>
@@ -260,7 +255,6 @@ public class RecipeTests
     [InlineData("3.013", false)]
     [InlineData("py3.13", false)]
     [InlineData("2.7", false)]
-    [InlineData("3.13\n", false)]
     [InlineData("latest", false)]
     public void ThePythonRecipeAcceptsOnlyMinorVersionsUvBuilds(string version, bool accepted) =>
         Assert.Equal(accepted, Get("python").AcceptsVersion(version));
@@ -285,7 +279,6 @@ public class RecipeTests
     [InlineData("1.6.2", false)]
     [InlineData("01", false)]
     [InlineData("latest", false)]
-    [InlineData("1\n", false)]
     public void TheCodegraphRecipeAcceptsOnlyMajorVersionsThatInstall(string version, bool accepted) =>
         Assert.Equal(accepted, Get("codegraph").AcceptsVersion(version));
 
@@ -365,8 +358,6 @@ public class RecipeTests
     [InlineData("2.1.3-beta", false)]
     [InlineData("latest-1", false)]
     [InlineData("stable", false)]
-    [InlineData("latest\n", false)]
-    [InlineData("2.1.3\n", false)]
     public void AgentRecipesAcceptLatestOrAnExactRelease(string version, bool accepted)
     {
         var agents = RecipeCatalog.Embedded.Recipes.Where(r => r.IsAgent && !r.Hidden).ToList();

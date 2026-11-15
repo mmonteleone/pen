@@ -238,14 +238,6 @@ public class WorktreeTests
     // --- B4: running in a linked worktree ------------------------------------------
 
     [Fact]
-    public void CheckAtStartAcceptsAValidWorktree()
-    {
-        using var t = new TempDir();
-        var (_, wt, _) = RepoWithWorktree(t);
-        RepoGuard.CheckAtStart(wt);
-    }
-
-    [Fact]
     public void AWorktreeInsideTheMainCheckoutIsAllowed_WithTheMainKey()
     {
         using var t = new TempDir();

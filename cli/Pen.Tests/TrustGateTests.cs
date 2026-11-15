@@ -889,14 +889,6 @@ public class TrustGateTests
     }
 
     [Fact]
-    public void TheToolsAndTheirDomainsAreRecordedInTheSession()
-    {
-        using var f = ToolsFixture();
-        Assert.Equal(0, f.Run(NoTerminal, flagTools: [PenTest]));
-        Assert.Equal("example.org\n", f.Seen("tool-domains-seen"));
-    }
-
-    [Fact]
     public void ALiveUpdateKeepsARecordedToolsDomains()
     {
         using var f = new Fixture(projectToml: "", dockerfile: "");

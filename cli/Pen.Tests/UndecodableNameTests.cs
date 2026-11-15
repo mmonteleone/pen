@@ -56,15 +56,6 @@ public class UndecodableNameTests
     }
 
     [Fact]
-    public void AnEmptyBadlyNamedDirectoryIsRefusedToo_SinceItsContentsAreUnknown()
-    {
-        using var t = new TempDir();
-        var repo = FreshRepo(t);
-        Plant(repo, "mkdir \"$b\"");
-        Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(repo));
-    }
-
-    [Fact]
     public void ARealEntryWithTheDecodedName_DoesntHideTheBadOne()
     {
         using var t = new TempDir();

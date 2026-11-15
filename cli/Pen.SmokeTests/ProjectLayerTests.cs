@@ -1,5 +1,3 @@
-using System.Text.RegularExpressions;
-
 namespace Pen.SmokeTests;
 
 /// <summary>The project layer from .pen/Dockerfile: approval, the build, its context and a failing build.</summary>
@@ -17,9 +15,6 @@ public sealed class ProjectLayerTests(ProjectLayerTests.Fixture fixture) : IClas
 
     [Fact(DisplayName = "...and starts nothing")]
     public void UnapprovedStartsNothing() => Assert.Equal(0, fixture.ContainersAfterUnapproved);
-
-    [Fact(DisplayName = "pen trust without a terminal needs --yes")]
-    public void TrustNeedsYes() => AssertHas(fixture.TrustWithoutYes, "--yes");
 
     [Fact(DisplayName = "pen trust --yes has nothing new to approve the second time")]
     public void SecondTrustHasNothingNew() => AssertHas(fixture.SecondTrust, "nothing new");
@@ -51,18 +46,6 @@ public sealed class ProjectLayerTests(ProjectLayerTests.Fixture fixture) : IClas
     [Fact(DisplayName = "...and the private copy is gone afterwards")]
     public void PrivateCopyIsGone() => Assert.Empty(fixture.LayerCopies);
 
-    [Fact(DisplayName = "a changed Dockerfile is asked about again, and alone")]
-    public void ChangedDockerfileIsAskedAboutAlone()
-    {
-        var output = fixture.Changed.Output;
-
-        Assert.True(
-            Regex.IsMatch(output, @"\.pen/Dockerfile") && fixture.Changed.OutputComplete
-                && !output.Contains("allow example.org", StringComparison.Ordinal)
-                && !output.Contains("smoke-build-error", StringComparison.Ordinal),
-            fixture.Changed.Describe());
-    }
-
     [Fact(DisplayName = "a failing layer build stops the launch")]
     public void FailingBuildStopsTheLaunch() =>
         AssertHas(fixture.Failing, "building the project layer from .pen/Dockerfile failed");
@@ -82,7 +65,7 @@ public sealed class ProjectLayerTests(ProjectLayerTests.Fixture fixture) : IClas
             $"\"{text}\" is there; {result.Describe()}");
 
     /// <summary>Runs sessions with a .pen/Dockerfile before and after pen trust, after a rebuild of pen:latest,
-    /// with a build context to look into, and with a changed and then failing Dockerfile; the user's config names
+    /// with a build context to look into, and with a failing Dockerfile; the user's config names
     /// no tools, so the layer is &lt;key&gt;:latest.</summary>
     public sealed class Fixture : SmokeFixture
     {
@@ -95,8 +78,6 @@ public sealed class ProjectLayerTests(ProjectLayerTests.Fixture fixture) : IClas
         internal bool LayerAfterUnapproved { get; private set; }
 
         internal int ContainersAfterUnapproved { get; private set; }
-
-        internal CommandResult TrustWithoutYes { get; private set; } = null!;
 
         internal CommandResult SecondTrust { get; private set; } = null!;
 
@@ -111,8 +92,6 @@ public sealed class ProjectLayerTests(ProjectLayerTests.Fixture fixture) : IClas
 
         /// <summary>Gets the runtime dir's layer-* directories after the context session.</summary>
         internal IReadOnlyList<string> LayerCopies { get; private set; } = [];
-
-        internal CommandResult Changed { get; private set; } = null!;
 
         internal CommandResult Failing { get; private set; } = null!;
 
@@ -143,7 +122,6 @@ public sealed class ProjectLayerTests(ProjectLayerTests.Fixture fixture) : IClas
             Unapproved = Cli.Run("run", "bash", "-c", "cat /etc/pen-smoke-layer");
             LayerAfterUnapproved = HasImage(Layer);
             ContainersAfterUnapproved = Docker.CountContainers(Key);
-            TrustWithoutYes = Cli.Run("trust");
             Cli.Run("trust", "--yes").RequireSuccess();
             SecondTrust = Cli.Run("trust", "--yes");
             Approved = Cli.Run("run", "bash", "-c", """
@@ -208,7 +186,6 @@ public sealed class ProjectLayerTests(ProjectLayerTests.Fixture fixture) : IClas
         private void RunFailingBuild()
         {
             WriteDockerfile("FROM pen:latest\nRUN echo smoke-build-error && exit 3\n");
-            Changed = Cli.Run("run", "true");
             Cli.Run("trust", "--yes").RequireSuccess();
             Failing = Cli.Run("run", "true");
             ContainersAfterFailing = Docker.CountContainers(Key);

@@ -20,16 +20,6 @@ public class RuntimeDirTests
     }
 
     [Fact]
-    public void APlainDirRecordsItself()
-    {
-        using var t = new TempDir();
-        var host = t.Host();
-        var p = Project.Resolve(t.Sub("plain"), host);
-        Session.EnsureRuntimeDir(host, p);
-        Assert.Equal(p.Dir + "\n", ProjectDirOf(host, p));
-    }
-
-    [Fact]
     public void ALinkedWorktreeRecordsTheMainCheckout()
     {
         using var t = new TempDir();

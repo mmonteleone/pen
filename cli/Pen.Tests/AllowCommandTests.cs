@@ -173,14 +173,4 @@ public class AllowCommandTests
         var hosts = AllowCommand.FindBlockedAcross([older, newer]).Select(b => b.Host).ToList();
         Assert.Equal(["example.com", "plain.io", "old.io"], hosts);
     }
-
-    [Theory]
-    [InlineData("github.com", true)]
-    [InlineData("api.github.com", true)]
-    [InlineData("x.example.org", true)]
-    [InlineData("example.org", true)]
-    [InlineData("badexample.org", false)]
-    [InlineData("example.com", false)]
-    public void IsAllowed(string host, bool allowed) =>
-        Assert.Equal(allowed, Allowlist.IsAllowed(["github.com", "api.github.com", ".example.org"], host));
 }

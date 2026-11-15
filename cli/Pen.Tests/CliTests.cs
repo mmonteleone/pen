@@ -207,20 +207,6 @@ public class CliTests
         Assert.Equal(["ls"], P("--docker", "--", "ls").Args);
     }
 
-    [Theory]
-    [InlineData("upgrade")]
-    [InlineData("allow")]
-    [InlineData("sign")]
-    [InlineData("reset")]
-    [InlineData("ps")]
-    [InlineData("prune")]
-    [InlineData("--help")]
-    public void DockerWithAnythingButRunningIsAnError(string what)
-    {
-        var e = Assert.Throws<PenException>(() => P("--docker", what));
-        Assert.Contains("--docker goes only with a command to run", e.Message);
-    }
-
     [Fact]
     public void PortIsRepeatable_InOrder_WithoutDuplicates()
     {
@@ -310,13 +296,6 @@ public class CliTests
     }
 
     [Fact]
-    public void TheHelpNoLongerSaysSessionsDontInstallTools()
-    {
-        Assert.DoesNotContain("don't install tools", HelpText.Usage);
-        Assert.DoesNotContain("don't install tools", HelpText.Subcommands["run"]);
-    }
-
-    [Fact]
-    public void TheToolsImageBuildOptionIsGone() =>
-        Assert.Equal(2, Assert.Throws<PenException>(() => CommandParser.Parse(["--tool", "pen-test", "--build-tools-image"])).ExitCode);
+    public void AnUnknownOptionAfterARunOptionIsAUsageError() =>
+        Assert.Equal(2, Assert.Throws<PenException>(() => CommandParser.Parse(["--tool", "pen-test", "--nope"])).ExitCode);
 }

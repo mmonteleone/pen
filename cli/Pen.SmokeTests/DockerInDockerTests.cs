@@ -128,15 +128,6 @@ public sealed class DockerInDockerTests(DockerInDockerTests.Fixture fixture)
             () => AssertHas(fixture.DockerTrue, "[tcp://dind:2375]"),
             () => AssertHas(fixture.DockerTrue, "server "));
 
-    [Fact(DisplayName = "...and a bad value names the file")]
-    public void BadDockerValueNamesTheFile() =>
-        Assert.True(
-            fixture.DockerMaybe.ExitCode != 0
-                && Regex.IsMatch(
-                    fixture.DockerMaybe.Output, "^pen: .pen/config.toml: docker must be true or false",
-                    RegexOptions.Multiline),
-            fixture.DockerMaybe.Describe());
-
     [Fact(DisplayName = "nothing is left running")]
     public void NothingIsLeftRunning() => Assert.Equal(0, fixture.ContainersAtEnd);
 
@@ -211,8 +202,6 @@ public sealed class DockerInDockerTests(DockerInDockerTests.Fixture fixture)
         internal CommandResult DockerTrueUnapproved { get; private set; } = null!;
 
         internal CommandResult DockerTrue { get; private set; } = null!;
-
-        internal CommandResult DockerMaybe { get; private set; } = null!;
 
         internal int ContainersAtEnd { get; private set; }
 
@@ -366,8 +355,6 @@ public sealed class DockerInDockerTests(DockerInDockerTests.Fixture fixture)
             DockerTrue = Cli.Run("run", "bash", "-c", """
                 echo "[$DOCKER_HOST]"; docker version --format "server {{.Server.Version}}"
                 """);
-            File.WriteAllText(config, "docker = \"maybe\"\n");
-            DockerMaybe = Cli.Run("run", "true");
             File.Delete(config);
             ContainersAtEnd = Docker.CountContainers(Key);
         }

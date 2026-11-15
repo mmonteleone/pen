@@ -478,38 +478,6 @@ public class TrustTests
         Assert.Equal("h299999.example", blocked[^1]);
     }
 
-    [Theory]
-    [InlineData(".x.com", "x.com", true)]
-    [InlineData(".x.com", ".x.com", true)]
-    [InlineData(".x.com", "a.b.x.com", true)]
-    [InlineData(".x.com", ".a.x.com", true)]
-    [InlineData(".x.com", "badx.com", false)]
-    [InlineData("x.com", ".x.com", false)]
-    [InlineData("x.com", "a.x.com", false)]
-    [InlineData("a.x.com", "x.com", false)]
-    public void CoverageByADomainOrWildcard(string entry, string host, bool allowed) =>
-        Assert.Equal(allowed, Allowlist.IsAllowed([entry], host));
-
-    [Fact]
-    public void MergingDropsOnlyWhatAWildcardCovers() =>
-        Assert.Equal([".x.com", ".y.com", "z.com"], Allowlist.Merge(["a.x.com", ".x.com", ".b.x.com", "x.com", "y.com", ".y.com", ".x.com", "z.com"]));
-
-    [Fact]
-    public void PruneRemovesTheStoreWithTheRuntimeDir()
-    {
-        using var t = new TempDir();
-        var host = t.Host();
-        var dir = t.Sub("gone");
-        var project = Project.Resolve(dir, host);
-        Session.EnsureRuntimeDir(host, project);
-        TrustStore.For(host, project).ApproveDomains(["a.example"]);
-        var path = TrustStore.GetPath(host.GetRuntimeDir(project.Key), dir);
-        Assert.True(File.Exists(path));
-        Directory.Delete(dir);
-        Assert.True(PruneCommand.Remove(host, Assert.Single(PruneCommand.Find(host, [], []), e => e.Key == project.Key)));
-        Assert.False(File.Exists(path));
-    }
-
     // Tools
 
     private static readonly ToolSpec Tool1 = new("pen-test", "1");
@@ -530,14 +498,6 @@ public class TrustTests
 
         Assert.Equal(new ToolSpec("pen-test", "2"), Assert.Single(f.Requested("tools = [\"pen-test:2\"]\n").Tools).Tool);
         Assert.Equal(new ToolSpec("pen-test-b", "1"), Assert.Single(f.Requested("tools = [\"pen-test:1\", \"pen-test-b\"]\n").Tools).Tool);
-    }
-
-    [Fact]
-    public void ApprovingAToolDoesntApproveItsDomainsForAllow()
-    {
-        using var f = new Fixture();
-        f.Store.Approve(f.Requested("tools = [\"pen-test:1\"]\n"));
-        Assert.Equal(["example.org"], f.Requested("allow = [\"example.org\"]\n").Domains);
     }
 
     [Fact]

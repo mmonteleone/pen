@@ -222,6 +222,19 @@ public class ToolsTests
     }
 
     [Fact]
+    public void ARecipeRegexAnchoredWithDollar_StillRefusesAFinalNewline()
+    {
+        var catalog = RecipeCatalog.FromFiles(new Dictionary<string, string>
+        {
+            ["tools/anchored/tool.toml"] = "default = \"1\"\nversion = '^\\d+$'\n",
+            ["tools/anchored/install.sh"] = "#!/bin/sh\n",
+        });
+        Assert.True(catalog.TryGet("anchored", out var recipe));
+        Assert.True(recipe.AcceptsVersion("12"));
+        Assert.False(recipe.AcceptsVersion("12\n"));
+    }
+
+    [Fact]
     public void TwoVersionsThatCantCoexistAreRefused()
     {
         var message = ToolSpec.TryCanonicalize([Tool("go:1.24"), Tool("go:1.25")], Catalog, out _);

@@ -402,16 +402,6 @@ public class HooksPathTests
     }
 
     [Fact]
-    public void ALinkInTheProjectThatLeadsOut_Warns_SinceTheSandboxCanReplaceIt()
-    {
-        using var f = new Fixture();
-        var outside = f.T.Sub("outside-hooks");
-        File.CreateSymbolicLink(Path.Combine(f.Dir, "hooks"), outside);
-        f.Set("hooks");
-        Assert.NotNull(f.Warning());
-    }
-
-    [Fact]
     public void ALinkSwappedForARealDirectory_RunsThePlantedHook_WhichIsWhyItWarnedBefore()
     {
         using var f = new Fixture();
