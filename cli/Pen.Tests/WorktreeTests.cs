@@ -156,6 +156,37 @@ public class WorktreeTests
         Assert.Null(Resolve(wt));
     }
 
+    [Fact]
+    public void RefusesASymlinkedGitdirFileInTheEntry()
+    {
+        using var t = new TempDir();
+        var (_, wt, admin) = RepoWithWorktree(t);
+        Assert.True(RepoScan.IsWorktreeInside(wt, admin));
+        var gitdir = Path.Combine(admin, "gitdir");
+        var copy = Path.Combine(t.Path, "gitdir-copy");
+        File.Move(gitdir, copy);
+        File.CreateSymbolicLink(gitdir, copy);
+        Assert.Null(Resolve(wt));
+        Assert.False(RepoScan.IsWorktreeInside(wt, admin)); // unreadable counts as outside
+
+        File.Delete(gitdir);
+        File.Move(copy, gitdir);
+        Assert.NotNull(Resolve(wt));
+        Assert.True(RepoScan.IsWorktreeInside(wt, admin));
+    }
+
+    [Fact]
+    public void ReadsLinkFilesWithCrlfOrNoNewlineAndRelativePaths()
+    {
+        using var t = new TempDir();
+        var (repo, wt, admin) = RepoWithWorktree(t);
+        File.WriteAllText(Path.Combine(wt, ".git"), "gitdir: ../repo/.git/worktrees/wt\r\n");
+        File.WriteAllText(Path.Combine(admin, "commondir"), "../..");
+        File.WriteAllText(Path.Combine(admin, "gitdir"), "../../../../wt/.git\r\n");
+        Assert.Equal(Path.Combine(repo, ".git"), Resolve(wt));
+        Assert.True(RepoScan.IsWorktreeInside(wt, admin));
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("gitdir: \n")]

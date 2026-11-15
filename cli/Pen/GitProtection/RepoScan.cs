@@ -290,13 +290,24 @@ internal static class RepoScan
     }
 
     /// <summary>Reads a one-line file's value after <paramref name="prefix"/>.</summary>
-    /// <returns>The value, or null if the file doesn't have that shape.</returns>
+    /// <returns>
+    /// The value, or null if the file doesn't have that shape, or isn't a regular file (a symlink isn't followed) of
+    /// a reasonable size.
+    /// </returns>
+    /// <remarks>
+    /// The read itself doesn't follow a symlink, so one swapped in after the check isn't read through; the check
+    /// stays because O_NOFOLLOW's value isn't known on every architecture. The text is decoded as a
+    /// <see cref="StreamReader"/> does by default: UTF-8, unless a byte order mark says otherwise.
+    /// </remarks>
     private static string? ReadPathFile(string path, string prefix)
     {
         if (!File.Exists(path) || RepoGuard.IsLink(path))
             return null;
-        var text = Native.ReadRegularFile(path);
-        if (text == null || !text.StartsWith(prefix, StringComparison.Ordinal))
+        if (Native.ReadProtected(path) is not { } file)
+            return null;
+        using var reader = new StreamReader(new MemoryStream(file.Bytes));
+        var text = reader.ReadToEnd();
+        if (!text.StartsWith(prefix, StringComparison.Ordinal))
             return null;
         var value = text[prefix.Length..].TrimEnd('\n', '\r');
         return value.Length == 0 || value.Contains('\n') || value.Contains('\0') ? null : value;
