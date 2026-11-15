@@ -1,4 +1,5 @@
 using System.IO.Enumeration;
+using System.Text;
 using Pen.Platform;
 
 namespace Pen.GitProtection;
@@ -10,6 +11,10 @@ namespace Pen.GitProtection;
 /// </remarks>
 internal static class RepoScan
 {
+    /// <summary>UTF-8 that throws on bytes it can't decode.</summary>
+    private static readonly UTF8Encoding StrictUtf8 =
+        new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
     private static readonly EnumerationOptions Options = new()
     {
         AttributesToSkip = 0, // dot files are "hidden" on Unix, and .git is one
@@ -291,26 +296,52 @@ internal static class RepoScan
 
     /// <summary>Reads a one-line file's value after <paramref name="prefix"/>.</summary>
     /// <returns>
-    /// The value, or null if the file doesn't have that shape, or isn't a regular file (a symlink isn't followed) of
-    /// a reasonable size.
+    /// The value, or null if the file doesn't have that shape, starts with a byte order mark, isn't valid UTF-8, or
+    /// isn't a regular file (a symlink isn't followed) of a reasonable size.
     /// </returns>
     /// <remarks>
-    /// The read itself doesn't follow a symlink, so one swapped in after the check isn't read through; the check
-    /// stays because O_NOFOLLOW's value isn't known on every architecture. The text is decoded as a
-    /// <see cref="StreamReader"/> does by default: UTF-8, unless a byte order mark says otherwise.
+    /// <para>
+    /// The read itself (<see cref="ReadPathText"/>) doesn't follow a symlink, so one swapped in after the check
+    /// isn't read through; the check stays because O_NOFOLLOW's value isn't known on every architecture.
+    /// </para>
+    /// <para>
+    /// Git never writes a byte order mark here, and reads one as part of the file: a gitdir or commondir file's path
+    /// then starts with U+FEFF, so it's relative to the file's dir, through a name only the sandbox would have made
+    /// ("\uFEFF../.." is the file's dir itself once a directory named "\uFEFF.." is there). Rather than classify a
+    /// worktree by that path (<see cref="IsWorktreeInside"/>), the file is refused.
+    /// </para>
     /// </remarks>
     private static string? ReadPathFile(string path, string prefix)
     {
         if (!File.Exists(path) || RepoGuard.IsLink(path))
             return null;
-        if (Native.ReadProtected(path) is not { } file)
-            return null;
-        using var reader = new StreamReader(new MemoryStream(file.Bytes));
-        var text = reader.ReadToEnd();
-        if (!text.StartsWith(prefix, StringComparison.Ordinal))
+        var text = ReadPathText(path);
+        if (text == null || text.StartsWith('\uFEFF') || !text.StartsWith(prefix, StringComparison.Ordinal))
             return null;
         var value = text[prefix.Length..].TrimEnd('\n', '\r');
         return value.Length == 0 || value.Contains('\n') || value.Contains('\0') ? null : value;
+    }
+
+    /// <summary>Reads a path file's text, never through a symlink at <paramref name="path"/>.</summary>
+    /// <returns>The text, or null if it isn't valid UTF-8, or isn't a regular file of a reasonable size.</returns>
+    /// <remarks>
+    /// Git reads these files as bytes, so the text is exactly those bytes as UTF-8: a byte order mark stays, as
+    /// U+FEFF, rather than being skipped or picking another encoding, so a value git reads differently doesn't match
+    /// the one Pen expects. Bytes that aren't valid UTF-8 would decode to U+FFFD, naming a different path from the
+    /// one git reads, so the file is unreadable instead.
+    /// </remarks>
+    internal static string? ReadPathText(string path)
+    {
+        if (Native.ReadProtected(path) is not { } file)
+            return null;
+        try
+        {
+            return StrictUtf8.GetString(file.Bytes);
+        }
+        catch (DecoderFallbackException)
+        {
+            return null;
+        }
     }
 
     /// <summary>One walk of a project's tree, collecting what it finds.</summary>

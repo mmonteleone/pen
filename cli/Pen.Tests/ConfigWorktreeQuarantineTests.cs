@@ -132,6 +132,42 @@ public class ConfigWorktreeQuarantineTests
         Assert.False(File.Exists(file));
     }
 
+    // ---- A forged entry that's its own common dir ----
+
+    /// <summary>
+    /// Git reads commondir as bytes. After a UTF-8 byte order mark, it names "&lt;entry&gt;/\uFEFF../..", which a
+    /// directory named "\uFEFF.." makes the entry itself; after UTF-32BE's, a NUL comes first, so it names the entry.
+    /// Either way git opens the entry as the repo, with its config.
+    /// </summary>
+    [Theory]
+    [InlineData("utf-8")]
+    [InlineData("utf-32BE")]
+    public void Replay_ACommondirWithAByteOrderMark_IsNoWorktreeOfTheProject(string encoding)
+    {
+        using var t = new TempDir();
+        var (hook, marker) = Canary(t);
+        var (repo, git) = Repo(t);
+        var s = Started(t, repo, git);
+        var checkout = Path.Combine(repo, "forged");
+        Git.Run(repo, "worktree", "add", "-q", "--detach", checkout);
+        var entry = Path.Combine(git, "worktrees", "forged");
+        File.WriteAllBytes(Path.Combine(entry, "commondir"), WorktreeTests.WithBom(encoding, "../..\n"));
+        if (encoding == "utf-8")
+            Directory.CreateDirectory(Path.Combine(entry, "\uFEFF.."));
+        Directory.CreateDirectory(Path.Combine(entry, "objects"));
+        Directory.CreateDirectory(Path.Combine(entry, "refs"));
+        File.WriteAllText(Path.Combine(entry, "config"), Fsmonitor(hook));
+        File.WriteAllText(Path.Combine(entry, "HEAD"), "ref: refs/heads/unborn\n");
+        File.Delete(Path.Combine(entry, "index"));
+        AssertFires(checkout, marker);
+
+        var check = GitCheck.RunAtSessionEnd(repo, s);
+
+        Assert.Null(check.Failure);
+        Assert.Contains(check.Moved, q => q.From == Path.Combine(checkout, ".git"));
+        AssertDoesntFire(checkout, marker);
+    }
+
     // ---- What stays ----
 
     [Fact]

@@ -260,6 +260,19 @@ public class ScanFailClosedTests
     }
 
     [Fact]
+    public void AProtectedReadDoesntFollowASymlink()
+    {
+        using var t = new TempDir();
+        var path = Path.Combine(t.Path, "f");
+        File.WriteAllText(path, "x");
+        var link = Path.Combine(t.Path, "link");
+        File.CreateSymbolicLink(link, path);
+        Assert.Equal("x"u8.ToArray(), Native.ReadProtected(path)!.Bytes);
+        Assert.Null(Native.ReadProtected(link));
+        Assert.Equal("x", Native.ReadRegularFile(link)); // the plain read does
+    }
+
+    [Fact]
     public void AnOversizedGitConfigSaysSo_NotToFixPermissions()
     {
         using var t = new TempDir();

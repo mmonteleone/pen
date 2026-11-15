@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Pen.Tests;
 
 /// <summary>B1: a repo modeled apart from its dir (RepoScan.ResolveWorktree, Project's repo fields). B4: sessions in a linked worktree.</summary>
@@ -176,6 +178,18 @@ public class WorktreeTests
     }
 
     [Fact]
+    public void ThePathFileReadItselfDoesntFollowASymlink()
+    {
+        using var t = new TempDir();
+        var real = Path.Combine(t.Path, "commondir");
+        File.WriteAllText(real, "../..\n");
+        var link = Path.Combine(t.Path, "link");
+        File.CreateSymbolicLink(link, real);
+        Assert.Equal("../..\n", RepoScan.ReadPathText(real));
+        Assert.Null(RepoScan.ReadPathText(link));
+    }
+
+    [Fact]
     public void ReadsLinkFilesWithCrlfOrNoNewlineAndRelativePaths()
     {
         using var t = new TempDir();
@@ -198,6 +212,111 @@ public class WorktreeTests
         var (_, wt, _) = RepoWithWorktree(t);
         File.WriteAllText(Path.Combine(wt, ".git"), content);
         Assert.Null(Resolve(wt));
+    }
+
+    /// <summary>The bytes of <paramref name="text"/> in <paramref name="encoding"/>, after its byte order mark.</summary>
+    internal static byte[] WithBom(string encoding, string text)
+    {
+        Encoding e = encoding switch
+        {
+            "utf-8" => new UTF8Encoding(encoderShouldEmitUTF8Identifier: true),
+            "utf-16" => new UnicodeEncoding(bigEndian: false, byteOrderMark: true),
+            "utf-32BE" => new UTF32Encoding(bigEndian: true, byteOrderMark: true),
+            _ => throw new ArgumentException(encoding),
+        };
+        return [.. e.GetPreamble(), .. e.GetBytes(text)];
+    }
+
+    [Fact]
+    public void ThePathFileReadKeepsAByteOrderMark_AndRefusesBytesThatArentUtf8()
+    {
+        using var t = new TempDir();
+        var path = Path.Combine(t.Path, "commondir");
+        File.WriteAllBytes(path, WithBom("utf-8", "../..\n"));
+        Assert.Equal("\uFEFF../..\n", RepoScan.ReadPathText(path));
+        File.WriteAllBytes(path, [.. "../"u8, 0xFF, .. "\n"u8]);
+        Assert.Null(RepoScan.ReadPathText(path));
+        File.WriteAllBytes(path, WithBom("utf-32BE", "../..\n"));
+        Assert.Null(RepoScan.ReadPathText(path));
+        File.WriteAllBytes(path, Encoding.Unicode.GetBytes("../..\n")); // UTF-16 without one: NULs
+        Assert.Equal("../..\n", RepoScan.ReadPathText(path)!.Replace("\0", ""));
+    }
+
+    // Git reads these files as bytes. After a UTF-8 byte order mark, commondir names "<entry>/\uFEFF../..", which a
+    // directory named "\uFEFF.." makes the entry itself; after UTF-32BE's, a NUL comes first, so it names the entry.
+    [Theory]
+    [InlineData("utf-8")]
+    [InlineData("utf-16")]
+    [InlineData("utf-32BE")]
+    public void RefusesACommondirWithAByteOrderMark(string encoding)
+    {
+        using var t = new TempDir();
+        var (_, wt, admin) = RepoWithWorktree(t);
+        Assert.NotNull(Resolve(wt));
+        File.WriteAllBytes(Path.Combine(admin, "commondir"), WithBom(encoding, "../..\n"));
+        Assert.Null(Resolve(wt));
+    }
+
+    [Theory]
+    [InlineData("utf-8")]
+    [InlineData("utf-16")]
+    [InlineData("utf-32BE")]
+    public void RefusesAGitFileWithAByteOrderMark(string encoding)
+    {
+        using var t = new TempDir();
+        var (_, wt, admin) = RepoWithWorktree(t);
+        var gitFile = Path.Combine(wt, ".git");
+        File.WriteAllBytes(gitFile, WithBom(encoding, $"gitdir: {admin}\n"));
+        Assert.Null(Resolve(wt));
+        Assert.Null(RepoScan.ReadWorktreeEntry(gitFile));
+        File.WriteAllText(gitFile, $"gitdir: {admin}\n");
+        Assert.NotNull(Resolve(wt));
+        Assert.Equal(admin, RepoScan.ReadWorktreeEntry(gitFile));
+    }
+
+    [Theory]
+    [InlineData("utf-8")]
+    [InlineData("utf-16")]
+    [InlineData("utf-32BE")]
+    public void AGitdirFileWithAByteOrderMark_DoesntPointBack_AndCountsAsOutside(string encoding)
+    {
+        // A worktree inside the repo, so a path relative to its entry would be inside too.
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Git.Run(repo, "worktree", "add", "-q", "wt");
+        var wt = Path.Combine(repo, "wt");
+        var admin = Path.Combine(repo, ".git", "worktrees", "wt");
+        Assert.True(RepoScan.IsWorktreeInside(repo, admin));
+        File.WriteAllBytes(Path.Combine(admin, "gitdir"), WithBom(encoding, Path.Combine(wt, ".git") + "\n"));
+        Assert.Null(Resolve(wt));
+        Assert.False(RepoScan.IsWorktreeInside(repo, admin));
+    }
+
+    [Fact]
+    public void RefusesAGitFileThatIsntUtf8_RatherThanReadAnotherEntry()
+    {
+        // Decoded with replacement, "wt\xFF" would read as the entry named "wt\uFFFD", which git never opens.
+        using var t = new TempDir();
+        var (repo, wt, admin) = RepoWithWorktree(t);
+        var lookalike = Path.Combine(repo, ".git", "worktrees", "wt\uFFFD");
+        Directory.Move(admin, lookalike);
+        var gitFile = Path.Combine(wt, ".git");
+        File.WriteAllText(gitFile, $"gitdir: {lookalike}\n");
+        Assert.NotNull(Resolve(wt));
+        File.WriteAllBytes(gitFile, [.. Encoding.UTF8.GetBytes($"gitdir: {admin}"), 0xFF, .. "\n"u8]);
+        Assert.Null(Resolve(wt));
+        Assert.Null(RepoScan.ReadWorktreeEntry(gitFile));
+    }
+
+    [Fact]
+    public void AGitdirFileThatIsntUtf8_CountsAsOutside()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Git.Run(repo, "worktree", "add", "-q", "wt");
+        var admin = Path.Combine(repo, ".git", "worktrees", "wt");
+        File.WriteAllBytes(Path.Combine(admin, "gitdir"), [.. Encoding.UTF8.GetBytes(Path.Combine(repo, "wt")), 0xFF, .. "/.git\n"u8]);
+        Assert.False(RepoScan.IsWorktreeInside(repo, admin));
     }
 
     // --- Project ------------------------------------------------------------------
