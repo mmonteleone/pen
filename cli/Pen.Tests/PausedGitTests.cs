@@ -582,7 +582,11 @@ public class PausedGitTests
             File.WriteAllText(Path.Combine(home, ".zshrc"), $"source '{script}'\nsetopt PROMPT_SUBST\nprecmd() {{ __git_ps1 \"a\" \"b\"; }}\n");
             args = ["-c", "exec zsh -i </dev/null"];
         }
-        var psi = new ProcessStartInfo("sh", args) { WorkingDirectory = repo, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true };
+        var psi = NoTerminal.StartInfo("sh", args);
+        psi.WorkingDirectory = repo;
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
+        psi.RedirectStandardInput = true;
         psi.Environment["HOME"] = home;
         psi.Environment["ZDOTDIR"] = home;
         psi.Environment["GIT_CONFIG_GLOBAL"] = "/dev/null";

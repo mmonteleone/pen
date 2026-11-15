@@ -253,13 +253,11 @@ public class RestoreCommandTests
 
     private static void RunInShell(string file, string[] args, string cwd, string script)
     {
-        var psi = new ProcessStartInfo(file, args)
-        {
-            WorkingDirectory = cwd,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
+        var psi = NoTerminal.StartInfo(file, args);
+        psi.WorkingDirectory = cwd;
+        psi.RedirectStandardInput = true;
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
         using var p = Process.Start(psi)!;
         p.ErrorDataReceived += (_, _) => { };
         p.OutputDataReceived += (_, _) => { };
