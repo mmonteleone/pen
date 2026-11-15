@@ -19,11 +19,11 @@ internal sealed class GitCheckRun
     /// <summary>The project dir; messages are relative to it.</summary>
     private readonly string _dir;
 
+    /// <summary>Whether this run may add u+rx (or u+rwx) to a directory and keep that.</summary>
+    private readonly bool _mayOpen;
+
     /// <summary>Adds u+rx to a directory so it can be listed, or null when this run may not change modes.</summary>
     private readonly Func<string, bool>? _tryOpen;
-
-    /// <summary>Adds u+rwx to a directory so it can be renamed in, or null if this run may not change modes.</summary>
-    private readonly Func<string, bool>? _tryOpenForWriting;
 
     /// <summary>What it renamed, or couldn't rename, in order: the protected files' first.</summary>
     private readonly List<Quarantined> _moved = [];
@@ -58,18 +58,16 @@ internal sealed class GitCheckRun
     public GitCheckRun(string dir, bool mayOpen)
     {
         _dir = dir;
+        _mayOpen = mayOpen;
         if (mayOpen)
-        {
             _tryOpen = TryOpenToRead;
-            _tryOpenForWriting = TryOpenToWrite;
-        }
     }
 
     /// <summary>Checks the dir against what's given and quarantines what it flags. Restores nothing.</summary>
     /// <param name="startedWithGit">Whether the session started with a .git there.</param>
     /// <param name="commonGitDir">The git dir it started with, or null for dir/.git.</param>
     /// <param name="modulesAtStart">The module repos in that git dir at the start, or null for those there now.</param>
-    /// <returns>The result, with no Opened, Restored or RestoreBlocked.</returns>
+    /// <returns>The result, with Opened, Restored and RestoreBlocked empty.</returns>
     public CheckResult RunWithoutRestoring(
         bool startedWithGit,
         string? commonGitDir,
@@ -493,7 +491,7 @@ internal sealed class GitCheckRun
     private bool TryRenameWithOpening(string path, string why, bool breakLayout)
     {
         var attempt = GitCheck.Move(path, why, breakLayout);
-        if (attempt.Failed && _tryOpenForWriting?.Invoke(Path.GetDirectoryName(path)!) == true)
+        if (attempt.Failed && _mayOpen && TryOpenRecording(Path.GetDirectoryName(path)!, write: true))
             attempt = GitCheck.Move(path, why, breakLayout);
         if (attempt.Failed)
             return false;
@@ -506,8 +504,6 @@ internal sealed class GitCheckRun
         _moved.Add(GitCheck.Move(path, why, breakLayout));
 
     private bool TryOpenToRead(string path) => TryOpenRecording(path, write: false);
-
-    private bool TryOpenToWrite(string path) => TryOpenRecording(path, write: true);
 
     /// <summary>Opens a directory with <see cref="GitCheck.TryOpen"/> and records the mode change.</summary>
     /// <returns>Whether it changed the mode.</returns>

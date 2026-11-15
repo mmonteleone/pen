@@ -36,7 +36,7 @@ internal static class RepoGuard
     /// A linked worktree of a non-bare main checkout is accepted when its .git file validates
     /// (<see cref="RepoScan.ResolveWorktree"/>); the main repo's git dir then gets the same checks as a main
     /// checkout's own. Submodules are accepted when their repos are kept in that git dir (modules/), so their
-    /// checkouts have .git files that <see cref="RepoScan.FindNested(string)"/> validates; one with its own .git dir
+    /// checkouts have .git files that <see cref="RepoScan.ScanNested"/> validates; one with its own .git dir
     /// is refused like any nested repo, with advice to absorb it.
     /// </para>
     /// </remarks>
@@ -47,7 +47,10 @@ internal static class RepoGuard
         RequireNoCommondir(dir, common);
         var modules = RepoScan.ScanModules(common);
         RequireReadableModules(dir, modules);
-        var scan = RepoScan.ScanNested(dir, common);
+        // Defence in depth: ResolveModuleCheckout already rejects a checkout whose gitdir goes through a symlink
+        // (it requires RealPath(gitdir) == gitdir), and planning the mounts refuses the symlink.
+        var moduleRepos = modules.Repos.Where(repo => !IsLink(repo)).ToList();
+        var scan = RepoScan.ScanNested(dir, common, moduleRepos, tryOpen: null);
         RequireDecodableNames(dir, common, modules, scan);
         RequireListable(dir, scan);
         RequireNoNestedRepos(dir, git, scan.Repos);

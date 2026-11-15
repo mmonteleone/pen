@@ -95,7 +95,7 @@ public class UndecodableNameTests
         var repo = FreshRepo(t);
         Plant(repo, "echo x > \"$b\"", "caf\\351.txt");
         var nested = Git.Repo(Path.Combine(repo, "nested"));
-        Assert.Equal(Path.Combine(nested, ".git"), Assert.Single(RepoScan.FindNested(repo)).Path);
+        Assert.Equal(Path.Combine(nested, ".git"), Assert.Single(NestedScans.Find(repo)).Path);
     }
 
     [Fact]
@@ -122,7 +122,7 @@ public class UndecodableNameTests
         Assert.Null(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Failure);
 
         var nested = Git.Repo(Path.Combine(dir, "nested"));
-        Assert.Equal(Path.Combine(nested, ".git"), Assert.Single(RepoScan.FindNested(repo)).Path);
+        Assert.Equal(Path.Combine(nested, ".git"), Assert.Single(NestedScans.Find(repo)).Path);
     }
 
     [Theory]

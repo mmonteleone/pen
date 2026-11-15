@@ -492,7 +492,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         {
             var check = GitCheck.RunAtSessionEnd(projectDir, session);
             GitCheck.Report(projectDir, check);
-            var isClean = check.Failure == null && check.Moved.Count == 0 && check.Restored is not { Count: > 0 };
+            var isClean = check.Failure == null && check.Moved.Count == 0 && check.Restored.Count == 0;
             var result = new SessionEndResult(check.Failure == null, isClean ? projectDir : null);
             if (check.RestoreIncomplete)
                 Out.WriteRaw(GitCheck.KeptCopiesAdvice(session, check.RestoreBlocked));

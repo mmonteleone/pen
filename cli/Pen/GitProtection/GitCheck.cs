@@ -23,7 +23,9 @@ internal static class GitCheck
     /// </summary>
     internal const string RetryCommand = "pen true";
 
-    /// <summary>Checks <paramref name="dir"/> and quarantines what it flags, changing no modes.</summary>
+    /// <summary>
+    /// Checks <paramref name="dir"/> and quarantines what it flags, changing no modes, reporting whether it finished.
+    /// </summary>
     /// <param name="dir">The project dir.</param>
     /// <param name="startedWithGit">Whether the session started with a .git there.</param>
     /// <param name="commonGitDir">
@@ -34,31 +36,18 @@ internal static class GitCheck
     /// The submodule repos in that git dir when the session started: any other is quarantined, and the checkouts of
     /// those left are the project's own. Null (pen sign, which doesn't end a session) takes the ones there now.
     /// </param>
-    /// <returns>What it renamed, in order.</returns>
+    /// <returns>
+    /// The result, with <see cref="CheckResult.Opened"/>, <see cref="CheckResult.Restored"/> and
+    /// <see cref="CheckResult.RestoreBlocked"/> empty.
+    /// </returns>
     /// <remarks>
-    /// No config.worktree is touched: with no record of the start, one can't be told from the user's.
-    /// </remarks>
-    public static List<Quarantined> Run(
-        string dir,
-        bool startedWithGit,
-        string? commonGitDir,
-        IReadOnlyCollection<string>? modulesAtStart) =>
-        RunWithoutOpening(dir, startedWithGit, commonGitDir, modulesAtStart).Moved;
-
-    /// <summary>
-    /// Checks <paramref name="dir"/> and quarantines what it flags, as <see cref="Run"/> does, reporting whether it
-    /// finished.
-    /// </summary>
-    /// <param name="dir">The project dir.</param>
-    /// <param name="startedWithGit">Whether the session started with a .git there.</param>
-    /// <param name="commonGitDir">The git dir it started with, or null for dir/.git (see <see cref="Run"/>).</param>
-    /// <param name="modulesAtStart">
-    /// The submodule repos in that git dir at the start, or null to take the ones there now (see <see cref="Run"/>).
-    /// </param>
-    /// <returns>The result, with no <see cref="CheckResult.Opened"/> or <see cref="CheckResult.Restored"/>.</returns>
-    /// <remarks>
+    /// <para>
     /// It changes no modes: a session may still be running in another worktree of the repo, so a directory that
     /// can't be listed is a Failure rather than something to open.
+    /// </para>
+    /// <para>
+    /// No config.worktree is touched: with no record of the start, one can't be told from the user's.
+    /// </para>
     /// </remarks>
     public static CheckResult RunWithoutOpening(
         string dir,
@@ -260,16 +249,16 @@ internal static class GitCheck
     {
         if (check.Moved.Count > 0)
             Out.WriteRaw(Warning(dir, check.Moved));
-        foreach (var restored in check.Restored ?? [])
+        foreach (var restored in check.Restored)
             Out.WriteLine($"{RepoGuard.FormatPath(dir, restored.Path)}: {restored.What}");
-        foreach (var change in check.Opened ?? [])
+        foreach (var change in check.Opened)
         {
             Out.WriteLine($"changed {RepoGuard.FormatPath(dir, change.Path)} from mode {Octal(change.Was)} " +
                 $"to {Octal(change.Now)} so it could be checked, and left it that way");
         }
 
-        if (check.Paused is { Count: > 0 } paused)
-            Out.WriteRaw(PausedGit.Warning(dir, paused));
+        if (check.Paused.Count > 0)
+            Out.WriteRaw(PausedGit.Warning(dir, check.Paused));
         if (check.Failure != null)
             Out.WriteRaw(NotCheckedWarning(dir, check.Failure));
     }

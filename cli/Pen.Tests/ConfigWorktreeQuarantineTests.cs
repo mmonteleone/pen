@@ -266,7 +266,7 @@ public class ConfigWorktreeQuarantineTests
         var last = GitCheck.RunAtSessionEnd(repo, c);
 
         Assert.Empty(last.Moved);
-        Assert.Empty(last.Restored!);
+        Assert.Empty(last.Restored);
         Assert.False(File.Exists(file), "written back from a copy of what the agent planted");
         AssertDoesntFire(checkout, marker);
     }
@@ -578,7 +578,7 @@ public class ConfigWorktreeQuarantineTests
             Assert.Null(check.Failure);
             Assert.Contains(check.Moved, q => q.From == file);
             Assert.False(File.Exists(file));
-            if (mode != 0b011_001_001) Assert.Contains(check.Opened!, o => o.Path == entry); // 311 is enough to rename in
+            if (mode != 0b011_001_001) Assert.Contains(check.Opened, o => o.Path == entry); // 311 is enough to rename in
         }
         finally { File.SetUnixFileMode(entry, Dir755); }
         AssertDoesntFire(checkout, marker);

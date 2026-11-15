@@ -280,8 +280,8 @@ public class SessionEndTests
             var check = GitCheck.RunAtSessionEnd(repo, session);
             Assert.True(check.RestoreIncomplete);
             Assert.NotNull(check.Failure);
-            Assert.Contains(repo, check.RestoreBlocked!);
-            Assert.Empty(check.Restored!);
+            Assert.Contains(repo, check.RestoreBlocked);
+            Assert.Empty(check.Restored);
             Assert.True(File.Exists(session.ProtectedManifest));
         }
         finally { File.SetUnixFileMode(repo, (UnixFileMode)0b111_101_101); }
@@ -370,8 +370,8 @@ public class SessionEndTests
         finally { File.SetUnixFileMode(holder, (UnixFileMode)0b111_101_101); }
         Assert.True(check.RestoreIncomplete);
         Assert.NotNull(check.Failure);
-        Assert.Contains(holder, check.RestoreBlocked!);
-        Assert.Empty(check.Restored!);
+        Assert.Contains(holder, check.RestoreBlocked);
+        Assert.Empty(check.Restored);
         Assert.True(File.Exists(innerSession.ProtectedManifest));
     }
 

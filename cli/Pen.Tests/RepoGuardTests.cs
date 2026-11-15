@@ -101,7 +101,7 @@ public class RepoGuardTests
         File.WriteAllText(Path.Combine(wtLike, "commondir"), "../.git\n");
         File.WriteAllText(Path.Combine(t.Sub("repo", "b"), ".git"), $"gitdir: {t.Path}/elsewhere\n");
         Directory.CreateSymbolicLink(Path.Combine(t.Sub("repo", "c"), ".git"), Path.Combine(repo, ".git"));
-        var found = RepoScan.FindNested(repo);
+        var found = NestedScans.Find(repo);
         Assert.Equal(
             [("a/HEAD", NestedKind.Bare), ("b/.git", NestedKind.GitFile), ("c/.git", NestedKind.GitLink)],
             found.Select(n => (RepoGuard.FormatPath(repo, n.Path), n.Kind)));
@@ -113,7 +113,7 @@ public class RepoGuardTests
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
         Directory.CreateDirectory(Path.Combine(t.Sub("repo", "x"), ".GIT"));
-        Assert.Single(RepoScan.FindNested(repo));
+        Assert.Single(NestedScans.Find(repo));
     }
 
     [Fact]
@@ -123,7 +123,7 @@ public class RepoGuardTests
         var other = Git.Repo(t.Sub("other"));
         var repo = Git.Repo(t.Sub("repo"));
         Directory.CreateSymbolicLink(Path.Combine(repo, "link"), other);
-        Assert.Empty(RepoScan.FindNested(repo));
+        Assert.Empty(NestedScans.Find(repo));
     }
 
     [Fact]
@@ -167,7 +167,7 @@ public class RepoGuardTests
         File.WriteAllText(Path.Combine(elsewhere, "commondir"), "../..\n");
         Directory.Delete(Path.Combine(repo, ".git", "worktrees", "wt"), recursive: true);
         Directory.CreateSymbolicLink(Path.Combine(repo, ".git", "worktrees", "wt"), elsewhere);
-        Assert.False(RepoScan.IsProjectWorktree(repo, Path.Combine(repo, "wt", ".git")));
+        Assert.False(NestedScans.IsProjectWorktree(repo, Path.Combine(repo, "wt", ".git")));
     }
 
     [Fact]
@@ -177,7 +177,7 @@ public class RepoGuardTests
         var repo = Git.Repo(t.Sub("repo"));
         Git.Run(repo, "worktree", "add", "-q", Path.Combine(t.Path, "outside"));
         // .git/worktrees/outside has HEAD + commondir, but it's inside the project's .git.
-        Assert.Empty(RepoScan.FindNested(repo));
+        Assert.Empty(NestedScans.Find(repo));
     }
 
     // --- mounts ---------------------------------------------------------------

@@ -21,36 +21,6 @@ internal static class RepoScan
     /// <summary>One name in a directory listing, as the listing reports it (no symlink followed).</summary>
     private readonly record struct Entry(string Name, bool IsDir, bool IsLink);
 
-    /// <summary>Finds every repo below <paramref name="root"/>, the project dir as a real path.</summary>
-    /// <returns>
-    /// The repos <see cref="ScanNested(string, string)"/> finds, with root/.git as the common git dir.
-    /// </returns>
-    public static List<NestedRepo> FindNested(string root) =>
-        ScanNested(root, Path.Combine(root, ".git")).Repos;
-
-    /// <summary>
-    /// Finds every repo below <paramref name="root"/>, the project dir as a real path, taking the checkouts of
-    /// <paramref name="moduleRepos"/> as the project's own.
-    /// </summary>
-    /// <returns>The repos the scan finds, with root/.git as the common git dir and no directory opened.</returns>
-    public static List<NestedRepo> FindNested(string root, IReadOnlyCollection<string> moduleRepos) =>
-        ScanNested(root, Path.Combine(root, ".git"), moduleRepos, tryOpen: null).Repos;
-
-    /// <summary>
-    /// Scans the tree below <paramref name="root"/> for repos, taking the checkouts of the submodule repos now in
-    /// <paramref name="commonGitDir"/> (other than symlinks) as the project's own.
-    /// </summary>
-    /// <param name="root">The project dir, a real path.</param>
-    /// <param name="commonGitDir">
-    /// The project's common git dir: root/.git, or for a linked worktree the main checkout's.
-    /// </param>
-    /// <returns>What the walk found, as for the overload taking the module repos.</returns>
-    public static NestedScan ScanNested(string root, string commonGitDir)
-    {
-        var moduleRepos = FindModuleRepos(commonGitDir).Where(repo => !RepoGuard.IsLink(repo)).ToList();
-        return ScanNested(root, commonGitDir, moduleRepos, tryOpen: null);
-    }
-
     /// <summary>
     /// Scans the tree below <paramref name="root"/> for repos, plus a bare layout in the root itself.
     /// </summary>
@@ -113,15 +83,6 @@ internal static class RepoScan
 
     private static bool IsNamed(string name, string wanted) =>
         name.Equals(wanted, StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>Whether <paramref name="gitFile"/> is the .git file of a worktree of the project itself.</summary>
-    /// <remarks>
-    /// That's one made by `git worktree add` inside the project (Claude Code puts these in .claude/worktrees/):
-    /// one whose common git dir is the project's own .git. Anything else could point host git at config and hooks
-    /// the agent controls.
-    /// </remarks>
-    internal static bool IsProjectWorktree(string root, string gitFile) =>
-        ResolveWorktree(gitFile) == Path.Combine(root, ".git");
 
     /// <summary>
     /// Finds the common git dir of the linked worktree whose .git file is <paramref name="gitFile"/>.

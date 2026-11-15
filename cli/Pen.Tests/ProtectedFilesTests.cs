@@ -365,7 +365,7 @@ public class ProtectedFilesTests
         var check = End(repo, s);
         Assert.Null(check.Failure);
         Assert.Empty(check.Moved);
-        Assert.Empty(check.Restored!);
+        Assert.Empty(check.Restored);
         Assert.Equal(before, File.GetLastWriteTimeUtc(config));
     }
 
@@ -442,7 +442,7 @@ public class ProtectedFilesTests
         var check = End(repo, s);
         Assert.Null(check.Failure);
         Assert.Empty(check.Moved);
-        Assert.Equal(config, Assert.Single(check.Restored!).Path);
+        Assert.Equal(config, Assert.Single(check.Restored).Path);
         Assert.Equal(original, File.ReadAllBytes(config));
         Assert.Equal((UnixFileMode)0b110_110_100, File.GetUnixFileMode(config));
     }
@@ -569,7 +569,7 @@ public class ProtectedFilesTests
         var check = End(repo, s);
         Assert.Null(check.Failure);
         Assert.Empty(check.Moved);
-        Assert.Contains("mode", Assert.Single(check.Restored!).What);
+        Assert.Contains("mode", Assert.Single(check.Restored).What);
         Assert.Equal(was, File.GetUnixFileMode(config));
     }
 
@@ -736,7 +736,7 @@ public class ProtectedFilesTests
         Assert.Equal(original, File.ReadAllBytes(config));
         var q = Assert.Single(check.Moved);
         Assert.True(File.Exists(q.To));
-        Assert.Contains(check.Opened!, o => o.Path == git);
+        Assert.Contains(check.Opened, o => o.Path == git);
         AssertDoesntRun(repo, marker);
     }
 
@@ -779,7 +779,7 @@ public class ProtectedFilesTests
         var check = End(repo, s);
 
         Assert.Null(check.Failure);
-        var r = Assert.Single(check.Restored!);
+        var r = Assert.Single(check.Restored);
         Assert.Equal(inc, r.Path);
         Assert.Contains(replacedByFile ? "replaced by a file" : "was removed", r.What);
         Assert.Equal(replacedByFile, File.Exists(sub));
@@ -832,7 +832,7 @@ public class ProtectedFilesTests
         File.Delete(planted);
         var check = End(repo, second);
         Assert.Null(check.Failure);
-        Assert.Empty(check.Restored!);
+        Assert.Empty(check.Restored);
         Assert.False(File.Exists(planted));
     }
 

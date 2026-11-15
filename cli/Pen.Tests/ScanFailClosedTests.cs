@@ -78,7 +78,7 @@ public class ScanFailClosedTests
         Assert.Null(check.Failure);
         Assert.Equal(Path.Combine(sub, "x", ".git"), Assert.Single(check.Moved).From);
         Assert.True(Directory.Exists(Path.Combine(sub, "x", ".git.pen-quarantine")));
-        var c = Assert.Single(check.Opened!);
+        var c = Assert.Single(check.Opened);
         Assert.Equal((sub, Mode311), (c.Path, c.Was));
         Assert.Equal(c.Now, File.GetUnixFileMode(sub));
         Assert.True(c.Now.HasFlag(UnixFileMode.UserRead));
@@ -136,7 +136,7 @@ public class ScanFailClosedTests
 
         Assert.Null(check.Failure);
         Assert.Empty(check.Moved);
-        Assert.Empty(check.Opened!);
+        Assert.Empty(check.Opened);
         Assert.Equal(mode, File.GetUnixFileMode(db));
     }
 
@@ -313,7 +313,7 @@ public class ScanFailClosedTests
         try
         {
             Assert.Equal(0, r.ExitStatus.ExitCode);
-            var deep = RepoScan.ScanNested(repo, Path.Combine(repo, ".git")).UnlistableDirs;
+            var deep = NestedScans.Scan(repo, Path.Combine(repo, ".git")).UnlistableDirs;
             Assert.StartsWith(Path.Combine(repo, name), Assert.Single(deep));
             Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(repo));
         }
@@ -339,7 +339,7 @@ public class ScanFailClosedTests
         File.WriteAllText(file, string.Concat(Enumerable.Repeat(Inc("config.worktree"), 64)));
 
         Assert.True(ReadOnly(Mounts(t, repo), file));
-        Assert.Empty(Within10s(() => GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null)));
+        Assert.Empty(Within10s(() => GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved));
         Assert.Null(Within10s(() => GitCheck.RunAtSessionEnd(repo, Session(t, Path.Combine(repo, ".git")))).Failure);
     }
 
@@ -457,9 +457,9 @@ public class ScanFailClosedTests
         var foo = Path.Combine(t.Sub("repo", ".git", "modules"), "foo");
         File.CreateSymbolicLink(foo, t.Sub("elsewhere"));
 
-        Assert.Equal(foo + GitCheck.Suffix, Assert.Single(GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null)).To);
+        Assert.Equal(foo + GitCheck.Suffix, Assert.Single(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved).To);
 
-        Assert.Empty(GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null));
+        Assert.Empty(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved);
         Assert.Empty(RepoScan.FindModuleRepos(Path.Combine(repo, ".git")));
         Assert.True(RepoGuard.IsLink(foo + GitCheck.Suffix));
     }

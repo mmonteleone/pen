@@ -24,10 +24,10 @@ public class PausedGitTests
         var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
         Assert.Empty(check.Moved);
         Assert.Null(check.Failure);
-        return PausedGit.Warning(repo, check.Paused!);
+        return PausedGit.Warning(repo, check.Paused);
     }
 
-    private static List<PausedOp> Paused(string repo) => GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Paused!;
+    private static List<PausedOp> Paused(string repo) => GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Paused;
 
     private static void MkFifo(string path)
     {
@@ -105,7 +105,7 @@ public class PausedGitTests
         var repo = PausedRebase(t);
         var check = GitCheck.RunWithoutOpening(repo, startedWithGit: false, commonGitDir: null, modulesAtStart: null);
         Assert.Single(check.Moved);
-        Assert.Empty(check.Paused!);
+        Assert.Empty(check.Paused);
     }
 
     // What git 2.56 does with each is in the comment on PausedGit: these are the lines it runs, and the ones it doesn't.
@@ -312,7 +312,7 @@ public class PausedGitTests
         var repo = Git.Repo(t.Sub("repo"));
         var state = Path.Combine(repo, ".git", name);
         Directory.CreateSymbolicLink(state, t.Sub("elsewhere"));
-        var moved = Assert.Single(GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null));
+        var moved = Assert.Single(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved);
         Assert.Equal(state, moved.From);
         Assert.False(RepoGuard.Exists(state));
     }
@@ -327,7 +327,7 @@ public class PausedGitTests
         var quarantined = state + GitCheck.Suffix;
         try
         {
-            var moved = Assert.Single(GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null));
+            var moved = Assert.Single(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved);
             Assert.Equal(quarantined, moved.To);
             Assert.Contains("can't be read", moved.Why);
         }
@@ -427,7 +427,7 @@ public class PausedGitTests
             case "no-newline": File.WriteAllText(path, Planted.TrimEnd()); break;
         }
 
-        var moved = Within10s(() => GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null));
+        var moved = Within10s(() => GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved);
 
         Assert.Equal(path, Assert.Single(moved).From);
         Assert.False(RepoGuard.Exists(path));
@@ -550,7 +550,7 @@ public class PausedGitTests
 
         Assert.Empty(check.Moved);
         Assert.Null(check.Failure);
-        Assert.Single(check.Paused!);
+        Assert.Single(check.Paused);
     }
 
     private static readonly string[] PromptScripts =
@@ -634,7 +634,7 @@ public class PausedGitTests
         if (!File.Exists(canary)) Assert.Skip($"{shell} didn't draw a prompt that expands the planted file here, so there's nothing to compare against");
         File.Delete(canary);
 
-        var moved = GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
+        var moved = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved;
         Assert.Equal(path, Assert.Single(moved).From);
 
         DrawPrompt(t, shell, repo, script);
@@ -679,7 +679,7 @@ public class PausedGitTests
 
         Assert.False(File.Exists(Path.Combine(repo, "canary")));
         if (file.StartsWith("rebase-", StringComparison.Ordinal))
-            Assert.Empty(GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null)); // a legal ref name, so it stays
+            Assert.Empty(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved); // a legal ref name, so it stays
     }
 
     private const UnixFileMode ReadOnlyDir = (UnixFileMode)0b101_101_101;
@@ -746,7 +746,7 @@ public class PausedGitTests
         Assert.Null(check.Failure);
         Assert.False(RepoGuard.Exists(path));
         Assert.Contains(check.Moved, q => q.From == path && q.To.Length > 0);
-        Assert.Contains(check.Opened!, c => c.Path == Path.GetDirectoryName(path) && c.Now.HasFlag(UnixFileMode.UserWrite));
+        Assert.Contains(check.Opened, c => c.Path == Path.GetDirectoryName(path) && c.Now.HasFlag(UnixFileMode.UserWrite));
     }
 
     public static TheoryData<string, string> ReadOnlyPromptCases()
@@ -864,7 +864,7 @@ public class PausedGitTests
 
         Assert.Null(check.Failure);
         Assert.False(File.Exists(path));
-        Assert.Contains(check.Opened!, c => c.Path == git);
+        Assert.Contains(check.Opened, c => c.Path == git);
         DrawPrompt(t, shell, repo, script);
         Assert.False(File.Exists(canary));
     }

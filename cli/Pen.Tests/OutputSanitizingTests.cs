@@ -286,7 +286,7 @@ public class RestoreCommandTests
             var repo = Git.Repo(t.Sub("repo"));
             var nested = t.Sub("repo", name);
             Git.Run(nested, "init", "-q");
-            var moved = GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
+            var moved = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved;
             var q = Assert.Single(moved);
             Assert.Equal(Path.Combine(nested, ".git"), q.From);
             Assert.False(Directory.Exists(q.From));
@@ -342,7 +342,7 @@ public class RestoreCommandTests
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
         Git.Run(repo, "init", "-q", "--bare", ".git/modules/x\n");
-        var moved = GitCheck.Run(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: []);
+        var moved = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved;
         var w = GitCheck.Warning(repo, moved);
         Assert.Contains("pen can't write a command for", w);
         Assert.Contains("x\\n, since the name ends in a newline", w);
