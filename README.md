@@ -122,4 +122,5 @@ See [all limitations](docs/limitations.md) for the known gaps and host precautio
 - [Limitations](docs/limitations.md): what Pen doesn't protect against.
 - [Contributing](CONTRIBUTING.md): building, testing and development.
 - [Security](SECURITY.md): reporting vulnerabilities.
+- [Code of conduct](CODE_OF_CONDUCT.md).
 - [MIT License](LICENSE).

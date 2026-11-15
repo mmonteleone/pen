@@ -2,7 +2,7 @@
 
 Build, run unit tests, reinstall pen, then run the relevant smoke tests. Smoke tests use the installed binary, so reinstall before testing a change, including changes to `compose.yaml`, `image/`, `proxy/`, `templates/` and `tools/`, which are embedded in it.
 
-For installation and everyday use, start with the [README](README.md#get-started). Commands below run from the repo root unless shown otherwise.
+For installation and everyday use, start with the [README](README.md#get-started). Commands below run from the repo root unless shown otherwise. Everyone taking part is expected to follow the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## Development setup
 
