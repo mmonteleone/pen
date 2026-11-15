@@ -74,8 +74,14 @@ internal sealed class SessionDir(string projectKey, string path)
     /// <remarks>It holds the repo's common git dir (empty from older pens: PROJECT_DIR/.git).</remarks>
     public string StartedWithGit => GetPath("started-with-git");
 
-    /// <summary>Gets the path of the list of submodule repos in the common git dir at the start.</summary>
-    /// <remarks>Each path is NUL-terminated; the session-end check quarantines any others.</remarks>
+    /// <summary>
+    /// Gets the path of the list of submodule repos in the common git dir at the start that the session takes as the
+    /// submodules' own: those every session open then listed too (<see cref="ModuleBaseline"/>).
+    /// </summary>
+    /// <remarks>
+    /// Each path is NUL-terminated; the session-end check quarantines any others. It goes after compose.yaml when the
+    /// session's files are deleted, so an open session started in a repo always has it.
+    /// </remarks>
     public string ModulesFile => GetPath("modules");
 
     /// <summary>
@@ -147,11 +153,11 @@ internal sealed class SessionDir(string projectKey, string path)
     public string[]? ReadCommand() =>
         File.Exists(CommandFile) ? File.ReadAllText(CommandFile).Split('\0')[..^1] : null;
 
-    /// <summary>Writes the submodule repos in the common git dir at the start.</summary>
+    /// <summary>Writes the submodule repos the session takes as the submodules' own.</summary>
     public void WriteModules(IEnumerable<string> repos) =>
         File.WriteAllText(ModulesFile, string.Concat(repos.Select(repo => repo + "\0")));
 
-    /// <summary>Reads the submodule repos in the common git dir at the start.</summary>
+    /// <summary>Reads the submodule repos the session took as the submodules' own at its start.</summary>
     /// <returns>The repos, or null for a session started by a Pen that didn't record them.</returns>
     public string[]? ReadModules() =>
         File.Exists(ModulesFile) ? File.ReadAllText(ModulesFile).Split('\0')[..^1] : null;

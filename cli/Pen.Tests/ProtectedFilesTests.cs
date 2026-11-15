@@ -16,13 +16,18 @@ public class ProtectedFilesTests
     private static SessionDir NewSession(TempDir t, string id = "abcd1234") =>
         new(Key, t.Sub("runtime", "sessions", id));
 
-    private static SessionDir Started(TempDir t, string dir, string common, string id = "abcd1234", IReadOnlyList<SessionDir>? running = null)
+    /// <summary>
+    /// Starts a session as Session does, with the project's open sessions as the baselines: the module repos chosen,
+    /// the choice narrowed with the files and git records saved, then compose.yaml, which opens it for the next one.
+    /// </summary>
+    private static SessionDir Started(TempDir t, string dir, string common, string id = "abcd1234")
     {
+        var runtime = Path.Combine(t.Path, "runtime");
         var mounts = RepoGuard.PrepareMounts(dir, "/nonexistent-home");
+        var chosen = ModuleBaseline.ChooseAtStart(Key, runtime, common, dir);
         var s = NewSession(t, id);
-        File.WriteAllText(s.StartedWithGit, common + "\n");
-        File.WriteAllText(s.ModulesFile, string.Concat(RepoScan.FindModuleRepos(common).Select(r => r + "\0")));
-        ProtectedFiles.Save(s, mounts, dir, running ?? []);
+        ModuleBaseline.NarrowAndSave(s, mounts, chosen, runtime, common, dir);
+        File.WriteAllText(s.ComposeFile, "");
         return s;
     }
 
@@ -71,7 +76,7 @@ public class ProtectedFilesTests
         var (repo, git) = Repo(t);
         var mounts = RepoGuard.PrepareMounts(repo, "/nonexistent-home");
         var s = NewSession(t);
-        ProtectedFiles.Save(s, mounts, repo, []);
+        ProtectedFiles.Save(s, mounts, repo, [], []);
         AssertManifestMatchesMounts(s, mounts, Path.Combine(git, "config"));
         Assert.Contains(Path.Combine(git, "hooks"), ProtectedFiles.Read(s)!.ReadOnlyDirs);
         Assert.Contains(Path.Combine(repo, ".pen"), ProtectedFiles.Read(s)!.ReadOnlyDirs);
@@ -89,7 +94,7 @@ public class ProtectedFilesTests
         var mounts = RepoGuard.PrepareMounts(wt, "/nonexistent-home");
         Assert.Contains(mounts, m => m.Path == Path.Combine(git, "HEAD") && m.ReadOnly && !m.Verify);
         var s = NewSession(t);
-        ProtectedFiles.Save(s, mounts, wt, []);
+        ProtectedFiles.Save(s, mounts, wt, [], []);
         AssertManifestMatchesMounts(s, mounts,
             Path.Combine(git, "config"), Path.Combine(git, "worktrees", "in", "commondir"), Path.Combine(wt, ".git"));
     }
@@ -102,7 +107,7 @@ public class ProtectedFilesTests
         Git.Run(repo, "worktree", "add", "-q", "in");
         var mounts = RepoGuard.PrepareMounts(repo, "/nonexistent-home");
         var s = NewSession(t);
-        ProtectedFiles.Save(s, mounts, repo, []);
+        ProtectedFiles.Save(s, mounts, repo, [], []);
         AssertManifestMatchesMounts(s, mounts,
             Path.Combine(git, "config"), Path.Combine(git, "worktrees", "in", "commondir"));
     }
@@ -117,7 +122,7 @@ public class ProtectedFilesTests
         File.WriteAllText(Path.Combine(entry, "config.worktree"), "");
         var mounts = RepoGuard.PrepareMounts(repo, "/nonexistent-home");
         var s = NewSession(t);
-        ProtectedFiles.Save(s, mounts, repo, []);
+        ProtectedFiles.Save(s, mounts, repo, [], []);
         AssertManifestMatchesMounts(s, mounts, Path.Combine(git, "config"));
         Assert.Contains(entry, ProtectedFiles.Read(s)!.ReadOnlyDirs);
     }
@@ -133,7 +138,7 @@ public class ProtectedFilesTests
         File.WriteAllText(Path.Combine(module, "config.worktree"), "[core]\n");
         var mounts = RepoGuard.PrepareMounts(repo, "/nonexistent-home");
         var s = NewSession(t);
-        ProtectedFiles.Save(s, mounts, repo, []);
+        ProtectedFiles.Save(s, mounts, repo, [], []);
         AssertManifestMatchesMounts(s, mounts,
             Path.Combine(git, "config"), Path.Combine(module, "config"), Path.Combine(module, "config.worktree"));
     }
@@ -150,7 +155,7 @@ public class ProtectedFilesTests
         File.AppendAllText(Path.Combine(git, "config"), $"[include]\n path = ../a.cfg\n path = extra.cfg\n path = {outside}\n");
         var mounts = RepoGuard.PrepareMounts(repo, "/nonexistent-home");
         var s = NewSession(t);
-        ProtectedFiles.Save(s, mounts, repo, []);
+        ProtectedFiles.Save(s, mounts, repo, [], []);
         AssertManifestMatchesMounts(s, mounts,
             Path.Combine(git, "config"), Path.Combine(git, "extra.cfg"), Path.Combine(repo, "a.cfg"), Path.Combine(repo, "b.cfg"));
     }
@@ -174,7 +179,7 @@ public class ProtectedFilesTests
         using var t = new TempDir();
         var dir = t.Sub("plain");
         var s = NewSession(t);
-        ProtectedFiles.Save(s, RepoGuard.PrepareMounts(dir, "/nonexistent-home"), dir, []);
+        ProtectedFiles.Save(s, RepoGuard.PrepareMounts(dir, "/nonexistent-home"), dir, [], []);
         Assert.Empty(ProtectedFiles.Read(s)!.Files);
     }
 
@@ -245,7 +250,7 @@ public class ProtectedFilesTests
     {
         var s = NewSession(t);
         PenException? e = null;
-        AssertIn10s(() => e = Assert.Throws<PenException>(() => ProtectedFiles.Save(s, mounts, repo, [])));
+        AssertIn10s(() => e = Assert.Throws<PenException>(() => ProtectedFiles.Save(s, mounts, repo, [], [])));
         Assert.Contains(expected, e!.Message);
         Assert.False(Directory.Exists(s.ProtectedDir));
     }
@@ -288,7 +293,7 @@ public class ProtectedFilesTests
         var (repo, commondir, mounts) = WorktreeInProject(t);
         using (var f = File.OpenWrite(commondir)) f.SetLength(1024 * 1024);
         var s = NewSession(t);
-        ProtectedFiles.Save(s, mounts, repo, []);
+        ProtectedFiles.Save(s, mounts, repo, [], []);
         var saved = Assert.Single(ProtectedFiles.Read(s)!.Files, f => f.Path == commondir);
         Assert.Equal(1024 * 1024, new FileInfo(Path.Combine(s.ProtectedDir, saved.Copy)).Length);
     }
@@ -333,7 +338,7 @@ public class ProtectedFilesTests
         Git.Run(repo, "worktree", "add", "-q", wt);
         // The common git dir is mounted, though the project dir (all CheckAllowed looks at) doesn't hold it.
         var inGit = new SessionDir(Key, t.Sub("repo", ".git", "state", "sessions", "abcd1234"));
-        var e = Assert.Throws<PenException>(() => ProtectedFiles.Save(inGit, RepoGuard.PrepareMounts(wt, "/nonexistent-home"), wt, []));
+        var e = Assert.Throws<PenException>(() => ProtectedFiles.Save(inGit, RepoGuard.PrepareMounts(wt, "/nonexistent-home"), wt, [], []));
         Assert.Contains("would be inside the sandbox", e.Message);
         Assert.False(Directory.Exists(inGit.ProtectedDir));
     }
@@ -897,7 +902,7 @@ public class ProtectedFilesTests
         Assert.Equal(upper, Native.RealPath(config));
         AssertRuns(repo, marker);
 
-        var second = Started(t, repo, git, "bbbbbbbb", running: [first]);
+        var second = Started(t, repo, git, "bbbbbbbb");
 
         var a = End(repo, first);
         Assert.Null(a.Failure);
@@ -918,7 +923,7 @@ public class ProtectedFilesTests
         var first = Started(t, repo, git, "aaaaaaaa");
         var planted = Path.Combine(git, "config.worktree");
         File.WriteAllText(planted, "[core]\n fsmonitor = /evil\n");
-        var second = Started(t, repo, git, "bbbbbbbb", running: [first]);
+        var second = Started(t, repo, git, "bbbbbbbb");
         Assert.True(Assert.Single(ProtectedFiles.Read(second)!.Files, f => f.Path == planted).Adopted);
 
         // Gone: not recreated from what the agent wrote.
@@ -937,7 +942,7 @@ public class ProtectedFilesTests
         var first = Started(t, repo, git, "aaaaaaaa");
         var planted = Path.Combine(git, "config.worktree");
         File.WriteAllText(planted, "# first\n");
-        var second = Started(t, repo, git, "bbbbbbbb", running: [first]);
+        var second = Started(t, repo, git, "bbbbbbbb");
         File.WriteAllText(planted, "# second\n");
         var check = End(repo, second);
         Assert.Null(check.Failure);
@@ -955,8 +960,77 @@ public class ProtectedFilesTests
         var file = Path.Combine(git, "worktrees", "wt", "config.worktree");
         File.WriteAllText(file, "");
         var first = Started(t, repo, git, "aaaaaaaa"); // the worktree's entry is read-only as a whole there
-        var second = Started(t, wt, git, "bbbbbbbb", running: [first]);
+        var second = Started(t, wt, git, "bbbbbbbb");
         Assert.False(Assert.Single(ProtectedFiles.Read(second)!.Files, f => f.Path == file).Adopted);
+    }
+
+    // ---- Module repos an open session didn't list ----
+
+    /// <summary>A repo with the submodules m and m2, and a session's files saved with m unlisted.</summary>
+    private static (string Repo, string Git, SessionDir Session) SavedWithMUnlisted(TempDir t)
+    {
+        var (repo, git) = Repo(t);
+        var lib = Git.Repo(t.Sub("lib"));
+        Git.Run(repo, [.. AllowFile, "submodule", "add", "-q", lib, "m"]);
+        Git.Run(repo, [.. AllowFile, "submodule", "add", "-q", lib, "m2"]);
+        Git.Run(Path.Combine(repo, "m"), "config", "extensions.worktreeConfig", "true");
+        Git.Run(Path.Combine(repo, "m"), "config", "--worktree", "user.name", "m");
+        var s = NewSession(t);
+        File.WriteAllText(s.StartedWithGit, git + "\n");
+        s.WriteModules([Path.Combine(git, "modules", "m2")]);
+        ProtectedFiles.Save(s, RepoGuard.PrepareMounts(repo, "/nonexistent-home"), repo, [],
+            [Path.Combine(git, "modules", "m")]);
+        return (repo, git, s);
+    }
+
+    [Fact]
+    public void EveryFileInAnUnlistedModuleRepo_IsAdopted_AndNothingElse()
+    {
+        using var t = new TempDir();
+        var (_, git, s) = SavedWithMUnlisted(t);
+        var files = ProtectedFiles.Read(s)!.Files;
+        var m = Path.Combine(git, "modules", "m");
+
+        Assert.Equal(
+            [Path.Combine(m, "config"), Path.Combine(m, "config.worktree")],
+            files.Where(f => f.Adopted).Select(f => f.Path).Order(StringComparer.Ordinal));
+        Assert.False(Assert.Single(files, f => f.Path == Path.Combine(git, "modules", "m2", "config")).Adopted);
+        Assert.False(Assert.Single(files, f => f.Path == Path.Combine(git, "config")).Adopted);
+    }
+
+    [Fact]
+    public void AFileInAnUnlistedModuleRepo_IsNeverWrittenBack()
+    {
+        using var t = new TempDir();
+        var (repo, git, s) = SavedWithMUnlisted(t);
+        var config = Path.Combine(git, "modules", "m", "config");
+        File.WriteAllText(config, "[core]\n\tbare = false\n");
+        var otherConfig = Path.Combine(git, "modules", "m2", "config");
+        var original = File.ReadAllBytes(otherConfig);
+        File.AppendAllText(otherConfig, "[core]\n\tfsmonitor = /evil\n");
+
+        var check = End(repo, s);
+
+        Assert.DoesNotContain(check.Moved, q => q.From == config);
+        Assert.DoesNotContain(check.Restored, r => r.Path == config);
+        Assert.Contains(check.Moved, q => q.From == otherConfig);
+        Assert.Equal(original, File.ReadAllBytes(otherConfig));
+    }
+
+    [Fact]
+    public void AFileAnOpenSessionAdopted_IsAdoptedAgain_WhateverItsName()
+    {
+        using var t = new TempDir();
+        var (repo, git, older) = SavedWithMUnlisted(t);
+        File.WriteAllText(older.ComposeFile, "");
+        var s = NewSession(t, "bbbbbbbb");
+
+        ProtectedFiles.Save(s, RepoGuard.PrepareMounts(repo, "/nonexistent-home"), repo, [older], []);
+
+        Assert.True(Assert.Single(ProtectedFiles.Read(s)!.Files,
+            f => f.Path == Path.Combine(git, "modules", "m", "config")).Adopted);
+        Assert.False(Assert.Single(ProtectedFiles.Read(s)!.Files,
+            f => f.Path == Path.Combine(git, "modules", "m2", "config")).Adopted);
     }
 
     // ---- Includes Pen must not miss ----
@@ -1030,7 +1104,7 @@ public class ProtectedFilesTests
         var original = File.ReadAllBytes(config);
         var first = Started(t, repo, git, "aaaaaaaa");
         File.AppendAllText(config, "[core]\n fsmonitor = /evil\n"); // first's agent, past its mount
-        var second = Started(t, repo, git, "bbbbbbbb", running: [first]);
+        var second = Started(t, repo, git, "bbbbbbbb");
 
         End(repo, first);
         Assert.Equal(original, File.ReadAllBytes(config));
@@ -1048,7 +1122,7 @@ public class ProtectedFilesTests
         var (repo, git) = Repo(t);
         var first = Started(t, repo, git, "aaaaaaaa");
         Directory.Delete(first.ProtectedDir, recursive: true);
-        var second = Started(t, repo, git, "bbbbbbbb", running: [first]);
+        var second = Started(t, repo, git, "bbbbbbbb");
         Assert.NotEmpty(ProtectedFiles.Read(second)!.Files);
     }
 

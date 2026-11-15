@@ -230,7 +230,7 @@ Everyday git works inside: commit, branch, merge, rebase, fetch and worktrees. K
 
 - `git init` for a new project;
 - `git config`, `git remote add`, setting upstreams, deleting branches, hook installers (husky);
-- `git submodule add`, `update --init` and `sync`;
+- `git submodule add`, `update --init` and `sync` (a submodule repo made while a session is open is moved aside when that session ends, and when any session started alongside it ends);
 - `git worktree prune` and `remove` for worktrees outside the project.
 
 Push reviewed commits from the host. Read-only tokens prevent sandbox pushes; Pen doesn't block pushes made with write-capable credentials.

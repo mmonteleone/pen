@@ -16,11 +16,15 @@ public class GitDirRepoTests
     private static SessionDir Started(TempDir t, string dir, string common, string id = "aaaaaaaa")
     {
         RepoGuard.CheckAtStart(dir);
+        // As Session does, with no other session open: every module repo found is listed.
+        var lists = ModuleBaseline.ReadOpenLists([], common, dir);
         var mounts = RepoGuard.PrepareMounts(dir, "/nonexistent-home");
+        var found = RepoScan.FindModuleRepos(common);
+        var modules = ModuleBaseline.Choose(found, lists);
         var s = new SessionDir(Key, t.Sub("runtime", "sessions", id));
         File.WriteAllText(s.StartedWithGit, common + "\n");
-        s.WriteModules(RepoScan.FindModuleRepos(common));
-        ProtectedFiles.Save(s, mounts, dir, []);
+        s.WriteModules(modules);
+        ProtectedFiles.Save(s, mounts, dir, [], found.Except(modules, StringComparer.Ordinal).ToList());
         return s;
     }
 

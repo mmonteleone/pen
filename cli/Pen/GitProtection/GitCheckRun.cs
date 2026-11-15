@@ -459,9 +459,11 @@ internal sealed class GitCheckRun
         return scan;
     }
 
-    /// <summary>Quarantines a module repo that's a symlink or wasn't there at the start.</summary>
+    /// <summary>Quarantines a module repo that's a symlink or the session didn't list at its start.</summary>
     /// <param name="repo">The module repo.</param>
-    /// <param name="listed">The module repos there at the start, or null to keep all.</param>
+    /// <param name="listed">
+    /// The module repos the session listed at its start (<see cref="ModuleBaseline"/>), or null to keep all.
+    /// </param>
     /// <returns>Whether it's one of those, so it's gone (or named as couldn't be moved).</returns>
     private bool TryQuarantineModuleRepo(string repo, HashSet<string>? listed)
     {
@@ -473,8 +475,8 @@ internal sealed class GitCheckRun
         }
         if (listed != null && !listed.Contains(repo))
         {
-            Quarantine(repo, "a submodule repo made during the session: " +
-                "its config and hooks were writable from the sandbox", breakLayout: true);
+            Quarantine(repo, "a submodule repo that wasn't there at the session's start, or that another " +
+                "session could have made: its config and hooks were writable from the sandbox", breakLayout: true);
             return true;
         }
         return false;

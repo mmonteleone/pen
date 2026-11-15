@@ -1,8 +1,10 @@
+using System.Text.RegularExpressions;
+
 namespace Pen.SmokeTests;
 
 /// <summary>Submodules in the project: git works in an initialized one while its repo in .git/modules stays
-/// protected, a repointed checkout .git file is quarantined, and the old layout with its own .git dir is refused
-/// until absorbgitdirs.</summary>
+/// protected, a repointed checkout .git file is quarantined, a submodule repo the agent makes isn't kept by a session
+/// started alongside, and the old layout with its own .git dir is refused until absorbgitdirs.</summary>
 public sealed class ProjectSubmoduleTests(ProjectSubmoduleTests.Fixture fixture)
     : IClassFixture<ProjectSubmoduleTests.Fixture>
 {
@@ -43,6 +45,31 @@ public sealed class ProjectSubmoduleTests(ProjectSubmoduleTests.Fixture fixture)
     [Fact(DisplayName = "...and the next session ends without a warning")]
     public void NextSessionDoesntWarn() => SmokeAssert.Lacks(fixture.AfterPutBack, "WARNING");
 
+    [Fact(DisplayName =
+        "the replay is real: while that session runs, git in the checkout of a submodule repo its agent made runs its config")]
+    public void PlantFiresWhilePlanting() => Assert.True(fixture.FiresWhilePlanting);
+
+    [Fact(DisplayName = "a second session starts alongside the planting one")]
+    public void SecondStartsAlongside() => Assert.True(fixture.StartedAlongside);
+
+    [Fact(DisplayName = "the planting session's end quarantines that repo")]
+    public void PlanterQuarantinesIt() =>
+        Assert.True(fixture.Planter.Output.Contains(".git/modules/evil → ", StringComparison.Ordinal),
+            fixture.Planter.Describe());
+
+    [Fact(DisplayName = "the second session's agent makes it again, and git in the checkout runs it again")]
+    public void PlantFiresWhenMadeAgain() => Assert.True(fixture.FiresWhenMadeAgain);
+
+    [Fact(DisplayName = "...but the second session didn't take it as its own: its end quarantines it")]
+    public void AlongsideQuarantinesIt() =>
+        Assert.True(
+            fixture.Alongside.ExitCode == 0
+                && fixture.Alongside.Output.Contains(".git/modules/evil → ", StringComparison.Ordinal),
+            fixture.Alongside.Describe());
+
+    [Fact(DisplayName = "...so git in the checkout no longer runs it")]
+    public void PlantNoLongerFires() => Assert.False(fixture.FiresAfterBoth);
+
     [Fact(DisplayName = "a submodule with its own .git dir is refused, naming it")]
     public void OwnGitDirIsRefused() =>
         SmokeAssert.Refused(fixture.OwnGitDir, "libs/y (a submodule with its own .git dir)");
@@ -80,6 +107,18 @@ public sealed class ProjectSubmoduleTests(ProjectSubmoduleTests.Fixture fixture)
 
         internal CommandResult AfterPutBack { get; private set; } = null!;
 
+        internal bool FiresWhilePlanting { get; private set; }
+
+        internal bool StartedAlongside { get; private set; }
+
+        internal CommandResult Planter { get; private set; } = null!;
+
+        internal bool FiresWhenMadeAgain { get; private set; }
+
+        internal CommandResult Alongside { get; private set; } = null!;
+
+        internal bool FiresAfterBoth { get; private set; }
+
         internal CommandResult OwnGitDir { get; private set; } = null!;
 
         internal CommandResult Absorbed { get; private set; } = null!;
@@ -87,6 +126,28 @@ public sealed class ProjectSubmoduleTests(ProjectSubmoduleTests.Fixture fixture)
         internal int ContainersAtEnd { get; private set; }
 
         private string Checkout => Path.Combine(Project.Dir, "libs", "x");
+
+        private string EvilCheckout => Path.Combine(Project.Dir, "evil");
+
+        private string EvilConfig => Path.Combine(Project.Dir, ".git", "modules", "evil", "config");
+
+        private string AgentPattern => $"^{Key}-.*-agent$";
+
+        private string Hook => Path.Combine(Scratch, "hook-sm");
+
+        private string Canary => Path.Combine(Scratch, "canary-sm");
+
+        /// <summary>Gets the agent's command that makes the submodule repo .git/modules/evil, with the host's hook as
+        /// its core.fsmonitor, and its checkout evil, which git and Pen both take for a submodule's.</summary>
+        private string PlantScript => $$"""
+            git init -q --separate-git-dir="$PWD/.git/modules/evil" evil && printf '[core]\n\tworktree = %s\n\tfsmonitor = %s\n' "$PWD/evil" '{{Hook}}' >>.git/modules/evil/config
+            """;
+
+        /// <summary>Gets the second agent's command: once the planting session's end has moved the repo aside, it
+        /// makes it again, says so (replanted), and exits once the host has looked (go).</summary>
+        private string AlongsideScript => $$"""
+            for i in $(seq 600); do [ -e .git/modules/evil ] || break; sleep 0.2; done; rm -f evil/.git && {{PlantScript}} && touch replanted && for i in $(seq 600); do [ -e go ] && break; sleep 0.2; done
+            """;
 
         protected override void Prepare()
         {
@@ -99,6 +160,7 @@ public sealed class ProjectSubmoduleTests(ProjectSubmoduleTests.Fixture fixture)
                 && Files.IsRegularFile(Path.Combine(module, "HEAD"));
             RunProbes(module);
             RunRepointed();
+            RunAlongsidePlanter();
             RunOwnGitDir(library);
             ContainersAtEnd = Docker.CountContainers(Key);
         }
@@ -128,6 +190,53 @@ public sealed class ProjectSubmoduleTests(ProjectSubmoduleTests.Fixture fixture)
             File.WriteAllText(gitFile, "gitdir: ../../.git/modules/libs/x\n");
             StatusPutBack = SmokeGit.CreateCommand(Checkout, "status", "--porcelain").Run();
             AfterPutBack = Cli.Run("run", "bash", "-c", "true");
+        }
+
+        /// <summary>Starts a session whose agent makes a submodule repo and a second one beside it, ends the planting
+        /// one, has the second's agent make the repo again, then ends the second.</summary>
+        private void RunAlongsidePlanter()
+        {
+            File.WriteAllText(Hook, $"#!/bin/sh\ntouch {Canary}\n");
+            File.SetUnixFileMode(Hook, Files.Mode755);
+            var planter = Track(Cli.Start("run", "bash", "-c", $"{PlantScript}; sleep 120"));
+            if (!Polling.WaitForContainer(AgentPattern))
+                throw new InvalidOperationException($"planting session didn't start: {planter.OutputSoFar}");
+            Polling.WaitUntil(
+                () => Files.Exists(EvilConfig) && File.ReadAllText(EvilConfig).Contains(Hook, StringComparison.Ordinal),
+                TimeSpan.FromSeconds(10));
+            var planterAgent = FindAgent(except: null);
+            FiresWhilePlanting = Fires();
+            var other = Track(Cli.Start("run", "bash", "-c", AlongsideScript));
+            StartedAlongside = Polling.WaitForContainers(AgentPattern, 2);
+            Docker.Run("rm", "-f", planterAgent).RequireSuccess();
+            Planter = planter.WaitForExit();
+            Polling.WaitUntil(() => Files.Exists(Path.Combine(Project.Dir, "replanted")), TimeSpan.FromSeconds(60));
+            FiresWhenMadeAgain = Fires();
+            File.WriteAllText(Path.Combine(Project.Dir, "go"), "");
+            Alongside = other.WaitForExit();
+            FiresAfterBoth = Fires();
+
+            foreach (var name in new[] { "evil", "replanted", "go" })
+                Files.DeleteTree(Path.Combine(Project.Dir, name));
+            var modules = Path.Combine(Project.Dir, ".git", "modules");
+            foreach (var entry in Directory.EnumerateFileSystemEntries(modules, "evil*"))
+                Files.DeleteTree(entry);
+        }
+
+        /// <summary>Finds a running agent container of the project, as docker ps | grep | head -1 does.</summary>
+        /// <param name="except">An agent to leave out, or null.</param>
+        /// <exception cref="InvalidOperationException">There's none.</exception>
+        private string FindAgent(string? except) =>
+            Docker.ListRunningNames().FirstOrDefault(
+                name => Regex.IsMatch(name, AgentPattern) && name != except)
+            ?? throw new InvalidOperationException($"no running agent of {Key} other than {except}");
+
+        /// <summary>Runs host git status in the planted checkout and checks whether it ran the hook.</summary>
+        private bool Fires()
+        {
+            File.Delete(Canary);
+            SmokeGit.CreateCommand(EvilCheckout, "status").Run();
+            return Files.Exists(Canary);
         }
 
         /// <summary>Replaces the submodule with one in the old layout, with its own .git dir in the checkout, and

@@ -36,9 +36,12 @@ internal static class ProtectedFiles
     /// <param name="session">The session that's starting.</param>
     /// <param name="mounts">The session's mounts.</param>
     /// <param name="dir">The project dir; messages are relative to it.</param>
-    /// <param name="running">The project's other running sessions.</param>
+    /// <param name="open">The project's other open sessions (<see cref="SessionRegistry.FindOpen"/>).</param>
+    /// <param name="unlistedModules">
+    /// The module repos there now that an open session didn't list at its start (<see cref="ModuleBaseline"/>).
+    /// </param>
     /// <remarks>
-    /// A file <paramref name="running"/> sessions already saved keeps their copy, the oldest that still has one: its
+    /// A file <paramref name="open"/> sessions already saved keeps their copy, the oldest that still has one: its
     /// agent may have changed the file since, and this session's end would otherwise put that change back after that
     /// session's end had removed it. The file on disk is only taken when no session has a copy, which means none
     /// could have changed it since the last one put it back. The same file can have another name by now (an agent's
@@ -50,7 +53,8 @@ internal static class ProtectedFiles
         SessionDir session,
         IReadOnlyList<Mount> mounts,
         string dir,
-        IReadOnlyList<SessionDir> running)
+        IReadOnlyList<SessionDir> open,
+        IReadOnlyList<string> unlistedModules)
     {
         // Project.CheckAllowed covers the project dir; this covers every mount, the common git dir among them.
         var realSession = Native.RealPath(session.Path) ?? session.Path;
@@ -60,11 +64,11 @@ internal static class ProtectedFiles
                 $"session dir {Out.Field(realSession)} would be inside the sandbox");
         }
 
-        var older = ReadOlder(running);
+        var older = ReadOlder(open);
         Directory.CreateDirectory(session.ProtectedDir, Dir700);
         try
         {
-            var files = SaveCopies(session, mounts, dir, older);
+            var files = SaveCopies(session, mounts, dir, older, unlistedModules);
             var dirs = mounts.Where(m => m.ReadOnly && !m.Verify && Directory.Exists(m.Path))
                 .Select(m => m.Path)
                 .ToList();
@@ -86,7 +90,8 @@ internal static class ProtectedFiles
         SessionDir session,
         IReadOnlyList<Mount> mounts,
         string dir,
-        OlderSessions older)
+        OlderSessions older,
+        IReadOnlyList<string> unlistedModules)
     {
         var files = new List<ProtectedFile>();
         foreach (var mount in mounts.Where(m => m.Verify))
@@ -95,7 +100,7 @@ internal static class ProtectedFiles
             var baseline = ReadBaseline(dir, real, older.Files);
             var copy = files.Count.ToString(CultureInfo.InvariantCulture);
             WriteNew(Path.Combine(session.ProtectedDir, copy), baseline.Bytes, File600);
-            files.Add(new(real, copy, baseline.Mode, IsAdopted(real, older)));
+            files.Add(new(real, copy, baseline.Mode, IsAdopted(real, older, unlistedModules)));
         }
         return files;
     }
@@ -196,8 +201,8 @@ internal static class ProtectedFiles
     }
 
     /// <summary>
-    /// What running sessions have saved: their files by what each path resolves to now, oldest session first; the
-    /// files any of them adopted; each one's read-only directories; and whether one has no record to go by.
+    /// What open sessions have saved: their files by what each path resolves to now, oldest session first; the files
+    /// any of them adopted; each one's read-only directories; and whether one has no record to go by.
     /// </summary>
     /// <remarks>
     /// A session that has put its files back is still here, as its agent may have planted what its check hasn't
@@ -209,17 +214,17 @@ internal static class ProtectedFiles
         List<List<string>> ReadOnlyDirs,
         bool Unrecorded);
 
-    /// <summary>A running session's saved file.</summary>
+    /// <summary>An open session's saved file.</summary>
     private sealed record SavedCopy(SessionDir Session, ProtectedFile File);
 
-    /// <summary>Reads what <paramref name="running"/> sessions have saved.</summary>
-    private static OlderSessions ReadOlder(IReadOnlyList<SessionDir> running)
+    /// <summary>Reads what <paramref name="open"/> sessions have saved.</summary>
+    private static OlderSessions ReadOlder(IReadOnlyList<SessionDir> open)
     {
         var files = new Dictionary<string, List<SavedCopy>>(StringComparer.Ordinal);
         var adopted = new HashSet<string>(StringComparer.Ordinal);
         var readOnly = new List<List<string>>();
         bool unrecorded = false;
-        foreach (var session in running.OrderBy(session => session.ReadStarted() ?? DateTime.MaxValue))
+        foreach (var session in open.OrderBy(session => session.ReadStarted() ?? DateTime.MaxValue))
         {
             var manifest = ReadRecord(session);
             if (manifest == null)
@@ -244,23 +249,29 @@ internal static class ProtectedFiles
     }
 
     /// <summary>
-    /// Tells whether <paramref name="path"/> is a config.worktree a running session's agent could have made: a
-    /// session adopted it, or none saved it and one of them could write there.
+    /// Tells whether <paramref name="path"/> is a file an open session's agent could have made: one in a module repo
+    /// an open session didn't list, one a session adopted, or a config.worktree none saved where one could write.
     /// </summary>
-    /// <remarks>Being read-only in one says nothing about the others.</remarks>
-    private static bool IsAdopted(string path, OlderSessions older)
+    /// <remarks>
+    /// The session-end check quarantines a module repo the session didn't list, so nothing in it is put back. A
+    /// session adopted a file only in a repo it didn't list, which this one doesn't list either, or a config.worktree.
+    /// Being read-only in one session says nothing about the others.
+    /// </remarks>
+    private static bool IsAdopted(string path, OlderSessions older, IReadOnlyList<string> unlistedModules)
     {
-        if (!string.Equals(Path.GetFileName(path), "config.worktree", StringComparison.OrdinalIgnoreCase))
-            return false;
+        if (unlistedModules.Any(repo => RepoGuard.IsInside(repo, path)))
+            return true;
         if (older.Adopted.Contains(path))
             return true;
+        if (!string.Equals(Path.GetFileName(path), "config.worktree", StringComparison.OrdinalIgnoreCase))
+            return false;
         if (older.Files.ContainsKey(path))
             return false;
         return older.Unrecorded || older.ReadOnlyDirs.Any(dirs => !dirs.Any(d => RepoGuard.IsInside(d, path)));
     }
 
     /// <summary>
-    /// Reads what to save for <paramref name="path"/>: the oldest running session's copy that's still there, or else
+    /// Reads what to save for <paramref name="path"/>: the oldest open session's copy that's still there, or else
     /// the file on disk.
     /// </summary>
     /// <exception cref="PenException">The file on disk can't be read or saved whole.</exception>

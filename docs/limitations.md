@@ -56,6 +56,8 @@ Some files can't be protected in advance. For example, a `.git/commondir` file r
 
 `pen sign` refuses while a session runs in its own directory, but allows one in another worktree. Its git calls disable hooks and `core.fsmonitor`; the agent can still change the commits and other data it reads. Wait for all sessions to end before signing.
 
+Sessions see each other only when they're started through the same path. On macOS, a project opened through its `/System/Volumes/Data` firmlink path (or on Linux, through a bind mount) gets a different project key than through its usual path, so sessions started through the two paths don't share locks, protected-file baselines or submodule repo lists, and neither allows for what the other's agent could write. Always start Pen in a project through the same path.
+
 ## At session start
 
 Pen warns about two gaps without blocking the session:
@@ -85,6 +87,8 @@ Pen only checks what a symlink in the project leads to inside `.git`. One that l
 
 The agent's branches can also carry a whole repo layout in tracked files, such as `foo/HEAD`, `foo/objects/…`, `foo/refs/…` and `foo/config`. Nothing of it is in `.git`, and it arrives in the project only when you check the branch out; git run in `foo` after that would take it for a bare repo and use its config, which can run commands. Setting `safe.bareRepository = explicit` in your global git config (see [Host precautions](#host-precautions)) stops git from using it.
 
+Submodule repos in `.git/modules` (or a worktree's own `modules`) that weren't there at session start are moved aside at session end, since their config and hooks were writable from the sandbox. When other sessions are open in the project, a session takes as its own only the submodule repos that every one of them had at its own start, so one another session's agent could have made is moved aside at its end too, and its config is never put back from a saved copy. Pen refuses to start while a session is open that has no record of its submodule repos (one started by an older version of Pen, before the directory was a git repo, or in a repo with another common git dir), naming it: exit it first.
+
 Pen also quarantines `config.worktree` files in the git dir, worktree entries and submodule repos that weren't there at the start, or first appeared while another session could write them. These can contain commands. This includes the file `git worktree add` copies when `extensions.worktreeConfig` is on; the warning explains how to restore it. `pen sign` has no session baseline, so it leaves these files alone without warning.
 
 ### Paused git operations
@@ -99,7 +103,7 @@ Some state files can't wait. `git-prompt.sh` can put their contents into a promp
 
 If a protected file can't be restored, Pen keeps its saved copies, refuses new sessions and prints a recovery command. **Run that command as printed, on one line.** It may fix directory permissions and run `pen true` to retry. Running `chmod` separately could let a git-aware prompt execute planted code before the retry.
 
-If the git check can't finish, Pen ends the session, prints **"git wasn't checked: don't run git here"** with the reason, and runs no host git itself. Inspect `.git` by hand before using git. This warning isn't remembered: a later session accepts the submodule repos it finds as its baseline, unless saved files are still waiting to be restored.
+If the git check can't finish, Pen ends the session, prints **"git wasn't checked: don't run git here"** with the reason, and runs no host git itself. Inspect `.git` by hand before using git. This warning isn't remembered: a later session accepts the submodule repos it finds as its baseline, other than any that a session still open didn't have at its start, unless saved files are still waiting to be restored.
 
 <details>
 <summary>Unreadable directories and filenames that aren't valid UTF-8</summary>

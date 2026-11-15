@@ -29,11 +29,12 @@ internal sealed record ProtectedManifest(List<ProtectedFile> Files, List<string>
 /// <param name="Copy">The name of its copy in the session's protected dir.</param>
 /// <param name="Mode">Its mode at the start.</param>
 /// <param name="Adopted">
-/// Whether it's a config.worktree first seen while another session's agent could have planted it, or inherited from
-/// a session that adopted it.
+/// Whether another session's agent could have planted it: it's in a module repo an open session didn't list at its
+/// start (<see cref="ModuleBaseline"/>), or it's a config.worktree first seen while one could write there, or it's
+/// inherited from a session that adopted it.
 /// </param>
 /// <remarks>
-/// Nothing vouches for an adopted file: it's never written back, and it's quarantined at the end like one that isn't
-/// listed at all, changed or not.
+/// Nothing vouches for an adopted file: it's never written back, and it's quarantined at the end, changed or not,
+/// with its module repo, or like a config.worktree that isn't listed at all.
 /// </remarks>
 internal sealed record ProtectedFile(string Path, string Copy, UnixFileMode Mode, bool Adopted);

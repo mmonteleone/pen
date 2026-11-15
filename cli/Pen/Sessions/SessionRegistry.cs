@@ -13,19 +13,34 @@ internal static class SessionRegistry
     public static List<SessionDir> FindRunning(string projectKey, string runtimeDir)
     {
         var running = new List<SessionDir>();
-        var sessions = Path.Combine(runtimeDir, "sessions");
-        if (!Directory.Exists(sessions))
-            return running;
-        foreach (var path in Directory.EnumerateDirectories(sessions).Order(StringComparer.Ordinal))
+        foreach (var session in FindOpen(projectKey, runtimeDir))
         {
-            var session = new SessionDir(projectKey, path);
-            if (!session.IsOpen)
-                continue;
             using var probe = FileLock.TryTake(session.LockFile, exclusive: true);
             if (probe == null)
                 running.Add(session);
         }
         return running;
+    }
+
+    /// <summary>Finds the project's open sessions, whether or not their Pen is still running.</summary>
+    /// <returns>The sessions whose compose.yaml is there, by ID.</returns>
+    /// <remarks>
+    /// One whose Pen died is open until the next run ends it, and its agent's container may still be running, so
+    /// whatever has to allow for what other sessions' agents could write goes by this.
+    /// </remarks>
+    public static List<SessionDir> FindOpen(string projectKey, string runtimeDir)
+    {
+        var open = new List<SessionDir>();
+        var sessions = Path.Combine(runtimeDir, "sessions");
+        if (!Directory.Exists(sessions))
+            return open;
+        foreach (var path in Directory.EnumerateDirectories(sessions).Order(StringComparer.Ordinal))
+        {
+            var session = new SessionDir(projectKey, path);
+            if (session.IsOpen)
+                open.Add(session);
+        }
+        return open;
     }
 
     /// <summary>Finds every project's running sessions, for pen ps and pen allow --global.</summary>

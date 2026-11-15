@@ -90,8 +90,11 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         /// <summary>Gets the mounts over the project mount.</summary>
         public required IReadOnlyList<Mount> Mounts { get; init; }
 
-        /// <summary>Gets the submodule repos in the common git dir now.</summary>
-        public required IReadOnlyList<string> Modules { get; init; }
+        /// <summary>
+        /// Gets the submodule repos in the common git dir now, split by what the open sessions listed
+        /// (<see cref="ModuleBaseline"/>).
+        /// </summary>
+        public required ModuleChoice Modules { get; init; }
 
         /// <summary>Gets the image the agent runs.</summary>
         public required string Image { get; init; }
@@ -123,8 +126,11 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         // Before anything below uses a setting from .pen/.
         new TrustGate(context, answers, catalog).RequireForSession(flagTools);
         var mounts = RepoGuard.PrepareMounts(Project.Dir, context.Host.Home);
-        // What the session-end check takes as the submodules' own (PrepareMounts protects them).
-        var modules = Project.IsRepo ? RepoScan.FindModuleRepos(Project.CommonGitDir!) : [];
+        // PrepareMounts protects every module repo; the session-end check takes as the submodules' own only those
+        // listed.
+        var modules = Project.IsRepo
+            ? ModuleBaseline.ChooseAtStart(Project.Key, RuntimeDir, Project.CommonGitDir!, Project.Dir)
+            : ModuleChoice.None;
         var image = EnsureImage(tools);
         // Under rootless Docker, the host user is container root: the agent
         // runs as UID 0 (with no capabilities) on a read-only root filesystem.
@@ -278,8 +284,10 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         Preparation prepared,
         IReadOnlyList<int> forwarded)
     {
-        ProtectedFiles.Save(session, prepared.Mounts, Project.Dir,
-            SessionRegistry.FindRunning(Project.Key, RuntimeDir));
+        // The protected files and the module list, by the open sessions' lists read again: one that opened between
+        // Prepare's read and its scan could have made a repo the scan found.
+        ModuleBaseline.NarrowAndSave(session, prepared.Mounts, prepared.Modules, RuntimeDir, Project.CommonGitDir,
+            Project.Dir);
         var env = BuildEnv(prepared);
         File.WriteAllLines(session.EnvFile, env.Select(variable => $"{variable.Key}={variable.Value}"));
         WriteRecords(session, request, prepared, forwarded);
@@ -304,8 +312,8 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     }
 
     /// <summary>
-    /// Writes the session's records: the common git dir and module repos at the start, the docker marker, and its
-    /// ports, tools, command and start time.
+    /// Writes the session's records for pen ps and the stack: the docker marker, and its ports, tools, command and
+    /// start time.
     /// </summary>
     private void WriteRecords(
         SessionDir session,
@@ -313,11 +321,6 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         Preparation prepared,
         IReadOnlyList<int> forwarded)
     {
-        if (Project.IsRepo)
-        {
-            File.WriteAllText(session.StartedWithGit, Project.CommonGitDir + "\n");
-            session.WriteModules(prepared.Modules);
-        }
         if (request.Docker)
             File.WriteAllText(session.DockerMarker, "");
         session.WritePorts(forwarded);
@@ -582,12 +585,13 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     }
 
     /// <summary>Deletes an ended session's files, except proxy.log and proxy.log.1.</summary>
-    private static void DeleteSessionFiles(SessionDir session)
+    internal static void DeleteSessionFiles(SessionDir session)
     {
         foreach (var entry in Directory.EnumerateFileSystemEntries(session.Path))
         {
             if (entry == session.ProxyLog || entry == session.PreviousProxyLog || entry == session.LockFile
-                || entry == session.ComposeFile || entry == session.RestoredManifest)
+                || entry == session.ComposeFile || entry == session.RestoredManifest
+                || entry == session.StartedWithGit || entry == session.ModulesFile)
             {
                 continue;
             }
@@ -597,10 +601,12 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
             else
                 File.Delete(entry);
         }
-        // compose.yaml marks the session open, so it goes last but for the lock and
-        // the record of what it vouched for: an open session always has that record.
+        // compose.yaml marks the session open, so it goes last but for the lock and the records of what it vouched
+        // for and the module repos it listed: an open session always has those records.
         File.Delete(session.ComposeFile);
         File.Delete(session.RestoredManifest);
+        File.Delete(session.StartedWithGit);
+        File.Delete(session.ModulesFile);
         File.Delete(session.LockFile);
     }
 

@@ -11,11 +11,16 @@ public class ConfigWorktreeQuarantineTests
 
     private static SessionDir Started(TempDir t, string dir, string common, string id = "aaaaaaaa", IReadOnlyList<SessionDir>? running = null)
     {
+        // As Session does: the module repos every open session listed, and the rest unlisted.
+        var open = running ?? [];
+        var lists = ModuleBaseline.ReadOpenLists(open, common, dir);
         var mounts = RepoGuard.PrepareMounts(dir, "/nonexistent-home");
+        var found = RepoScan.FindModuleRepos(common);
+        var modules = ModuleBaseline.Choose(found, lists);
         var s = new SessionDir(Key, t.Sub("runtime", "sessions", id));
         File.WriteAllText(s.StartedWithGit, common + "\n");
-        s.WriteModules(RepoScan.FindModuleRepos(common));
-        ProtectedFiles.Save(s, mounts, dir, running ?? []);
+        s.WriteModules(modules);
+        ProtectedFiles.Save(s, mounts, dir, open, found.Except(modules, StringComparer.Ordinal).ToList());
         return s;
     }
 
@@ -399,6 +404,9 @@ public class ConfigWorktreeQuarantineTests
         using var t = new TempDir();
         var (repo, git) = Repo(t);
         var older = new SessionDir(Key, t.Sub("runtime", "sessions", "aaaaaaaa"));
+        // Its module repos are recorded, but its manifest is missing or damaged.
+        File.WriteAllText(older.StartedWithGit, git + "\n");
+        older.WriteModules([]);
         File.WriteAllText(older.ComposeFile, "");
         var file = Path.Combine(git, "config.worktree");
         File.WriteAllText(file, "[core]\n\tfsmonitor = /evil\n");
