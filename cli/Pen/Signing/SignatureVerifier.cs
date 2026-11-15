@@ -1,4 +1,3 @@
-using System.Text;
 using Pen.Platform;
 
 namespace Pen.Signing;
@@ -100,8 +99,8 @@ internal sealed class SignatureVerifier(HostGit git)
 
     /// <summary>Runs one <c>git log</c> that prints %H %G? %GT for each of <paramref name="commits"/>.</summary>
     private static GitResult ReadSignatures(HostGit verifying, IReadOnlyList<string> commits) => verifying.Run(
-        ["log", "--no-walk=unsorted", "--stdin", "--no-show-signature", "--no-notes", "--format=%H %G? %GT"],
-        Encoding.ASCII.GetBytes(string.Join('\n', commits) + "\n"));
+        [.. HostGit.LogEachArgs, "--format=%H %G? %GT"],
+        HostGit.EncodeLines(commits));
 
     /// <summary>Ranks a gpg trust level, case-insensitively.</summary>
     /// <returns>Its rank from 0 (undefined) to 4 (ultimate), or -1 for a level that isn't one of them.</returns>

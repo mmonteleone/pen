@@ -93,10 +93,8 @@ internal sealed class BranchSigner(HostGit git)
     /// <exception cref="PenException">git rev-list failed.</exception>
     public List<string> FindOnARemote(string baseCommit, string head, IReadOnlyList<string> range)
     {
-        var result = git.Run("rev-list", $"{baseCommit}..{head}", "--not", "--remotes");
-        if (!result.Ok)
-            throw new PenException($"git rev-list failed: {result.Stderr.Trim()}");
-        var unpushed = result.Lines.ToHashSet(StringComparer.Ordinal);
+        var unpushed = git.ReadLines("rev-list", $"{baseCommit}..{head}", "--not", "--remotes")
+            .ToHashSet(StringComparer.Ordinal);
         return range.Where(commit => !unpushed.Contains(commit)).ToList();
     }
 

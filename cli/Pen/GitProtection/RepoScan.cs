@@ -47,7 +47,7 @@ internal static class RepoScan
     /// <returns>What the walk found, as for the overload taking the module repos.</returns>
     public static NestedScan ScanNested(string root, string commonGitDir)
     {
-        var moduleRepos = FindModuleRepos(commonGitDir).Where(repo => !IsLinkPath(repo)).ToList();
+        var moduleRepos = FindModuleRepos(commonGitDir).Where(repo => !RepoGuard.IsLink(repo)).ToList();
         return ScanNested(root, commonGitDir, moduleRepos, tryOpen: null);
     }
 
@@ -141,7 +141,7 @@ internal static class RepoScan
     {
         try
         {
-            if (IsLinkPath(gitFile))
+            if (RepoGuard.IsLink(gitFile))
                 return null;
             var entry = ReadRealWorktreeEntry(gitFile);
             if (entry == null)
@@ -156,11 +156,7 @@ internal static class RepoScan
                 return null;
             return PointsBackTo(entry, gitFile) ? common : null;
         }
-        catch (IOException)
-        {
-            return null;
-        }
-        catch (UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return null;
         }
@@ -212,11 +208,7 @@ internal static class RepoScan
                 gitdir = Path.Combine(Path.GetDirectoryName(gitFile)!, gitdir);
             return Path.GetFullPath(gitdir).TrimEnd('/');
         }
-        catch (IOException)
-        {
-            return null;
-        }
-        catch (UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return null;
         }
@@ -241,7 +233,7 @@ internal static class RepoScan
     {
         try
         {
-            if (moduleRepos.Count == 0 || IsLinkPath(gitFile))
+            if (moduleRepos.Count == 0 || RepoGuard.IsLink(gitFile))
                 return null;
             var gitdir = ReadPathFile(gitFile, "gitdir: ");
             if (gitdir == null)
@@ -255,11 +247,7 @@ internal static class RepoScan
                 return null;
             return HasWorktreeAt(real, checkout) ? real : null;
         }
-        catch (IOException)
-        {
-            return null;
-        }
-        catch (UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return null;
         }
@@ -276,7 +264,7 @@ internal static class RepoScan
     private static bool HasWorktreeAt(string repo, string checkout)
     {
         var config = Path.Combine(repo, "config");
-        if (IsLinkPath(config))
+        if (RepoGuard.IsLink(config))
             return false;
         var worktree = GitConfigFile.ParseFile(config)
             .Where(e => e.Section == "core" && e.Subsection == null && e.Key == "worktree")
@@ -322,13 +310,13 @@ internal static class RepoScan
     private static bool IsGitDirLayout(string dir) =>
         File.Exists(Path.Combine(dir, "HEAD")) &&
         ((Directory.Exists(Path.Combine(dir, "objects")) && Directory.Exists(Path.Combine(dir, "refs")))
-         || Path.Exists(Path.Combine(dir, "commondir")) || IsLinkPath(Path.Combine(dir, "commondir")));
+         || RepoGuard.Exists(Path.Combine(dir, "commondir")));
 
     /// <summary>Reads a one-line file's value after <paramref name="prefix"/>.</summary>
     /// <returns>The value, or null if the file doesn't have that shape.</returns>
     private static string? ReadPathFile(string path, string prefix)
     {
-        if (!File.Exists(path) || IsLinkPath(path))
+        if (!File.Exists(path) || RepoGuard.IsLink(path))
             return null;
         var text = Native.ReadRegularFile(path);
         if (text == null || !text.StartsWith(prefix, StringComparison.Ordinal))
@@ -336,8 +324,6 @@ internal static class RepoScan
         var value = text[prefix.Length..].TrimEnd('\n', '\r');
         return value.Length == 0 || value.Contains('\n') || value.Contains('\0') ? null : value;
     }
-
-    private static bool IsLinkPath(string path) => new FileInfo(path).LinkTarget != null;
 
     /// <summary>One walk of a project's tree, collecting what it finds.</summary>
     private sealed class NestedWalk(
@@ -499,7 +485,7 @@ internal static class RepoScan
         {
             WalkModules(Path.Combine(gitDir, "modules"));
             var worktrees = Path.Combine(gitDir, "worktrees");
-            if (IsLinkPath(worktrees) || !Directory.Exists(worktrees))
+            if (RepoGuard.IsLink(worktrees) || !Directory.Exists(worktrees))
                 return; // a symlinked worktrees/ is refused by the mounts
             var entries = ListOrNote(worktrees);
             if (entries == null)
@@ -509,7 +495,7 @@ internal static class RepoScan
                 return;
             foreach (var worktree in entries)
             {
-                if (!undecodable.Contains(Path.GetFileName(worktree)) && !IsLinkPath(worktree))
+                if (!undecodable.Contains(Path.GetFileName(worktree)) && !RepoGuard.IsLink(worktree))
                     WalkModules(Path.Combine(worktree, "modules"));
             }
         }
@@ -519,7 +505,7 @@ internal static class RepoScan
         /// </summary>
         private void WalkModules(string dir)
         {
-            if (IsLinkPath(dir))
+            if (RepoGuard.IsLink(dir))
             {
                 _repos.Add(dir);
                 return;
@@ -549,7 +535,7 @@ internal static class RepoScan
             // Before the symlink test, so a quarantined symlink isn't flagged and renamed again.
             if (Path.GetFileName(entry).Contains(GitCheck.Suffix, StringComparison.Ordinal))
                 return true;
-            if (IsLinkPath(entry))
+            if (RepoGuard.IsLink(entry))
             {
                 _repos.Add(entry);
             }

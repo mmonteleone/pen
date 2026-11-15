@@ -141,7 +141,7 @@ internal sealed class GitCheckRun
                 + "this machine can still enter them and run what's there (shown with octal escapes): "
                 + string.Join(", ", RepoGuard.FormatBadNames(_dir, _badNames)));
         }
-        if (_moved.Any(quarantined => quarantined.To.Length == 0))
+        if (_moved.Any(quarantined => quarantined.Failed))
             failures.Add("a file named above couldn't be moved out of git's way or restored");
         var failure = failures.Count == 0 ? null : string.Join("; ", failures);
         return new() { Moved = _moved, Failure = failure, Paused = _paused };
@@ -493,9 +493,9 @@ internal sealed class GitCheckRun
     private bool TryRenameWithOpening(string path, string why, bool breakLayout)
     {
         var attempt = GitCheck.Move(path, why, breakLayout);
-        if (attempt.To.Length == 0 && _tryOpenForWriting?.Invoke(Path.GetDirectoryName(path)!) == true)
+        if (attempt.Failed && _tryOpenForWriting?.Invoke(Path.GetDirectoryName(path)!) == true)
             attempt = GitCheck.Move(path, why, breakLayout);
-        if (attempt.To.Length == 0)
+        if (attempt.Failed)
             return false;
         _moved.Add(attempt);
         return true;

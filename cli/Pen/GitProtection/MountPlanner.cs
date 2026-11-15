@@ -359,7 +359,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
 
         // As the OS walks it: ".." after a symlink is the parent of where that leads.
         var written = Path.GetFullPath(path);
-        var real = HooksPath.WalkRealPath(path, _ => false, out _)
+        var real = HooksPath.WalkRealPath(path)
             ?? throw new PenException($"{FormatPath(configFile)} includes " +
                 $"{FormatPath(written)}, and pen can't follow that path to the file git " +
                 "would read: fix its permissions or remove the include, then rerun");

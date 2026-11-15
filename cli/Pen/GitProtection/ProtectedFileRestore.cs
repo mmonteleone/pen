@@ -88,7 +88,7 @@ internal sealed class ProtectedFileRestore
             return true;
         foreach (var file in manifest.Files.Where(file => !file.Adopted))
             RestoreOrRecord(file);
-        if (_moved.Any(quarantined => quarantined.To.Length == 0))
+        if (_moved.Any(quarantined => quarantined.Failed))
             return false;
         File.Move(_session.ProtectedManifest, _session.RestoredManifest, overwrite: true);
         Directory.Delete(_session.ProtectedDir, recursive: true);
@@ -194,7 +194,7 @@ internal sealed class ProtectedFileRestore
             "start of the session (a symlink, a directory, or too big or unreadable " +
             "to compare), so it was moved aside and the original put back", breakLayout: false);
         _moved.Add(quarantined);
-        if (quarantined.To.Length > 0)
+        if (!quarantined.Failed)
             ProtectedFiles.WriteNew(file.Path, original, file.Mode);
     }
 
@@ -311,6 +311,6 @@ internal sealed class ProtectedFileRestore
             ?? throw new PenException("it can't be opened");
         File.SetUnixFileMode(handle, file.Mode);
         _restored.Add(new(file.Path, "its mode was changed during the session to " +
-            $"{Convert.ToString((int)was, 8)}, and is back to {Convert.ToString((int)file.Mode, 8)}"));
+            $"{GitCheck.Octal(was)}, and is back to {GitCheck.Octal(file.Mode)}"));
     }
 }

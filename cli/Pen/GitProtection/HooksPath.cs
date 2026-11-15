@@ -48,6 +48,9 @@ internal static class HooksPath
     /// <summary>How many symlinks one path may pass through before it's taken as unresolvable.</summary>
     private const int MaxLinks = 40;
 
+    /// <summary>How many GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n pairs are read from the environment.</summary>
+    private const int MaxEnvironmentConfigs = 100;
+
     private const string Optional = ":(optional)";
 
     /// <summary>The places a system config is kept, by how git was built and installed.</summary>
@@ -163,7 +166,7 @@ internal static class HooksPath
         if (workTree.Value.Contains('\ufffd'))
             return null;
         // core.worktree is relative to the git dir holding it.
-        return WalkRealPath(Path.Combine(gitDir, workTree.Value), _ => false, out _);
+        return WalkRealPath(Path.Combine(gitDir, workTree.Value));
     }
 
     /// <summary>
@@ -174,7 +177,7 @@ internal static class HooksPath
     {
         if (!int.TryParse(env("GIT_CONFIG_COUNT"), System.Globalization.CultureInfo.InvariantCulture, out int count))
             return;
-        for (int i = 0; i < count && i < RepoGuard.MaxIncludeFiles; i++)
+        for (int i = 0; i < count && i < MaxEnvironmentConfigs; i++)
         {
             var key = env($"GIT_CONFIG_KEY_{i}") ?? "";
             var source = $"GIT_CONFIG_KEY_{i}";
@@ -303,7 +306,7 @@ internal static class HooksPath
         if (fromTop == Place.Writable || project.CommonGitDir is not { } common)
             return fromTop;
         // .git/hooks, as a work tree path: the read-only one is the one meant.
-        if (top != null && WalkRealPath(top + "/" + value, _ => false, out _) is { } real
+        if (top != null && WalkRealPath(top + "/" + value) is { } real
             && RepoGuard.IsInside(Path.Combine(common, "hooks"), real))
         {
             return fromTop;
@@ -345,6 +348,16 @@ internal static class HooksPath
     }
 
     /// <summary>
+    /// Resolves the real path of <paramref name="path"/> as the OS would walk it, one name at a time, when nothing on
+    /// the walk needs checking for whether the sandbox can replace it.
+    /// </summary>
+    /// <param name="path">The path to walk.</param>
+    /// <returns>
+    /// The real path, or null if a directory on the way can't be entered or the path passes through too many links.
+    /// </returns>
+    internal static string? WalkRealPath(string path) => WalkRealPath(path, _ => false, out _);
+
+    /// <summary>
     /// Resolves the real path of <paramref name="path"/> as the OS would walk it, one name at a time.
     /// </summary>
     /// <param name="path">The path to walk.</param>
@@ -375,7 +388,8 @@ internal static class HooksPath
     }
 
     /// <summary>
-    /// Walks <paramref name="path"/> one name at a time, following symlinks, for <see cref="WalkRealPath"/>.
+    /// Walks <paramref name="path"/> one name at a time, following symlinks, for
+    /// <see cref="WalkRealPath(string, Func{string, bool}, out bool)"/>.
     /// </summary>
     /// <returns>The real path, or null if a directory can't be entered or there are too many links.</returns>
     private static string? WalkNames(string path, Func<string, bool> canBeReplaced, ref bool replaceable)

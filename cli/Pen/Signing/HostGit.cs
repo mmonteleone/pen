@@ -27,6 +27,13 @@ internal sealed class HostGit
 
     private static readonly string[] ForcedEnv = ["GIT_NO_LAZY_FETCH", "GIT_NO_REPLACE_OBJECTS"];
 
+    /// <summary>
+    /// The start of a <c>git log</c> that prints exactly the commits given one per line on stdin, in that order,
+    /// without signature output or notes; a --format argument follows.
+    /// </summary>
+    public static readonly IReadOnlyList<string> LogEachArgs =
+        ["log", "--no-walk=unsorted", "--stdin", "--no-show-signature", "--no-notes"];
+
     private readonly string? _dir;
     private readonly IReadOnlyList<string> _config;
     private readonly IReadOnlyDictionary<string, string>? _env;
@@ -114,6 +121,21 @@ internal sealed class HostGit
             throw new PenException($"git {string.Join(' ', args)} failed: {result.Stderr.Trim()}");
         return result.Text.Trim();
     }
+
+    /// <summary>Runs git and reads the lines of its stdout.</summary>
+    /// <returns>The non-empty lines of stdout.</returns>
+    /// <exception cref="PenException">git failed; the message names its subcommand and has its error.</exception>
+    public IEnumerable<string> ReadLines(params string[] args)
+    {
+        var result = Run(args);
+        if (!result.Ok)
+            throw new PenException($"git {args[0]} failed: {result.Stderr.Trim()}");
+        return result.Lines;
+    }
+
+    /// <summary>Encodes <paramref name="lines"/> for git's stdin, each ending in a newline.</summary>
+    public static byte[] EncodeLines(IEnumerable<string> lines) =>
+        Encoding.ASCII.GetBytes(string.Join('\n', lines) + "\n");
 
     /// <summary>Runs git and reads its stdout, if it succeeds.</summary>
     /// <returns>The trimmed stdout, or null when git fails (e.g. a config key that isn't set).</returns>

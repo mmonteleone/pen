@@ -181,11 +181,11 @@ internal static class GitCheck
         foreach (var quarantined in moved)
         {
             text.Append("  ").Append(RepoGuard.FormatPath(dir, quarantined.From));
-            if (quarantined.To.Length > 0)
+            if (!quarantined.Failed)
                 text.Append(" → ").Append(RepoGuard.FormatPath(dir, quarantined.To));
             text.AppendLine().Append("      ").AppendLine(quarantined.Why);
         }
-        var restorable = moved.Where(quarantined => quarantined.To.Length > 0).ToList();
+        var restorable = moved.Where(quarantined => !quarantined.Failed).ToList();
         if (restorable.Count > 0)
         {
             text.AppendLine("pen: Inspect each one before putting it back (a hook or a " +
@@ -274,7 +274,8 @@ internal static class GitCheck
             Out.WriteRaw(NotCheckedWarning(dir, check.Failure));
     }
 
-    private static string Octal(UnixFileMode mode) => Convert.ToString((int)mode, 8);
+    /// <summary>Formats a file mode in octal, as chmod takes it.</summary>
+    internal static string Octal(UnixFileMode mode) => Convert.ToString((int)mode, 8);
 
     /// <summary>
     /// Quotes a path as one word of a command the user pastes, in sh, bash, zsh or fish 3.4+, on a name the agent

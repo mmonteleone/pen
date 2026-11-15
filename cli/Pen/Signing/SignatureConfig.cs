@@ -17,7 +17,7 @@ internal static class SignatureConfig
     /// </remarks>
     public static List<string> BuildForVerifying(HostGit git)
     {
-        var config = BuildPrograms(git);
+        var config = BuildPrograms(git, git.ReadGlobalValue("gpg.format") ?? "openpgp");
         config.AddRange(FormatSetting("gpg.ssh.allowedSignersFile",
             KeepIfOutsideTheRepo(git.ReadGlobalValue("gpg.ssh.allowedSignersFile")) ?? "/dev/null"));
         config.AddRange(FormatSetting("gpg.ssh.revocationFile",
@@ -35,8 +35,8 @@ internal static class SignatureConfig
     /// <remarks>They go on the command line so the repo can't substitute its own signing program.</remarks>
     public static List<string> BuildForSigning(HostGit git)
     {
-        var config = BuildPrograms(git);
         var format = git.ReadGlobalValue("gpg.format") ?? "openpgp";
+        var config = BuildPrograms(git, format);
         var key = git.ReadGlobalValue("user.signingkey");
         var keyCommand = git.ReadGlobalValue("gpg.ssh.defaultKeyCommand");
         if (key != null)
@@ -72,20 +72,22 @@ internal static class SignatureConfig
     }
 
     /// <summary>Builds the settings for the format and every program git could run for it.</summary>
+    /// <param name="git">The git whose global config is read.</param>
+    /// <param name="format">The global gpg.format, or "openpgp" if it isn't set.</param>
     /// <returns>The settings as "-c key=value" pairs, already split.</returns>
     /// <remarks>
     /// All of them, whatever the format: to verify, git picks the program by the type of the signature, which the
     /// agent chooses. Where one isn't set globally, git's default is passed instead, since a missing override
     /// overrides nothing.
     /// </remarks>
-    private static List<string> BuildPrograms(HostGit git)
+    private static List<string> BuildPrograms(HostGit git, string format)
     {
+        var program = git.ReadGlobalValue("gpg.program");
+        var openpgpProgram = git.ReadGlobalValue("gpg.openpgp.program");
         var config = new List<string>();
-        config.AddRange(FormatSetting("gpg.format", git.ReadGlobalValue("gpg.format") ?? "openpgp"));
-        config.AddRange(FormatSetting("gpg.program",
-            git.ReadGlobalValue("gpg.program") ?? git.ReadGlobalValue("gpg.openpgp.program") ?? "gpg"));
-        config.AddRange(FormatSetting("gpg.openpgp.program",
-            git.ReadGlobalValue("gpg.openpgp.program") ?? git.ReadGlobalValue("gpg.program") ?? "gpg"));
+        config.AddRange(FormatSetting("gpg.format", format));
+        config.AddRange(FormatSetting("gpg.program", program ?? openpgpProgram ?? "gpg"));
+        config.AddRange(FormatSetting("gpg.openpgp.program", openpgpProgram ?? program ?? "gpg"));
         config.AddRange(FormatSetting("gpg.x509.program", git.ReadGlobalValue("gpg.x509.program") ?? "gpgsm"));
         config.AddRange(FormatSetting("gpg.ssh.program", git.ReadGlobalValue("gpg.ssh.program") ?? "ssh-keygen"));
         return config;

@@ -16,7 +16,7 @@ internal sealed class CommitReader(HostGit git)
         var result = new Dictionary<string, CommitObject>(StringComparer.Ordinal);
         if (commits.Count == 0)
             return result;
-        var batch = git.Run(["cat-file", "--batch"], Encoding.ASCII.GetBytes(string.Join('\n', commits) + "\n"));
+        var batch = git.Run(["cat-file", "--batch"], HostGit.EncodeLines(commits));
         if (!batch.Ok)
             throw new PenException($"git cat-file failed: {batch.Stderr.Trim()}");
         var bytes = batch.Stdout;
@@ -43,8 +43,8 @@ internal sealed class CommitReader(HostGit git)
     public void CheckMatchesGit(IReadOnlyList<string> commits, IReadOnlyDictionary<string, CommitObject> parsed)
     {
         var result = git.Run(
-            ["log", "--no-walk=unsorted", "--stdin", "--no-show-signature", "--no-notes", "--format=%H %T %P"],
-            Encoding.ASCII.GetBytes(string.Join('\n', commits) + "\n"),
+            [.. HostGit.LogEachArgs, "--format=%H %T %P"],
+            HostGit.EncodeLines(commits),
             new Dictionary<string, string> { ["GIT_GRAFT_FILE"] = "/dev/null", ["GIT_SHALLOW_FILE"] = "/dev/null" });
         if (!result.Ok)
             throw new PenException($"git can't read these commits: {result.Stderr.Trim()}");

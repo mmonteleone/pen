@@ -387,11 +387,7 @@ internal static class RepoGuard
                 text = Path.Combine(entry, text);
             return IsInside(dir, ResolveExisting(Path.GetFullPath(text)));
         }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return false;
         }
