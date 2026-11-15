@@ -773,6 +773,22 @@ public class SignTests
     }
 
     [Fact]
+    public void AMissingCommitInTheRange_FailsWithGitsError()
+    {
+        using var f = new Fixture();
+        SetBase(f);
+        var middle = f.Commit("a", "1", "A <a@x.io>", "2026-01-01T00:00:00Z", "one");
+        var head = f.Commit("a", "2", "A <a@x.io>", "2026-01-02T00:00:00Z", "two");
+        File.Delete(f.ObjectPath(middle));
+
+        var e = Assert.Throws<PenException>(() => new BranchSigner(f.Git).Sign(null));
+
+        Assert.StartsWith("git rev-list failed: ", e.Message);
+        Assert.Contains(middle, e.Message); // git names the commit it couldn't read
+        Assert.Equal(head, f.Head());
+    }
+
+    [Fact]
     public void ALevelOfUndefinedStillOnlyAcceptsAGoodVerifiedSignature()
     {
         using var f = new Fixture();

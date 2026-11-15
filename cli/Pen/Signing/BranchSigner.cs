@@ -79,14 +79,9 @@ internal sealed class BranchSigner(HostGit git)
     }
 
     /// <summary>Lists the commits in <c>base..head</c>, oldest first, parents before children.</summary>
-    /// <exception cref="PenException">git rev-list failed.</exception>
-    public List<string> ListRange(string baseCommit, string head)
-    {
-        var result = git.Run("rev-list", "--reverse", "--topo-order", $"{baseCommit}..{head}");
-        if (!result.Ok)
-            throw new PenException($"git rev-list failed");
-        return result.Lines.ToList();
-    }
+    /// <exception cref="PenException">git rev-list failed; the message has its error.</exception>
+    public List<string> ListRange(string baseCommit, string head) =>
+        git.ReadLines("rev-list", "--reverse", "--topo-order", $"{baseCommit}..{head}").ToList();
 
     /// <summary>Finds the commits in <paramref name="range"/> that are also on a remote branch.</summary>
     /// <returns>Those commits, in range order; a remote branch is any ref under refs/remotes/.</returns>
