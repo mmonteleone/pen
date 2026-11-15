@@ -1,7 +1,8 @@
 namespace Pen.SmokeTests;
 
 /// <summary>What pen refuses to start in, and what it starts in anyway: forged worktrees, directories it can't
-/// list, a FIFO named .git, nested and bare repos, and worktrees under .claude/.</summary>
+/// list, a FIFO named .git, nested and bare repos, a repo in the git dir, a symlink into the git dir, and worktrees
+/// under .claude/.</summary>
 public sealed class RepoRefusalTests(RepoRefusalTests.Fixture fixture) : IClassFixture<RepoRefusalTests.Fixture>
 {
     [Fact(DisplayName = "refuses a .git file that isn't a valid linked worktree (see LinkedWorktreeTests)")]
@@ -25,6 +26,14 @@ public sealed class RepoRefusalTests(RepoRefusalTests.Fixture fixture) : IClassF
             () => SmokeAssert.Refused(fixture.Nested, "run pen in each repo instead"),
             () => Assert.Equal(0, fixture.ContainersAfterNested));
 
+    [Fact(DisplayName = "refuses a repo inside the git dir (git init .git/foo/bar)")]
+    public void GitDirRepoIsRefused() =>
+        SmokeAssert.Refused(fixture.GitDirRepo, "its git dir has repos where git keeps none");
+
+    [Fact(DisplayName = "refuses a symlink into the git dir (docs -> .git/refs)")]
+    public void GitDirLinkIsRefused() =>
+        SmokeAssert.Refused(fixture.GitDirLink, "these symlinks lead into its git dir");
+
     [Fact(DisplayName = "a git worktree add worktree under .claude/worktrees/ starts normally")]
     public void ClaudeWorktreeStarts() => SmokeAssert.Succeeded(fixture.ClaudeWorktree);
 
@@ -47,6 +56,10 @@ public sealed class RepoRefusalTests(RepoRefusalTests.Fixture fixture) : IClassF
         internal CommandResult Nested { get; private set; } = null!;
 
         internal int ContainersAfterNested { get; private set; }
+
+        internal CommandResult GitDirRepo { get; private set; } = null!;
+
+        internal CommandResult GitDirLink { get; private set; } = null!;
 
         internal CommandResult ClaudeWorktree { get; private set; } = null!;
 
@@ -78,6 +91,15 @@ public sealed class RepoRefusalTests(RepoRefusalTests.Fixture fixture) : IClassF
             ContainersAfterNested = Docker.CountContainers(Key);
             Files.DeleteTree(Path.Combine(Project.Dir, "libs"));
             Files.DeleteTree(Path.Combine(Project.Dir, "sub2"));
+
+            Project.RunGit("init", "-q", ".git/foo/bar");
+            GitDirRepo = Cli.Run("run", "true");
+            Files.DeleteTree(Path.Combine(Project.Dir, ".git", "foo"));
+
+            var docs = Path.Combine(Project.Dir, "docs");
+            Directory.CreateSymbolicLink(docs, ".git/refs");
+            GitDirLink = Cli.Run("run", "true");
+            File.Delete(docs);
 
             Project.RunGit("worktree", "add", "-q", ".claude/worktrees/x");
             ClaudeWorktree = Cli.Run("run", "true");

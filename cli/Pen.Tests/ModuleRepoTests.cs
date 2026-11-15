@@ -438,9 +438,16 @@ public class ModuleRepoTests
         var super = Super(t);
         var mid = Path.Combine(super, ".git", "modules", "libs", "mid");
         var moved = GitCheck.RunWithoutOpening(super, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved;
-        // mid goes, and leaf with it: only one move for the pair, then both checkouts.
-        Assert.Equal([".git/modules/libs/mid", "libs/mid/.git", "libs/mid/deps/leaf/.git"],
+        // mid goes, and leaf with it, as a submodule repo; then both checkouts. Moved aside, leaf is still a git
+        // dir by its layout, which git run there (through a symlink) would use, so the walk of the git dir breaks
+        // that where it now is, and only that.
+        Assert.Equal(
+            [
+                ".git/modules/libs/mid", ".git/modules/libs/mid.pen-quarantine/modules/deps/leaf/HEAD",
+                "libs/mid/.git", "libs/mid/deps/leaf/.git",
+            ],
             moved.Select(q => RepoGuard.FormatPath(super, q.From)).Order(StringComparer.Ordinal));
+        Assert.Empty(GitCheck.RunWithoutOpening(super, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved);
         Assert.False(Directory.Exists(mid));
         Assert.Empty(RepoScan.FindModuleRepos(Path.Combine(super, ".git")));
     }

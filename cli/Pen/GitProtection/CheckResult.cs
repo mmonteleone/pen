@@ -26,15 +26,34 @@ internal sealed record CheckResult
     public List<PausedOp> Paused { get; init; } = [];
 }
 
-/// <summary>One rename the check made, or one it couldn't make.</summary>
-/// <param name="From">What was moved.</param>
-/// <param name="To">Where it went, or empty if it couldn't be moved (or restored).</param>
+/// <summary>One rename the check made, or one it couldn't make, or a symlink it removed.</summary>
+/// <param name="From">What was moved, or removed.</param>
+/// <param name="To">Where it went, or empty if it was removed or couldn't be moved (or restored).</param>
 /// <param name="Why">Why it was moved, and if it couldn't be, why not.</param>
 /// <param name="Inner">A second rename inside the moved item (a .git directory's HEAD), if any.</param>
-internal sealed record Quarantined(string From, string To, string Why, (string From, string To)? Inner = null)
+/// <param name="LinkTarget">
+/// For a symlink removed rather than renamed (it holds no data, and under any name leads to the same place), what it
+/// held, so it can be made again.
+/// </param>
+/// <param name="LinkTargetEscaped">
+/// Whether what the symlink held isn't valid UTF-8, so <see cref="LinkTarget"/> shows it with octal escapes and
+/// names it only for reading.
+/// </param>
+internal sealed record Quarantined(
+    string From,
+    string To,
+    string Why,
+    (string From, string To)? Inner = null,
+    string? LinkTarget = null,
+    bool LinkTargetEscaped = false)
 {
-    /// <summary>Whether it couldn't be moved (or restored): <see cref="To"/> is empty.</summary>
-    public bool Failed => To.Length == 0;
+    /// <summary>Whether it was a symlink that was removed.</summary>
+    public bool Removed => LinkTarget != null;
+
+    /// <summary>
+    /// Whether it couldn't be moved (or restored, or removed): <see cref="To"/> is empty and it wasn't removed.
+    /// </summary>
+    public bool Failed => To.Length == 0 && !Removed;
 }
 
 /// <summary>A protected file that changed with nothing to set aside.</summary>

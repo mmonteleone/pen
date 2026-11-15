@@ -306,6 +306,203 @@ internal static partial class Native
         }
     }
 
+    // stat(2) and friends. struct stat differs by platform and architecture, so: on macOS fstatat(2),
+    // whose 64-bit-inode struct has one layout on arm64 and x64 (where the symbol is fstatat$INODE64);
+    // on Linux statx(2), whose struct has one layout on every architecture.
+    [LibraryImport(Libc, EntryPoint = "fstatat", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
+    private static unsafe partial int FStatAtMacArm64(int dirfd, string path, byte* buffer, int flags);
+
+    [LibraryImport(Libc, EntryPoint = "fstatat$INODE64", StringMarshalling = StringMarshalling.Utf8,
+        SetLastError = true)]
+    private static unsafe partial int FStatAtMacX64(int dirfd, string path, byte* buffer, int flags);
+
+    [LibraryImport(Libc, EntryPoint = "statx", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
+    private static unsafe partial int StatxNative(int dirfd, string path, int flags, uint mask, byte* buffer);
+
+    [LibraryImport(Libc, EntryPoint = "readlinkat", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
+    private static unsafe partial nint ReadLinkAtNative(int dirfd, string path, byte* buffer, nuint size);
+
+    // openat(2) is variadic too: as with open, O_CREAT is never passed, so the mode is never read.
+    [LibraryImport(Libc, EntryPoint = "openat", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
+    private static partial int OpenAtNative(int dirfd, string path, int flags);
+
+    [LibraryImport(Libc, EntryPoint = "unlinkat", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
+    private static partial int UnlinkAtNative(int dirfd, string path, int flags);
+
+    private static int AT_FDCWD => OperatingSystem.IsMacOS() ? -2 : -100;
+    private static int AT_SYMLINK_NOFOLLOW => OperatingSystem.IsMacOS() ? 0x20 : 0x100;
+    private static int O_DIRECTORY
+    {
+        get
+        {
+            if (OperatingSystem.IsMacOS())
+                return 0x100000;
+            return RuntimeInformation.ProcessArchitecture is Architecture.Arm64 or Architecture.Arm ? 0x4000 : 0x10000;
+        }
+    }
+
+    // S_IFMT, S_IFDIR and S_IFLNK, the same on both platforms.
+    private const int ModeTypeMask = 0xF000, ModeDirectory = 0x4000, ModeSymlink = 0xA000;
+
+    /// <summary>The size of the buffer given to fstatat or statx: more than either struct needs.</summary>
+    private const int StatBufferSize = 512;
+
+    /// <summary>Whether stat calls work here, found on first use.</summary>
+    private static readonly Lazy<bool> StatWorks = new(() =>
+    {
+        try
+        {
+            return StatAt(AT_FDCWD, "/", follow: true) != null;
+        }
+        catch (Exception exception) when (exception is EntryPointNotFoundException or DllNotFoundException)
+        {
+            return false;
+        }
+    });
+
+    /// <summary>Gets whether <see cref="Stat"/> works on this platform.</summary>
+    /// <remarks>
+    /// macOS on arm64 and x64, and Linux with a libc that has statx (glibc 2.28 and later, musl 1.2.5 and later).
+    /// </remarks>
+    public static bool CanStat => StatWorks.Value;
+
+    /// <summary>Gets what's at <paramref name="path"/> (through a symlink if <paramref name="follow"/>).</summary>
+    /// <returns>What's there, or null if that can't be found out (nothing there, or no stat here).</returns>
+    public static FileStatus? Stat(string path, bool follow) => CanStat ? StatAt(AT_FDCWD, path, follow) : null;
+
+    /// <summary>Gets what's at <paramref name="path"/> relative to the directory <paramref name="dirfd"/>.</summary>
+    /// <returns>What's there, or null if the call failed or the platform's layout isn't known.</returns>
+    private static unsafe FileStatus? StatAt(int dirfd, string path, bool follow)
+    {
+        var flags = follow ? 0 : AT_SYMLINK_NOFOLLOW;
+        var buffer = stackalloc byte[StatBufferSize];
+        var bytes = new ReadOnlySpan<byte>(buffer, StatBufferSize);
+        ulong device;
+        ulong inode;
+        int mode;
+        if (OperatingSystem.IsMacOS())
+        {
+            var result = RuntimeInformation.ProcessArchitecture switch
+            {
+                Architecture.Arm64 => FStatAtMacArm64(dirfd, path, buffer, flags),
+                Architecture.X64 => FStatAtMacX64(dirfd, path, buffer, flags),
+                _ => -1,
+            };
+            if (result != 0)
+                return null;
+            // st_dev (int32) at 0, st_mode (uint16) at 4, st_ino (uint64) at 8.
+            device = MemoryMarshal.Read<uint>(bytes);
+            mode = MemoryMarshal.Read<ushort>(bytes[4..]);
+            inode = MemoryMarshal.Read<ulong>(bytes[8..]);
+        }
+        else if (OperatingSystem.IsLinux())
+        {
+            const uint STATX_TYPE = 0x1, STATX_INO = 0x100;
+            if (StatxNative(dirfd, path, flags, STATX_TYPE | STATX_INO, buffer) != 0)
+                return null;
+            // stx_mode (uint16) at 28, stx_ino (uint64) at 32, stx_dev_major and stx_dev_minor (uint32) at 136.
+            mode = MemoryMarshal.Read<ushort>(bytes[28..]);
+            inode = MemoryMarshal.Read<ulong>(bytes[32..]);
+            device = ((ulong)MemoryMarshal.Read<uint>(bytes[136..]) << 32) | MemoryMarshal.Read<uint>(bytes[140..]);
+        }
+        else
+        {
+            return null;
+        }
+        return new(device, inode, (mode & ModeTypeMask) == ModeDirectory, (mode & ModeTypeMask) == ModeSymlink);
+    }
+
+    /// <summary>The largest symlink target <see cref="ReadLink"/> reads: PATH_MAX on Linux, above macOS's.</summary>
+    private const int MaxLinkTarget = 4096;
+
+    /// <summary>Reads what the symlink at <paramref name="path"/> holds, as its exact bytes.</summary>
+    /// <returns>The bytes, or null if it isn't a symlink or can't be read.</returns>
+    public static byte[]? ReadLink(string path) => CanStat ? ReadLinkAt(AT_FDCWD, path) : null;
+
+    private static unsafe byte[]? ReadLinkAt(int dirfd, string path)
+    {
+        // One spare byte: filling it means the target may be longer than what was read.
+        var buffer = new byte[MaxLinkTarget + 1];
+        nint read;
+        fixed (byte* pointer = buffer)
+            read = ReadLinkAtNative(dirfd, path, pointer, (nuint)buffer.Length);
+        return read < 0 || read > MaxLinkTarget ? null : buffer[..(int)read];
+    }
+
+    /// <summary>
+    /// Removes the symlink at <paramref name="path"/>, below <paramref name="root"/>, opening each directory on the
+    /// way down from <paramref name="root"/> without following a symlink.
+    /// </summary>
+    /// <param name="root">A directory to start from, opened as named.</param>
+    /// <param name="path">The symlink, below <paramref name="root"/>.</param>
+    /// <returns>What the symlink held, as its exact bytes.</returns>
+    /// <exception cref="UnauthorizedAccessException">Permission is denied, naming the directory it was in.</exception>
+    /// <exception cref="IOException">
+    /// Anything else stopped it: what's there isn't a symlink any more, a directory on the way is a symlink now, or
+    /// the platform's flags aren't known.
+    /// </exception>
+    /// <remarks>
+    /// A path, rechecked and then removed, could have a directory on the way swapped for a symlink in between, so
+    /// the removal would happen wherever that leads. Through descriptors, what's checked (fstatat with
+    /// AT_SYMLINK_NOFOLLOW) and what's removed (unlinkat) are in the one directory reached without a symlink, and
+    /// unlinkat without AT_REMOVEDIR never removes a directory.
+    /// </remarks>
+    public static byte[] RemoveSymlink(string root, string path)
+    {
+        // O_NOFOLLOW and O_DIRECTORY differ by architecture on Linux, so this fails closed where they aren't known.
+        if (!CanStat || (!OperatingSystem.IsMacOS()
+            && RuntimeInformation.ProcessArchitecture is not (Architecture.X64 or Architecture.Arm64)))
+        {
+            throw new IOException("pen can't remove a symlink safely on this platform");
+        }
+        var relative = Path.GetRelativePath(root, path);
+        if (relative == "." || relative == ".." || relative.StartsWith("../", StringComparison.Ordinal)
+            || Path.IsPathRooted(relative))
+        {
+            throw new IOException($"it isn't below {root}");
+        }
+        var parts = relative.Split('/');
+        int fd = OpenNative(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        if (fd < 0)
+            throw ErrnoException(root);
+        try
+        {
+            var at = root;
+            foreach (var part in parts[..^1])
+            {
+                at = Path.Combine(at, part);
+                int next = OpenAtNative(fd, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+                if (next < 0)
+                    throw ErrnoException(at);
+                CloseNative(fd);
+                fd = next;
+            }
+            var name = parts[^1];
+            if (StatAt(fd, name, follow: false) is not { IsSymlink: true })
+                throw new IOException("it isn't a symlink any more");
+            var target = ReadLinkAt(fd, name) ?? throw new IOException("what it holds can't be read");
+            if (UnlinkAtNative(fd, name, 0) != 0)
+                throw ErrnoException(at);
+            return target;
+        }
+        finally
+        {
+            CloseNative(fd);
+        }
+    }
+
+    /// <summary>Turns the last call's errno into the exception for <paramref name="path"/>.</summary>
+    private static Exception ErrnoException(string path)
+    {
+        int errno = Marshal.GetLastPInvokeError();
+        if (errno is EACCES or EPERM)
+            return new UnauthorizedAccessException($"Access to the path '{path}' is denied.");
+        // ELOOP (62 on macOS, 40 on Linux), or ENOTDIR: O_NOFOLLOW met a symlink, or O_DIRECTORY something else.
+        if (errno == (OperatingSystem.IsMacOS() ? 62 : 40) || errno == ENOTDIR)
+            return new IOException($"{path} isn't a directory any more (a symlink, say)");
+        return new IOException($"{path}: {Marshal.GetPInvokeErrorMessage(errno)}");
+    }
+
     /// <summary>Checks whether the file descriptor <paramref name="fd"/> is a terminal, with isatty(3).</summary>
     public static bool IsATty(int fd) => IsATtyNative(fd) == 1;
 

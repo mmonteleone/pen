@@ -23,7 +23,13 @@ public class RepoGuardTests
         Git.Run(repo, "worktree", "add", "-q", Path.Combine(t.Path, "wt"));
         File.WriteAllText(Path.Combine(repo, ".git", "worktrees", "wt", "commondir"), "/tmp/evil\n");
         Assert.Contains("isn't a valid linked worktree", Refusal(Path.Combine(t.Path, "wt")));
-        RepoGuard.CheckAtStart(repo); // the main checkout itself is fine
+        // The forged entry is in the main checkout's git dir, where git run in it would take it for a git dir.
+        var message = Refusal(repo);
+        Assert.Contains("\n  .git/worktrees/wt (a worktree entry whose commondir doesn't lead back to this repo)\n",
+            message);
+        Assert.Contains("git worktree prune removes an entry whose worktree is gone", message);
+        Assert.Contains("git worktree repair mends one whose worktree moved", message);
+        Assert.EndsWith("\ninspect any others and remove them, then rerun", message);
     }
 
     [Fact]
@@ -92,6 +98,83 @@ public class RepoGuardTests
     }
 
     [Fact]
+    public void RefusesReposInTheGitDir_NamingEach()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        var git = Path.Combine(repo, ".git");
+        Git.Run(t.Sub("repo", ".git", "a"), "init", "-q");
+        Git.Run(t.Sub("repo", ".git", "b"), "init", "-q", "--bare");
+        File.WriteAllText(Path.Combine(t.Sub("repo", ".git", "c", "d"), ".git"), $"gitdir: {t.Path}/elsewhere\n");
+        Directory.CreateSymbolicLink(Path.Combine(git, ".git"), t.Sub("elsewhere"));
+
+        var message = Refusal(repo);
+
+        Assert.Contains("its git dir has repos where git keeps none", message);
+        Assert.Contains("\n  .git (a .git symlink)\n", message);
+        Assert.Contains("\n  .git/a (a .git dir)\n", message);
+        Assert.Contains("\n  .git/b (laid out as a git dir of its own)\n", message);
+        Assert.Contains("\n  .git/c/d (a .git file that isn't one of this repo's worktrees or submodules)\n", message);
+        Assert.EndsWith("\ninspect each and remove it, then rerun", message);
+    }
+
+    [Fact]
+    public void RefusesASymlinkIntoTheGitDir()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Directory.CreateSymbolicLink(Path.Combine(t.Sub("repo", "src"), "docs"), Path.Combine(repo, ".git", "refs"));
+
+        var message = Refusal(repo);
+
+        Assert.Contains("these symlinks lead into its git dir (or would, once a directory they name is made), so " +
+            "git run through one would use any repo the sandbox puts there", message);
+        Assert.Contains("\n  src/docs\n", message);
+        Assert.EndsWith("\nremove them, then rerun", message);
+    }
+
+    /// <summary>Remote branches named refs/x and objects/y beside origin/HEAD are ref names git takes for a git dir.</summary>
+    [Fact]
+    public void ReposMadeByRefNames_AreRefused_WithAdviceToRenameTheRefs()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Git.Run(repo, "commit", "-q", "--allow-empty", "-m", "init");
+        Git.Run(repo, "update-ref", "refs/remotes/origin/main", "HEAD");
+        Git.Run(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+        Git.Run(repo, "update-ref", "refs/remotes/origin/refs/x", "HEAD");
+        Git.Run(repo, "update-ref", "refs/remotes/origin/objects/y", "HEAD");
+        var origin = Path.Combine(repo, ".git", "refs", "remotes", "origin");
+        Assert.Equal(origin, Native.RealPath(Git.Run(origin, "rev-parse", "--absolute-git-dir").TrimEnd('\n')));
+
+        var message = Refusal(repo);
+
+        Assert.Contains("\n  .git/refs/remotes/origin (ref names that lay it out as a git dir)\n", message);
+        Assert.Contains("those in refs/ or logs/ are ref names that git takes for a repo's layout", message);
+        Assert.Contains("rather than removing them, rename those branches or refs", message);
+        Assert.DoesNotContain("git worktree prune", message);
+    }
+
+    [Fact]
+    public void RefusesADirectoryInTheGitDirItCantList()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        var shut = t.Sub("repo", ".git", "x");
+        File.SetUnixFileMode(shut, UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        try
+        {
+            var message = Refusal(repo);
+            Assert.Contains("pen can't list these directories", message);
+            Assert.Contains("\n  .git/x\n", message);
+        }
+        finally
+        {
+            File.SetUnixFileMode(shut, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Fact]
     public void FindsAGitdirLayoutWithCommondir_AGitFileAndAGitSymlink()
     {
         using var t = new TempDir();
@@ -100,11 +183,14 @@ public class RepoGuardTests
         File.WriteAllText(Path.Combine(wtLike, "HEAD"), "ref: refs/heads/main\n");
         File.WriteAllText(Path.Combine(wtLike, "commondir"), "../.git\n");
         File.WriteAllText(Path.Combine(t.Sub("repo", "b"), ".git"), $"gitdir: {t.Path}/elsewhere\n");
-        Directory.CreateSymbolicLink(Path.Combine(t.Sub("repo", "c"), ".git"), Path.Combine(repo, ".git"));
-        var found = NestedScans.Find(repo);
+        Directory.CreateSymbolicLink(Path.Combine(t.Sub("repo", "c"), ".git"), t.Sub("elsewhere"));
+        // One into the git dir is a symlink into the git dir, which the end check removes rather than renames.
+        Directory.CreateSymbolicLink(Path.Combine(t.Sub("repo", "d"), ".git"), Path.Combine(repo, ".git"));
+        var scan = NestedScans.Scan(repo, Path.Combine(repo, ".git"));
         Assert.Equal(
             [("a/HEAD", NestedKind.Bare), ("b/.git", NestedKind.GitFile), ("c/.git", NestedKind.GitLink)],
-            found.Select(n => (RepoGuard.FormatPath(repo, n.Path), n.Kind)));
+            scan.Repos.Select(n => (RepoGuard.FormatPath(repo, n.Path), n.Kind)));
+        Assert.Equal([Path.Combine(repo, "d", ".git")], scan.GitDirLinks);
     }
 
     [Fact]

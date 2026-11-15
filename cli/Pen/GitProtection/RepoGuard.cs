@@ -30,7 +30,9 @@ internal static class RepoGuard
     /// <para>
     /// Refused: a symlinked .git; a .git file that isn't a validated linked worktree, or a worktree of a bare repo;
     /// a git dir Pen can't list; a commondir in it; module repos it can't read; names that aren't valid UTF-8; a
-    /// directory it can enter but not list; and any repo inside the project.
+    /// directory it can enter but not list; any repo inside the project; a repo anywhere in the git dir where git
+    /// keeps none (<see cref="RepoScan.ScanGitDir"/>); and a symlink in the project, of any name, that leads into the
+    /// git dir, or would once a directory it names is made (<see cref="GitDirLinkCheck"/>).
     /// </para>
     /// <para>
     /// A linked worktree of a non-bare main checkout is accepted when its .git file validates
@@ -51,9 +53,12 @@ internal static class RepoGuard
         // (it requires the gitdir's real path to be the path it reads as), and planning the mounts refuses the symlink.
         var moduleRepos = modules.Repos.Where(repo => !IsLink(repo)).ToList();
         var scan = RepoScan.ScanNested(dir, common, moduleRepos, tryOpen: null);
-        RequireDecodableNames(dir, common, modules, scan);
-        RequireListable(dir, scan);
+        var inGitDir = RepoScan.ScanGitDir(common, moduleRepos, tryOpen: null);
+        RequireDecodableNames(dir, common, modules, scan, inGitDir);
+        RequireListable(dir, scan, inGitDir);
         RequireNoNestedRepos(dir, git, scan.Repos);
+        RequireNoGitDirRepos(dir, common, inGitDir.Repos);
+        RequireNoGitDirLinks(dir, scan.GitDirLinks, scan.UntracedLinks);
     }
 
     /// <summary>Finds the project's common git dir, refusing one Pen can't check.</summary>
@@ -107,13 +112,20 @@ internal static class RepoGuard
         }
     }
 
-    /// <summary>Refuses names in the git dir's module repos or the tree that aren't valid UTF-8.</summary>
+    /// <summary>Refuses names in the git dir, its module repos or the tree that aren't valid UTF-8.</summary>
     /// <remarks>
-    /// Pen can't look inside them, though git on this machine can still enter them and run what's there.
+    /// Pen can't look inside them, though git on this machine can still enter them and run what's there. The walk of
+    /// the git dir meets the names the module walk reports too, so each is listed once.
     /// </remarks>
-    private static void RequireDecodableNames(string dir, string common, ModuleScan modules, NestedScan scan)
+    private static void RequireDecodableNames(
+        string dir,
+        string common,
+        ModuleScan modules,
+        NestedScan scan,
+        NestedScan inGitDir)
     {
-        var badNames = modules.BadNames.Concat(scan.BadNames).ToList();
+        var badNames = modules.BadNames.Concat(inGitDir.BadNames).Concat(scan.BadNames)
+            .DistinctBy(n => n.DisplayPath, StringComparer.Ordinal).ToList();
         if (badNames.Count == 0)
             return;
         var command = "";
@@ -134,11 +146,11 @@ internal static class RepoGuard
             + "\nrename or remove each, then rerun" + command + gitDirNote);
     }
 
-    /// <summary>Refuses directories in the tree that can be entered but not listed.</summary>
+    /// <summary>Refuses directories in the git dir or the tree that can be entered but not listed.</summary>
     /// <remarks>Git on this machine can still enter them, so Pen can't see a repo inside one.</remarks>
-    private static void RequireListable(string dir, NestedScan scan)
+    private static void RequireListable(string dir, NestedScan scan, NestedScan inGitDir)
     {
-        var unlistable = scan.UnlistableDirs;
+        var unlistable = inGitDir.UnlistableDirs.Concat(scan.UnlistableDirs).ToList();
         if (unlistable.Count == 0)
             return;
         var listed = ListFirst(unlistable, MaxListed, u => FormatPath(dir, u));
@@ -160,11 +172,14 @@ internal static class RepoGuard
         bool anySubmodule = false;
         bool anyOther = false;
         // Only the repos listed are looked at for the advice; any not listed may be other repos.
+        bool anyQuarantined = false;
         var listed = ListFirst(nested, MaxListed, repo =>
         {
             bool submodule = repo.Kind == NestedKind.GitDir && IsSubmodulePath(dir, repo.RepoDir);
+            bool quarantined = IsInQuarantine(dir, repo.RepoDir);
             anySubmodule |= submodule;
-            anyOther |= !submodule;
+            anyQuarantined |= quarantined;
+            anyOther |= !submodule && !quarantined;
             var kind = submodule ? " (a submodule with its own .git dir)" : Describe(repo.Kind);
             return FormatPath(dir, repo.RepoDir) + kind;
         });
@@ -177,10 +192,109 @@ internal static class RepoGuard
                 "it moves the submodule's .git dir into this repo's, where pen can protect it");
         }
 
+        if (anyQuarantined)
+            message.Append(QuarantineHint);
         if (anyOther)
             message.Append("\nrun pen in each repo instead");
         throw new PenException(message.ToString());
     }
+
+    /// <summary>Refuses repos in the git dir where git keeps none (<see cref="RepoScan.ScanGitDir"/>).</summary>
+    /// <param name="dir">The project dir.</param>
+    /// <param name="common">The common git dir, which the repos found are inside.</param>
+    /// <param name="found">The repos found in the git dir.</param>
+    /// <remarks>
+    /// Only the repos listed are looked at for the advice: one in refs/ or logs/ is made by ref names, which
+    /// renaming fixes, and a worktree entry may be a stale one, which git can tidy.
+    /// </remarks>
+    private static void RequireNoGitDirRepos(string dir, string common, List<NestedRepo> found)
+    {
+        if (found.Count == 0)
+            return;
+        bool anyRefs = false;
+        bool anyEntry = false;
+        bool anyQuarantined = false;
+        var listed = ListFirst(found, MaxListed, repo =>
+        {
+            var refs = repo is { Place: GitDirPlace.Refs, Kind: NestedKind.Bare };
+            anyRefs |= refs;
+            anyQuarantined |= IsInQuarantine(common, repo.RepoDir);
+            anyEntry |= repo is { Place: GitDirPlace.WorktreeEntry, Kind: NestedKind.Bare };
+            return FormatPath(dir, repo.RepoDir) + (refs ? " (ref names that lay it out as a git dir)" :
+                DescribeInGitDir(repo));
+        });
+        var message = new StringBuilder($"refusing to run in {Out.Field(dir)}: its git dir has repos where git " +
+            "keeps none, whose config and hooks pen can't protect, and git run in their directories (through a " +
+            "symlink, say) would use them:");
+        foreach (var line in listed)
+            message.Append("\n  ").Append(line);
+        if (anyRefs)
+        {
+            message.Append("\nthose in refs/ or logs/ are ref names that git takes for a repo's layout (a branch " +
+                "named HEAD beside ones under objects/ and refs/, say): rather than removing them, rename those " +
+                "branches or refs");
+        }
+        if (anyEntry)
+        {
+            message.Append("\na worktree entry whose commondir leads elsewhere may be a stale one: git worktree " +
+                "prune removes an entry whose worktree is gone, and git worktree repair mends one whose worktree " +
+                "moved");
+        }
+        if (anyQuarantined)
+            message.Append(QuarantineHint);
+        message.Append(anyRefs || anyEntry
+            ? "\ninspect any others and remove them, then rerun"
+            : "\ninspect each and remove it, then rerun");
+        throw new PenException(message.ToString());
+    }
+
+    /// <summary>
+    /// Refuses symlinks in the tree that lead into the git dir, or would once a directory they name is made, and
+    /// those Pen can't tell lead elsewhere (<see cref="GitDirLinkCheck"/>).
+    /// </summary>
+    /// <param name="dir">The project dir.</param>
+    /// <param name="links">The symlinks that lead into the git dir.</param>
+    /// <param name="untraced">The symlinks Pen can't trace.</param>
+    /// <remarks>Git run through one starts in the git dir, where the sandbox could put a repo for it to use.</remarks>
+    private static void RequireNoGitDirLinks(string dir, List<string> links, List<string> untraced)
+    {
+        if (links.Count == 0 && untraced.Count == 0)
+            return;
+        var message = new StringBuilder($"refusing to run in {Out.Field(dir)}: ");
+        if (links.Count > 0)
+        {
+            message.Append("these symlinks lead into its git dir (or would, once a directory they name is made), so " +
+                "git run through one would use any repo the sandbox puts there:");
+            foreach (var line in ListFirst(links, MaxListed, link => FormatPath(dir, link)))
+                message.Append("\n  ").Append(line);
+        }
+        if (untraced.Count > 0)
+        {
+            message.Append(links.Count > 0 ? "\nand pen can't tell where these lead" : "pen can't tell where these " +
+                "symlinks lead");
+            message.Append(" (a directory on the way can't be searched, or a target can't be read or isn't valid " +
+                "UTF-8), so they may lead into its git dir, where git run through one would use any repo the " +
+                "sandbox puts there:");
+            foreach (var line in ListFirst(untraced, MaxListed, link => FormatPath(dir, link)))
+                message.Append("\n  ").Append(line);
+        }
+        message.Append("\nremove them, then rerun");
+        throw new PenException(message.ToString());
+    }
+
+    /// <summary>The advice for a repo found in something Pen quarantined (<see cref="IsInQuarantine"/>).</summary>
+    private const string QuarantineHint = "\nthose under a name holding " + GitCheck.Suffix + " are inside what " +
+        "pen put aside at the end of an earlier session (a repo in it was left intact): inspect them and remove them";
+
+    /// <summary>
+    /// Whether <paramref name="repoDir"/> is inside something Pen quarantined: a component of its path below
+    /// <paramref name="dir"/> holds <see cref="GitCheck.Suffix"/>, which Pen adds when it moves a thing aside (with
+    /// -2, -3, … after it when the name is taken).
+    /// </summary>
+    /// <remarks>Components above <paramref name="dir"/>, should the repo be outside it, don't count.</remarks>
+    private static bool IsInQuarantine(string dir, string repoDir) =>
+        Path.GetRelativePath(dir, repoDir).Split('/').SkipWhile(part => part == "..")
+            .Any(part => part.Contains(GitCheck.Suffix, StringComparison.Ordinal));
 
     /// <summary>Formats the first line of the nested-repo refusal, worded for a repo or a plain directory.</summary>
     private static string FormatNestedHeading(string dir, string git)
@@ -296,6 +410,17 @@ internal static class RepoGuard
         NestedKind.GitFile => " (a .git file that isn't one of this repo's worktrees or submodules)",
         NestedKind.GitLink => " (a .git symlink)",
         _ => "",
+    };
+
+    /// <summary>Describes what makes a repo in the git dir one, for the refusal.</summary>
+    private static string DescribeInGitDir(NestedRepo repo) => repo switch
+    {
+        { Place: GitDirPlace.WorktreeEntry, Kind: NestedKind.Bare } =>
+            " (a worktree entry whose commondir doesn't lead back to this repo)",
+        { Kind: NestedKind.Bare } => " (laid out as a git dir of its own)",
+        { Kind: NestedKind.GitFile } => " (a .git file that isn't one of this repo's worktrees or submodules)",
+        { Kind: NestedKind.GitLink } => " (a .git symlink)",
+        _ => " (a .git dir)",
     };
 
     /// <summary>Warns once if the repo's common git dir may fold case.</summary>

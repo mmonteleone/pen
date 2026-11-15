@@ -132,14 +132,16 @@ internal sealed class GitCheckRun
         if (_unlistable.Count > 0)
             failures.Add(DescribeUnlistable());
 
-        if (_badNames.Count > 0)
+        // The walk of the git dir meets the names the module walk reports too.
+        var badNames = _badNames.DistinctBy(n => n.DisplayPath, StringComparer.Ordinal).ToList();
+        if (badNames.Count > 0)
         {
             failures.Add("these names aren't valid UTF-8, so pen can't look inside them or rename them, though git on "
                 + "this machine can still enter them and run what's there (shown with octal escapes): "
-                + string.Join(", ", RepoGuard.FormatBadNames(_dir, _badNames)));
+                + string.Join(", ", RepoGuard.FormatBadNames(_dir, badNames)));
         }
         if (_changes.Moved.Any(quarantined => quarantined.Failed))
-            failures.Add("a file named above couldn't be moved out of git's way or restored");
+            failures.Add("a file named above couldn't be moved out of git's way, removed or restored");
         var failure = failures.Count == 0 ? null : string.Join("; ", failures);
         return new() { Moved = _changes.Moved, Failure = failure, Paused = _paused };
     }
@@ -147,10 +149,12 @@ internal sealed class GitCheckRun
     /// <summary>Words the failure for the directories it couldn't list, naming the first few.</summary>
     private string DescribeUnlistable()
     {
-        var named = _unlistable.Take(RepoGuard.MaxListed).Select(path => RepoGuard.FormatPath(_dir, path));
+        // The walk of the git dir and the prompt-hazard scan can both meet a worktrees dir, or an entry in one.
+        var unlistable = _unlistable.Distinct(StringComparer.Ordinal).ToList();
+        var named = unlistable.Take(RepoGuard.MaxListed).Select(path => RepoGuard.FormatPath(_dir, path));
         var text = "pen can't list these directories, so it can't see a repo inside one: " + string.Join(", ", named);
-        if (_unlistable.Count > RepoGuard.MaxListed)
-            text += $" and {_unlistable.Count - RepoGuard.MaxListed} more";
+        if (unlistable.Count > RepoGuard.MaxListed)
+            text += $" and {unlistable.Count - RepoGuard.MaxListed} more";
         return text;
     }
 
@@ -200,8 +204,9 @@ internal sealed class GitCheckRun
     }
 
     /// <summary>
-    /// Checks the dir: a repo made during the session, the git dir's commondir and module repos, nested repos, then
-    /// what a shell prompt would run and the paused operations.
+    /// Checks the dir: a repo made during the session, the git dir's commondir and module repos, repos in the git dir
+    /// where git keeps none, nested repos and symlinks into the git dir, then what a shell prompt would run and the
+    /// paused operations.
     /// </summary>
     /// <param name="startedWithGit">Whether the session started with a .git there.</param>
     /// <param name="commonGitDir">The git dir it started with, or null for dir/.git.</param>
@@ -233,6 +238,7 @@ internal sealed class GitCheckRun
         {
             git = commonGitDir ?? git;
             known = CheckGitDir(git, modulesAtStart);
+            QuarantineGitDirRepos(git, known);
         }
 
         QuarantineNestedRepos(git, known);
@@ -279,16 +285,85 @@ internal sealed class GitCheckRun
         return CheckModuleRepos(git, modulesAtStart);
     }
 
-    /// <summary>Quarantines the repos nested in the tree that aren't the project's own.</summary>
+    /// <summary>
+    /// Quarantines the repos nested in the tree that aren't the project's own, and removes the symlinks in it that
+    /// lead into the git dir.
+    /// </summary>
     /// <param name="git">The git dir the tree's own worktrees belong to.</param>
     /// <param name="known">The module repos whose checkouts in the tree are the project's own.</param>
-    private void QuarantineNestedRepos(string git, HashSet<string> known)
+    private void QuarantineNestedRepos(string git, HashSet<string> known) =>
+        QuarantineFound(
+            RepoScan.ScanNested(_dir, git, known, _tryOpen),
+            repo => DescribeNested(repo.Kind),
+            movedAside => RepoScan.ScanNested(_dir, git, known, _tryOpen, from: movedAside));
+
+    /// <summary>
+    /// Quarantines the repos anywhere in the git dir where git keeps none (<see cref="RepoScan.ScanGitDir"/>).
+    /// </summary>
+    /// <param name="git">The git dir.</param>
+    /// <param name="known">The module repos kept in it, which are its own.</param>
+    private void QuarantineGitDirRepos(string git, HashSet<string> known) =>
+        QuarantineFound(
+            RepoScan.ScanGitDir(git, known, _tryOpen),
+            DescribeInGitDir,
+            movedAside => RepoScan.ScanGitDir(git, known, _tryOpen, from: movedAside));
+
+    /// <summary>
+    /// Quarantines what a walk found and removes the symlinks it found, then walks each .git directory it moved
+    /// aside, and so on.
+    /// </summary>
+    /// <param name="scan">What the walk found.</param>
+    /// <param name="describe">Words why a repo it found is quarantined.</param>
+    /// <param name="walkFrom">Walks again from the directories given, in the same way.</param>
+    /// <remarks>
+    /// A walk doesn't enter a .git directory, whose contents are that repo's. Once it's moved aside, with its HEAD,
+    /// what's inside is reachable all the same (by a symlink to its new, predictable name, or one in it), so it's
+    /// walked before the check ends: each round is inside the last one's, so it ends.
+    /// </remarks>
+    private void QuarantineFound(NestedScan scan, Func<NestedRepo, string> describe,
+        Func<List<string>, NestedScan> walkFrom)
     {
-        var scan = RepoScan.ScanNested(_dir, git, known, _tryOpen);
-        _unlistable.AddRange(scan.UnlistableDirs);
-        _badNames.AddRange(scan.BadNames);
-        foreach (var repo in scan.Repos)
-            Quarantine(repo.Path, DescribeNested(repo.Kind), breakLayout: repo.Kind == NestedKind.GitDir);
+        while (true)
+        {
+            _unlistable.AddRange(scan.UnlistableDirs);
+            _badNames.AddRange(scan.BadNames);
+            var movedAside = new List<string>();
+            foreach (var repo in scan.Repos)
+            {
+                var isDir = repo.Kind == NestedKind.GitDir;
+                var moved = GitCheck.Move(repo.Path, describe(repo), breakLayout: isDir);
+                _changes.Moved.Add(moved);
+                if (isDir && !moved.Failed)
+                    movedAside.Add(moved.To);
+            }
+            foreach (var link in scan.GitDirLinks)
+            {
+                RemoveLink(link, "a symlink into the git dir, or one that would lead there once a directory it " +
+                    "names is made: git run through it would use whatever repo the sandbox put there, and renamed " +
+                    "it would lead there still, so it's removed (a symlink holds no data)");
+            }
+            foreach (var link in scan.UntracedLinks)
+            {
+                RemoveLink(link, "a symlink pen can't trace (a directory on the way can't be searched, or its " +
+                    "target can't be read or isn't valid UTF-8), so it may lead into the git dir, where git run " +
+                    "through it would use whatever repo the sandbox put there: it's removed (a symlink holds no data)");
+            }
+            if (movedAside.Count == 0)
+                return;
+            scan = walkFrom(movedAside);
+        }
+    }
+
+    /// <summary>
+    /// Removes the symlink <paramref name="link"/> and records it, adding u+w to the directory holding it first if
+    /// that's what stops it and this run may, or records that it couldn't.
+    /// </summary>
+    private void RemoveLink(string link, string why)
+    {
+        var attempt = GitCheck.RemoveLink(_dir, link, why);
+        if (attempt.Failed && _mayOpen && _changes.TryOpenRecording(Path.GetDirectoryName(link)!, write: true))
+            attempt = GitCheck.RemoveLink(_dir, link, why);
+        _changes.Moved.Add(attempt);
     }
 
     /// <summary>Words why a nested repo of this kind is quarantined.</summary>
@@ -300,6 +375,32 @@ internal sealed class GitCheckRun
             "worktrees or submodules: it points git at another directory",
         NestedKind.GitLink => "a .git symlink: it points git at another directory",
         _ => "a nested repo: its config and hooks were writable from the sandbox",
+    };
+
+    /// <summary>Words why a repo in the git dir is quarantined.</summary>
+    private static string DescribeInGitDir(NestedRepo repo) => repo switch
+    {
+        { Place: GitDirPlace.Refs, Kind: NestedKind.Bare } =>
+            "ref names (a branch named HEAD beside ones under objects/ and refs/, say) that lay this directory " +
+            "out as a git dir: git run from it (through a symlink in the project, say) takes it for one and uses " +
+            "its config and hooks, which were writable from the sandbox. Renaming its HEAD breaks that; rename " +
+            "those refs before putting it back",
+        _ => DescribeInGitDir(repo.Kind),
+    };
+
+    /// <summary>Words why a repo of this kind in the git dir is quarantined.</summary>
+    private static string DescribeInGitDir(NestedKind kind) => kind switch
+    {
+        NestedKind.Bare => "a directory inside the git dir that git takes for a git dir of its own, where git keeps " +
+            "none outside modules/ and worktrees/: git run from it (through a symlink in the project, say) uses " +
+            "its config and hooks, which were writable from the sandbox",
+        NestedKind.GitFile => "a .git file inside the git dir that isn't one of this repo's worktrees or " +
+            "submodules: git run from that directory (through a symlink in the project, say) follows it to " +
+            "another directory",
+        NestedKind.GitLink => "a .git symlink inside the git dir: git run from that directory (through a " +
+            "symlink in the project, say) follows it to another directory",
+        _ => "a repo inside the git dir, where git keeps none outside modules/: git run from that directory " +
+            "(through a symlink in the project, say) uses it, and its config and hooks were writable from the sandbox",
     };
 
     /// <summary>

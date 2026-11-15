@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 namespace Pen.Tests;
 
@@ -140,6 +141,37 @@ public class UndecodableNameTests
         var e = Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(repo));
         Assert.Contains(@"bad\377dir", e.Message);
         AssertCouldNotCheck(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null));
+    }
+
+    [Theory]
+    [InlineData("foo")]
+    [InlineData("refs/heads")]
+    public void ABadlyNamedDirectoryElsewhereInTheGitDir_IsRefused_AndCouldntBeCheckedAtTheEnd(string where)
+    {
+        using var t = new TempDir();
+        var repo = FreshRepo(t);
+        var parent = Path.Combine(repo, ".git", where);
+        Directory.CreateDirectory(parent);
+        Plant(parent, PlantRepo);
+
+        var e = Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(repo));
+        Assert.Contains($@".git/{where}/bad\377dir", e.Message);
+        AssertCouldNotCheck(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null));
+    }
+
+    [Fact]
+    public void ABadNameWhereGitKeepsModuleRepos_IsNamedOnce()
+    {
+        using var t = new TempDir();
+        var repo = FreshRepo(t);
+        var modules = Path.Combine(repo, ".git", "modules");
+        Directory.CreateDirectory(modules);
+        Plant(modules, "mkdir \"$b\"");
+
+        var e = Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(repo));
+        Assert.Single(Regex.Matches(e.Message, Regex.Escape(@"bad\377dir")));
+        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
+        Assert.Single(Regex.Matches(check.Failure!, Regex.Escape(@"bad\377dir")));
     }
 
     [Fact]

@@ -134,6 +134,71 @@ internal static class GitCheck
         }
     }
 
+    /// <summary>Removes the symlink <paramref name="path"/>, keeping what it held for the warning.</summary>
+    /// <param name="root">The project dir, which <paramref name="path"/> is below.</param>
+    /// <param name="path">The symlink.</param>
+    /// <param name="why">Why it's removed, for the warning.</param>
+    /// <returns>
+    /// The removal made, or one with neither <see cref="Quarantined.To"/> nor <see cref="Quarantined.LinkTarget"/>
+    /// whose Why says it couldn't be removed.
+    /// </returns>
+    /// <remarks>
+    /// Renamed, a symlink would lead to the same place, so it's removed instead: it holds no data. Only ever a
+    /// symlink is removed, in the directory reached from <paramref name="root"/> without following a symlink
+    /// (<see cref="Native.RemoveSymlink"/>), so another session's agent can't swap a directory on the way for one
+    /// that leads elsewhere; anything but a symlink there now is left, and the removal fails. Never fatal, like
+    /// <see cref="Move"/>.
+    /// </remarks>
+    internal static Quarantined RemoveLink(string root, string path, string why)
+    {
+        try
+        {
+            var target = Native.RemoveSymlink(root, path);
+            return DescribeTarget(target) is { } text
+                ? new(path, "", why, LinkTarget: text)
+                : new(path, "", why, LinkTarget: EscapeTarget(target), LinkTargetEscaped: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            var reason = exception is UnauthorizedAccessException denied
+                ? Out.DescribePermissionDenied(denied)
+                : exception.Message;
+            return new(path, "", $"{why}. COULD NOT REMOVE IT ({reason}): " +
+                "don't run git here until you've dealt with it");
+        }
+    }
+
+    private static readonly UTF8Encoding StrictUtf8 =
+        new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
+    /// <summary>Reads a symlink's target as text.</summary>
+    /// <returns>The text, or null if it isn't valid UTF-8, so no text names it exactly.</returns>
+    private static string? DescribeTarget(byte[] target)
+    {
+        try
+        {
+            return StrictUtf8.GetString(target);
+        }
+        catch (DecoderFallbackException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Shows a target that isn't valid UTF-8: octal escapes for all but printable ASCII.</summary>
+    private static string EscapeTarget(byte[] target)
+    {
+        var text = new StringBuilder();
+        foreach (var value in target)
+        {
+            if (value is >= 0x20 and < 0x7f && value != (byte)'\\')
+                text.Append((char)value);
+            else
+                text.Append('\\').Append(Convert.ToString(value, 8).PadLeft(3, '0'));
+        }
+        return text.ToString();
+    }
+
     /// <summary>Renames the HEAD inside a .git directory that was just moved to <paramref name="moved"/>.</summary>
     /// <returns>The rename made, or null if it isn't a real directory or has no HEAD.</returns>
     private static (string From, string To)? MoveHeadAside(string moved)
@@ -158,19 +223,23 @@ internal static class GitCheck
         return to;
     }
 
-    /// <summary>Words the loud warning: what moved, why, and how to put it back.</summary>
+    /// <summary>Words the loud warning: what moved or was removed, why, and how to put it back.</summary>
     /// <param name="dir">The project dir; paths are shown relative to it.</param>
-    /// <param name="moved">What the check renamed.</param>
+    /// <param name="moved">What the check renamed or removed.</param>
     public static string Warning(string dir, IReadOnlyList<Quarantined> moved)
     {
         var text = new StringBuilder();
         text.AppendLine("pen: WARNING: this session left git files that " +
             "would make git on this machine run code from the sandbox.");
-        text.AppendLine("pen: They've been moved out of git's way:");
+        text.AppendLine(moved.Any(quarantined => quarantined.Removed)
+            ? "pen: They've been moved out of git's way, or removed:"
+            : "pen: They've been moved out of git's way:");
         foreach (var quarantined in moved)
         {
             text.Append("  ").Append(RepoGuard.FormatPath(dir, quarantined.From));
-            if (!quarantined.Failed)
+            if (quarantined.LinkTarget is { } target)
+                text.Append(" (a symlink to ").Append(Out.Field(target)).Append(") removed");
+            else if (!quarantined.Failed)
                 text.Append(" → ").Append(RepoGuard.FormatPath(dir, quarantined.To));
             text.AppendLine().Append("      ").AppendLine(quarantined.Why);
         }
@@ -190,10 +259,23 @@ internal static class GitCheck
     {
         // Command substitution drops trailing newlines, so no quoting
         // that works in every shell can name this one.
-        if (quarantined.From.EndsWith('\n'))
+        if (quarantined.From.EndsWith('\n') || quarantined.LinkTarget?.EndsWith('\n') == true)
         {
             text.Append("  pen can't write a command for ").Append(Out.Field(quarantined.From)).AppendLine(
-                ", since the name ends in a newline: rename it back by hand");
+                quarantined.Removed
+                    ? ", since its name or what it held ends in a newline: make it again by hand"
+                    : ", since the name ends in a newline: rename it back by hand");
+            return;
+        }
+        if (quarantined.LinkTargetEscaped)
+        {
+            text.Append("  pen can't write a command for ").Append(Out.Field(quarantined.From)).AppendLine(
+                ", since what it held isn't valid UTF-8 (shown above with octal escapes): make it again by hand");
+            return;
+        }
+        if (quarantined.LinkTarget is { } target)
+        {
+            text.Append("  ln -s ").Append(Quote(target)).Append(' ').Append(Quote(quarantined.From)).AppendLine();
             return;
         }
         text.Append("  mv ").Append(Quote(quarantined.To)).Append(' ').Append(Quote(quarantined.From));
