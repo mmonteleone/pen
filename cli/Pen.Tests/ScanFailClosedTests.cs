@@ -206,7 +206,7 @@ public class ScanFailClosedTests
         var repo = Git.Repo(t.Sub("repo"));
         var entry = t.Sub("repo", ".git", "worktrees", "w");
         MkFifo(Path.Combine(entry, "gitdir"));
-        Assert.False(Within10s(() => RepoGuard.IsWorktreeInside(repo, entry)));
+        Assert.False(Within10s(() => RepoScan.IsWorktreeInside(repo, entry)));
         var config = Path.Combine(repo, ".git", "config.worktree");
         MkFifo(config);
         var e = Within10s(() => Assert.Throws<PenException>(() => GitConfigFile.ParseFile(config)));

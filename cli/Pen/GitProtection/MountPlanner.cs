@@ -144,7 +144,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
         var commondir = Path.Combine(entry, "commondir");
         if (RepoGuard.Exists(commondir))
             RepoGuard.RequireNotLink(dir, commondir);
-        if (!RepoGuard.IsWorktreeInside(dir, entry))
+        if (!RepoScan.IsWorktreeInside(dir, entry))
         {
             // The worktree isn't visible in the sandbox, so its entry
             // looks dangling there: `git worktree prune` would delete

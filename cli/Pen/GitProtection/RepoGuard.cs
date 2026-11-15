@@ -141,12 +141,10 @@ internal static class RepoGuard
         var unlistable = scan.UnlistableDirs;
         if (unlistable.Count == 0)
             return;
-        var listed = unlistable.Take(MaxListed).Select(u => "  " + FormatPath(dir, u));
-        if (unlistable.Count > MaxListed)
-            listed = listed.Append($"  … and {unlistable.Count - MaxListed} more");
+        var listed = ListFirst(unlistable, MaxListed, u => FormatPath(dir, u));
         throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't list these directories, " +
             "though git on this machine can still enter them, so it can't see a repo inside one:\n"
-            + string.Join('\n', listed)
+            + string.Join('\n', listed.Select(line => "  " + line))
             + "\nfix their permissions (chmod u+rx) or remove them, then rerun");
     }
 
@@ -161,19 +159,18 @@ internal static class RepoGuard
         var message = new StringBuilder(FormatNestedHeading(dir, git));
         bool anySubmodule = false;
         bool anyOther = false;
-        foreach (var repo in nested.Take(MaxListed))
+        // Only the repos listed are looked at for the advice; any not listed may be other repos.
+        var listed = ListFirst(nested, MaxListed, repo =>
         {
             bool submodule = repo.Kind == NestedKind.GitDir && IsSubmodulePath(dir, repo.RepoDir);
-            var kind = submodule ? " (a submodule with its own .git dir)" : Describe(repo.Kind);
-            message.Append($"\n  {FormatPath(dir, repo.RepoDir)}{kind}");
             anySubmodule |= submodule;
             anyOther |= !submodule;
-        }
-        if (nested.Count > MaxListed)
-        {
-            message.Append($"\n  … and {nested.Count - MaxListed} more");
-            anyOther = true;
-        }
+            var kind = submodule ? " (a submodule with its own .git dir)" : Describe(repo.Kind);
+            return FormatPath(dir, repo.RepoDir) + kind;
+        });
+        foreach (var line in listed)
+            message.Append("\n  ").Append(line);
+        anyOther |= nested.Count > MaxListed;
         if (anySubmodule)
         {
             message.Append("\nfor a submodule, run git submodule absorbgitdirs here on this machine: " +
@@ -199,13 +196,21 @@ internal static class RepoGuard
 
     /// <summary>Formats the first few of <paramref name="names"/> for a message, and how many more there are.</summary>
     /// <returns>One line per name listed, without indent, then "… and N more" if any weren't.</returns>
-    internal static IEnumerable<string> FormatBadNames(string dir, IReadOnlyList<BadName> names)
-    {
-        var listed = names.Take(MaxListed).Select(n => FormatPath(dir, n.DisplayPath) + (n.EndsInNewline ? " " +
+    internal static List<string> FormatBadNames(string dir, IReadOnlyList<BadName> names) =>
+        ListFirst(names, MaxListed, n => FormatPath(dir, n.DisplayPath) + (n.EndsInNewline ? " " +
             "(it ends in a newline, so no command can name it here: rename it by hand)" : ""));
-        if (names.Count > MaxListed)
-            return listed.Append($"… and {names.Count - MaxListed} more");
-        return listed;
+
+    /// <summary>
+    /// Formats the first <paramref name="max"/> of <paramref name="items"/>, then how many more there are.
+    /// </summary>
+    /// <returns>One line per item listed, without indent, then "… and N more" if any weren't.</returns>
+    /// <remarks>Formats only the items listed, each once and in order, before returning.</remarks>
+    internal static List<string> ListFirst<T>(IReadOnlyCollection<T> items, int max, Func<T, string> format)
+    {
+        var lines = items.Take(max).Select(format).ToList();
+        if (items.Count > max)
+            lines.Add($"… and {items.Count - max} more");
+        return lines;
     }
 
     /// <summary>
@@ -364,31 +369,6 @@ internal static class RepoGuard
     /// <param name="hostHome">The host user's home, for includes of ~/ paths.</param>
     /// <returns>The mounts, in order, one per path (see <see cref="MountPlanner.Plan"/>).</returns>
     public static List<Mount> PrepareMounts(string dir, string hostHome) => new MountPlanner(dir, hostHome).Plan();
-
-    /// <summary>
-    /// Whether the worktree whose entry is <paramref name="entry"/> (a &lt;git dir&gt;/worktrees/&lt;name&gt;) is
-    /// inside <paramref name="dir"/>, by the path its gitdir file names.
-    /// </summary>
-    /// <returns>False for an entry without a usable gitdir file: it counts as outside.</returns>
-    internal static bool IsWorktreeInside(string dir, string entry)
-    {
-        var gitdirFile = Path.Combine(entry, "gitdir");
-        try
-        {
-            if (!File.Exists(gitdirFile) || IsLink(gitdirFile))
-                return false;
-            var text = Native.ReadRegularFile(gitdirFile)?.TrimEnd('\n', '\r');
-            if (string.IsNullOrEmpty(text) || text.Contains('\n') || text.Contains('\0'))
-                return false;
-            if (!Path.IsPathRooted(text))
-                text = Path.Combine(entry, text);
-            return IsInside(dir, ResolveExisting(Path.GetFullPath(text)));
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            return false;
-        }
-    }
 
     /// <summary>
     /// Resolves the real path of <paramref name="path"/>, or of its deepest existing ancestor plus the rest.

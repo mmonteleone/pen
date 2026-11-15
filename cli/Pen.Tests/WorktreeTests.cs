@@ -427,4 +427,13 @@ public class WorktreeTests
         Assert.True(PruneCommand.IsImageOf(main.Key, Image.GetProjectLayerName(main, one)));
         Assert.True(PruneCommand.IsImageOf(main.Key, Image.GetProjectLayerName(w, one)));
     }
+
+    [Fact]
+    public void AGitdirWithATrailingSlashStillResolves()
+    {
+        using var t = new TempDir();
+        var (repo, wt, admin) = RepoWithWorktree(t);
+        File.WriteAllText(Path.Combine(wt, ".git"), $"gitdir: {admin}/\n");
+        Assert.Equal(Path.Combine(repo, ".git"), Resolve(wt));
+    }
 }

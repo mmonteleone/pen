@@ -104,7 +104,7 @@ internal static class RepoScan
         {
             if (RepoGuard.IsLink(gitFile))
                 return null;
-            var entry = ReadRealWorktreeEntry(gitFile);
+            var entry = ReadGitFileTarget(gitFile, requireReal: true);
             if (entry == null)
                 return null;
             var worktrees = Path.GetDirectoryName(entry);
@@ -123,25 +123,6 @@ internal static class RepoScan
         }
     }
 
-    /// <summary>Reads the worktree entry a .git file names, requiring it to be a real path already.</summary>
-    /// <returns>The entry's full path, or null if the file doesn't name one or a symlink is on the way.</returns>
-    private static string? ReadRealWorktreeEntry(string gitFile)
-    {
-        var gitdir = ReadPathFile(gitFile, "gitdir: ");
-        if (gitdir == null)
-            return null;
-        if (!Path.IsPathRooted(gitdir))
-            gitdir = Path.Combine(Path.GetDirectoryName(gitFile)!, gitdir);
-
-        // git resolves the gitdir with realpath, so a symlink anywhere along
-        // it would lead elsewhere than it reads: require it to be real already.
-        var full = Path.GetFullPath(gitdir).TrimEnd('/');
-        var real = Native.RealPath(full);
-        if (real == null || real != full)
-            return null;
-        return real;
-    }
-
     /// <summary>Whether the worktree entry's gitdir file names <paramref name="gitFile"/>.</summary>
     private static bool PointsBackTo(string entry, string gitFile)
     {
@@ -155,6 +136,32 @@ internal static class RepoScan
     }
 
     /// <summary>
+    /// Whether the worktree whose entry is <paramref name="entry"/> (a &lt;git dir&gt;/worktrees/&lt;name&gt;) is
+    /// inside <paramref name="dir"/>, by the path its gitdir file names.
+    /// </summary>
+    /// <returns>False for an entry without a usable gitdir file: it counts as outside.</returns>
+    /// <remarks>
+    /// Unlike <see cref="PointsBackTo"/>, this resolves what exists of the path and keeps the rest, so a worktree
+    /// that's gone is still classified by where it was.
+    /// </remarks>
+    internal static bool IsWorktreeInside(string dir, string entry)
+    {
+        try
+        {
+            var gitdir = ReadPathFile(Path.Combine(entry, "gitdir"), "");
+            if (gitdir == null)
+                return false;
+            if (!Path.IsPathRooted(gitdir))
+                gitdir = Path.Combine(entry, gitdir);
+            return RepoGuard.IsInside(dir, RepoGuard.ResolveExisting(Path.GetFullPath(gitdir)));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Reads the git dir a validated linked worktree's .git file names: &lt;common&gt;/worktrees/&lt;name&gt;.
     /// </summary>
     /// <returns>The entry's full path, or null if the file can't be read.</returns>
@@ -162,12 +169,7 @@ internal static class RepoScan
     {
         try
         {
-            var gitdir = ReadPathFile(gitFile, "gitdir: ");
-            if (gitdir == null)
-                return null;
-            if (!Path.IsPathRooted(gitdir))
-                gitdir = Path.Combine(Path.GetDirectoryName(gitFile)!, gitdir);
-            return Path.GetFullPath(gitdir).TrimEnd('/');
+            return ReadGitFileTarget(gitFile, requireReal: false);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -196,17 +198,10 @@ internal static class RepoScan
         {
             if (moduleRepos.Count == 0 || RepoGuard.IsLink(gitFile))
                 return null;
-            var gitdir = ReadPathFile(gitFile, "gitdir: ");
-            if (gitdir == null)
+            var repo = ReadGitFileTarget(gitFile, requireReal: true);
+            if (repo == null || !moduleRepos.Contains(repo))
                 return null;
-            var checkout = Path.GetDirectoryName(gitFile)!;
-            if (!Path.IsPathRooted(gitdir))
-                gitdir = Path.Combine(checkout, gitdir);
-            var full = Path.GetFullPath(gitdir).TrimEnd('/');
-            var real = Native.RealPath(full);
-            if (real == null || real != full || !moduleRepos.Contains(real))
-                return null;
-            return HasWorktreeAt(real, checkout) ? real : null;
+            return HasWorktreeAt(repo, Path.GetDirectoryName(gitFile)!) ? repo : null;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -268,6 +263,31 @@ internal static class RepoScan
         File.Exists(Path.Combine(dir, "HEAD")) &&
         ((Directory.Exists(Path.Combine(dir, "objects")) && Directory.Exists(Path.Combine(dir, "refs")))
          || RepoGuard.Exists(Path.Combine(dir, "commondir")));
+
+    /// <summary>Reads the path a .git file's "gitdir: " line names, as a full path.</summary>
+    /// <param name="gitFile">The .git file; a relative path in it is from the file's own dir.</param>
+    /// <param name="requireReal">
+    /// Whether the path must be a real one already, with no symlink anywhere along it.
+    /// </param>
+    /// <returns>
+    /// The full path, without a trailing slash, or null if the file doesn't name one, or if
+    /// <paramref name="requireReal"/> and the path isn't real (a symlink on the way, or nothing there).
+    /// </returns>
+    private static string? ReadGitFileTarget(string gitFile, bool requireReal)
+    {
+        var gitdir = ReadPathFile(gitFile, "gitdir: ");
+        if (gitdir == null)
+            return null;
+        if (!Path.IsPathRooted(gitdir))
+            gitdir = Path.Combine(Path.GetDirectoryName(gitFile)!, gitdir);
+        var full = Path.GetFullPath(gitdir).TrimEnd('/');
+        if (!requireReal)
+            return full;
+
+        // git resolves the gitdir with realpath, so a symlink anywhere along
+        // it would lead elsewhere than it reads: require it to be real already.
+        return Native.RealPath(full) == full ? full : null;
+    }
 
     /// <summary>Reads a one-line file's value after <paramref name="prefix"/>.</summary>
     /// <returns>The value, or null if the file doesn't have that shape.</returns>

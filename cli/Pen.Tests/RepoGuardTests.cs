@@ -255,12 +255,42 @@ public class RepoGuardTests
         var link = Path.Combine(t.Path, "link");
         Directory.CreateSymbolicLink(link, repo);
         File.WriteAllText(Path.Combine(repo, ".git", "worktrees", "wt", "gitdir"), Path.Combine(link, "wt", ".git") + "\n");
-        Assert.True(RepoGuard.IsWorktreeInside(repo, Path.Combine(repo, ".git", "worktrees", "wt")));
+        Assert.True(RepoScan.IsWorktreeInside(repo, Path.Combine(repo, ".git", "worktrees", "wt")));
         // And a symlink inside the project leading out of it counts as outside.
         Git.Run(repo, "worktree", "add", "-q", Path.Combine(t.Path, "out"));
         Directory.CreateSymbolicLink(Path.Combine(repo, "to-out"), Path.Combine(t.Path, "out"));
         File.WriteAllText(Path.Combine(repo, ".git", "worktrees", "out", "gitdir"), Path.Combine(repo, "to-out", ".git") + "\n");
-        Assert.False(RepoGuard.IsWorktreeInside(repo, Path.Combine(repo, ".git", "worktrees", "out")));
+        Assert.False(RepoScan.IsWorktreeInside(repo, Path.Combine(repo, ".git", "worktrees", "out")));
+    }
+
+    [Fact]
+    public void A_WorktreeThatsGoneIsStillClassifiedByWhereItWas()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        var entry = t.Sub("repo", ".git", "worktrees", "wt");
+        File.WriteAllText(Path.Combine(entry, "gitdir"), Path.Combine(repo, "gone", "wt", ".git") + "\n");
+        Assert.True(RepoScan.IsWorktreeInside(repo, entry));
+        File.WriteAllText(Path.Combine(entry, "gitdir"), Path.Combine(t.Path, "gone", "wt", ".git") + "\n");
+        Assert.False(RepoScan.IsWorktreeInside(repo, entry));
+    }
+
+    [Theory]
+    [InlineData(0, "")]
+    [InlineData(1, "i0")]
+    [InlineData(3, "i0|i1|i2")]
+    [InlineData(4, "i0|i1|i2|… and 1 more")]
+    [InlineData(6, "i0|i1|i2|… and 3 more")]
+    public void ListFirst_ListsUpToMax_ThenHowManyMore(int count, string expected)
+    {
+        var formatted = new List<int>();
+        var lines = RepoGuard.ListFirst(Enumerable.Range(0, count).ToList(), 3, i =>
+        {
+            formatted.Add(i);
+            return $"i{i}";
+        });
+        Assert.Equal(expected, string.Join('|', lines));
+        Assert.Equal(Enumerable.Range(0, Math.Min(count, 3)), formatted); // only those listed, once each, in order
     }
 
     [Fact]
@@ -444,5 +474,25 @@ public class RepoGuardTests
         Assert.Contains("\"read_only\": true", yaml);
         Assert.Contains("\"create_host_path\": false", yaml);
         Assert.StartsWith("{", yaml);
+    }
+
+    [Fact]
+    public void RefusesMoreThanMaxListedSubmodules_WithBothAdviceLines_AndTheCountOfTheRest()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        var modules = "";
+        for (var i = 0; i <= RepoGuard.MaxListed; i++)
+        {
+            Git.Run(repo, "init", "-q", $"sub{i:00}");
+            modules += $"[submodule \"s{i}\"]\n\tpath = sub{i:00}\n";
+        }
+
+        File.WriteAllText(Path.Combine(repo, ".gitmodules"), modules);
+        var msg = Refusal(repo);
+        Assert.Contains("(a submodule with its own .git dir)", msg);
+        Assert.Contains("run git submodule absorbgitdirs here", msg);
+        Assert.Contains("run pen in each repo instead", msg);
+        Assert.Contains("… and 1 more", msg);
     }
 }

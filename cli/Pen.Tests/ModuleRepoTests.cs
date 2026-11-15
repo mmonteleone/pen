@@ -446,4 +446,22 @@ public class ModuleRepoTests
         s.WriteModules(["/r/.git/modules/a", "/r/.git/modules/b\nc"]);
         Assert.Equal(["/r/.git/modules/a", "/r/.git/modules/b\nc"], s.ReadModules()!);
     }
+
+    [Fact]
+    public void ModuleCheckoutNamedThroughASymlink_IsntVouchedFor_EvenIfListed()
+    {
+        using var t = new TempDir();
+        var real = t.Sub("gitdir", "modules", "m");
+        File.WriteAllText(Path.Combine(real, "config"), "[core]\n\tworktree = ../../../checkout\n");
+        var gitdir = Path.Combine(t.Path, "gitdir");
+        Directory.CreateSymbolicLink(Path.Combine(gitdir, "mods"), Path.Combine(gitdir, "modules"));
+        var viaLink = Path.Combine(t.Path, "gitdir", "mods", "m");
+        var gitFile = Path.Combine(t.Sub("checkout"), ".git");
+        File.WriteAllText(gitFile, $"gitdir: {real}\n");
+        var listedReal = new HashSet<string>(StringComparer.Ordinal) { real };
+        Assert.Equal(real, RepoScan.ResolveModuleCheckout(gitFile, listedReal));
+        File.WriteAllText(gitFile, $"gitdir: {viaLink}\n");
+        var listedViaLink = new HashSet<string>(StringComparer.Ordinal) { viaLink };
+        Assert.Null(RepoScan.ResolveModuleCheckout(gitFile, listedViaLink));
+    }
 }
