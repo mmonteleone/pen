@@ -96,8 +96,8 @@ internal static class RepoScan
     /// The common git dir (the main checkout's .git, or a bare repo), or null unless it has exactly the layout
     /// `git worktree add` makes:
     /// <list type="bullet">
-    /// <item>the file says "gitdir: &lt;common&gt;/worktrees/&lt;name&gt;", with no symlink anywhere along that
-    /// path;</item>
+    /// <item>the file says "gitdir: &lt;common&gt;/worktrees/&lt;name&gt;", and that's where git resolves it: the
+    /// real path of the value as written is that path, with no symlink in it;</item>
     /// <item>&lt;name&gt;/commondir is "../..";</item>
     /// <item>&lt;name&gt;/gitdir points back to this .git file.</item>
     /// </list>
@@ -146,8 +146,9 @@ internal static class RepoScan
     /// </summary>
     /// <returns>False for an entry without a usable gitdir file: it counts as outside.</returns>
     /// <remarks>
-    /// Unlike <see cref="PointsBackTo"/>, this resolves what exists of the path and keeps the rest, so a worktree
-    /// that's gone is still classified by where it was.
+    /// A path that exists is classified by its real path, resolved as written (a symlink before a ".." is followed
+    /// first). Otherwise, unlike <see cref="PointsBackTo"/>, this takes "." and ".." as text, then resolves what
+    /// exists of the path and keeps the rest, so a worktree that's gone is still classified by where it was.
     /// </remarks>
     internal static bool IsWorktreeInside(string dir, string entry)
     {
@@ -158,7 +159,8 @@ internal static class RepoScan
                 return false;
             if (!Path.IsPathRooted(gitdir))
                 gitdir = Path.Combine(entry, gitdir);
-            return RepoGuard.IsInside(dir, RepoGuard.ResolveExisting(Path.GetFullPath(gitdir)));
+            var real = Native.RealPath(gitdir) ?? RepoGuard.ResolveExisting(Path.GetFullPath(gitdir));
+            return RepoGuard.IsInside(dir, real);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -188,8 +190,8 @@ internal static class RepoScan
     /// <returns>
     /// The module repo, or null unless it has the layout `git submodule` makes:
     /// <list type="bullet">
-    /// <item>the file says "gitdir: &lt;repo&gt;", with no symlink anywhere along that path, and &lt;repo&gt; is one of
-    /// <paramref name="moduleRepos"/>;</item>
+    /// <item>the file says "gitdir: &lt;repo&gt;", and that's where git resolves it (the real path of the value as
+    /// written is that path, with no symlink in it), and &lt;repo&gt; is one of <paramref name="moduleRepos"/>;</item>
     /// <item>&lt;repo&gt;/config's core.worktree resolves back to the .git file's dir.</item>
     /// </list>
     /// </returns>
@@ -231,7 +233,8 @@ internal static class RepoScan
             return false;
         if (!Path.IsPathRooted(worktree))
             worktree = Path.Combine(repo, worktree); // git resolves it from the git dir
-        var worktreeReal = Native.RealPath(Path.GetFullPath(worktree));
+        // git chdirs into the git dir and resolves the value physically, so ".." after a symlink leaves its target.
+        var worktreeReal = Native.RealPath(worktree);
         return worktreeReal != null && worktreeReal == Native.RealPath(checkout);
     }
 
@@ -272,12 +275,17 @@ internal static class RepoScan
     /// <summary>Reads the path a .git file's "gitdir: " line names, as a full path.</summary>
     /// <param name="gitFile">The .git file; a relative path in it is from the file's own dir.</param>
     /// <param name="requireReal">
-    /// Whether the path must be a real one already, with no symlink anywhere along it.
+    /// Whether the value as written must resolve, as git resolves it, to the path it reads as.
     /// </param>
     /// <returns>
     /// The full path, without a trailing slash, or null if the file doesn't name one, or if
-    /// <paramref name="requireReal"/> and the path isn't real (a symlink on the way, or nothing there).
+    /// <paramref name="requireReal"/> and the value's real path isn't that path (nothing there, or a symlink in the
+    /// way that leads elsewhere, such as "l/../x" with l a symlink).
     /// </returns>
+    /// <remarks>
+    /// Without <paramref name="requireReal"/>, the path is the value with "." and ".." taken as text, which is where
+    /// git goes only when no symlink comes before a "..".
+    /// </remarks>
     private static string? ReadGitFileTarget(string gitFile, bool requireReal)
     {
         var gitdir = ReadPathFile(gitFile, "gitdir: ");
@@ -289,9 +297,9 @@ internal static class RepoScan
         if (!requireReal)
             return full;
 
-        // git resolves the gitdir with realpath, so a symlink anywhere along
-        // it would lead elsewhere than it reads: require it to be real already.
-        return Native.RealPath(full) == full ? full : null;
+        // git opens the value as written and takes its realpath, following any
+        // symlink before a later "..", so resolve that, not the text form.
+        return Native.RealPath(gitdir) == full ? full : null;
     }
 
     /// <summary>Reads a one-line file's value after <paramref name="prefix"/>.</summary>

@@ -46,6 +46,47 @@ public class WorktreeTests
         Assert.Equal(Path.Combine(t.Path, "repo", ".git"), Resolve(wt));
     }
 
+    /// <summary>Writes "gitdir: <paramref name="value"/>" with {repo} and {admin} filled in, as wt's .git file.</summary>
+    private static string WriteGitFile(string repo, string wt, string admin, string value)
+    {
+        var gitFile = Path.Combine(wt, ".git");
+        File.WriteAllText(gitFile, $"gitdir: {value.Replace("{repo}", repo).Replace("{admin}", admin)}\n");
+        return gitFile;
+    }
+
+    // Each is where git goes too: the value's realpath is the entry.
+    [Theory]
+    [InlineData("{admin}")]
+    [InlineData("{admin}/")]
+    [InlineData("{repo}//.git/./worktrees//wt")]
+    [InlineData("../repo/.git/worktrees/wt")]
+    [InlineData("./../repo/.git/worktrees/./wt/")]
+    [InlineData("back/../../repo/.git/worktrees/wt")] // back leads to a dir beside it, so ".." lands where it reads
+    public void GitFileValuesThatResolveWhereTheyRead_Resolve(string value)
+    {
+        using var t = new TempDir();
+        var (repo, wt, admin) = RepoWithWorktree(t);
+        Directory.CreateSymbolicLink(Path.Combine(wt, "back"), t.Sub("wt", "beside"));
+        WriteGitFile(repo, wt, admin, value);
+        Assert.Equal(admin, Git.Run(wt, "rev-parse", "--absolute-git-dir").TrimEnd('\n'));
+        Assert.Equal(Path.Combine(repo, ".git"), Resolve(wt));
+    }
+
+    [Theory]
+    [InlineData("l/../../repo/.git/worktrees/wt")] // git goes to <l's target>/../../repo/.git/worktrees/wt
+    [InlineData("gone/../../repo/.git/worktrees/wt")] // git can't get through gone
+    [InlineData("{link}/.git/worktrees/wt")]
+    public void GitFileValuesThatResolveElsewhereOrNowhere_AreRefused(string value)
+    {
+        using var t = new TempDir();
+        var (repo, wt, admin) = RepoWithWorktree(t);
+        Directory.CreateSymbolicLink(Path.Combine(wt, "l"), t.Sub("x", "y", "z"));
+        var link = Path.Combine(t.Path, "link");
+        Directory.CreateSymbolicLink(link, repo);
+        WriteGitFile(repo, wt, admin, value.Replace("{link}", link));
+        Assert.Null(Resolve(wt));
+    }
+
     [Fact]
     public void RefusesAGitdirWhoseParentIsntWorktrees()
     {

@@ -47,8 +47,8 @@ internal static class RepoGuard
         RequireNoCommondir(dir, common);
         var modules = RepoScan.ScanModules(common);
         RequireReadableModules(dir, modules);
-        // Defence in depth: ResolveModuleCheckout already rejects a checkout whose gitdir goes through a symlink
-        // (it requires RealPath(gitdir) == gitdir), and planning the mounts refuses the symlink.
+        // Defence in depth: ResolveModuleCheckout already rejects a checkout whose gitdir resolves through a symlink
+        // (it requires the gitdir's real path to be the path it reads as), and planning the mounts refuses the symlink.
         var moduleRepos = modules.Repos.Where(repo => !IsLink(repo)).ToList();
         var scan = RepoScan.ScanNested(dir, common, moduleRepos, tryOpen: null);
         RequireDecodableNames(dir, common, modules, scan);

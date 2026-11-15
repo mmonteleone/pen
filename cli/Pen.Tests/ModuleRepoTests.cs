@@ -305,6 +305,42 @@ public class ModuleRepoTests
         Assert.Equal(["libs/mid/.git"], Nested(super));
     }
 
+    // Git resolves the value as written (each ".." after a symlink leaves its target), so Pen does too.
+    [Theory]
+    [InlineData("../../.git/modules/libs/mid", true)] // as git writes it
+    [InlineData("{super}/.git/modules/libs/mid", true)]
+    [InlineData("{super}/.git/modules/libs/mid/", true)]
+    [InlineData("./../..//.git/modules/./libs/mid", true)]
+    [InlineData("l/../../../.git/modules/libs/mid", false)] // l leads to .git/foo/a/b/c: git opens .git/foo/.git/…
+    [InlineData("gone/../../../.git/modules/libs/mid", false)]
+    public void A_ModuleCheckoutsGitFileResolvesOnlyWhereGitGoes(string value, bool resolves)
+    {
+        using var t = new TempDir();
+        var super = Super(t);
+        var git = Path.Combine(super, ".git");
+        var checkout = Path.Combine(super, "libs", "mid");
+        Directory.CreateSymbolicLink(Path.Combine(checkout, "l"), t.Sub("super", ".git", "foo", "a", "b", "c"));
+        var gitFile = Path.Combine(checkout, ".git");
+        File.WriteAllText(gitFile, $"gitdir: {value.Replace("{super}", super)}\n");
+        var modules = RepoScan.FindModuleRepos(git).ToHashSet(StringComparer.Ordinal);
+        Assert.Equal(resolves ? Path.Combine(git, "modules", "libs", "mid") : null,
+            RepoScan.ResolveModuleCheckout(gitFile, modules));
+    }
+
+    // Git resolves core.worktree physically from the git dir, so ".." after a symlink leaves its target.
+    [Theory]
+    [InlineData("../../../../libs/mid", true)] // as git writes it
+    [InlineData("l/../../../../../libs/mid", false)] // l leads to elsewhere/x, so this is not libs/mid
+    public void A_ModuleCoreWorktreeResolvesOnlyWhereGitGoes(string value, bool resolves)
+    {
+        using var t = new TempDir();
+        var super = Super(t);
+        var repo = Path.Combine(super, ".git", "modules", "libs", "mid");
+        Directory.CreateSymbolicLink(Path.Combine(repo, "l"), t.Sub("super", "elsewhere", "x"));
+        SetWorktree(super, "libs/mid", value);
+        Assert.Equal(resolves ? [] : ["libs/mid/.git"], Nested(super));
+    }
+
     [Fact]
     public void A_GitFilePointingAtAnotherModuleOrNotAtOneIsFlagged()
     {

@@ -264,6 +264,25 @@ public class RepoGuardTests
     }
 
     [Fact]
+    public void A_WorktreeIsClassifiedWhereItsPathLeads_WithDotDotAfterASymlinkLeavingItsTarget()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        var outside = Path.Combine(t.Path, "elsewhere", "wt");
+        Git.Run(repo, "worktree", "add", "-q", outside);
+        // As text, repo/l/../wt/.git is inside; l leads to elsewhere/a, so the path is elsewhere/wt/.git.
+        Directory.CreateSymbolicLink(Path.Combine(repo, "l"), t.Sub("elsewhere", "a"));
+        var entry = Path.Combine(repo, ".git", "worktrees", "wt");
+        File.WriteAllText(Path.Combine(entry, "gitdir"), Path.Combine(repo, "l", "..", "wt", ".git") + "\n");
+        Assert.False(RepoScan.IsWorktreeInside(repo, entry));
+        // And the other way round: through a symlink out of the project and back into it.
+        Directory.CreateSymbolicLink(Path.Combine(t.Path, "elsewhere", "in"), t.Sub("repo", "sub", "deeper"));
+        Directory.Move(outside, Path.Combine(repo, "sub", "wt"));
+        File.WriteAllText(Path.Combine(entry, "gitdir"), Path.Combine(t.Path, "elsewhere", "in", "..", "wt", ".git") + "\n");
+        Assert.True(RepoScan.IsWorktreeInside(repo, entry));
+    }
+
+    [Fact]
     public void A_WorktreeThatsGoneIsStillClassifiedByWhereItWas()
     {
         using var t = new TempDir();

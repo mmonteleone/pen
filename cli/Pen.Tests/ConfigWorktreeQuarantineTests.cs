@@ -168,6 +168,73 @@ public class ConfigWorktreeQuarantineTests
         AssertDoesntFire(checkout, marker);
     }
 
+    // ---- A gitfile whose ".." comes after a symlink ----
+
+    /// <summary>
+    /// Points <paramref name="checkout"/>'s .git file (the checkout sits directly in the repo) at
+    /// "l/../../<paramref name="named"/>", which reads as the repo's own <paramref name="named"/>. Git opens the value
+    /// as written and takes its realpath, so each ".." leaves the symlink's target: with l leading to .git/foo/a/b, it
+    /// opens .git/foo/<paramref name="named"/>, a git dir made here with an fsmonitor in its config.
+    /// </summary>
+    /// <returns>The .git file.</returns>
+    private static string ForgeThroughASymlink(string git, string checkout, string named, string hook)
+    {
+        var forged = Path.Combine(git, "foo", named);
+        Directory.CreateDirectory(Path.Combine(forged, "objects"));
+        Directory.CreateDirectory(Path.Combine(forged, "refs"));
+        File.WriteAllText(Path.Combine(forged, "HEAD"), "ref: refs/heads/unborn\n");
+        File.WriteAllText(Path.Combine(forged, "config"), Fsmonitor(hook));
+        Directory.CreateSymbolicLink(Path.Combine(checkout, "l"), Directory.CreateDirectory(
+            Path.Combine(git, "foo", "a", "b")).FullName);
+        var gitFile = Path.Combine(checkout, ".git");
+        File.WriteAllText(gitFile, $"gitdir: l/../../{named}\n");
+        return gitFile;
+    }
+
+    [Fact]
+    public void Replay_AWorktreesGitFileThroughASymlink_IsNoWorktreeOfTheProject()
+    {
+        using var t = new TempDir();
+        var (hook, marker) = Canary(t);
+        var (repo, git) = Repo(t);
+        var checkout = Path.Combine(repo, "wt");
+        Git.Run(repo, "worktree", "add", "-q", "--detach", checkout);
+        var s = Started(t, repo, git);
+        var gitFile = ForgeThroughASymlink(git, checkout, ".git/worktrees/wt", hook);
+        AssertFires(checkout, marker);
+        Assert.Null(RepoScan.ResolveWorktree(gitFile));
+
+        var check = GitCheck.RunAtSessionEnd(repo, s);
+
+        Assert.Null(check.Failure);
+        Assert.Contains(check.Moved, q => q.From == gitFile);
+        AssertDoesntFire(checkout, marker);
+    }
+
+    [Fact]
+    public void Replay_AModuleCheckoutsGitFileThroughASymlink_IsNoCheckoutOfTheProject()
+    {
+        using var t = new TempDir();
+        var (hook, marker) = Canary(t);
+        var (repo, git) = Repo(t);
+        var lib = Git.Repo(t.Sub("lib"));
+        Git.Run(repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", lib, "m");
+        Git.Run(repo, "commit", "-q", "-m", "m");
+        var checkout = Path.Combine(repo, "m");
+        var modules = RepoScan.FindModuleRepos(git).ToHashSet(StringComparer.Ordinal);
+        Assert.NotNull(RepoScan.ResolveModuleCheckout(Path.Combine(checkout, ".git"), modules));
+        var s = Started(t, repo, git);
+        var gitFile = ForgeThroughASymlink(git, checkout, ".git/modules/m", hook);
+        AssertFires(checkout, marker);
+        Assert.Null(RepoScan.ResolveModuleCheckout(gitFile, modules));
+
+        var check = GitCheck.RunAtSessionEnd(repo, s);
+
+        Assert.Null(check.Failure);
+        Assert.Contains(check.Moved, q => q.From == gitFile);
+        AssertDoesntFire(checkout, marker);
+    }
+
     // ---- What stays ----
 
     [Fact]
