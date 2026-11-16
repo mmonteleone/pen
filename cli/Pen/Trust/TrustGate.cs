@@ -47,13 +47,40 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     }
 
     /// <summary>Finds the project's allow domains that the defaults, user allow and store don't cover.</summary>
+    /// <remarks>What <see cref="SelectAllowedDomains"/> leaves out, each once.</remarks>
     private List<string> FindUnapprovedDomains(TrustStore store)
     {
+        var covers = CoversProjectDomain(context.User, store);
+        return context.ProjectConfig.Allow.Distinct().Where(domain => !covers(domain)).ToList();
+    }
+
+    /// <summary>Selects the entries of the project's allow that a session's allowlist may take.</summary>
+    /// <param name="user">The user's config.</param>
+    /// <param name="projectConfig">The project's config, whose allow is agent-writable.</param>
+    /// <param name="store">The approvals for the project's directory.</param>
+    /// <returns>
+    /// Those approved in <paramref name="store"/>, or covered by the defaults and the user's allow without
+    /// asking, in order; the rest are what a prompt asks for. Session start and live apply both take these.
+    /// </returns>
+    internal static List<string> SelectAllowedDomains(Config user, Config projectConfig, TrustStore store) =>
+        projectConfig.Allow.Where(CoversProjectDomain(user, store)).ToList();
+
+    /// <summary>Tells whether a project allow entry needs no approval now.</summary>
+    /// <remarks>
+    /// <para>A domain counts when the defaults or the user's allow name it, as written or under a wildcard, or the
+    /// store approves it. The user's <see cref="Allowlist.AnyDomain"/> doesn't count for it: a domain allowed by
+    /// name reaches private addresses, which open egress doesn't, so it covers only the project's own "*".</para>
+    /// <para>The project's "*" counts when the user's allow has it too, or it's approved; an approved one covers
+    /// no other entry (<see cref="TrustStore.CoversDomain"/>).</para>
+    /// </remarks>
+    private static Func<string, bool> CoversProjectDomain(Config user, TrustStore store)
+    {
         var defaults = Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt"));
-        var allowed = Allowlist.Merge(defaults, context.User.Allow).ToHashSet(StringComparer.Ordinal);
-        return context.ProjectConfig.Allow.Distinct()
-            .Where(domain => !Allowlist.IsAllowed(allowed, domain) && !store.CoversDomain(domain))
-            .ToList();
+        var named = Allowlist.MergeNamed(defaults, user.Allow).ToHashSet(StringComparer.Ordinal);
+        bool userOpen = Allowlist.Merge(user.Allow).Contains(Allowlist.AnyDomain);
+        return domain =>
+            (domain == Allowlist.AnyDomain ? userOpen : Allowlist.IsAllowed(named, domain))
+            || store.CoversDomain(domain);
     }
 
     /// <summary>Finds the project's github_owner when it needs approving.</summary>
@@ -147,13 +174,14 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
 
     /// <summary>Lets a session start once nothing new is asked for, or the user approves it now.</summary>
     /// <param name="flagTools">The tools pen --tool names, and the agent the command implies.</param>
+    /// <returns>The approvals the session starts with, including any given now.</returns>
     /// <exception cref="PenException">When it isn't approved: the session doesn't start.</exception>
-    public void RequireForSession(IReadOnlyList<ToolSpec> flagTools)
+    public TrustStore RequireForSession(IReadOnlyList<ToolSpec> flagTools)
     {
         var store = TrustStore.For(context.Host, context.Project);
         var request = FindUnapproved(store, flagTools);
         if (request.IsEmpty)
-            return;
+            return store;
         RequireCheckable(request);
         if (!answers.IsTerminal)
         {
@@ -165,13 +193,13 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
         if (review != null)
             request = WithReviewedLayer(request, review, store, showCopy: true);
         if (request.IsEmpty)
-            return;
+            return store;
         RequireCheckable(request);
 
         WriteRequest(request);
         if (!Out.Confirm(request.Question, answers.Input))
             throw new PenException("not starting: nothing approved");
-        store.Approve(request);
+        return store.Approve(request);
     }
 
     /// <summary>Describes <paramref name="request"/> for an error, ending with <paramref name="ending"/>.</summary>

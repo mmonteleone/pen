@@ -557,6 +557,188 @@ public class TrustGateTests
         Assert.Equal("tok_acme", f.Seen("token-seen"));
     }
 
+    // allow = ["*"]
+
+    private const string StarToml = "allow = [\"*\"]\n";
+
+    private static string CaptureStderr(Func<int> run, out int exit)
+    {
+        var stderr = Console.Error;
+        var captured = new StringWriter();
+        Console.SetError(captured);
+        try { exit = run(); }
+        finally { Console.SetError(stderr); }
+        return captured.ToString();
+    }
+
+    [Fact]
+    public void AProjectStarIsRefusedWithoutATerminal_SayingItOpensEgress_BesideItsOtherDomains()
+    {
+        using var f = new Fixture(projectToml: "allow = [\"*\", \"extra.example\"]\n", dockerfile: "");
+        var e = Assert.Throws<PenException>(() => f.Run(NoTerminal));
+        Assert.Contains(TrustRequest.AnyDomainLine, e.Message);
+        Assert.Contains("ANY domain for this project's sessions", e.Message);
+        Assert.Contains("allow extra.example: the sandbox can reach it", e.Message);
+        Assert.DoesNotContain("allow *: the sandbox can reach it", e.Message);
+        f.AssertNothingReached();
+    }
+
+    [Fact]
+    public void PenTrustWithoutATerminalRefusesAProjectStar_ShowingItsOpenEgressLine()
+    {
+        using var f = new Fixture(projectToml: StarToml, dockerfile: "");
+        var command = new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded);
+        var e = Assert.Throws<PenException>(() => command.Run(yes: false, list: false));
+        Assert.Contains(TrustRequest.AnyDomainLine, e.Message);
+        Assert.False(TrustStore.For(f.Host, f.Project).CoversDomain("*"));
+    }
+
+    [Fact]
+    public void ApprovingAProjectStarAtThePromptRecordsIt_AndOpensEgress_WithoutAskingAgain()
+    {
+        using var f = new Fixture(projectToml: StarToml, dockerfile: "");
+        var stderr = CaptureStderr(() => f.Run(Saying("y")), out var exit);
+        Assert.Equal(0, exit);
+        Assert.Contains(TrustRequest.AnyDomainLine, stderr);
+        Assert.Contains("approve these?", stderr);
+        Assert.Contains("\nallow *\n", File.ReadAllText(TrustStore.GetPath(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir)));
+        Assert.Equal(".\n", f.Seen("open-egress-seen"));
+        Assert.DoesNotContain("*", f.Seen("allowlist-seen"));
+        Assert.Equal(0, f.Run(NoTerminal));
+    }
+
+    [Fact]
+    public void DecliningAProjectStarApprovesNothing()
+    {
+        using var f = new Fixture(projectToml: StarToml, dockerfile: "");
+        Assert.Throws<PenException>(() => f.Run(Saying("n")));
+        f.AssertNothingReached();
+        Assert.False(TrustStore.For(f.Host, f.Project).CoversDomain("*"));
+    }
+
+    [Fact]
+    public void AnApprovedStarDoesntApproveADomainNamedBesideIt()
+    {
+        using var f = new Fixture(projectToml: StarToml, dockerfile: "");
+        Assert.Equal(0, f.Run(Saying("y")));
+        File.Delete(f.CallsFile);
+        File.WriteAllText(f.Project.ProjectConfigPath, "allow = [\"*\", \"internal.example\"]\n");
+        var e = Assert.Throws<PenException>(() => f.Run(NoTerminal));
+        Assert.Contains("allow internal.example: the sandbox can reach it", e.Message);
+        Assert.DoesNotContain(TrustRequest.AnyDomainLine, e.Message);
+        Assert.Empty(f.Calls);
+    }
+
+    [Fact]
+    public void AnApprovedStarAppliesLive_WithoutTheProjectsUnapprovedNamedDomains()
+    {
+        using var f = new Fixture(projectToml: "allow = [\"*\", \"internal.example\"]\n", dockerfile: "");
+        var (s, l) = RunningSession(f);
+        using var _ = l;
+        File.WriteAllText(s.DenylistFile, "");
+        File.WriteAllText(s.OpenEgressFile, "");
+        TrustStore.For(f.Host, f.Project).ApproveDomains(["*"]);
+        Assert.True(AllowCommand.Apply(f.Host, s));
+        Assert.Equal(".\n", File.ReadAllText(s.OpenEgressFile));
+        var list = File.ReadAllText(s.AllowlistFile);
+        Assert.DoesNotContain("internal.example", list);
+        Assert.DoesNotContain("*", list);
+    }
+
+    private static int RunAs(Fixture f, string userToml, Answers answers)
+    {
+        File.WriteAllText(f.Host.UserConfigPath, userToml); // what pen allow reads live
+        var user = Config.Parse(userToml, "u", ConfigKind.User);
+        return new Session(new ProjectContext(f.Host, f.Project, user, f.ProjectConfig), answers, RecipeCatalog.Embedded).Run(new(["true"]));
+    }
+
+    [Fact]
+    public void AUsersStarDoesntLetAProjectsNamedDomainIn_ItsAskedFor()
+    {
+        using var f = new Fixture(projectToml: "allow = [\"internal.example\"]\n", dockerfile: "");
+        // Allowed by name, it would reach private addresses, which the user's "*" doesn't.
+        var e = Assert.Throws<PenException>(() => RunAs(f, StarToml, NoTerminal));
+        Assert.Contains("allow internal.example: the sandbox can reach it", e.Message);
+        f.AssertNothingReached();
+        Assert.Throws<PenException>(() => RunAs(f, StarToml, Saying("n")));
+        f.AssertNothingReached();
+
+        var stderr = CaptureStderr(() => RunAs(f, StarToml, Saying("y")), out var exit);
+        Assert.Equal(0, exit);
+        Assert.Contains("allow internal.example: the sandbox can reach it", stderr);
+        Assert.Contains("internal.example", f.Seen("allowlist-seen").Split('\n'));
+        Assert.Equal(".\n", f.Seen("open-egress-seen"));
+    }
+
+    [Fact]
+    public void AUsersStarAppliesLive_WithoutTheProjectsUnapprovedNamedDomains()
+    {
+        using var f = new Fixture(projectToml: "allow = [\"*\", \"internal.example\"]\n", dockerfile: "");
+        File.WriteAllText(f.Host.UserConfigPath, StarToml);
+        var (s, l) = RunningSession(f);
+        using var _ = l;
+        File.WriteAllText(s.DenylistFile, "");
+        File.WriteAllText(s.OpenEgressFile, "");
+        Assert.True(AllowCommand.Apply(f.Host, s));
+        Assert.Equal(".\n", File.ReadAllText(s.OpenEgressFile));
+        Assert.DoesNotContain("internal.example", File.ReadAllText(s.AllowlistFile));
+    }
+
+    [Theory]
+    [InlineData("allow = [\"*\", \".corp.example\"]\n", "allow = [\"*\", \"a.corp.example\", \"api.github.com\", \"approved.example\", \"zz.example\"]\ndeny = [\"gist.github.com\"]\n")]
+    [InlineData("allow = [\"*\"]\n", "allow = [\"approved.example\", \"api.github.com\"]\n")]
+    [InlineData("allow = [\".corp.example\", \"u.example\"]\n", "allow = [\"a.corp.example\", \"api.github.com\", \"approved.example\", \".wild.example\"]\n")]
+    [InlineData("", "allow = [\"approved.example\", \".wild.example\", \"x.wild.example\"]\n")]
+    public void SessionStartAndLiveApplyGiveTheSameAclFiles(string userToml, string projectToml)
+    {
+        using var f = new Fixture(projectToml: projectToml, dockerfile: "");
+        Session.EnsureRuntimeDir(f.Host, f.Project);
+        TrustStore.For(f.Host, f.Project).ApproveDomains(["approved.example", "zz.example", ".wild.example"]);
+        Assert.Equal(0, RunAs(f, userToml, NoTerminal));
+        var started = (Allow: f.Seen("allowlist-seen"), Deny: f.Seen("denylist-seen"), Open: f.Seen("open-egress-seen"));
+        Assert.Contains("approved.example", started.Allow.Split('\n'));
+
+        var (s, l) = RunningSession(f);
+        using var _ = l;
+        File.WriteAllText(s.DenylistFile, "");
+        File.WriteAllText(s.OpenEgressFile, "");
+        Assert.True(AllowCommand.Apply(f.Host, s));
+        Assert.Equal(started, (File.ReadAllText(s.AllowlistFile), File.ReadAllText(s.DenylistFile), File.ReadAllText(s.OpenEgressFile)));
+    }
+
+    [Fact]
+    public void AUsersStarMeansTheProjectsStarDoesntAsk_AndApprovesNothing()
+    {
+        using var f = new Fixture(projectToml: StarToml, dockerfile: "");
+        var user = Config.Parse("allow = [\"*\"]\n", "u", ConfigKind.User);
+        Assert.Equal(0, new Session(new ProjectContext(f.Host, f.Project, user, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded).Run(new(["true"])));
+        Assert.Equal(".\n", f.Seen("open-egress-seen"));
+        Assert.False(TrustStore.For(f.Host, f.Project).CoversDomain("*"));
+    }
+
+    [Fact]
+    public void TrustListShowsTheStarsWarning_AndTrustYesApprovesIt()
+    {
+        using var f = new Fixture(projectToml: "allow = [\"*\", \"extra.example\"]\n", dockerfile: "");
+        var context = new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig);
+        var stdout = Console.Out;
+        var captured = new StringWriter();
+        Console.SetOut(captured);
+        try { Assert.Equal(0, new TrustCommand(context, NoTerminal, RecipeCatalog.Embedded).Run(yes: false, list: true)); }
+        finally { Console.SetOut(stdout); }
+        Assert.Contains(TrustRequest.AnyDomainLine + "\n", captured.ToString());
+        Assert.Contains("allow extra.example", captured.ToString());
+        Assert.False(TrustStore.For(f.Host, f.Project).CoversDomain("*"));
+
+        var stderr = CaptureStderr(() => new TrustCommand(context, NoTerminal, RecipeCatalog.Embedded).Run(yes: true, list: false), out var exit);
+        Assert.Equal(0, exit);
+        Assert.Contains(TrustRequest.AnyDomainLine, stderr);
+        var store = TrustStore.For(f.Host, f.Project);
+        Assert.True(store.CoversDomain("*"));
+        Assert.True(store.CoversDomain("extra.example"));
+        Assert.Equal(0, f.Run(NoTerminal));
+    }
+
     // pen trust
 
     [Fact]

@@ -200,8 +200,9 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     /// </summary>
     /// <returns>Whether it worked; a failure is reported, naming the session.</returns>
     /// <remarks>
-    /// <para>Of its project's config, only the approved domains count; the tools' domains are the ones it started
-    /// with (tool-domains), so a tools entry added to .pen/ since adds nothing. The deny lists count in full.</para>
+    /// <para>Of its project's config, only the domains the trust gate lets through count; the tools' domains are the
+    /// ones it started with (tool-domains), so a tools entry added to .pen/ since adds nothing. The deny lists count
+    /// in full.</para>
     /// <para>A session started by a Pen without deny gets only its allowlist, never with
     /// <see cref="Allowlist.AnyDomain"/> (see <see cref="WriteAclFiles"/>).</para>
     /// </remarks>
@@ -248,7 +249,8 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     /// Merges what <paramref name="session"/>, started in <paramref name="projectDir"/>, gets now.
     /// </summary>
     /// <returns>
-    /// The allow lists from the defaults, the user's allow, the project's approved allow and the session's tools'
+    /// The allow lists from the defaults, the user's allow, the project's allow as
+    /// <see cref="TrustGate.SelectAllowedDomains"/> takes it (as session start does) and the session's tools'
     /// domains, and the deny list from the user's and the project's deny.
     /// </returns>
     private static Egress MergeEgress(HostEnv host, SessionDir session, string projectDir)
@@ -256,8 +258,8 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
         var user = Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User);
         var projectConfig = Config.Load(Path.Combine(projectDir, ".pen"),
             Out.Field(Path.Combine(projectDir, ".pen")), ConfigKind.Project);
-        var approved = TrustStore.Load(host.GetRuntimeDir(session.ProjectKey), projectDir)
-            .SelectApprovedDomains(projectConfig.Allow);
+        var approved = TrustGate.SelectAllowedDomains(user, projectConfig,
+            TrustStore.Load(host.GetRuntimeDir(session.ProjectKey), projectDir));
         IEnumerable<string>[] sources = [Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")), user.Allow,
             approved, session.ReadToolDomains()];
         return new(Allowlist.Merge(sources), Allowlist.MergeNamed(sources), Allowlist.MergeDeny(user, projectConfig));
@@ -398,7 +400,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     private (HashSet<string> Allowed, HashSet<string> Denied) MergeAllowedNow(ProjectContext context)
     {
         var store = TrustStore.For(host, context.Project);
-        var approved = store.SelectApprovedDomains(context.ProjectConfig.Allow);
+        var approved = TrustGate.SelectAllowedDomains(context.User, context.ProjectConfig, store);
         var toolDomains = ToolSpec.ListDomains(
             context.User.Tools.Concat(store.SelectApprovedTools(context.ProjectConfig.Tools, catalog)),
             catalog);

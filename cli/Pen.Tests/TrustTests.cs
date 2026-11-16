@@ -75,6 +75,87 @@ public class TrustTests
     }
 
     [Fact]
+    public void TheStarIsAskedAbout_UnlessTheUsersAllowHasItToo()
+    {
+        using var f = new Fixture();
+        Assert.Equal(["*"], f.Requested("allow = [\"*\"]\n").Domains);
+        Assert.Equal(["*"], f.Requested("allow = [\"*\"]\n", "allow = [\".new.example\"]\n").Domains);
+        Assert.True(f.Requested("allow = [\"*\"]\n", "allow = [\"*\"]\n").IsEmpty);
+    }
+
+    [Fact]
+    public void AnApprovedStarCoversTheStarAlone_NoDomainByName()
+    {
+        using var f = new Fixture();
+        f.Store.Approve(f.Requested("allow = [\"*\"]\n"));
+        Assert.Contains("\nallow *\n", File.ReadAllText(f.StorePath));
+        Assert.True(f.Store.CoversDomain("*"));
+        Assert.False(f.Store.CoversDomain("example.com"));
+        Assert.False(f.Store.CoversDomain(".example.com"));
+        Assert.True(f.Requested("allow = [\"*\"]\n").IsEmpty);
+        // Named, a domain can reach private addresses, which "*" can't: it needs its own approval.
+        Assert.Equal(["internal.example"], f.Requested("allow = [\"*\", \"internal.example\"]\n").Domains);
+        var both = Config.Parse("allow = [\"*\", \"internal.example\"]\n", "p", ConfigKind.Project);
+        Assert.Equal(["*"], TrustGate.SelectAllowedDomains(Config.Empty, both, f.Store));
+    }
+
+    [Fact]
+    public void ApprovedDomainsDontCoverTheStar()
+    {
+        using var f = new Fixture();
+        f.Store.ApproveDomains(["a.example", ".wild.example"]);
+        Assert.False(f.Store.CoversDomain("*"));
+        Assert.Equal(["*"], f.Requested("allow = [\"*\", \"a.example\"]\n").Domains);
+    }
+
+    [Fact]
+    public void AUsersStarCoversTheProjectsStarAlone_ItsNamedDomainsAreAskedAbout()
+    {
+        using var f = new Fixture();
+        const string userStar = "allow = [\"*\"]\n";
+        // Named, a domain can reach private addresses, which the user's "*" doesn't let it.
+        Assert.Equal(["internal.example"], f.Requested("allow = [\"internal.example\"]\n", userStar).Domains);
+        Assert.Equal(["internal.example", ".wild.example"],
+            f.Requested("allow = [\"*\", \"internal.example\", \".wild.example\", \"internal.example\"]\n", userStar).Domains);
+        // The user's named entries and the defaults still cover, beside the user's "*".
+        Assert.Empty(f.Requested("allow = [\"a.corp.example\", \"api.github.com\"]\n", "allow = [\"*\", \".corp.example\"]\n").Domains);
+        Assert.Empty(f.Requested("allow = [\"x.example\"]\n", "allow = [\"x.example\", \"*\"]\n").Domains);
+        f.Store.ApproveDomains(["internal.example"]);
+        Assert.True(f.Requested("allow = [\"*\", \"internal.example\"]\n", userStar).IsEmpty);
+    }
+
+    [Theory]
+    [InlineData("allow = [\"*\"]\n", new[] { "*", "api.github.com", "approved.example" })]
+    [InlineData("allow = [\"*\", \".corp.example\"]\n", new[] { "*", "a.corp.example", "api.github.com", "approved.example" })]
+    [InlineData("allow = [\".corp.example\"]\n", new[] { "a.corp.example", "api.github.com", "approved.example" })]
+    [InlineData("", new[] { "api.github.com", "approved.example" })]
+    public void ASessionTakesTheProjectsApprovedDomains_AndThoseTheUsersNamedAllowCovers(string userToml, string[] expected)
+    {
+        using var f = new Fixture();
+        f.Store.ApproveDomains(["approved.example"]);
+        var user = Config.Parse(userToml, "u", ConfigKind.User);
+        var project = Config.Parse("allow = [\"*\", \"internal.example\", \"a.corp.example\", \"api.github.com\", \"approved.example\"]\n", "p", ConfigKind.Project);
+        Assert.Equal(expected, TrustGate.SelectAllowedDomains(user, project, f.Store));
+        // What it leaves out is what the gate asks for.
+        var asked = new TrustGate(new ProjectContext(f.Host, f.Project, user, project), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded).FindUnapproved(f.Store, []).Domains;
+        Assert.Equal(project.Allow.Except(expected), asked);
+    }
+
+    [Fact]
+    public void AStoreWithTheStarRoundTrips_AlongsideDomains()
+    {
+        using var f = new Fixture();
+        f.Store.ApproveDomains(["a.example", "*"]);
+        var text = File.ReadAllText(f.StorePath);
+        Assert.Equal($"pen-trust 1\ndir {f.Project.Dir}\nallow *\nallow a.example\n", text);
+        Assert.True(f.Store.CoversDomain("*"));
+        Assert.True(f.Store.CoversDomain("a.example"));
+        f.Store.ApproveDomains(["b.example"]); // read back, then written again
+        Assert.Equal($"pen-trust 1\ndir {f.Project.Dir}\nallow *\nallow a.example\nallow b.example\n", File.ReadAllText(f.StorePath));
+        Assert.True(f.Store.CoversDomain("*"));
+    }
+
+    [Fact]
     public void DockerIsAskedAboutOnlyWhenOn_AndOnce()
     {
         using var f = new Fixture();
@@ -226,6 +307,10 @@ public class TrustTests
     [InlineData("evil.example\r\ndocker")]
     [InlineData("not a domain")]
     [InlineData("")]
+    [InlineData("**")]
+    [InlineData(" *")]
+    [InlineData("*\ndocker")]
+    [InlineData("*.example")]
     public void AValueThatIsntADomainIsRefused_AndForgesNothing(string hostile)
     {
         using var f = new Fixture();
@@ -236,6 +321,7 @@ public class TrustTests
         Assert.False(f.Store.Docker);
         Assert.Null(f.Store.LayerHash);
         Assert.False(f.Store.CoversDomain("evil.example"));
+        Assert.False(f.Store.CoversDomain("*"));
     }
 
     [Fact]
@@ -269,6 +355,11 @@ public class TrustTests
         "pen-trust 1\ndir {dir}\ndocker\r\n",
         "pen-trust 1\ndir {dir}\nallow not a domain\ndocker\n",
         "pen-trust 1\ndir {dir}\nallow EVIL.example\ndocker\n",
+        "pen-trust 1\ndir {dir}\nallow **\ndocker\n",
+        "pen-trust 1\ndir {dir}\nallow  *\ndocker\n",
+        "pen-trust 1\ndir {dir}\nallow * \ndocker\n",
+        "pen-trust 1\ndir {dir}\nallow *.example\ndocker\n",
+        "pen-trust 1\ndir {dir}\nallow\ndocker\n",
         "pen-trust 1\ndir {dir}\ngithub_owner Upper\ndocker\n",
         "pen-trust 1\ndir {dir}\ngithub_owner -bad\ndocker\n",
         "pen-trust 1\ndir {dir}\nlayer abc\ndocker\n",
@@ -281,6 +372,7 @@ public class TrustTests
         Assert.False(store.Docker);
         Assert.Null(store.LayerHash);
         Assert.False(store.CoversDomain("fine.example"));
+        Assert.False(store.CoversDomain("*"));
         Assert.False(store.CoversOwner("other"));
     }
 
@@ -289,7 +381,8 @@ public class TrustTests
     public void ACorruptStoreApprovesNothing(string content)
     {
         using var f = new Fixture();
-        f.Store.Approve(f.Requested("allow = [\"fine.example\"]\ndocker = true\ngithub_owner = \"other\"\n"));
+        f.Store.Approve(f.Requested("allow = [\"fine.example\", \"*\"]\ndocker = true\ngithub_owner = \"other\"\n"));
+        Assert.True(f.Store.CoversDomain("*"));
         File.WriteAllText(f.StorePath, content.Replace("{dir}", f.Project.Dir));
         AssertNothingApproved(f.Store);
     }
@@ -401,7 +494,9 @@ public class TrustTests
     {
         using var f = new Fixture();
         f.Store.ApproveDomains(["a.example", ".wild.example"]);
-        Assert.Equal(["a.example", "x.wild.example"], f.Store.SelectApprovedDomains(["a.example", "b.example", "x.wild.example"]));
+        var project = Config.Parse("allow = [\"a.example\", \"b.example\", \"x.wild.example\"]\n", "p", ConfigKind.Project);
+        Assert.Equal(["a.example", "x.wild.example"],
+            TrustGate.SelectAllowedDomains(Config.Empty, project, f.Store));
     }
 
     [Fact]
@@ -432,6 +527,47 @@ public class TrustTests
     private static List<string> ManyDomains(int n) => Enumerable.Range(0, n).Select(i => $"d{i}.example").ToList();
 
     [Fact]
+    public void TheStarSaysItOpensEgress_InsteadOfListingAsADomain()
+    {
+        var alone = new TrustRequest(["*"], false, null, null, null);
+        var line = Assert.Single(alone.FormatLines());
+        Assert.Equal(TrustRequest.AnyDomainLine, line);
+        Assert.Contains("* allows ANY domain for this project's sessions", line);
+        Assert.Contains("open egress", line);
+        Assert.Contains("raw IPs", line);
+        Assert.Contains("private addresses stay blocked", line);
+        Assert.DoesNotContain("the sandbox can reach it", line);
+        Assert.Equal([TrustRequest.AnyDomainLine], alone.FormatAllLines());
+        Assert.Equal("approve these?", alone.Question);
+
+        var lines = new TrustRequest(["a.example", "*", "b.example"], true, null, null, null).FormatLines().ToList();
+        Assert.Equal(5, lines.Count);
+        Assert.Equal(TrustRequest.AnyDomainLine, lines[0]);
+        Assert.Contains("docker = true", lines[1]);
+        Assert.Equal("  allow a.example: the sandbox can reach it", lines[2]);
+        Assert.Equal("  allow b.example: the sandbox can reach it", lines[3]);
+        Assert.Equal(TrustRequest.NamedBesideAnyLine, lines[4]);
+        Assert.Contains("private addresses", lines[4]);
+        Assert.DoesNotContain(TrustRequest.NamedBesideAnyLine, new TrustRequest(["*"], false, null, null, null).FormatLines());
+        Assert.DoesNotContain(TrustRequest.NamedBesideAnyLine, new TrustRequest(["a.example"], false, null, null, null).FormatLines());
+        Assert.Single(lines, l => l.Contains("allow *"));
+    }
+
+    [Fact]
+    public void AFloodOfDomainsCantHideTheStar()
+    {
+        var r = new TrustRequest([.. ManyDomains(100), "*"], false, null, null, null);
+        var lines = r.FormatLines().ToList();
+        Assert.Equal(TrustRequest.AnyDomainLine, lines[0]);
+        Assert.Equal(1 + TrustRequest.MaxListedDomains + 2, lines.Count);
+        Assert.Contains("80 more domains", lines[^2]);
+        Assert.Equal(TrustRequest.NamedBesideAnyLine, lines[^1]);
+        Assert.Contains("80 domains not listed", r.Question);
+        Assert.Equal(1 + 100 + 1, r.FormatAllLines().Count());
+        Assert.Equal(TrustRequest.AnyDomainLine, r.FormatAllLines().First());
+    }
+
+    [Fact]
     public void AFloodOfDomainsIsCapped_AndCantPushOtherItemsOutOfSight()
     {
         var r = new TrustRequest(ManyDomains(30_000), true, "other", "acme", new(Hex, null));
@@ -460,7 +596,7 @@ public class TrustTests
         f.Store.Approve(request);
         var store = f.Store;
         Assert.True(new TrustGate(new ProjectContext(f.Host, f.Project, Config.Empty, toml), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded).FindUnapproved(store, []).IsEmpty);
-        Assert.Equal(30_000, store.SelectApprovedDomains(toml.Allow).Count);
+        Assert.Equal(30_000, TrustGate.SelectAllowedDomains(Config.Empty, toml, store).Count);
         Assert.Equal(30_000 + 1, Allowlist.Merge(toml.Allow, [".wild.example"]).Count);
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(8), $"took {watch.Elapsed}");
     }
@@ -546,6 +682,7 @@ public class TrustTests
     [InlineData("tool-allow pen-test:1 not_a_domain")]
     [InlineData("tool-allow pen-test example.org")]
     [InlineData("tool-allow  pen-test:1 example.org")]
+    [InlineData("tool-allow pen-test:1 *")]
     public void AToolLineThatIsntOneMakesTheStoreCorrupt(string line)
     {
         using var f = new Fixture();
@@ -564,6 +701,9 @@ public class TrustTests
         Assert.Contains("tool-allow pen-test:1 example.org\n", File.ReadAllText(f.StorePath));
         Assert.Throws<PenException>(() => f.Store.Approve(new TrustRequest([], false, null, null, null) { Tools = [new(new("pen-test", "1\ndocker"), true, [])] }));
         Assert.Throws<PenException>(() => f.Store.Approve(new TrustRequest([], false, null, null, null) { Tools = [new(Tool1, true, ["evil.example\ndocker"])] }));
+        Assert.Throws<PenException>(() => f.Store.Approve(new TrustRequest([], false, null, null, null) { Tools = [new(Tool1, true, ["*"])] }));
+        Assert.False(f.Store.CoversToolDomain(Tool1, "*"));
+        Assert.False(f.Store.CoversDomain("*"));
         Assert.False(f.Store.Docker);
         Assert.False(f.Store.CoversToolDomain(Tool1, "evil.example"));
     }

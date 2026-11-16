@@ -26,6 +26,13 @@ internal sealed class TrustStore
     private readonly string _path;
     private readonly string _dir;
     private readonly HashSet<string> _domains = new(StringComparer.Ordinal);
+
+    /// <summary>Whether allow = ["*"] is approved.</summary>
+    /// <remarks>
+    /// Kept apart from <see cref="_domains"/>, so it covers only the project's own "*" entry: a domain allowed by
+    /// name reaches private addresses, which open egress doesn't.
+    /// </remarks>
+    private bool _anyDomain;
     private readonly HashSet<string> _owners = new(StringComparer.Ordinal);
     private readonly HashSet<string> _tools = new(StringComparer.Ordinal);
 
@@ -97,8 +104,8 @@ internal sealed class TrustStore
         var value = space < 0 ? null : line[(space + 1)..];
         switch (kind)
         {
-            case "allow" when value != null && IsDomain(value):
-                _domains.Add(value);
+            case "allow" when value != null && IsAllowEntry(value):
+                AddAllowEntry(value);
                 return true;
             case "github_owner" when value != null && IsOwner(value):
                 _owners.Add(value);
@@ -122,6 +129,20 @@ internal sealed class TrustStore
 
     private static bool IsDomain(string value) => Allowlist.IsValidDomain(value);
 
+    /// <summary>
+    /// Whether <paramref name="value"/> may be an allow line's: a domain, or <see cref="Allowlist.AnyDomain"/>.
+    /// </summary>
+    /// <remarks>Only allow lines take "*": a tool-allow line's domain is always a domain.</remarks>
+    private static bool IsAllowEntry(string value) => Allowlist.IsValidAllowEntry(value);
+
+    private void AddAllowEntry(string entry)
+    {
+        if (entry == Allowlist.AnyDomain)
+            _anyDomain = true;
+        else
+            _domains.Add(entry);
+    }
+
     private static bool IsOwner(string value) =>
         Config.OwnerRegex().IsMatch(value) && value == value.ToLowerInvariant();
 
@@ -130,9 +151,15 @@ internal sealed class TrustStore
 
     private static bool IsHash(string value) => value.Length == 64 && value.All(c => char.IsAsciiHexDigitLower(c));
 
-    /// <summary>Whether <paramref name="domain"/> is approved as written, or under an approved wildcard.</summary>
-    /// <remarks>example.com doesn't cover .example.com.</remarks>
-    public bool CoversDomain(string domain) => Allowlist.IsAllowed(_domains, domain);
+    /// <summary>
+    /// Whether the allow entry <paramref name="domain"/> is approved as written, or under an approved wildcard.
+    /// </summary>
+    /// <remarks>
+    /// example.com doesn't cover .example.com. An approved <see cref="Allowlist.AnyDomain"/> covers that entry and
+    /// nothing else, so it approves no domain by name.
+    /// </remarks>
+    public bool CoversDomain(string domain) =>
+        domain == Allowlist.AnyDomain ? _anyDomain : Allowlist.IsAllowed(_domains, domain);
 
     /// <summary>Whether <paramref name="owner"/> is approved as a github_owner, ignoring case.</summary>
     public bool CoversOwner(string owner) => _owners.Contains(owner.ToLowerInvariant());
@@ -150,10 +177,6 @@ internal sealed class TrustStore
         tools.Where(tool => CoversTool(tool)
                 && ToolSpec.ListDomains([tool], catalog).All(domain => CoversToolDomain(tool, domain)))
             .ToList();
-
-    /// <summary>Selects the approved domains of a project's <paramref name="allow"/> list.</summary>
-    /// <returns>All of the list that may reach an allowlist.</returns>
-    public List<string> SelectApprovedDomains(IEnumerable<string> allow) => allow.Where(CoversDomain).ToList();
 
     /// <summary>Records everything in <paramref name="request"/>.</summary>
     /// <returns>The store as written.</returns>
@@ -203,9 +226,9 @@ internal sealed class TrustStore
     {
         foreach (var domain in domains)
         {
-            if (!IsDomain(domain))
+            if (!IsAllowEntry(domain))
                 throw new PenException($"can't approve {Out.Field(domain)}: it isn't a domain");
-            _domains.Add(domain);
+            AddAllowEntry(domain);
         }
     }
 
@@ -242,6 +265,8 @@ internal sealed class TrustStore
     private void WriteFile()
     {
         var lines = new List<string> { Header, "dir " + _dir };
+        if (_anyDomain)
+            lines.Add("allow " + Allowlist.AnyDomain);
         lines.AddRange(_domains.Order(StringComparer.Ordinal).Select(domain => "allow " + domain));
         lines.AddRange(_owners.Order(StringComparer.Ordinal).Select(owner => "github_owner " + owner));
         lines.AddRange(_tools.Order(StringComparer.Ordinal).Select(tool => "tool " + tool));

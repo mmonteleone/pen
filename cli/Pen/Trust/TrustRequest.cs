@@ -1,9 +1,12 @@
 using Pen.Platform;
+using Pen.Proxy;
 
 namespace Pen.Trust;
 
 /// <summary>What a project's .pen/ asks for that isn't approved.</summary>
-/// <param name="Domains">The allow domains nothing approves yet.</param>
+/// <param name="Domains">
+/// The allow domains nothing approves yet, and <see cref="Allowlist.AnyDomain"/> when it's unapproved.
+/// </param>
 /// <param name="Docker">Whether docker = true needs approving.</param>
 /// <param name="GitHubOwner">The github_owner that needs approving, or null.</param>
 /// <param name="OriginOwner">The owner of origin, shown next to that github_owner, or null when it has none.</param>
@@ -30,7 +33,13 @@ internal sealed record TrustRequest(
     /// <summary>Whether nothing needs approving.</summary>
     public bool IsEmpty => Domains.Count == 0 && !Docker && GitHubOwner == null && Layer == null && Tools.Count == 0;
 
-    private int HiddenDomainCount => Math.Max(Domains.Count - MaxListedDomains, 0);
+    /// <summary>Whether <see cref="Allowlist.AnyDomain"/> needs approving: open egress.</summary>
+    public bool AnyDomain => Domains.Contains(Allowlist.AnyDomain);
+
+    /// <summary>The domains listed a line each: all but <see cref="Allowlist.AnyDomain"/>, which has its own.</summary>
+    private IEnumerable<string> NamedDomains => Domains.Where(domain => domain != Allowlist.AnyDomain);
+
+    private int HiddenDomainCount => Math.Max(NamedDomains.Count() - MaxListedDomains, 0);
     private int HiddenToolCount => Math.Max(Tools.Count - MaxListedTools, 0);
 
     /// <summary>Formats one indented line for each item, saying what it grants, for a prompt.</summary>
@@ -46,15 +55,18 @@ internal sealed record TrustRequest(
             yield return FormatToolLine(tool);
         if (HiddenToolCount > 0)
             yield return $"  ...and {HiddenToolCount} more tools: pen trust --list shows them all";
-        foreach (var domain in Domains.Take(MaxListedDomains))
+        foreach (var domain in NamedDomains.Take(MaxListedDomains))
             yield return FormatDomainLine(domain);
         if (HiddenDomainCount > 0)
             yield return $"  ...and {HiddenDomainCount} more domains: pen trust --list shows them all";
+        if (HasNamedDomainBesideAny)
+            yield return NamedBesideAnyLine;
     }
 
     /// <summary>Formats every item, with no limit, for pen trust --list.</summary>
     public IEnumerable<string> FormatAllLines() =>
-        DescribeGrants().Concat(Tools.Select(FormatToolLine)).Concat(Domains.Select(FormatDomainLine));
+        DescribeGrants().Concat(Tools.Select(FormatToolLine)).Concat(NamedDomains.Select(FormatDomainLine))
+            .Concat(HasNamedDomainBesideAny ? [NamedBesideAnyLine] : []);
 
     /// <summary>The question to approve, which says so when it covers items not listed.</summary>
     public string Question
@@ -72,7 +84,17 @@ internal sealed record TrustRequest(
         }
     }
 
+    private bool HasNamedDomainBesideAny => AnyDomain && NamedDomains.Any();
+
+    /// <summary>Said after the domains when <see cref="Allowlist.AnyDomain"/> is requested beside named ones.</summary>
+    internal const string NamedBesideAnyLine =
+        "  domains allowed by name reach private addresses too, which * alone doesn't";
+
     private static string FormatDomainLine(string domain) => $"  allow {Out.Field(domain)}: the sandbox can reach it";
+
+    /// <summary>The line for <see cref="Allowlist.AnyDomain"/>, which isn't a domain the sandbox can reach.</summary>
+    internal const string AnyDomainLine = "  allow *: open egress. * allows ANY domain for this project's sessions "
+        + "(raw IPs and names that resolve to private addresses stay blocked)";
 
     private static string FormatToolLine(ToolRequest request)
     {
@@ -85,9 +107,15 @@ internal sealed record TrustRequest(
         return $"  tool {name}: sessions run with it installed, and the sandbox can reach {domains}";
     }
 
-    /// <summary>Describes the items other than tools and domains, one line each (the layer's has its text).</summary>
+    /// <summary>
+    /// Describes <see cref="Allowlist.AnyDomain"/> and the items other than tools and domains, one line each (the
+    /// layer's has its text).
+    /// </summary>
+    /// <remarks>"*" comes first, never among the domains a long list cuts.</remarks>
     private IEnumerable<string> DescribeGrants()
     {
+        if (AnyDomain)
+            yield return AnyDomainLine;
         if (Layer != null)
             yield return DescribeLayer(Layer);
         if (Docker)

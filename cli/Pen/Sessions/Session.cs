@@ -142,7 +142,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         // Tools that can't go together stop the session, whatever's approved.
         var tools = ToolSpec.Merge(catalog, context.User.Tools, context.ProjectConfig.Tools, flagTools);
         // Before anything below uses a setting from .pen/.
-        new TrustGate(context, answers, catalog).RequireForSession(flagTools);
+        var trust = new TrustGate(context, answers, catalog).RequireForSession(flagTools);
         var mounts = RepoGuard.PrepareMounts(Project.Dir, context.Host.Home);
         // PrepareMounts protects every module repo; the session-end check takes as the submodules' own only those
         // listed.
@@ -156,8 +156,10 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         var owner = GitHub.FindProjectOwner(Project, context.ProjectConfig);
         var token = GitHub.SelectToken(owner, context.User, RuntimeDir, context.Host);
         var toolDomains = ToolSpec.ListDomains(tools, catalog);
+        // The same project domains pen allow applies live: what the gate let through, never on the user's "*" alone.
+        var projectAllow = TrustGate.SelectAllowedDomains(context.User, context.ProjectConfig, trust);
         IEnumerable<string>[] allowSources = [Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")),
-            context.User.Allow, context.ProjectConfig.Allow, toolDomains];
+            context.User.Allow, projectAllow, toolDomains];
         var deny = Allowlist.MergeDeny(context.User, context.ProjectConfig);
         return new()
         {
