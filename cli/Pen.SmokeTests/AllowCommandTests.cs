@@ -22,13 +22,13 @@ public sealed class AllowCommandTests(AllowCommandTests.Fixture fixture) : IClas
                 && !fixture.FirstSession.Output.Contains("pen allow example.com", StringComparison.Ordinal),
             fixture.FirstSession.Describe());
 
-    [Fact(DisplayName = "it creates .pen/config.toml with the commented stub")]
-    public void CreatesTheStub()
+    [Fact(DisplayName = "it creates .pen/config.toml from the commented project template")]
+    public void CreatesTheProjectTemplate()
     {
         var lines = fixture.ProjectConfigLines;
 
         Assert.True(
-            lines.Count > 0 && lines[0].StartsWith("# pen project config", StringComparison.Ordinal)
+            lines.Count > 0 && lines[0].StartsWith("# Pen project config", StringComparison.Ordinal)
                 && lines.Any(line => line.StartsWith("# github_owner", StringComparison.Ordinal)),
             string.Join('\n', lines));
     }

@@ -123,9 +123,9 @@ public class AllowCommandTests
     {
         using var t = new TempDir();
         var path = Path.Combine(t.Path, "config.toml");
-        Assert.Equal(["example.com", ".foo.io"], AllowCommand.Append(new(path, ".pen/config.toml", ConfigKind.Project, AllowCommand.ProjectConfigStub), "allow", ["example.com", ".foo.io"]));
+        Assert.Equal(["example.com", ".foo.io"], AllowCommand.Append(new(path, ".pen/config.toml", ConfigKind.Project, ProjectTemplate.Render(ProjectDetection.None)), "allow", ["example.com", ".foo.io"]));
         var text = File.ReadAllText(path);
-        Assert.StartsWith(AllowCommand.ProjectConfigStub, text);
+        Assert.StartsWith(ProjectTemplate.Render(ProjectDetection.None), text);
         Assert.Equal(["example.com", ".foo.io"], Config.Parse(text, "x", ConfigKind.Project).Allow);
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead, File.GetUnixFileMode(path));
 
@@ -142,7 +142,7 @@ public class AllowCommandTests
         using var t = new TempDir();
         var path = Path.Combine(t.Path, "config.toml");
         File.WriteAllText(path, "allw = 1\n");
-        Assert.Throws<PenException>(() => AllowCommand.Append(new(path, ".pen/config.toml", ConfigKind.Project, AllowCommand.ProjectConfigStub), "allow", ["b.io"]));
+        Assert.Throws<PenException>(() => AllowCommand.Append(new(path, ".pen/config.toml", ConfigKind.Project, ProjectTemplate.Render(ProjectDetection.None)), "allow", ["b.io"]));
         Assert.Equal("allw = 1\n", File.ReadAllText(path));
     }
 

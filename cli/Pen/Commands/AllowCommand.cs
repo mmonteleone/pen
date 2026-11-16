@@ -21,19 +21,6 @@ namespace Pen.Commands;
 /// <param name="catalog">The recipes that say which domains a tool brings.</param>
 internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
 {
-    /// <summary>The text of a new .pen/config.toml, which pen allow and pen deny create when there's none.</summary>
-    public const string ProjectConfigStub = """
-        # pen project config (TOML), read-only inside the sandbox. Not for secrets:
-        # it's usually committed. Edits apply to the next session, once approved;
-        # `pen allow` and `pen deny` also apply to running ones.
-        #
-        # github_owner = "<owner>"   whose GitHub token to use (default: origin's owner)
-        # docker = true              Docker-in-Docker for every session
-        # ports = [5173]             forward localhost:5173 on the host to the sandbox
-        # tools = ["go", "rust"]     toolchains, as name or name:version (pen --tool list)
-
-        """;
-
     /// <summary>Adds <paramref name="domains"/> to allow and applies them to running sessions.</summary>
     /// <param name="domains">The domains to allow (lowercased), or <see cref="Allowlist.AnyDomain"/>.</param>
     /// <param name="global">
@@ -96,7 +83,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     /// <summary>
     /// Adds <paramref name="domains"/> to <paramref name="key"/> in the user's config.toml (with
     /// <paramref name="global"/>) or the project's .pen/config.toml, creating that from
-    /// <see cref="ProjectConfigStub"/> if it's missing.
+    /// <see cref="ProjectTemplate"/>'s all-commented template if it's missing.
     /// </summary>
     /// <returns>The file, as messages name it, and the domains that weren't in its list yet.</returns>
     internal static ConfigAddition AddToConfig(
@@ -116,7 +103,8 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
         var where = ".pen/" + Config.FileName;
         RepoGuard.EnsureDirectory(project!.Dir, project.PenDir);
         RepoGuard.RequireNotLink(project.Dir, project.ProjectConfigPath);
-        var target = new ConfigTarget(project.ProjectConfigPath, where, ConfigKind.Project, ProjectConfigStub);
+        var target = new ConfigTarget(project.ProjectConfigPath, where, ConfigKind.Project,
+            ProjectTemplate.Render(ProjectDetection.None));
         return new(where, Append(target, key, domains));
     }
 

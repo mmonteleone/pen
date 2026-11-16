@@ -66,7 +66,7 @@ public class DenyCommandTests
         Assert.Equal(".pen/config.toml", addition.Where);
         Assert.Equal(["pastebin.com"], addition.Added);
         var text = File.ReadAllText(project.ProjectConfigPath);
-        Assert.StartsWith(AllowCommand.ProjectConfigStub, text);
+        Assert.StartsWith(ProjectTemplate.Render(ProjectDetection.None), text);
         Assert.Equal(["pastebin.com"], Config.Parse(text, "x", ConfigKind.Project).Deny);
         Assert.Empty(Config.Parse(text, "x", ConfigKind.Project).Allow);
         Assert.False(File.Exists(TrustStore.GetPath(host.GetRuntimeDir(project.Key), project.Dir)));
