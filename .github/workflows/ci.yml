@@ -1,0 +1,68 @@
+name: CI
+
+# Build, unit tests on macOS and Linux, then the smoke suite on Linux (rootful
+# Docker). The release workflow calls this too, so a tag publishes nothing until
+# it passes. Rootless Docker and macOS smoke runs stay manual (CONTRIBUTING.md).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: 1
+
+jobs:
+  unit:
+    name: Build and unit tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: cli/global.json
+      - name: Build
+        working-directory: cli
+        run: dotnet build
+      - name: Unit tests
+        working-directory: cli
+        run: dotnet test
+
+  smoke:
+    name: Smoke tests (Linux, rootful Docker)
+    needs: unit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: cli/global.json
+      - name: Install pen
+        run: |
+          cli/install.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Smoke tests
+        working-directory: cli
+        run: |
+          pen --version
+          dotnet run --project Pen.SmokeTests

@@ -443,14 +443,14 @@ Set `docker = true` in `.pen/config.toml` to enable it for every session. The da
 
 ### Update Pen itself
 
-From your Pen source checkout:
+With Homebrew, run `brew upgrade pen`. With a release binary, download the new archive from [Releases](https://github.com/mmonteleone/pen/releases) and replace `pen` as you [installed it](../README.md#install). From a source checkout:
 
 ```sh
 git pull
 cli/install.sh
 ```
 
-If the bundled image files changed, the next session rebuilds the base image. Homebrew and standalone release binaries are planned; source installation is the current option.
+If the bundled image files changed, the next session rebuilds the base image.
 
 ### Update agents and tools
 

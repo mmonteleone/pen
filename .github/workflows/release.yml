@@ -1,0 +1,176 @@
+name: Release
+
+# Pushing a vX.Y.Z tag that matches <Version> in cli/Pen/Pen.csproj runs CI,
+# builds Native AOT binaries for macOS and Linux, publishes them to a GitHub
+# release with checksums and build provenance, and updates the Homebrew tap.
+# A version with a "-" suffix (v0.2.0-rc.1) is a prerelease and leaves the tap
+# alone. See "Releasing" in CONTRIBUTING.md.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: 1
+
+jobs:
+  check:
+    name: Check tag against version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: version
+        run: |
+          tag=${GITHUB_REF_NAME#v}
+          version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' cli/Pen/Pen.csproj)
+          if [ "$tag" != "$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME doesn't match <Version>$version</Version> in cli/Pen/Pen.csproj"
+            exit 1
+          fi
+          case $version in
+            *-*) prerelease=true ;;
+            *) prerelease=false ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+  test:
+    name: CI
+    needs: check
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Build ${{ matrix.rid }}
+    needs: [check, test]
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { rid: osx-arm64, os: macos-15, arch: arm64 }
+          - { rid: osx-x64, os: macos-15-intel, arch: x86_64 }
+          - { rid: linux-x64, os: ubuntu-24.04, arch: x86-64 }
+          - { rid: linux-arm64, os: ubuntu-24.04-arm, arch: aarch64 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      RID: ${{ matrix.rid }}
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Linux builds in install.sh's Azure Linux container (glibc 2.34+), so
+      # only macOS needs a host SDK.
+      - if: runner.os == 'macOS'
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: cli/global.json
+      - name: Build
+        run: cli/install.sh --out "$RUNNER_TEMP/out"
+      - name: Check the binary
+        run: |
+          pen=$RUNNER_TEMP/out/pen
+          file "$pen"
+          file "$pen" | grep -q -- "$ARCH" || { echo "::error::expected a $ARCH binary"; exit 1; }
+          reported=$("$pen" --version)
+          case $reported in
+            "pen $VERSION" | "pen $VERSION+"*) ;;
+            *) echo "::error::pen --version printed '$reported', expected pen $VERSION"; exit 1 ;;
+          esac
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp LICENSE README.md "$RUNNER_TEMP/out/"
+          tar -czf "dist/pen-$VERSION-$RID.tar.gz" -C "$RUNNER_TEMP/out" pen LICENSE README.md
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pen-${{ matrix.rid }}
+          path: dist/pen-*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish GitHub release
+    needs: [check, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      PRERELEASE: ${{ needs.check.outputs.prerelease }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: pen-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum pen-*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+          [ "$(wc -l < SHA256SUMS)" -eq 4 ] || { echo "::error::expected 4 archives"; exit 1; }
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/pen-*.tar.gz
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=()
+          [ "$PRERELEASE" = true ] && flags+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "Pen $VERSION" --generate-notes "${flags[@]}" dist/pen-*.tar.gz dist/SHA256SUMS
+
+  homebrew:
+    name: Update Homebrew tap
+    needs: [check, release]
+    if: needs.check.outputs.prerelease == 'false'
+    runs-on: ubuntu-24.04
+    # Holds HOMEBREW_TAP_TOKEN; restrict it to v* tags in the repo settings.
+    environment: release
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: pen
+      - name: Render formula
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS --dir "$RUNNER_TEMP"
+          pen/packaging/homebrew/render-formula.sh "$VERSION" "$RUNNER_TEMP/SHA256SUMS" > "$RUNNER_TEMP/pen.rb"
+          cat "$RUNNER_TEMP/pen.rb"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: mmonteleone/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+      - name: Commit and push
+        working-directory: tap
+        run: |
+          mkdir -p Formula
+          cp "$RUNNER_TEMP/pen.rb" Formula/pen.rb
+          git add Formula/pen.rb
+          if git diff --cached --quiet; then
+            echo "Formula/pen.rb is already up to date"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "pen $VERSION"
+          git push

@@ -26,14 +26,26 @@ The project is a live mount, so keep backups, and keep host git (including IDE i
 
 Pen runs on **macOS or Linux** with **Docker and Compose v2**. On macOS, OrbStack and Colima are options. Linux supports rootful and rootless Docker and needs glibc 2.34+ (Ubuntu 22.04+, Debian 12+, etc.).
 
-Installation is from source for now:
-
-- **macOS:** install the .NET 11 SDK pinned in [`cli/global.json`](cli/global.json) and Xcode command-line tools (`xcode-select --install`).
-- **Linux:** the installer builds in a container; no host .NET SDK is needed.
-
-Homebrew and standalone release binaries are planned.
+Install with Homebrew or a release binary. To build from source on macOS, you also need the .NET 11 SDK pinned in [`cli/global.json`](cli/global.json) and Xcode command-line tools (`xcode-select --install`); on Linux the installer builds in a container, so no host .NET SDK is needed.
 
 ## Get started
+
+### Install
+
+With [Homebrew](https://brew.sh) on macOS or Linux:
+
+```sh
+brew install mmonteleone/tap/pen
+```
+
+Or download the archive for your platform (`osx-arm64`, `osx-x64`, `linux-x64` or `linux-arm64`) from [Releases](https://github.com/mmonteleone/pen/releases), check it against `SHA256SUMS` (or with `gh attestation verify <archive> --repo mmonteleone/pen`), and put `pen` on your `PATH`:
+
+```sh
+tar -xzf pen-*.tar.gz pen
+install -m 0755 pen ~/.local/bin/pen
+```
+
+Release binaries aren't notarized; on macOS, if you downloaded the archive in a browser, run `xattr -d com.apple.quarantine ~/.local/bin/pen` once.
 
 ### Install from source
 
@@ -43,7 +55,7 @@ cd pen
 cli/install.sh
 ```
 
-This installs `pen` to `~/.local/bin/`. Make sure that directory is in your `PATH`.
+This builds `pen` for your machine and installs it to `~/.local/bin/`. Make sure that directory is in your `PATH`.
 
 ### Start a session
 
