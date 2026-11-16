@@ -1,13 +1,13 @@
 namespace Pen.Tests;
 
 /// <summary>
-/// D2: pen prune's classification of project keys, and removal of the ones it
+/// D2: pen clean --stale's classification of project keys, and removal of the ones it
 /// may remove. Runs alone: these retake a project lock straight after releasing
 /// it, and a process start in a parallel test can hold a shared lock fd until
 /// its exec, so the lock could outlive the release.
 /// </summary>
 [Collection(nameof(LockAndProcessTests))]
-public class PruneTests
+public class CleanStaleTests
 {
     /// <summary>Records <paramref name="dir"/> as a project the way a pen command does, returning its key.</summary>
     private static string Record(HostEnv host, string dir)
@@ -17,7 +17,7 @@ public class PruneTests
         return p.Key;
     }
 
-    private static PruneCommand.Entry Only(List<PruneCommand.Entry> entries, string key) => Assert.Single(entries, e => e.Key == key);
+    private static CleanStaleCommand.Entry Only(List<CleanStaleCommand.Entry> entries, string key) => Assert.Single(entries, e => e.Key == key);
 
     [Fact]
     public void ARepoThatsStillThereIsLive()
@@ -25,8 +25,8 @@ public class PruneTests
         using var t = new TempDir();
         var host = t.Host();
         var key = Record(host, Git.Repo(t.Sub("repo")));
-        var e = Only(PruneCommand.Find(host, [], []), key);
-        Assert.Equal(PruneCommand.Status.Live, e.Status);
+        var e = Only(CleanStaleCommand.Find(host, [], []), key);
+        Assert.Equal(CleanStaleCommand.Status.Live, e.Status);
         Assert.False(e.Removable);
     }
 
@@ -36,7 +36,7 @@ public class PruneTests
         using var t = new TempDir();
         var host = t.Host();
         var key = Record(host, t.Sub("plain"));
-        Assert.Equal(PruneCommand.Status.Live, Only(PruneCommand.Find(host, [], []), key).Status);
+        Assert.Equal(CleanStaleCommand.Status.Live, Only(CleanStaleCommand.Find(host, [], []), key).Status);
     }
 
     [Fact]
@@ -47,8 +47,8 @@ public class PruneTests
         var repo = Git.Repo(t.Sub("repo"));
         var key = Record(host, repo);
         Directory.Delete(repo, recursive: true);
-        var e = Only(PruneCommand.Find(host, [], []), key);
-        Assert.Equal(PruneCommand.Status.Missing, e.Status);
+        var e = Only(CleanStaleCommand.Find(host, [], []), key);
+        Assert.Equal(CleanStaleCommand.Status.Missing, e.Status);
         Assert.Equal(repo, e.RecordedDir);
         Assert.True(e.Removable);
     }
@@ -62,7 +62,7 @@ public class PruneTests
         var key = Record(host, dir);
         Directory.Delete(dir);
         File.WriteAllText(dir, "");
-        Assert.Equal(PruneCommand.Status.Missing, Only(PruneCommand.Find(host, [], []), key).Status);
+        Assert.Equal(CleanStaleCommand.Status.Missing, Only(CleanStaleCommand.Find(host, [], []), key).Status);
     }
 
     [Fact]
@@ -77,8 +77,8 @@ public class PruneTests
         var other = Git.Repo(t.Sub("other"));
         File.CreateSymbolicLink(repo, other);
 
-        var e = Only(PruneCommand.Find(host, [], []), key);
-        Assert.Equal(PruneCommand.Status.Moved, e.Status);
+        var e = Only(CleanStaleCommand.Find(host, [], []), key);
+        Assert.Equal(CleanStaleCommand.Status.Moved, e.Status);
         Assert.Equal(Project.ComputeKey(other), e.CurrentKey);
         Assert.True(e.Removable);
     }
@@ -93,8 +93,8 @@ public class PruneTests
         Directory.Delete(dir);
         var main = Git.Repo(t.Sub("main"));
         Git.Run(main, "worktree", "add", "-q", dir);
-        var (status, current) = PruneCommand.Classify(key, dir);
-        Assert.Equal(PruneCommand.Status.Moved, status);
+        var (status, current) = CleanStaleCommand.Classify(key, dir);
+        Assert.Equal(CleanStaleCommand.Status.Moved, status);
         Assert.Equal(Project.ComputeKey(main), current);
     }
 
@@ -108,13 +108,13 @@ public class PruneTests
         Git.Run(repo, "worktree", "add", "-q", wt);
         var key = Record(host, wt);
         Assert.Equal(Project.ComputeKey(repo), key);
-        Assert.Equal(PruneCommand.Status.Live, Only(PruneCommand.Find(host, [], []), key).Status);
+        Assert.Equal(CleanStaleCommand.Status.Live, Only(CleanStaleCommand.Find(host, [], []), key).Status);
 
         // The worktree going doesn't matter; the main checkout going does.
         Git.Run(repo, "worktree", "remove", "--force", wt);
-        Assert.Equal(PruneCommand.Status.Live, Only(PruneCommand.Find(host, [], []), key).Status);
+        Assert.Equal(CleanStaleCommand.Status.Live, Only(CleanStaleCommand.Find(host, [], []), key).Status);
         Directory.Delete(repo, recursive: true);
-        Assert.Equal(PruneCommand.Status.Missing, Only(PruneCommand.Find(host, [], []), key).Status);
+        Assert.Equal(CleanStaleCommand.Status.Missing, Only(CleanStaleCommand.Find(host, [], []), key).Status);
     }
 
     [Fact]
@@ -124,10 +124,10 @@ public class PruneTests
         var host = t.Host();
         var key = Record(host, t.Sub("plain"));
         File.Delete(Path.Combine(host.GetRuntimeDir(key), Session.ProjectDirFile));
-        var e = Only(PruneCommand.Find(host, [$"{key}_home"], []), key);
-        Assert.Equal(PruneCommand.Status.Unknown, e.Status);
+        var e = Only(CleanStaleCommand.Find(host, [$"{key}_home"], []), key);
+        Assert.Equal(CleanStaleCommand.Status.Unknown, e.Status);
         Assert.False(e.Removable);
-        Assert.Equal(PruneCommand.Status.Unknown, PruneCommand.Classify(key, null).Status);
+        Assert.Equal(CleanStaleCommand.Status.Unknown, CleanStaleCommand.Classify(key, null).Status);
     }
 
     [Fact]
@@ -136,8 +136,8 @@ public class PruneTests
         using var t = new TempDir();
         var host = t.Host();
         const string key = "pen-gone-0123abcd";
-        var e = Only(PruneCommand.Find(host, [$"{key}_nuget", $"{key}_home", $"{key}_dind"], []), key);
-        Assert.Equal(PruneCommand.Status.Unknown, e.Status);
+        var e = Only(CleanStaleCommand.Find(host, [$"{key}_nuget", $"{key}_home", $"{key}_dind"], []), key);
+        Assert.Equal(CleanStaleCommand.Status.Unknown, e.Status);
         Assert.Null(e.RuntimeDir);
         Assert.Equal([$"{key}_dind", $"{key}_home", $"{key}_nuget"], e.Volumes);
     }
@@ -149,7 +149,7 @@ public class PruneTests
         var host = t.Host();
         var a = Record(host, Git.Repo(t.Sub("a")));
         var b = Record(host, t.Sub("b"));
-        var entries = PruneCommand.Find(host,
+        var entries = CleanStaleCommand.Find(host,
             [$"{a}_home", $"{a}_nuget", "pen-c-89abcdef_home", "unrelated_home", $"{a}_other", "pen-c-89abcdef", "pen_home"],
             [$"{a}:latest", $"{a}-0011aabb:latest", $"{a}:old", $"{a}-x-0011aabb:latest", "pen:latest", $"{b}x:latest"]);
 
@@ -161,7 +161,7 @@ public class PruneTests
         var eb = Only(entries, b);
         Assert.Empty(eb.Volumes);
         Assert.Empty(eb.Images);
-        Assert.Equal(PruneCommand.Status.Live, eb.Status);
+        Assert.Equal(CleanStaleCommand.Status.Live, eb.Status);
     }
 
     [Fact]
@@ -171,7 +171,7 @@ public class PruneTests
         var host = t.Host();
         t.Sub("home", ".local", "state", "pen", "not-a-key");
         t.Sub("home", ".local", "state", "pen", "pen-x-nothex12");
-        Assert.Empty(PruneCommand.Find(host, [], []));
+        Assert.Empty(CleanStaleCommand.Find(host, [], []));
     }
 
     [Theory]
@@ -182,7 +182,7 @@ public class PruneTests
     [InlineData("pen-foo_home", null)]
     [InlineData("pen-foo-0123ABCD_home", null)]
     [InlineData("xpen-foo-0123abcd_home", null)]
-    public void KeyOfVolume(string volume, string? key) => Assert.Equal(key, PruneCommand.FindKeyOfVolume(volume));
+    public void KeyOfVolume(string volume, string? key) => Assert.Equal(key, CleanStaleCommand.FindKeyOfVolume(volume));
 
     [Theory]
     [InlineData("pen-foo-0123abcd:latest", true)]
@@ -199,13 +199,13 @@ public class PruneTests
     [InlineData("pen-foo-0123abcd-89abcdef-89abcdef:0123456789abcdef", false)]
     [InlineData("pen-foo-0123abcdx:0123456789abcdef", false)]
     [InlineData("pen-tools:0123456789abcdef", false)]
-    public void IsImageOf(string image, bool expected) => Assert.Equal(expected, PruneCommand.IsImageOf("pen-foo-0123abcd", image));
+    public void IsImageOf(string image, bool expected) => Assert.Equal(expected, CleanStaleCommand.IsImageOf("pen-foo-0123abcd", image));
 
     [Fact]
     public void AProjectNamedToolsDoesntClaimTheSharedToolsImages()
     {
-        Assert.False(PruneCommand.IsImageOf("pen-tools-0123abcd", "pen-tools:0123456789abcdef"));
-        Assert.True(PruneCommand.IsImageOf("pen-tools-0123abcd", "pen-tools-0123abcd:0123456789abcdef"));
+        Assert.False(CleanStaleCommand.IsImageOf("pen-tools-0123abcd", "pen-tools:0123456789abcdef"));
+        Assert.True(CleanStaleCommand.IsImageOf("pen-tools-0123abcd", "pen-tools-0123abcd:0123456789abcdef"));
     }
 
     [Fact]
@@ -218,7 +218,7 @@ public class PruneTests
         var gone = Git.Repo(t.Sub("gone"));
         var goneKey = Record(host, gone);
         Directory.Delete(gone, recursive: true);
-        var text = PruneCommand.Render(host, PruneCommand.Find(host,
+        var text = CleanStaleCommand.Render(host, CleanStaleCommand.Find(host,
             [$"{liveKey}_home", $"{goneKey}_home", $"{goneKey}_nuget", "pen-old-0123abcd_home"], [$"{goneKey}:latest"]));
 
         Assert.Contains($"kept, in use:\n  {live}  ({liveKey})", text);
@@ -239,15 +239,15 @@ public class PruneTests
         var dir = t.Sub("gone");
         var key = Record(host, dir);
         Directory.Delete(dir);
-        var e = Only(PruneCommand.Find(host, [], []), key);
-        Assert.True(PruneCommand.Remove(host, e));
+        var e = Only(CleanStaleCommand.Find(host, [], []), key);
+        Assert.True(CleanStaleCommand.Remove(host, e));
         Assert.False(Directory.Exists(host.GetRuntimeDir(key)));
-        Assert.Empty(PruneCommand.Find(host, [], []));
+        Assert.Empty(CleanStaleCommand.Find(host, [], []));
     }
 
     [Theory]
     [InlineData(false)] // a session (or pen sign) holds it shared
-    [InlineData(true)]  // pen reset holds it exclusive
+    [InlineData(true)]  // pen clean holds it exclusive
     public void AKeyWhoseProjectLockIsHeldIsSkipped(bool exclusive)
     {
         using var t = new TempDir();
@@ -255,11 +255,11 @@ public class PruneTests
         var dir = t.Sub("gone");
         var key = Record(host, dir);
         Directory.Delete(dir);
-        var e = Only(PruneCommand.Find(host, [], []), key);
+        var e = Only(CleanStaleCommand.Find(host, [], []), key);
         using (FileLock.TryTake(SessionRegistry.GetProjectLockFile(host.GetRuntimeDir(key)), exclusive))
-            Assert.False(PruneCommand.Remove(host, e));
+            Assert.False(CleanStaleCommand.Remove(host, e));
         Assert.True(Directory.Exists(host.GetRuntimeDir(key)));
-        Assert.True(PruneCommand.Remove(host, e));
+        Assert.True(CleanStaleCommand.Remove(host, e));
     }
 
     private const string CurrentBase = "sha256:current", OldBase = "sha256:old";
@@ -279,23 +279,23 @@ public class PruneTests
             "pen-tools:latest", // not a name Pen gives
             "other/pen-tools:0123456789abcdef",
         ];
-        Assert.Equal([OldTools], PruneCommand.FindStaleToolsImages(images, CurrentBase, _ => OldBase));
+        Assert.Equal([OldTools], CleanStaleCommand.FindStaleToolsImages(images, CurrentBase, _ => OldBase));
     }
 
     [Fact]
     public void AToolsImageOnTheCurrentBaseStays() =>
-        Assert.Equal([OldTools], PruneCommand.FindStaleToolsImages([CurrentTools, OldTools], CurrentBase, i => i == OldTools ? OldBase : CurrentBase));
+        Assert.Equal([OldTools], CleanStaleCommand.FindStaleToolsImages([CurrentTools, OldTools], CurrentBase, i => i == OldTools ? OldBase : CurrentBase));
 
     [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("<no value>")]
     public void AToolsImageWithoutAReadableLabelStays(string? label) =>
-        Assert.Empty(PruneCommand.FindStaleToolsImages([OldTools], CurrentBase, _ => label));
+        Assert.Empty(CleanStaleCommand.FindStaleToolsImages([OldTools], CurrentBase, _ => label));
 
     [Fact]
     public void WithoutACurrentBaseNothingIsStale() =>
-        Assert.Empty(PruneCommand.FindStaleToolsImages([OldTools], null, _ => OldBase));
+        Assert.Empty(CleanStaleCommand.FindStaleToolsImages([OldTools], null, _ => OldBase));
 
     /// <summary>A docker with images on each base, and a stacked layer that inherited the old label.</summary>
     private const string ImagesDocker = """
@@ -317,9 +317,9 @@ public class PruneTests
         using var fake = new FakeDocker(t, ImagesDocker);
         string[] Removed() => File.ReadAllLines(Path.Combine(t.Path, "calls")).Where(c => c.StartsWith("image rm", StringComparison.Ordinal)).ToArray();
 
-        Assert.Equal(1, new PruneCommand(host, new StringReader("n\n")).Run());
+        Assert.Equal(1, new CleanStaleCommand(host, new StringReader("n\n")).Run());
         Assert.Empty(Removed());
-        Assert.Equal(0, new PruneCommand(host, new StringReader("y\n")).Run());
+        Assert.Equal(0, new CleanStaleCommand(host, new StringReader("y\n")).Run());
         Assert.Equal($"image rm {OldTools}", Assert.Single(Removed()));
     }
 }

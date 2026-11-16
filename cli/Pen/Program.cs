@@ -60,7 +60,7 @@ internal static class Program
     /// <summary>Runs the command <paramref name="args"/> ask for.</summary>
     /// <remarks>
     /// Each step needs more than the one before, and each command runs as soon as it has
-    /// what it needs: help and listings need nothing, pen ps and pen prune the host,
+    /// what it needs: help and listings need nothing, pen ps and pen clean --stale the host,
     /// pen upgrade and pen allow &lt;domain…&gt; the user config, the rest the project.
     /// Only a session, pen allow (listing) and pen trust load the project config.
     /// </remarks>
@@ -87,8 +87,8 @@ internal static class Program
         {
             case CommandKind.Ps:
                 return new PsCommand(host).Run();
-            case CommandKind.Prune:
-                return new PruneCommand(host, Console.In).Run();
+            case CommandKind.Clean when command.Stale:
+                return new CleanStaleCommand(host, Console.In).Run();
         }
 
         Config.EnsureUserConfig(host, GitIdentity.ReadFromHost);
@@ -96,7 +96,7 @@ internal static class Program
         switch (command.Kind)
         {
             case CommandKind.Upgrade:
-                return new UpgradeCommand(host, user, RecipeCatalog.Embedded).Run(command.Clean);
+                return new UpgradeCommand(host, user, RecipeCatalog.Embedded).Run(command.NoCache);
             case CommandKind.Allow when command.Args.Count > 0:
                 return new AllowCommand(host, RecipeCatalog.Embedded).Run(command.Args, command.Global);
         }
@@ -108,7 +108,7 @@ internal static class Program
             CommandKind.Allow => ListBlocked(ProjectContext.Load(host, project, user)),
             CommandKind.Trust => RunTrust(ProjectContext.Load(host, project, user), command),
             CommandKind.Sign => RunSign(host, project, command),
-            CommandKind.Reset => new ResetCommand(host, project, Console.In).Run(),
+            CommandKind.Clean => new CleanCommand(host, project, Console.In).Run(),
             _ => throw new InvalidOperationException($"unhandled command {command.Kind}"),
         };
     }

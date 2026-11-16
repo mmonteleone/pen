@@ -7,7 +7,7 @@ Run Pen from your project root. For installation, see the [README](../README.md#
 - [Use git](#git-in-the-sandbox): [sign commits](#commit-signing), [worktrees](#worktrees), [submodules](#submodules)
 - [Configure Pen](#configuration): [logins](#logins-and-api-keys), [GitHub](#github), [shared agent settings](#agent-config-the-home-seed), [project settings](#project-settings)
 - [Use Docker-in-Docker](#docker-in-docker)
-- [Update or reset Pen](#upgrading-and-resetting), or [troubleshoot host differences](#differences-from-running-on-the-host)
+- [Update Pen or clean up](#upgrading-and-cleaning-up), or [troubleshoot host differences](#differences-from-running-on-the-host)
 - [Command reference](#commands), [agent versions and details](#agents), [herdr integration](#running-in-herdr)
 
 ## Running commands
@@ -23,7 +23,7 @@ pen --tool python run uv sync
 
 Pen installs the agent you name. A plain `pen` shell has no agents or language toolchains unless you [add them](#tools). Agents run with permission prompts off; the container is the boundary.
 
-Put Pen's options before the command. Everything after the command name goes to that command: `pen --tool node claude --help` passes `--help` to Claude. `pen run <command>` also lets you run a command whose name matches a Pen subcommand, such as `pen run reset`.
+Put Pen's options before the command. Everything after the command name goes to that command: `pen --tool node claude --help` passes `--help` to Claude. `pen run <command>` also lets you run a command whose name matches a Pen subcommand, such as `pen run clean`.
 
 Log in inside the sandbox when prompted; see [logins and API keys](#logins-and-api-keys). Your project files are mounted directly, so edits appear on the host immediately. Logins, sandbox settings and caches persist per project; linked worktrees share them.
 
@@ -44,7 +44,7 @@ pen --tool dotnet:8 --tool dotnet:10 claude  # two .NET SDKs
 
 Use `name` for the default version or `name:version` to choose one. To keep tools installed for future sessions, add `tools = ["node", "python"]` to your [user or project config](#configuration). The lists and command-line options add together; order and duplicates don't matter. Project tools need [approval](#project-settings).
 
-Each tool also allows the network domains it needs. For example, `node` brings npm's registry access. Tools are built into an image once and reused across projects with the same selection. Use [`pen upgrade`](#upgrading-and-resetting) to refresh them.
+Each tool also allows the network domains it needs. For example, `node` brings npm's registry access. Tools are built into an image once and reused across projects with the same selection. Use [`pen upgrade`](#upgrading-and-cleaning-up) to refresh them.
 
 | Tool | Default | Accepted versions | Multiple versions together |
 |---|---|---|---|
@@ -263,7 +263,7 @@ cd ../feat
 pen claude
 ```
 
-All worktrees of a repo share logins, caches, `pen reset` and the one-`--docker`-session limit. Each worktree has its own `.pen/` settings and approvals; `pen allow` in one applies only to that worktree.
+All worktrees of a repo share logins, caches, `pen clean` and the one-`--docker`-session limit. Each worktree has its own `.pen/` settings and approvals; `pen allow` in one applies only to that worktree.
 
 A linked worktree's sandbox sees its own files and the repo's shared git data (objects and branches). Other checkouts' files stay outside. Because that git data is writable, a session in any worktree makes [host git unsafe](limitations.md#while-a-session-runs) in all of them and in the main checkout. Worktrees of a bare repo aren't supported.
 
@@ -439,7 +439,7 @@ Set `docker = true` in `.pen/config.toml` to enable it for every session. The da
 - Containers get proxy env vars. Add service names (e.g. `api`) to `NO_PROXY` in compose files.
 - On rootful Linux, files containers write to the project are owned by root. Pass `--user`.
 
-## Upgrading and resetting
+## Upgrading and cleaning up
 
 ### Update Pen itself
 
@@ -455,23 +455,26 @@ If the bundled image files changed, the next session rebuilds the base image. Ho
 ### Update agents and tools
 
 ```sh
-pen upgrade          # refresh the images; keep logins and config
-pen upgrade --clean  # rebuild without the build cache
+pen upgrade             # refresh the images; keep logins and config
+pen upgrade --no-cache  # rebuild without the build cache
 ```
 
 `pen upgrade` rebuilds the base image and pulls newer proxy and Docker-in-Docker images. It doesn't update the Pen CLI.
 
 Tools and agents in your user config rebuild right away. In a project, its approved tools and Dockerfile rebuild too. Other combinations, including an agent selected only by `pen claude`, rebuild on their next use. Agents at `latest` get the newest release; exact agent versions stay pinned. Tool versions follow the rules in [Tools](#tools).
 
-### Reset a project's sandbox
+### Clean up
 
-`pen reset` asks, then removes the project's sandbox home, logins, settings, caches and Docker-in-Docker images. It keeps your project files and `~/.config/pen/`.
+`pen clean` works on one project; `pen clean --stale` on what's left over across all of them. Both list what they'll remove and ask first.
 
-Linked worktrees share this state. Reset is refused while a session or `pen sign` runs in the main checkout or any worktree.
+```sh
+pen clean          # start this project's sandbox fresh
+pen clean --stale  # remove what moved or deleted projects and old upgrades left behind
+```
 
-### Remove unused state
+`pen clean` removes this project's sandbox home (agent logins and config, shell history), NuGet cache and Docker-in-Docker images. It keeps your project files, `~/.config/pen/`, the project's approvals (`pen trust`) and its blocked-domain logs (`pen allow`). Linked worktrees share the sandbox, so it's refused while a session or `pen sign` runs in the main checkout or any worktree.
 
-`pen prune` lists state left by moved or deleted projects and tool images built on an old base, then asks before removing them. State it can't identify is listed with commands to remove it by hand. If you keep projects on an external drive or another mounted filesystem, mount it before pruning: an unavailable project directory looks deleted.
+`pen clean --stale` never touches a project still in use. For projects that were moved or deleted it removes everything Pen kept: sandbox, `.pen/Dockerfile` images, approvals and logs. It also removes tool images built on a base image older than the current one, which `pen upgrade` leaves behind. State it can't identify is listed with commands to remove it by hand. If you keep projects on an external drive or another mounted filesystem, mount it first: an unavailable project directory looks deleted.
 
 ## Differences from running on the host
 
@@ -494,9 +497,9 @@ pen allow --defaults            list the domains pen allows out of the box
 pen trust [--yes | --list]       review and approve what this project's .pen/ asks for
 pen ps                          list running sessions, ports and tools across projects
 pen sign [<base>]               re-sign your unpushed commits with your own key
-pen upgrade [--clean]           rebuild the base image, agents and tools
-pen reset                       wipe this project's sandbox state (logins, caches)
-pen prune                       remove unused project state and old tool images
+pen upgrade [--no-cache]        rebuild the base image, agents and tools
+pen clean                       start this project's sandbox fresh (logins, caches)
+pen clean --stale               remove moved/deleted projects' state and old tool images
 ```
 
 Options go before the agent: `pen --docker --port 5173 claude`. Run `pen --help` for an overview or `pen <subcommand> --help` for details.
@@ -516,7 +519,7 @@ You can also add agents to `tools` in either config file. If a list already name
 
 Only the command's first word selects an agent automatically. `pen run claude` includes Claude; `pen run timeout 60 claude` doesn't. For a wrapper command, use `pen --tool claude run timeout 60 claude`.
 
-`latest` means the newest release when the image is built. It isn't checked on each session. Run [`pen upgrade`](#upgrading-and-resetting) to rebuild with current releases; pinned releases stay at the requested version.
+`latest` means the newest release when the image is built. It isn't checked on each session. Run [`pen upgrade`](#upgrading-and-cleaning-up) to rebuild with current releases; pinned releases stay at the requested version.
 
 OpenCode and Pi can reach Anthropic and OpenAI by default. For another provider, use `pen allow` for its API domain. Pi packages from npm (`pi install npm:<pkg>`) also need the `node` tool: without it, the command fails with `spawn npm ENOENT`.
 

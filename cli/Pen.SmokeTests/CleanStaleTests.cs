@@ -4,13 +4,13 @@ using System.Text;
 
 namespace Pen.SmokeTests;
 
-/// <summary>pen prune: a deleted project's volumes, layers and runtime dir go, a live one's stay, and so do
+/// <summary>pen clean --stale: a deleted project's volumes, layers and runtime dir go, a live one's stay, and so do
 /// volumes it doesn't know; tools images on an old base go, by repository.</summary>
 /// <remarks>
 /// It runs under the throwaway HOME, whose state holds only this class's projects: the user's own projects'
-/// volumes show up there as unknown, which pen prune never removes.
+/// volumes show up there as unknown, which pen clean --stale never removes.
 /// </remarks>
-public sealed class PruneTests(PruneTests.Fixture fixture) : IClassFixture<PruneTests.Fixture>
+public sealed class CleanStaleTests(CleanStaleTests.Fixture fixture) : IClassFixture<CleanStaleTests.Fixture>
 {
     private string GoneKey => fixture.GoneKey;
 
@@ -20,7 +20,7 @@ public sealed class PruneTests(PruneTests.Fixture fixture) : IClassFixture<Prune
     [Fact(DisplayName = "a stacked layer does inherit the label")]
     public void StackedLayerInheritsTheLabel() => Assert.Equal("sha256:smoke-old-base", fixture.StackedLabel);
 
-    [Fact(DisplayName = "pen prune lists the deleted project as missing, with its volumes and layer")]
+    [Fact(DisplayName = "pen clean --stale lists the deleted project as missing, with its volumes and layer")]
     public void ListsTheDeletedProject() =>
         Assert.Multiple(
             () => AssertHas(fixture.AnsweredNo, "to remove, missing"),
@@ -97,18 +97,19 @@ public sealed class PruneTests(PruneTests.Fixture fixture) : IClassFixture<Prune
     [Fact(DisplayName = "...as does every other volume (unknown to this HOME, so never removed)")]
     public void OtherVolumesAreKept() => Assert.Equal(fixture.OtherVolumesBefore, fixture.OtherVolumesAfter);
 
-    [Fact(DisplayName = "run again, it finds nothing to prune")]
+    [Fact(DisplayName = "run again, it finds nothing stale to clean")]
     public void SecondRunFindsNothing() =>
         Assert.True(
-            fixture.Again.Output.Contains("pen: nothing to prune", StringComparison.Ordinal)
+            fixture.Again.Output.Contains("pen: nothing stale to clean", StringComparison.Ordinal)
                 && fixture.Again.OutputComplete && !fixture.Again.Output.Contains(GoneKey, StringComparison.Ordinal),
             fixture.Again.Describe());
 
     private static void AssertHas(CommandResult result, string text) =>
         Assert.True(result.Output.Contains(text, StringComparison.Ordinal), $"no \"{text}\"; {result.Describe()}");
 
-    /// <summary>Makes a project with a layer and a tools layer, which it then deletes, a live one, and tools
-    /// images on an old base and on it, then runs pen prune answering no, with a held lock, yes, and again.</summary>
+    /// <summary>Makes a project with a layer and a tools layer, which it then deletes, a live one, and
+    /// tools images on an old base and on it, then runs pen clean --stale answering no, with a held lock, yes,
+    /// and again.</summary>
     public sealed class Fixture : SmokeFixture
     {
         internal string GoneDir { get; private set; } = null!;
@@ -177,17 +178,17 @@ public sealed class PruneTests(PruneTests.Fixture fixture) : IClassFixture<Prune
             Home.MakeToolFree();
             SetUpProjects();
             SetUpToolsImages();
-            AnsweredNo = Cli.WithStdin("n\n").Run("prune");
+            AnsweredNo = Cli.WithStdin("n\n").Run("clean", "--stale");
             StaleAfterNo = HasImage(Stale);
             GoneVolumeAfterNo = HasVolume($"{GoneKey}_home");
             GoneRuntimeAfterNo = Directory.Exists(GoneRuntimeDir);
 
             using (Locks.Hold(Path.Combine(GoneRuntimeDir, "project.lock"), exclusive: false))
-                WhileLocked = Cli.WithStdin("y\n").Run("prune");
+                WhileLocked = Cli.WithStdin("y\n").Run("clean", "--stale");
             GoneVolumeAfterLocked = HasVolume($"{GoneKey}_home");
             GoneRuntimeAfterLocked = Directory.Exists(GoneRuntimeDir);
 
-            AnsweredYes = Cli.WithStdin("y\n").Run("prune");
+            AnsweredYes = Cli.WithStdin("y\n").Run("clean", "--stale");
             GoneVolumesAfterYes = HasVolume($"{GoneKey}_home") || HasVolume($"{GoneKey}_nuget");
             GoneLayersAfterYes = HasImage($"{GoneKey}:latest") || HasImage($"{GoneKey}:{GoneToolsHash}");
             ToolsImageAfterYes = HasImage($"pen-tools:{GoneToolsHash}");
@@ -199,7 +200,7 @@ public sealed class PruneTests(PruneTests.Fixture fixture) : IClassFixture<Prune
             LiveKeptAfterYes = HasVolume($"{LiveKey}_home") && File.Exists(liveProjectDir)
                 && new FileInfo(liveProjectDir).Length > 0;
             OtherVolumesAfter = ListOtherVolumes();
-            Again = Cli.WithStdin("n\n").Run("prune").RequireSuccess();
+            Again = Cli.WithStdin("n\n").Run("clean", "--stale").RequireSuccess();
         }
 
         /// <summary>Makes a project with a layer and a layer on a tools image, and a live project, each with a

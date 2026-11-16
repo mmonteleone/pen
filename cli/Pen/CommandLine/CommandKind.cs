@@ -18,14 +18,11 @@ internal enum CommandKind
     /// <summary>pen sign.</summary>
     Sign,
 
-    /// <summary>pen reset.</summary>
-    Reset,
+    /// <summary>pen clean, or pen clean --stale.</summary>
+    Clean,
 
     /// <summary>pen ps.</summary>
     Ps,
-
-    /// <summary>pen prune.</summary>
-    Prune,
 
     /// <summary>pen --help, or pen &lt;subcommand&gt; --help.</summary>
     Help,

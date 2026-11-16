@@ -15,9 +15,8 @@ internal static class CommandParser
         ["allow"] = CommandKind.Allow,
         ["trust"] = CommandKind.Trust,
         ["sign"] = CommandKind.Sign,
-        ["reset"] = CommandKind.Reset,
+        ["clean"] = CommandKind.Clean,
         ["ps"] = CommandKind.Ps,
-        ["prune"] = CommandKind.Prune,
     };
 
     /// <summary>Parses the arguments Pen was started with.</summary>
@@ -99,7 +98,8 @@ internal static class CommandParser
         {
             CommandKind.Run => ParseRun(rest),
             CommandKind.Upgrade => ParseUpgrade(rest),
-            CommandKind.Reset or CommandKind.Ps or CommandKind.Prune => ParseWithoutArguments(name, kind, rest),
+            CommandKind.Clean => ParseClean(rest),
+            CommandKind.Ps => ParseWithoutArguments(name, kind, rest),
             CommandKind.Allow => ParseAllow(rest),
             CommandKind.Trust => ParseTrust(rest),
             CommandKind.Sign => ParseSign(rest),
@@ -128,21 +128,35 @@ internal static class CommandParser
         return new(CommandKind.Run, rest);
     }
 
-    /// <summary>Parses pen upgrade's arguments: only --clean.</summary>
+    /// <summary>Parses pen upgrade's arguments: only --no-cache.</summary>
     private static Command ParseUpgrade(List<string> rest)
     {
-        var clean = false;
+        var noCache = false;
         foreach (var arg in rest)
         {
-            if (arg == "--clean")
-                clean = true;
+            if (arg == "--no-cache")
+                noCache = true;
             else
                 throw CreateUsageError($"pen upgrade: unexpected argument \"{arg}\"");
         }
-        return new(CommandKind.Upgrade, []) { Clean = clean };
+        return new(CommandKind.Upgrade, []) { NoCache = noCache };
     }
 
-    /// <summary>Parses the arguments of a subcommand that takes none (pen reset, pen ps, pen prune).</summary>
+    /// <summary>Parses pen clean's arguments: only --stale.</summary>
+    private static Command ParseClean(List<string> rest)
+    {
+        var stale = false;
+        foreach (var arg in rest)
+        {
+            if (arg == "--stale")
+                stale = true;
+            else
+                throw CreateUsageError($"pen clean: unexpected argument \"{arg}\"");
+        }
+        return new(CommandKind.Clean, []) { Stale = stale };
+    }
+
+    /// <summary>Parses the arguments of a subcommand that takes none (pen ps).</summary>
     private static Command ParseWithoutArguments(string name, CommandKind kind, List<string> rest)
     {
         if (rest.Count > 0)

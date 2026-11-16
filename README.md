@@ -89,8 +89,8 @@ pen trust                    # review what this project's .pen/ asks for
 pen ps                       # list running sessions across projects
 pen sign                     # sign unpushed commits on the host
 pen upgrade                  # rebuild the base image, agents and tools
-pen reset                    # wipe this project's logins and caches
-pen prune                    # remove unused project state and old tool images
+pen clean                    # start this project's sandbox fresh (logins, caches)
+pen clean --stale            # remove moved/deleted projects' state and old tool images
 ```
 
 Options go before the agent name. Dev servers must listen on `0.0.0.0` inside the sandbox. Linked worktrees share the repo's logins and caches.

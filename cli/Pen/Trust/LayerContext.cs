@@ -10,7 +10,7 @@ namespace Pen.Trust;
 /// dir, which <see cref="Project.CheckAllowed"/> keeps out of every sandbox, in a directory only this user
 /// can enter. For a build, the path stays the same for a directory, since BuildKit keeps a cache record per
 /// context path; so builds in one directory take turns, by a lock. One left by a Pen that died is removed
-/// by the next, or by pen prune.
+/// by the next, or by pen clean --stale.
 /// </remarks>
 internal sealed class LayerContext : IDisposable
 {
@@ -61,7 +61,7 @@ internal sealed class LayerContext : IDisposable
     /// <returns>The copy, kept until disposed, once the user has answered.</returns>
     /// <remarks>
     /// It isn't locked, since a prompt can wait for hours, and has a path of its own. One abandoned by a
-    /// killed Pen goes when the next review finds it old, or by pen prune.
+    /// killed Pen goes when the next review finds it old, or by pen clean --stale.
     /// </remarks>
     public static LayerContext Review(HostEnv host, Project project)
     {

@@ -78,7 +78,7 @@ public sealed class SessionTests(SessionTests.Fixture fixture) : IClassFixture<S
     public void ProxyLogIsWorldWritable() =>
         Assert.Equal("666", Files.GetMode(Path.Combine(fixture.LastSession, "proxy.log")));
 
-    [Fact(DisplayName = "the runtime dir records the project's real path in project-dir (prune D1)")]
+    [Fact(DisplayName = "the runtime dir records the project's real path in project-dir (clean --stale D1)")]
     public void RuntimeDirRecordsTheProjectDir() =>
         Assert.Equal(
             fixture.Project.Dir, File.ReadAllText(Path.Combine(fixture.RuntimeDir, "project-dir")).TrimEnd('\n'));

@@ -62,6 +62,14 @@ public class CliTests
     }
 
     [Fact]
+    public void RunCleanRunsCleanInTheSandbox()
+    {
+        var c = P("run", "clean");
+        Assert.Equal(CommandKind.Run, c.Kind);
+        Assert.Equal(["clean"], c.Args);
+    }
+
+    [Fact]
     public void RunAcceptsADoubleDash()
     {
         Assert.Equal(["-x"], P("run", "--", "-x").Args);
@@ -79,9 +87,8 @@ public class CliTests
     [InlineData("Allow", "allow")]
     [InlineData("Sign", "sign")]
     [InlineData("Sign", "sign", "origin/main")]
-    [InlineData("Reset", "reset")]
+    [InlineData("Clean", "clean")]
     [InlineData("Ps", "ps")]
-    [InlineData("Prune", "prune")]
     public void SubcommandsAreRecognized(string kind, params string[] args)
     {
         var c = P(args);
@@ -103,14 +110,14 @@ public class CliTests
     [InlineData("run", "run", "--help")]
     [InlineData("run", "run", "-h")]
     [InlineData("upgrade", "upgrade", "--help")]
-    [InlineData("upgrade", "upgrade", "--clean", "-h")]
+    [InlineData("upgrade", "upgrade", "--no-cache", "-h")]
     [InlineData("allow", "allow", "--help")]
     [InlineData("allow", "allow", "example.com", "--help")]
     [InlineData("allow", "allow", "--defaults", "--help")]
     [InlineData("sign", "sign", "--help")]
-    [InlineData("reset", "reset", "-h")]
+    [InlineData("clean", "clean", "-h")]
     [InlineData("ps", "ps", "--help")]
-    [InlineData("prune", "prune", "-h")]
+    [InlineData("clean", "clean", "--stale", "--help")]
     public void SubcommandHelp(string topic, params string[] args)
     {
         var c = P(args);
@@ -132,7 +139,7 @@ public class CliTests
     [Fact]
     public void EverySubcommandHasHelp_AndTheUsageMentionsIt()
     {
-        foreach (var name in new[] { "run", "upgrade", "allow", "sign", "reset", "ps", "prune" })
+        foreach (var name in new[] { "run", "upgrade", "allow", "sign", "clean", "ps" })
             Assert.True(HelpText.Subcommands.ContainsKey(name), name);
         Assert.Contains("pen <subcommand> --help", HelpText.Usage);
     }
@@ -166,18 +173,30 @@ public class CliTests
     [Fact]
     public void Upgrade()
     {
-        Assert.False(P("upgrade").Clean);
-        Assert.True(P("upgrade", "--clean").Clean);
+        Assert.False(P("upgrade").NoCache);
+        Assert.True(P("upgrade", "--no-cache").NoCache);
+        Assert.Throws<PenException>(() => P("upgrade", "--clean"));
         Assert.Throws<PenException>(() => P("upgrade", "--cleen"));
-        Assert.Throws<PenException>(() => P("reset", "now"));
+    }
+
+    [Fact]
+    public void Clean()
+    {
+        Assert.False(P("clean").Stale);
+        var stale = P("clean", "--stale");
+        Assert.Equal(CommandKind.Clean, stale.Kind);
+        Assert.True(stale.Stale);
+        Assert.Empty(stale.Args);
+        Assert.Throws<PenException>(() => P("clean", "now"));
     }
 
     [Theory]
     [InlineData("ps", "-a")]
     [InlineData("ps", "all")]
-    [InlineData("prune", "--yes")]
-    [InlineData("prune", "all")]
-    public void PsAndPruneTakeNoArguments(params string[] args)
+    [InlineData("clean", "--yes")]
+    [InlineData("clean", "--all")]
+    [InlineData("clean", "--stale", "all")]
+    public void PsAndCleanRejectOtherArguments(params string[] args)
     {
         var e = Assert.Throws<PenException>(() => P(args));
         Assert.Equal(2, e.ExitCode);
@@ -257,16 +276,17 @@ public class CliTests
     [InlineData("upgrade")]
     [InlineData("allow")]
     [InlineData("sign")]
-    [InlineData("reset")]
+    [InlineData("clean")]
+    [InlineData("clean", "--stale")]
     [InlineData("ps")]
-    [InlineData("prune")]
     [InlineData("--help")]
     [InlineData("--version")]
-    public void PortWithAnythingButRunningIsAnError(string what)
+    public void PortWithAnythingButRunningIsAnError(params string[] what)
     {
-        var e = Assert.Throws<PenException>(() => P("--port", "3000", what));
+        var e = Assert.Throws<PenException>(() => P(["--port", "3000", .. what]));
         Assert.StartsWith("--port goes only with a command to run", e.Message);
-        Assert.StartsWith("--docker goes only", Assert.Throws<PenException>(() => P("--docker", "--port", "3000", what)).Message);
+        var d = Assert.Throws<PenException>(() => P(["--docker", "--port", "3000", .. what]));
+        Assert.StartsWith("--docker goes only", d.Message);
     }
 
     [Fact]

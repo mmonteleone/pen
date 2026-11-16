@@ -10,7 +10,7 @@ namespace Pen.Commands;
 /// <param name="host">The host user's environment.</param>
 /// <param name="project">The project to sign in. Its .pen/config.toml is never read.</param>
 /// <remarks>
-/// The order matters: the locks (project.lock shared, so pen reset can't run, and this dir's worktree lock
+/// The order matters: the locks (project.lock shared, so pen clean can't run, and this dir's worktree lock
 /// exclusive, so no session runs here), then finishing dead sessions, then the session-end check of
 /// <c>.git</c>, and only then any host git, all of it through <see cref="HostGit"/>'s overrides.
 /// </remarks>

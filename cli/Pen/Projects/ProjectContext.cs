@@ -14,7 +14,7 @@ internal sealed record ProjectContext(HostEnv Host, Project Project, Config User
     /// <returns>The context for <paramref name="project"/>.</returns>
     /// <remarks>
     /// .pen/ is agent-writable, so only the commands that use the project config build a context:
-    /// pen sign and pen reset never read it, and a broken or hostile one can't get in their way.
+    /// pen sign and pen clean never read it, and a broken or hostile one can't get in their way.
     /// </remarks>
     public static ProjectContext Load(HostEnv host, Project project, Config user) =>
         new(host, project, user, Config.Load(project.PenDir, ".pen", ConfigKind.Project));

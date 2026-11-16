@@ -17,7 +17,7 @@ internal static class HelpText
                                     (repeatable; or tools = […] in either config.toml); a
                                     command named after an agent brings it: pen claude
           pen --tool list           list the agents and tools pen can install
-          pen upgrade [--clean]     rebuild the base image, agents and tools; --clean skips the cache
+          pen upgrade [--no-cache]  rebuild the base image, agents and tools; --no-cache skips the cache
           pen allow <domain…> [--global]
                                     allow domains, applied to running sessions too
           pen allow                 list recently blocked domains
@@ -25,8 +25,9 @@ internal static class HelpText
           pen trust [--yes|--list]  review and approve what this project's .pen/ asks for
           pen ps                    list running sessions, in every project
           pen sign [<base>]         on the host: re-sign unpushed commits with your key
-          pen reset                 wipe this project's volumes (asks first)
-          pen prune                 remove what moved or deleted projects left behind (asks first)
+          pen clean                 start this project's sandbox fresh: logins, caches (asks first)
+          pen clean --stale         remove what moved or deleted projects and old upgrades left
+                                    behind, in every project (asks first)
           pen <subcommand> --help   more about one of them
         """;
 
@@ -41,7 +42,7 @@ internal static class HelpText
             none, e.g. pen claude, pen codex, pen --tool node run npm ci. Everything after
             the command's name is passed to it unchanged, including options like --help.
             Use pen run when the command's name is also one of pen's subcommands (pen run
-            reset).
+            clean).
 
             Run it from a repo root. Ctrl-C goes to the command; the session ends when it
             exits, and pen then lists any domains the proxy blocked.
@@ -62,7 +63,7 @@ internal static class HelpText
                          a shell or behind another command, name it here or in tools
             """,
         ["upgrade"] = """
-            usage: pen upgrade [--clean]
+            usage: pen upgrade [--no-cache]
 
             Rebuilds the base image, always as a new image, then pulls newer proxy and
             Docker-in-Docker images. Agents and tools are built on the base, so all of them
@@ -72,7 +73,7 @@ internal static class HelpText
             installs an agent or tool at latest at its newest release, and a pinned one at
             the version given. Logins and config are kept.
 
-              --clean    rebuild without the build cache
+              --no-cache rebuild without the build cache
             """,
         ["allow"] = """
             usage: pen allow
@@ -122,29 +123,30 @@ internal static class HelpText
 
             <base> defaults to the branch's upstream (or origin/HEAD). pen refuses to
             rewrite commits that are already on a remote branch, and won't run while a
-            session is open in this directory or pen reset runs. It doesn't refuse for a
+            session is open in this directory or pen clean runs. It doesn't refuse for a
             session in another worktree of the repo, but that session's agent can change
             what pen sign reads, so wait for it to end too.
             """,
-        ["reset"] = """
-            usage: pen reset
+        ["clean"] = """
+            usage: pen clean
+                   pen clean --stale
 
-            Removes this project's sandbox volumes, after asking: its home (agent logins
-            and config, shell history), its NuGet cache and its Docker-in-Docker images.
-            The project's files and ~/.config/pen are untouched. A repo's linked worktrees
-            share these volumes, so it refuses while a session or pen sign runs in the
-            main checkout or any of its worktrees.
-            """,
-        ["prune"] = """
-            usage: pen prune
+            With no arguments, starts this project's sandbox fresh, after asking: removes
+            its home (agent logins and config, shell history), its NuGet cache and its
+            Docker-in-Docker images. The project's files, ~/.config/pen, and the project's
+            approvals (pen trust) and blocked-domain logs (pen allow) are kept. A repo's
+            linked worktrees share the sandbox, so it refuses while a session or pen sign
+            runs in the main checkout or any of its worktrees.
 
-            Finds the volumes, project-layer images and state that projects you have moved
-            or deleted left behind, and tools images built on an old base image. Lists them
-            with the projects still in use, and removes them after asking. A project whose
-            directory is gone may be on a volume that
-            isn't mounted: mount it first. Projects pen hasn't run in since it began
-            recording their directories are listed with the commands to remove them by
-            hand, never removed. Not while a session is open in the project.
+              --stale    instead, across every project, remove what projects you have
+                         moved or deleted left behind (sandbox, project-layer images,
+                         approvals and logs) and tools images built on an old base image.
+                         Projects still in use are listed and left alone. A project
+                         whose directory is gone may be on a volume that isn't mounted:
+                         mount it first. Projects pen hasn't run in since it began
+                         recording their directories are listed with the commands to
+                         remove them by hand, never removed. A project with an open
+                         session is skipped.
             """,
     };
 }

@@ -71,7 +71,7 @@ public sealed class LinkedWorktreeTests(LinkedWorktreeTests.Fixture fixture)
     [Fact(DisplayName = "...and its session ran under the main checkout's runtime dir, with its own worktree lock")]
     public void WorktreeLockIsInTheMainRuntimeDir() => Assert.True(fixture.WorktreeLockMade);
 
-    [Fact(DisplayName = "...whose project-dir still names the main checkout (prune D1)")]
+    [Fact(DisplayName = "...whose project-dir still names the main checkout (clean --stale D1)")]
     public void ProjectDirNamesTheMainCheckout() => Assert.Equal(fixture.Project.Dir, fixture.ProjectDirFile);
 
     [Fact(DisplayName = "a commondir planted in the common dir is quarantined when a worktree session ends")]

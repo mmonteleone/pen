@@ -1,7 +1,7 @@
 namespace Pen.Tests;
 
 /// <summary>
-/// The locks sessions, pen sign and pen reset take, for a project with two
+/// The locks sessions, pen sign and pen clean take, for a project with two
 /// dirs (its main checkout and a linked worktree sharing its key).
 /// Takes locks: runs alone, with the other lock tests.
 /// </summary>
@@ -96,7 +96,7 @@ public sealed class SessionLockTests : IDisposable
 
         Assert.Contains("another pen sign is running in this directory", Refused(() => SessionRegistry.TakeForSign(_host, _main)));
         using (SessionRegistry.TakeForSign(_host, _wt)) { }
-        Assert.Contains("a pen sign or another pen reset is running", Refused(() => SessionRegistry.TakeForReset(_host, _main)));
+        Assert.Contains("a pen sign or another pen clean is running", Refused(() => SessionRegistry.TakeForClean(_host, _main)));
     }
 
     [Fact]
@@ -104,32 +104,32 @@ public sealed class SessionLockTests : IDisposable
     {
         using (SessionRegistry.TakeForSign(_host, _main))
             Assert.Throws<PenException>(() => SessionRegistry.TakeForSession(_runtime, _main));
-        // Nothing left held by the refused take: reset gets project.lock exclusive.
-        using var reset = SessionRegistry.TakeForReset(_host, _main);
+        // Nothing left held by the refused take: clean gets project.lock exclusive.
+        using var clean = SessionRegistry.TakeForClean(_host, _main);
     }
 
     [Fact]
-    public void WhileResetRuns_SessionsAndSignAreRefused()
+    public void WhileCleanRuns_SessionsAndSignAreRefused()
     {
-        using var reset = SessionRegistry.TakeForReset(_host, _main);
-        Assert.Equal("a pen reset is running in this project: try again once it's done",
+        using var clean = SessionRegistry.TakeForClean(_host, _main);
+        Assert.Equal("a pen clean is running in this project: try again once it's done",
             Refused(() => SessionRegistry.TakeForSession(_runtime, _wt)));
-        Assert.Contains("refusing to sign: a pen reset is running", Refused(() => SessionRegistry.TakeForSign(_host, _main)));
+        Assert.Contains("refusing to sign: a pen clean is running", Refused(() => SessionRegistry.TakeForSign(_host, _main)));
         // The refused sign released nothing it didn't take, and took nothing: the worktree lock is free.
         using var w = FileLock.TryTake(SessionRegistry.GetWorktreeLockFile(_runtime, _main.Dir), exclusive: true);
         Assert.NotNull(w);
     }
 
     [Fact]
-    public void ResetRefusedWhileASessionRunsInAnyDir_ListingAll()
+    public void CleanRefusedWhileASessionRunsInAnyDir_ListingAll()
     {
         using var lm = SessionRegistry.TakeForSession(_runtime, _main);
         using var lw = SessionRegistry.TakeForSession(_runtime, _wt);
         using var sm = OpenSession("aaaa0001", _main);
         using var sw = OpenSession("aaaa0002", _wt);
 
-        var msg = Refused(() => SessionRegistry.TakeForReset(_host, _wt));
-        Assert.Contains("refusing to reset while 2 sessions are running in this project:", msg);
+        var msg = Refused(() => SessionRegistry.TakeForClean(_host, _wt));
+        Assert.Contains("refusing to clean while 2 sessions are running in this project:", msg);
         Assert.Contains($"  {Key}-aaaa0001-agent", msg);
         Assert.Contains($"  {Key}-aaaa0002-agent", msg);
     }

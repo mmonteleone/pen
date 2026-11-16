@@ -2,13 +2,13 @@ using System.Text.RegularExpressions;
 
 namespace Pen.SmokeTests;
 
-/// <summary>pen reset: refused while a session runs, asks first, and removes the project's volumes.</summary>
-/// <remarks>Reset logging out of claude and codex is a manual check.</remarks>
-public sealed class ResetTests(ResetTests.Fixture fixture) : IClassFixture<ResetTests.Fixture>
+/// <summary>pen clean: refused while a session runs, asks first, and removes the project's volumes.</summary>
+/// <remarks>Cleaning logging out of claude and codex is a manual check.</remarks>
+public sealed class CleanTests(CleanTests.Fixture fixture) : IClassFixture<CleanTests.Fixture>
 {
-    [Fact(DisplayName = "pen reset refuses while a session is open")]
+    [Fact(DisplayName = "pen clean refuses while a session is open")]
     public void RefusesWhileASessionIsOpen() =>
-        AssertHas(fixture.WhileOpen, "refusing to reset while a session is running");
+        AssertHas(fixture.WhileOpen, "refusing to clean while a session is running");
 
     [Fact(DisplayName = "...naming its agent container")]
     public void NamesTheAgentContainer() => AssertHas(fixture.WhileOpen, $"  {fixture.AgentName}");
@@ -19,7 +19,7 @@ public sealed class ResetTests(ResetTests.Fixture fixture) : IClassFixture<Reset
     [Fact(DisplayName = "after docker rm -f, that session's pen finishes its end path")]
     public void PenFinishesItsEndPath() => Assert.Equal(0, fixture.ContainersAfterRemoval);
 
-    [Fact(DisplayName = "pen reset asks before removing, echoing the answer read without a terminal")]
+    [Fact(DisplayName = "pen clean asks before removing, echoing the answer read without a terminal")]
     public void AsksBeforeRemoving() => AssertHas(fixture.AnsweredNo, "pen: remove them? [y/N] n");
 
     [Fact(DisplayName = "answering no removes nothing")]
@@ -36,12 +36,12 @@ public sealed class ResetTests(ResetTests.Fixture fixture) : IClassFixture<Reset
 
     [Fact(DisplayName = "...so the next session starts with a fresh home")]
     public void NextSessionHasAFreshHome() =>
-        Assert.True(fixture.AfterReset.CapturedStdout == "fresh", fixture.AfterReset.Describe());
+        Assert.True(fixture.AfterClean.CapturedStdout == "fresh", fixture.AfterClean.Describe());
 
     private static void AssertHas(CommandResult result, string text) =>
         Assert.True(result.Output.Contains(text, StringComparison.Ordinal), $"no \"{text}\"; {result.Describe()}");
 
-    /// <summary>Leaves a marker in the home volume, runs pen reset while a session is open, then answers no and
+    /// <summary>Leaves a marker in the home volume, runs pen clean while a session is open, then answers no and
     /// yes once it has ended, and reads the marker again.</summary>
     public sealed class Fixture : SmokeFixture
     {
@@ -61,27 +61,27 @@ public sealed class ResetTests(ResetTests.Fixture fixture) : IClassFixture<Reset
 
         internal bool HomeVolumeAfterYes { get; private set; }
 
-        internal CommandResult AfterReset { get; private set; } = null!;
+        internal CommandResult AfterClean { get; private set; } = null!;
 
         protected override void Prepare()
         {
-            Cli.Run("run", "bash", "-c", "echo kept >~/.reset-marker").RequireSuccess();
+            Cli.Run("run", "bash", "-c", "echo kept >~/.clean-marker").RequireSuccess();
             var session = Track(Cli.Start("run", "sleep", "120"));
             var agentName = new Regex($"^{Key}-.*-agent$");
             if (!Polling.WaitForContainer(agentName.ToString()))
                 throw new InvalidOperationException($"session didn't start: {session.OutputSoFar}");
             AgentName = Docker.ListRunningNames().First(agentName.IsMatch);
-            WhileOpen = Cli.WithStdin("y\n").Run("reset");
+            WhileOpen = Cli.WithStdin("y\n").Run("clean");
             HomeVolumeAfterRefusal = HasHomeVolume();
             Docker.Run("rm", "-f", AgentName);
             session.WaitForExit();
             ContainersAfterRemoval = Docker.CountContainers(Key);
 
-            AnsweredNo = Cli.WithStdin("n\n").Run("reset");
+            AnsweredNo = Cli.WithStdin("n\n").Run("clean");
             HomeVolumeAfterNo = HasHomeVolume();
-            AnsweredYes = Cli.WithStdin("y\n").Run("reset").RequireSuccess();
+            AnsweredYes = Cli.WithStdin("y\n").Run("clean").RequireSuccess();
             HomeVolumeAfterYes = HasHomeVolume();
-            AfterReset = Cli.Run("run", "bash", "-c", "cat ~/.reset-marker 2>/dev/null || echo fresh");
+            AfterClean = Cli.Run("run", "bash", "-c", "cat ~/.clean-marker 2>/dev/null || echo fresh");
         }
 
         private bool HasHomeVolume() => Docker.Run("volume", "inspect", $"{Key}_home").ExitCode == 0;

@@ -35,17 +35,17 @@ public sealed class PenSignTests(PenSignTests.Fixture fixture) : IClassFixture<P
     public void SecondSignRefused() =>
         SmokeAssert.StderrContains(fixture.SignWhileSigning, "another pen sign is running in this directory");
 
-    [Fact(DisplayName = "...and pen reset (sign holds project.lock shared)")]
-    public void ResetRefusedWhileSigning() =>
-        SmokeAssert.StderrContains(fixture.ResetWhileSigning, "a pen sign or another pen reset is running");
+    [Fact(DisplayName = "...and pen clean (sign holds project.lock shared)")]
+    public void CleanRefusedWhileSigning() =>
+        SmokeAssert.StderrContains(fixture.CleanWhileSigning, "a pen sign or another pen clean is running");
 
-    [Fact(DisplayName = "a session started while pen reset runs is refused")]
-    public void SessionRefusedWhileResetting() =>
-        SmokeAssert.StderrContains(fixture.RunWhileResetting, "a pen reset is running in this project");
+    [Fact(DisplayName = "a session started while pen clean runs is refused")]
+    public void SessionRefusedWhileCleaning() =>
+        SmokeAssert.StderrContains(fixture.RunWhileCleaning, "a pen clean is running in this project");
 
     [Fact(DisplayName = "...as is pen sign")]
-    public void SignRefusedWhileResetting() =>
-        SmokeAssert.StderrContains(fixture.SignWhileResetting, "refusing to sign: a pen reset is running");
+    public void SignRefusedWhileCleaning() =>
+        SmokeAssert.StderrContains(fixture.SignWhileCleaning, "refusing to sign: a pen clean is running");
 
     [Fact(DisplayName = "pen sign lists the commits it rewrites")]
     public void ListsTheCommits() =>
@@ -174,11 +174,11 @@ public sealed class PenSignTests(PenSignTests.Fixture fixture) : IClassFixture<P
 
         internal CommandResult SignWhileSigning { get; private set; } = null!;
 
-        internal CommandResult ResetWhileSigning { get; private set; } = null!;
+        internal CommandResult CleanWhileSigning { get; private set; } = null!;
 
-        internal CommandResult RunWhileResetting { get; private set; } = null!;
+        internal CommandResult RunWhileCleaning { get; private set; } = null!;
 
-        internal CommandResult SignWhileResetting { get; private set; } = null!;
+        internal CommandResult SignWhileCleaning { get; private set; } = null!;
 
         /// <summary>Gets each commit's tree, author and date, one line each, before the first pen sign.</summary>
         internal string CommitsBeforeFirstSign { get; private set; } = null!;
@@ -293,7 +293,7 @@ public sealed class PenSignTests(PenSignTests.Fixture fixture) : IClassFixture<P
         }
 
         /// <summary>Runs pen while the test holds the locks pen sign (this dir's worktree lock exclusive and
-        /// project.lock shared) and pen reset (project.lock exclusive) hold.</summary>
+        /// project.lock shared) and pen clean (project.lock exclusive) hold.</summary>
         private void RunWhileLocked()
         {
             var worktreeLock = Path.Combine(RuntimeDir, $"worktree-{Project.Hash}.lock");
@@ -303,11 +303,11 @@ public sealed class PenSignTests(PenSignTests.Fixture fixture) : IClassFixture<P
             using (Locks.Hold(worktreeLock, exclusive: true))
                 SignWhileSigning = _pen.Run("sign");
             using (Locks.Hold(projectLock, exclusive: false))
-                ResetWhileSigning = _pen.Run("reset");
+                CleanWhileSigning = _pen.Run("clean");
             using (Locks.Hold(projectLock, exclusive: true))
-                RunWhileResetting = _pen.Run("run", "true");
+                RunWhileCleaning = _pen.Run("run", "true");
             using (Locks.Hold(projectLock, exclusive: true))
-                SignWhileResetting = _pen.Run("sign");
+                SignWhileCleaning = _pen.Run("sign");
         }
 
         private void RunFirstSign()

@@ -3,7 +3,7 @@ using Pen.Projects;
 
 namespace Pen.Sessions;
 
-/// <summary>Finds a project's sessions, and takes the locks sessions, pen sign and pen reset hold.</summary>
+/// <summary>Finds a project's sessions, and takes the locks sessions, pen sign and pen clean hold.</summary>
 internal static class SessionRegistry
 {
     /// <summary>Finds the project's running sessions.</summary>
@@ -74,14 +74,14 @@ internal static class SessionRegistry
 
     /// <summary>Takes what a session holds for its whole run.</summary>
     /// <returns>project.lock shared, then its dir's worktree lock shared.</returns>
-    /// <remarks>pen reset takes project.lock exclusive, and pen sign in the same dir the worktree lock.</remarks>
+    /// <remarks>pen clean takes project.lock exclusive, and pen sign in the same dir the worktree lock.</remarks>
     public static Locks TakeForSession(string runtimeDir, Project project)
     {
         var locks = new Locks();
         try
         {
             locks.Add(FileLock.TryTake(GetProjectLockFile(runtimeDir), exclusive: false)
-                ?? throw new PenException("a pen reset is running in this project: try again once it's done"));
+                ?? throw new PenException("a pen clean is running in this project: try again once it's done"));
             locks.Add(FileLock.TryTake(GetWorktreeLockFile(runtimeDir, project.Dir), exclusive: false)
                 ?? throw new PenException("a pen sign is running in this directory: try again once it's done"));
             return locks;
@@ -94,7 +94,7 @@ internal static class SessionRegistry
     }
 
     /// <summary>Takes what pen sign holds for its whole run.</summary>
-    /// <returns>project.lock shared (so no reset runs), then its dir's worktree lock exclusive.</returns>
+    /// <returns>project.lock shared (so no pen clean runs), then its dir's worktree lock exclusive.</returns>
     /// <remarks>
     /// It refuses while a session runs in this dir; sessions in the project's other worktrees carry on.
     /// </remarks>
@@ -105,7 +105,7 @@ internal static class SessionRegistry
         try
         {
             locks.Add(FileLock.TryTake(GetProjectLockFile(runtimeDir), exclusive: false)
-                ?? throw new PenException("refusing to sign: a pen reset " +
+                ?? throw new PenException("refusing to sign: a pen clean " +
                     "is running in this project: try again once it's done"));
             var worktreeLock = FileLock.TryTake(GetWorktreeLockFile(runtimeDir, project.Dir), exclusive: true);
             if (worktreeLock == null)
@@ -125,12 +125,12 @@ internal static class SessionRegistry
         }
     }
 
-    /// <summary>Takes project.lock exclusive, for the whole of pen reset.</summary>
+    /// <summary>Takes project.lock exclusive, for the whole of pen clean.</summary>
     /// <remarks>
     /// It refuses while any session (or pen sign) runs in any of the project's dirs, and none starts until it's
     /// released.
     /// </remarks>
-    public static FileLock TakeForReset(HostEnv host, Project project)
+    public static FileLock TakeForClean(HostEnv host, Project project)
     {
         var runtimeDir = host.GetRuntimeDir(project.Key);
         var projectLock = FileLock.TryTake(GetProjectLockFile(runtimeDir), exclusive: true);
@@ -139,8 +139,8 @@ internal static class SessionRegistry
 
         var running = FindRunning(project.Key, runtimeDir);
         throw new PenException(running.Count == 0
-            ? "refusing to reset: a pen sign or another pen reset is running in this project: try again once it's done"
-            : DescribeRefusal("reset", running, "this project"));
+            ? "refusing to clean: a pen sign or another pen clean is running in this project: try again once it's done"
+            : DescribeRefusal("clean", running, "this project"));
     }
 
     /// <summary>Describes why <paramref name="what"/> is refused while <paramref name="running"/> run.</summary>

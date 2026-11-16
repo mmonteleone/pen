@@ -40,7 +40,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     public int Run(SessionRequest request)
     {
         // Every session holds project.lock and its dir's worktree lock
-        // shared; pen reset holds the first exclusive, pen sign the second.
+        // shared; pen clean holds the first exclusive, pen sign the second.
         EnsureRuntimeDir(context.Host, Project);
         using var locks = SessionRegistry.TakeForSession(RuntimeDir, Project);
 
@@ -228,8 +228,8 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     /// Creates the project's runtime dir and records the main checkout's real path in its project-dir.
     /// </summary>
     /// <remarks>
-    /// pen prune uses the record to tell which keys belong to projects that were moved or deleted. Every command
-    /// that resolves a project calls this, so active projects fill it in over time.
+    /// pen clean --stale uses the record to tell which keys belong to projects that were moved or deleted. Every
+    /// command that resolves a project calls this, so active projects fill it in over time.
     /// </remarks>
     internal static void EnsureRuntimeDir(HostEnv host, Project project)
     {

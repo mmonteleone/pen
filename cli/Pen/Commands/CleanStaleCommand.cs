@@ -9,15 +9,15 @@ using Pen.Trust;
 namespace Pen.Commands;
 
 /// <summary>
-/// Runs pen prune: removes what moved or deleted projects left behind (volumes, project-layer images, the runtime
-/// dir) and tools images on an old base, after asking.
+/// Runs pen clean --stale: removes what moved or deleted projects left behind (volumes, project-layer images,
+/// the runtime dir) and tools images on an old base, after asking.
 /// </summary>
 /// <param name="host">The host user's environment.</param>
 /// <param name="input">Where the confirmation is read from.</param>
 /// <remarks>
 /// A key's project is known from the project-dir file its runtime dir holds (<see cref="Session.EnsureRuntimeDir"/>).
 /// </remarks>
-internal sealed partial class PruneCommand(HostEnv host, TextReader input)
+internal sealed partial class CleanStaleCommand(HostEnv host, TextReader input)
 {
     /// <summary>What became of a key's project.</summary>
     internal enum Status
@@ -59,7 +59,7 @@ internal sealed partial class PruneCommand(HostEnv host, TextReader input)
         /// <summary>Gets, for a moved one, the key its recorded dir has now.</summary>
         public string? CurrentKey { get; init; }
 
-        /// <summary>Gets whether pen prune removes it: its project moved or is missing.</summary>
+        /// <summary>Gets whether pen clean --stale removes it: its project moved or is missing.</summary>
         public bool Removable => Status is Status.Moved or Status.Missing;
     }
 
@@ -74,7 +74,7 @@ internal sealed partial class PruneCommand(HostEnv host, TextReader input)
         var staleTools = FindStaleToolsImages(images, ToolsImage.ReadCurrentBaseId(), ReadBaseId);
         if (entries.Count == 0 && staleTools.Count == 0)
         {
-            Out.WriteLine("nothing to prune: no project has volumes or state");
+            Out.WriteLine("nothing to clean: no project has volumes or state");
             return 0;
         }
         if (entries.Count > 0)
@@ -83,7 +83,7 @@ internal sealed partial class PruneCommand(HostEnv host, TextReader input)
         var removable = entries.Where(entry => entry.Removable).ToList();
         if (removable.Count == 0 && staleTools.Count == 0)
         {
-            Out.WriteLine("nothing to prune");
+            Out.WriteLine("nothing stale to clean");
             return 0;
         }
         WriteWhatGoes(removable, staleTools);
@@ -250,7 +250,7 @@ internal sealed partial class PruneCommand(HostEnv host, TextReader input)
     /// <returns>The key, or null for any other volume.</returns>
     internal static string? FindKeyOfVolume(string volume)
     {
-        foreach (var name in ResetCommand.VolumeSuffixes)
+        foreach (var name in CleanCommand.VolumeSuffixes)
         {
             var suffix = "_" + name;
             if (volume.EndsWith(suffix, StringComparison.Ordinal))
@@ -316,7 +316,7 @@ internal sealed partial class PruneCommand(HostEnv host, TextReader input)
             entry => $"{Out.Field(host.Display(entry.RecordedDir!))}  ({entry.Key}, now {entry.CurrentKey})"
                 + DescribeContents(entry));
         Group(Status.Missing, "to remove, missing (the dir is gone: if it's on a volume that isn't mounted, mount it\n"
-                                + "and run pen prune again instead):",
+                                + "and run pen clean --stale again instead):",
             entry => $"{Out.Field(host.Display(entry.RecordedDir!))}  ({entry.Key}){DescribeContents(entry)}");
         return listing.ToString().TrimEnd('\n');
     }
@@ -364,7 +364,7 @@ internal sealed partial class PruneCommand(HostEnv host, TextReader input)
         using var projectLock = FileLock.TryTake(SessionRegistry.GetProjectLockFile(runtimeDir), exclusive: true);
         if (projectLock == null || SessionRegistry.FindRunning(entry.Key, runtimeDir).Count > 0)
         {
-            Out.WriteLine($"skipping {entry.Key}: a session (or pen sign or reset) is running in it");
+            Out.WriteLine($"skipping {entry.Key}: a session (or pen sign or pen clean) is running in it");
             return false;
         }
 

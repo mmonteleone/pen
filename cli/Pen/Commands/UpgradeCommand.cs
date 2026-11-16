@@ -20,19 +20,19 @@ namespace Pen.Commands;
 /// </remarks>
 internal sealed class UpgradeCommand(HostEnv host, Config user, RecipeCatalog catalog)
 {
-    /// <summary>Upgrades the images, without the build cache when <paramref name="clean"/> (--clean).</summary>
+    /// <summary>Upgrades the images, without the build cache when <paramref name="noCache"/> (--no-cache).</summary>
     /// <returns>0; a failure throws.</returns>
-    public int Run(bool clean)
+    public int Run(bool noCache)
     {
-        Out.WriteLine($"upgrading {Image.Name}{(clean ? " from scratch (--clean)" : "")}");
+        Out.WriteLine($"upgrading {Image.Name}{(noCache ? " from scratch (--no-cache)" : "")}");
         var refresh = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
-        Image.Build(Embedded.ComputeImageHash(), refresh: refresh, pull: true, noCache: clean);
+        Image.Build(Embedded.ComputeImageHash(), refresh: refresh, pull: true, noCache: noCache);
 
         // The project layer too, when run in a project that has one.
         var project = TryResolveProject();
-        var tools = ToolsImage.Ensure(SelectTools(project), catalog, noCache: clean);
+        var tools = ToolsImage.Ensure(SelectTools(project), catalog, noCache: noCache);
         if (project != null)
-            RebuildProjectLayer(project, clean, tools);
+            RebuildProjectLayer(project, noCache, tools);
 
         PullSidecarImages();
         Out.WriteLine("upgrade done");
@@ -94,10 +94,10 @@ internal sealed class UpgradeCommand(HostEnv host, Config user, RecipeCatalog ca
 
     /// <summary>
     /// Rebuilds <paramref name="project"/>'s layer on <paramref name="baseImage"/>, if it has one and it's
-    /// approved, without the build cache when <paramref name="clean"/>.
+    /// approved, without the build cache when <paramref name="noCache"/>.
     /// </summary>
     /// <remarks>pen upgrade doesn't ask, so an unapproved .pen/ is skipped rather than built.</remarks>
-    internal void RebuildProjectLayer(Project project, bool clean, string baseImage)
+    internal void RebuildProjectLayer(Project project, bool noCache, string baseImage)
     {
         if (!TrustGate.HasDockerfile(project))
             return;
@@ -107,7 +107,7 @@ internal sealed class UpgradeCommand(HostEnv host, Config user, RecipeCatalog ca
             return;
         }
         Out.WriteLine($"rebuilding the project layer {Image.GetProjectLayerName(project, baseImage)}");
-        Image.EnsureProjectLayer(host, project, noCache: clean, baseImage: baseImage);
+        Image.EnsureProjectLayer(host, project, noCache: noCache, baseImage: baseImage);
     }
 
     /// <summary>Pulls newer proxy and dind images for the embedded compose.yaml.</summary>

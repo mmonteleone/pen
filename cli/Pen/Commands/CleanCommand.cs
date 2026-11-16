@@ -4,7 +4,7 @@ using Pen.Sessions;
 
 namespace Pen.Commands;
 
-/// <summary>Runs pen reset: removes the project's volumes, after asking.</summary>
+/// <summary>Runs pen clean: removes the project's volumes, after asking.</summary>
 /// <param name="host">The host user's environment.</param>
 /// <param name="project">The project whose volumes go.</param>
 /// <param name="input">Where the confirmation is read from.</param>
@@ -12,7 +12,7 @@ namespace Pen.Commands;
 /// It holds project.lock exclusive throughout, so it refuses while any session or pen sign runs in the project,
 /// and none starts until it's done.
 /// </remarks>
-internal sealed class ResetCommand(HostEnv host, Project project, TextReader input)
+internal sealed class CleanCommand(HostEnv host, Project project, TextReader input)
 {
     /// <summary>What a project's volume names end in, after its key and an underscore.</summary>
     public static readonly string[] VolumeSuffixes = ["home", "nuget", "dind"];
@@ -22,13 +22,13 @@ internal sealed class ResetCommand(HostEnv host, Project project, TextReader inp
     public int Run()
     {
         Session.EnsureRuntimeDir(host, project);
-        using var projectLock = SessionRegistry.TakeForReset(host, project);
+        using var projectLock = SessionRegistry.TakeForClean(host, project);
         Session.FinishDeadSessions(project.Key, host.GetRuntimeDir(project.Key));
 
         var volumes = FindVolumes();
         if (volumes.Count == 0)
         {
-            Out.WriteLine($"nothing to reset: {project.Key} has no volumes");
+            Out.WriteLine($"nothing to clean: {project.Key} has no volumes");
             return 0;
         }
 
@@ -38,7 +38,8 @@ internal sealed class ResetCommand(HostEnv host, Project project, TextReader inp
             : "";
         Out.WriteRaw("  the project's sandbox home (agent logins and config, shell history), its NuGet cache"
                 + images
-                + ".\n  The project's files and your ~/.config/pen are untouched.");
+                + ".\n  The project's files, your ~/.config/pen, and this project's approvals (pen trust)"
+                + "\n  and blocked-domain logs (pen allow) are kept.");
         if (!Out.Confirm("remove them?", input))
         {
             Out.WriteLine("nothing removed");

@@ -10,8 +10,11 @@ namespace Pen.CommandLine;
 /// </param>
 internal sealed record Command(CommandKind Kind, IReadOnlyList<string> Args)
 {
-    /// <summary>Gets whether pen upgrade --clean was given.</summary>
-    public bool Clean { get; init; }
+    /// <summary>Gets whether pen upgrade --no-cache was given.</summary>
+    public bool NoCache { get; init; }
+
+    /// <summary>Gets whether pen clean --stale was given.</summary>
+    public bool Stale { get; init; }
 
     /// <summary>Gets whether pen allow --global was given.</summary>
     public bool Global { get; init; }

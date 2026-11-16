@@ -140,7 +140,7 @@ internal static class ToolsImage
 
     /// <summary>
     /// Builds the tools image for <paramref name="tools"/> if its tag doesn't exist, or always, without the
-    /// build cache, with <paramref name="noCache"/> (pen upgrade --clean).
+    /// build cache, with <paramref name="noCache"/> (pen upgrade --no-cache).
     /// </summary>
     /// <returns>The image to run: the tools image, or pen:latest with no tools.</returns>
     /// <remarks>pen:latest has to be up to date already (<see cref="Image.EnsureCurrent"/>).</remarks>

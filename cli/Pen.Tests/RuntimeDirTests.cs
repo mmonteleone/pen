@@ -1,6 +1,6 @@
 namespace Pen.Tests;
 
-/// <summary>D1: the runtime dir records its project's main checkout (for pen prune); the shared [y/N] prompt.</summary>
+/// <summary>D1: the runtime dir records its project's main checkout (for pen clean --stale); the shared [y/N] prompt.</summary>
 public class RuntimeDirTests
 {
     private static string ProjectDirOf(HostEnv host, Project p) =>

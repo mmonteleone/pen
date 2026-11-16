@@ -367,13 +367,13 @@ public class TrustGateTests
     }
 
     [Fact]
-    public void PruneRemovesACopyLeftByADeadPen()
+    public void CleanStaleRemovesACopyLeftByADeadPen()
     {
         using var f = new Fixture(projectToml: "", dockerfile: "");
         StaleContext(f);
         var runtimeDir = f.Host.GetRuntimeDir(f.Project.Key);
         Directory.Delete(f.Project.Dir, recursive: true);
-        Assert.True(PruneCommand.Remove(f.Host, Assert.Single(PruneCommand.Find(f.Host, [], []), e => e.Key == f.Project.Key)));
+        Assert.True(CleanStaleCommand.Remove(f.Host, Assert.Single(CleanStaleCommand.Find(f.Host, [], []), e => e.Key == f.Project.Key)));
         Assert.False(Directory.Exists(runtimeDir));
     }
 
@@ -591,7 +591,7 @@ public class TrustGateTests
     public void UpgradeSkipsAnUnapprovedLayer()
     {
         using var f = new Fixture();
-        new UpgradeCommand(f.Host, Config.Empty, RecipeCatalog.Embedded).RebuildProjectLayer(f.Project, clean: false, Image.Name);
+        new UpgradeCommand(f.Host, Config.Empty, RecipeCatalog.Embedded).RebuildProjectLayer(f.Project, noCache: false, Image.Name);
         Assert.Empty(f.Calls);
     }
 
@@ -600,7 +600,7 @@ public class TrustGateTests
     {
         using var f = new Fixture();
         File.CreateSymbolicLink(Path.Combine(f.Project.PenDir, "out"), "/etc/passwd");
-        new UpgradeCommand(f.Host, Config.Empty, RecipeCatalog.Embedded).RebuildProjectLayer(f.Project, clean: false, Image.Name);
+        new UpgradeCommand(f.Host, Config.Empty, RecipeCatalog.Embedded).RebuildProjectLayer(f.Project, noCache: false, Image.Name);
         Assert.Empty(f.Calls);
     }
 
@@ -609,12 +609,12 @@ public class TrustGateTests
     {
         using var f = new Fixture(projectToml: "");
         new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded).Run(yes: true, list: false);
-        new UpgradeCommand(f.Host, Config.Empty, RecipeCatalog.Embedded).RebuildProjectLayer(f.Project, clean: false, Image.Name);
+        new UpgradeCommand(f.Host, Config.Empty, RecipeCatalog.Embedded).RebuildProjectLayer(f.Project, noCache: false, Image.Name);
         Assert.Contains(f.Calls, c => c.StartsWith("build ", StringComparison.Ordinal));
 
         File.Delete(f.CallsFile);
         File.WriteAllText(Path.Combine(f.Project.PenDir, "Dockerfile"), "FROM pen:latest\nRUN worse\n");
-        new UpgradeCommand(f.Host, Config.Empty, RecipeCatalog.Embedded).RebuildProjectLayer(f.Project, clean: false, Image.Name);
+        new UpgradeCommand(f.Host, Config.Empty, RecipeCatalog.Embedded).RebuildProjectLayer(f.Project, noCache: false, Image.Name);
         Assert.Empty(f.Calls);
     }
 
@@ -624,7 +624,7 @@ public class TrustGateTests
         using var f = new Fixture(projectToml: "");
         Approve(f);
         File.WriteAllText(Path.Combine(f.T.Path, "swap-in"), "FROM pen:latest\nRUN worse\n");
-        new UpgradeCommand(f.Host, Config.Empty, RecipeCatalog.Embedded).RebuildProjectLayer(f.Project, clean: false, Image.Name);
+        new UpgradeCommand(f.Host, Config.Empty, RecipeCatalog.Embedded).RebuildProjectLayer(f.Project, noCache: false, Image.Name);
         Assert.Equal(Approved, f.Seen("seen-context/Dockerfile"));
         Assert.StartsWith(f.Host.GetRuntimeDir(f.Project.Key) + "/", f.Seen("context-path"));
     }
@@ -984,7 +984,7 @@ public class TrustGateTests
     {
         using var f = ToolsFixture(projectToml: "", dockerfile: "FROM pen:latest\n");
         Approve(f);
-        new UpgradeCommand(f.Host, Config.Empty, RecipeCatalog.Embedded).RebuildProjectLayer(f.Project, clean: true, baseImage: "pen-tools:0123456789abcdef");
+        new UpgradeCommand(f.Host, Config.Empty, RecipeCatalog.Embedded).RebuildProjectLayer(f.Project, noCache: true, baseImage: "pen-tools:0123456789abcdef");
         var build = Assert.Single(f.Calls, c => c.StartsWith("build ", StringComparison.Ordinal));
         Assert.Contains($"-t {f.Project.Key}:0123456789abcdef", build);
         Assert.Contains("--no-cache", build);

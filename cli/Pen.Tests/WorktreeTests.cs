@@ -640,8 +640,8 @@ public class WorktreeTests
         Assert.Equal($"{main.Key}-{Project.HashPath(wt)}:0123456789abcdef", Image.GetProjectLayerName(w, one));
         Assert.Equal($"{main.Key}:fedcba9876543210", Image.GetProjectLayerName(main, other));
         Assert.Equal($"{main.Key}:latest", Image.GetProjectLayerName(main, Image.Name));
-        Assert.True(PruneCommand.IsImageOf(main.Key, Image.GetProjectLayerName(main, one)));
-        Assert.True(PruneCommand.IsImageOf(main.Key, Image.GetProjectLayerName(w, one)));
+        Assert.True(CleanStaleCommand.IsImageOf(main.Key, Image.GetProjectLayerName(main, one)));
+        Assert.True(CleanStaleCommand.IsImageOf(main.Key, Image.GetProjectLayerName(w, one)));
     }
 
     [Fact]
