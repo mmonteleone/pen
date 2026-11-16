@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Pen.GitProtection;
+using Pen.Masking;
 using Pen.Platform;
 using Pen.Proxy;
 using Pen.Sessions;
@@ -15,8 +16,8 @@ namespace Pen.Configuration;
 /// </summary>
 /// <remarks>
 /// TOML errors name the file and line; Pen's own checks name the file and key. Keys are either
-/// user-only or project-only, except allow, deny and tools, whose lists are appended (allow: defaults,
-/// user, project; deny: user, project; tools: user, project, --tool).
+/// user-only or project-only, except allow, deny, tools and hide, whose lists are appended (allow: defaults,
+/// user, project; deny: user, project; tools: user, project, --tool; hide: user, project).
 /// </remarks>
 internal sealed partial class Config
 {
@@ -45,6 +46,13 @@ internal sealed partial class Config
     public List<int> Ports { get; } = [];
     /// <summary>tools = ["name", "name:version", …], validated against the recipes and canonical (both).</summary>
     public IReadOnlyList<ToolSpec> Tools { get; private set; } = [];
+    /// <summary>hide = [patterns]: what the sandbox sees as empty, in file order (both).</summary>
+    public List<HidePattern> Hide { get; } = [];
+    /// <summary>
+    /// [replace] target = source: project-relative paths, in file order (project only). The sandbox sees a copy
+    /// of each source over its target.
+    /// </summary>
+    public List<KeyValuePair<string, string>> Replace { get; } = [];
 
     public static Config Empty { get; } = new();
 
@@ -148,6 +156,7 @@ internal sealed partial class Config
             ("github_owner", ConfigKind.User) => ProjectFile,
             ("docker", ConfigKind.User) => $"{ProjectFile} (or use pen --docker)",
             ("ports", ConfigKind.User) => $"{ProjectFile} (or use pen --port)",
+            ("replace", ConfigKind.User) => ProjectFile,
             _ => null,
         };
         if (belongsIn != null)
@@ -182,6 +191,12 @@ internal sealed partial class Config
                 break;
             case "tools":
                 ReadTools(value, error);
+                break;
+            case "hide":
+                ReadHide(value, error);
+                break;
+            case "replace":
+                ReadReplace(value, error);
                 break;
             default:
                 throw error($"unknown key \"{key}\"");
@@ -287,6 +302,75 @@ internal sealed partial class Config
         if (ToolSpec.TryCanonicalize(parsed, RecipeCatalog.Embedded, out var canonical) is { } conflict)
             throw error($"tools: {conflict}");
         Tools = canonical;
+    }
+
+    private void ReadHide(object value, Func<string, PenException> error)
+    {
+        if (value is not TomlArray patterns)
+            throw error("hide must be a list of patterns, e.g. hide = [\".env\", \"secrets/\"]");
+        foreach (var item in patterns)
+        {
+            if (item is not string text)
+                throw error($"hide: {DescribeItem(item)} isn't a pattern (put it in quotes)");
+            if (HidePattern.TryParse(text, out var pattern) is { } problem)
+                throw error($"hide: \"{text}\": {problem}");
+            Hide.Add(pattern!);
+        }
+    }
+
+    private void ReadReplace(object value, Func<string, PenException> error)
+    {
+        var targets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (target, item) in RequireTable(value, "replace", error))
+        {
+            if (item is not string source)
+            {
+                throw error($"replace: \"{target}\" must be set to a path in quotes, and a target path " +
+                    "goes in quotes as one key, e.g. \".env\" = \".pen/agent.env\"");
+            }
+
+            if (FindReplacePathProblem(target, isTarget: true) is { } targetProblem)
+                throw error($"replace: target \"{target}\" {targetProblem}");
+            if (FindReplacePathProblem(source, isTarget: false) is { } sourceProblem)
+                throw error($"replace: source \"{source}\" (for \"{target}\") {sourceProblem}");
+            if (!targets.TryAdd(target, target))
+            {
+                throw error($"replace: \"{targets[target]}\" and \"{target}\" " +
+                    "are the same file where the filesystem ignores case");
+            }
+
+            Replace.Add(new(target, source));
+        }
+    }
+
+    /// <summary>Checks a [replace] target or source: a relative path to a file, with no wildcards.</summary>
+    /// <returns>What's wrong, as the end of a sentence about the path, or null.</returns>
+    /// <remarks>
+    /// Neither may reach into .git (any case). A target can't be in .pen, Pen's own directory; a source may,
+    /// since .pen is read-only in the sandbox.
+    /// </remarks>
+    private static string? FindReplacePathProblem(string path, bool isTarget)
+    {
+        if (path.Length == 0)
+            return "is empty";
+        if (path.StartsWith('/'))
+            return "must be relative to the project, not absolute";
+        if (path.EndsWith('/'))
+            return "must name a file, so it can't end in /";
+        if (path.Contains('\0'))
+            return "contains a NUL character";
+        if (path.AsSpan().IndexOfAny("*?[]\\") >= 0)
+            return "can't have *, ?, [, ] or \\ in it";
+        var segments = path.Split('/');
+        if (segments.Any(segment => segment.Length == 0))
+            return "can't have an empty segment (//)";
+        if (segments.Any(segment => segment is "." or ".."))
+            return "can't have . or .. segments";
+        if (segments.Any(segment => segment.Equals(".git", StringComparison.OrdinalIgnoreCase)))
+            return "can't be in .git";
+        if (isTarget && segments[0].Equals(".pen", StringComparison.OrdinalIgnoreCase))
+            return "can't be in .pen, Pen's own directory";
+        return null;
     }
 
     /// <summary>Describes a list item for an error: a string in quotes, anything else as TOML shows it.</summary>

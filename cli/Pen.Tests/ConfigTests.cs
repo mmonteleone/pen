@@ -177,6 +177,118 @@ public class ConfigTests
     public void PortsBelongInTheProjectFile() =>
         Assert.Equal($"{UserFile}: \"ports\" belongs in {ProjFile} (or use pen --port)", Error(() => User("ports = [3000]")));
 
+    [Fact]
+    public void HideIsAListOfPatterns_InEitherFile()
+    {
+        Assert.Empty(Proj("").Hide);
+        Assert.Empty(User("hide = []").Hide);
+        Assert.Equal([".env", "*.ps1", "secrets/"],
+            User("hide = [\".env\", '*.ps1', \"secrets/\"]").Hide.Select(p => p.Text));
+        var project = Proj("hide = [\n  \"/apps/web/.env\",  # comment\n  \".env.*\",\n]").Hide;
+        Assert.Equal(["/apps/web/.env", ".env.*"], project.Select(p => p.Text));
+        Assert.True(project[0].IsLiteral);
+        Assert.True(project[1].IsMatch("a/.env.local", false));
+    }
+
+    [Theory]
+    [InlineData("hide = \".env\"", "hide must be a list of patterns, e.g. hide = [\".env\", \"secrets/\"]")]
+    [InlineData("[hide]\nx = \"y\"", "hide must be a list of patterns")]
+    [InlineData("hide = [3]", "hide: 3 isn't a pattern (put it in quotes)")]
+    [InlineData("hide = [\".env\", true]", "hide: True isn't a pattern")]
+    [InlineData("hide = [[\".env\"]]", "hide: ")]
+    [InlineData("hide = [\"\"]", "hide: \"\": a pattern can't be empty")]
+    [InlineData("hide = [\"ok\", \"[ab]\"]", "hide: \"[ab]\": [, ] and \\ aren't supported in patterns (use * or ?)")]
+    [InlineData("hide = [\"a/../b\"]", "hide: \"a/../b\": a pattern can't have . or .. segments")]
+    [InlineData("hide = [\"sub/.git/config\"]", "hide: \"sub/.git/config\": a pattern can't reach into .git")]
+    [InlineData("hide = [\".pen/\"]", "hide: \".pen/\": a pattern can't start with .pen, Pen's own directory")]
+    [InlineData("hide = [\"**\"]", "hide: \"**\": this pattern would hide the whole project")]
+    public void InvalidHide(string text, string message)
+    {
+        Assert.StartsWith($"{UserFile}: {message}", Error(() => User(text)));
+        Assert.StartsWith($"{ProjFile}: {message}", Error(() => Proj(text)));
+    }
+
+    [Fact]
+    public void ReplaceIsAProjectTableOfPaths_InFileOrder()
+    {
+        Assert.Empty(Proj("").Replace);
+        var replace = Proj("""
+            [replace]
+            ".env" = ".pen/agent.env"
+            "apps/web/.env.local" = "fixtures/web.env"
+            "README" = '.pen/readme'
+            """).Replace;
+        Assert.Equal([
+            new(".env", ".pen/agent.env"),
+            new("apps/web/.env.local", "fixtures/web.env"),
+            new("README", ".pen/readme"),
+        ], replace);
+        Assert.Equal([new("a.env", "b")], Proj("replace = { \"a.env\" = \"b\" }").Replace);
+    }
+
+    [Fact]
+    public void ReplaceBelongsInTheProjectFile() =>
+        Assert.Equal($"{UserFile}: \"replace\" belongs in {ProjFile}",
+            Error(() => User("[replace]\n\".env\" = \".pen/agent.env\"")));
+
+    [Theory]
+    // An unquoted dotted key makes a subtable.
+    [InlineData("[replace]\napps.env = \"x\"", "replace: \"apps\" must be set to a path in quotes")]
+    [InlineData("[replace]\n\".env\" = 1", "replace: \".env\" must be set to a path in quotes, " +
+        "and a target path goes in quotes as one key, e.g. \".env\" = \".pen/agent.env\"")]
+    [InlineData("[replace]\n\".env\" = [\"x\"]", "replace: \".env\" must be set to a path in quotes")]
+    [InlineData("replace = \".env\"", "replace must be a table ([replace])")]
+    [InlineData("replace = [\".env\"]", "replace must be a table ([replace])")]
+    public void ReplaceValuesMustBePaths(string text, string message) =>
+        Assert.StartsWith($"{ProjFile}: {message}", Error(() => Proj(text)));
+
+    [Theory]
+    [InlineData("", "is empty")]
+    [InlineData("/etc/passwd", "must be relative to the project, not absolute")]
+    [InlineData("apps/", "must name a file, so it can't end in /")]
+    [InlineData("*.env", "can't have *, ?, [, ] or \\ in it")]
+    [InlineData("a?.env", "can't have *, ?, [, ] or \\ in it")]
+    [InlineData("[a].env", "can't have *, ?, [, ] or \\ in it")]
+    [InlineData("a\\\\b", "can't have *, ?, [, ] or \\ in it")]
+    [InlineData("a//b", "can't have an empty segment (//)")]
+    [InlineData("./.env", "can't have . or .. segments")]
+    [InlineData("../.env", "can't have . or .. segments")]
+    [InlineData("a/../.env", "can't have . or .. segments")]
+    [InlineData(".git/config", "can't be in .git")]
+    [InlineData("sub/.GIT/config", "can't be in .git")]
+    [InlineData(".git", "can't be in .git")]
+    public void InvalidReplacePaths(string path, string problem)
+    {
+        Assert.Equal($"{ProjFile}: replace: target \"{path.Replace("\\\\", "\\")}\" {problem}",
+            Error(() => Proj($"[replace]\n\"{path}\" = \"src\"")));
+        Assert.Equal($"{ProjFile}: replace: source \"{path.Replace("\\\\", "\\")}\" (for \"t\") {problem}",
+            Error(() => Proj($"[replace]\n\"t\" = \"{path}\"")));
+    }
+
+    [Fact]
+    public void AReplacePathWithANulSaysSo()
+    {
+        Assert.Equal($"{ProjFile}: replace: target \"a\\x00b\" contains a NUL character",
+            Error(() => Proj("[replace]\n\"a\\u0000b\" = \"src\"")));
+        Assert.Equal($"{ProjFile}: replace: source \"a\\x00b\" (for \"t\") contains a NUL character",
+            Error(() => Proj("[replace]\n\"t\" = \"a\\u0000b\"")));
+    }
+
+    [Theory]
+    [InlineData(".pen/config.toml")]
+    [InlineData(".PEN/x")]
+    public void AReplaceTargetCantBeInPen_ButASourceCan(string path)
+    {
+        Assert.Equal($"{ProjFile}: replace: target \"{path}\" can't be in .pen, Pen's own directory",
+            Error(() => Proj($"[replace]\n\"{path}\" = \"src\"")));
+        Assert.Equal([new("t", path)], Proj($"[replace]\n\"t\" = \"{path}\"").Replace);
+    }
+
+    [Fact]
+    public void ReplaceTargetsThatDifferOnlyInCaseAreRefused() =>
+        Assert.Equal($"{ProjFile}: replace: \".env\" and \".ENV\" are the same file where the filesystem ignores case",
+            Error(() => Proj("[replace]\n\".env\" = \"a\"\n\".ENV\" = \"b\"")));
+
     [Theory]
     [InlineData("[github]\nacme = \"t\"")]
     [InlineData("[env]\nFOO = \"x\"")]
