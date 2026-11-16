@@ -319,6 +319,12 @@ internal static partial class Native
         SetLastError = true)]
     private static unsafe partial int FStatAtMacX64(int dirfd, string path, byte* buffer, int flags);
 
+    [LibraryImport(Libc, EntryPoint = "fstat", SetLastError = true)]
+    private static unsafe partial int FStatMacArm64(int fd, byte* buffer);
+
+    [LibraryImport(Libc, EntryPoint = "fstat$INODE64", SetLastError = true)]
+    private static unsafe partial int FStatMacX64(int fd, byte* buffer);
+
     [LibraryImport(Libc, EntryPoint = "statx", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
     private static unsafe partial int StatxNative(int dirfd, string path, int flags, uint mask, byte* buffer);
 
@@ -344,8 +350,8 @@ internal static partial class Native
         }
     }
 
-    // S_IFMT, S_IFDIR and S_IFLNK, the same on both platforms.
-    private const int ModeTypeMask = 0xF000, ModeDirectory = 0x4000, ModeSymlink = 0xA000;
+    // S_IFMT, S_IFDIR, S_IFLNK and S_IFREG, the same on both platforms.
+    private const int ModeTypeMask = 0xF000, ModeDirectory = 0x4000, ModeSymlink = 0xA000, ModeRegular = 0x8000;
 
     /// <summary>The size of the buffer given to fstatat or statx: more than either struct needs.</summary>
     private const int StatBufferSize = 512;
@@ -375,9 +381,20 @@ internal static partial class Native
 
     /// <summary>Gets what's at <paramref name="path"/> relative to the directory <paramref name="dirfd"/>.</summary>
     /// <returns>What's there, or null if the call failed or the platform's layout isn't known.</returns>
-    private static unsafe FileStatus? StatAt(int dirfd, string path, bool follow)
+    private static FileStatus? StatAt(int dirfd, string path, bool follow) =>
+        ReadStatus(dirfd, path, follow ? 0 : AT_SYMLINK_NOFOLLOW);
+
+    /// <summary>Gets what the open descriptor <paramref name="fd"/> is, with fstat(2) or statx(2).</summary>
+    /// <returns>What it is, or null if the call failed or the platform's layout isn't known.</returns>
+    private static FileStatus? StatOpen(int fd) => ReadStatus(fd, null, 0);
+
+    /// <summary>
+    /// Stats <paramref name="path"/> relative to the directory <paramref name="fd"/> with fstatat or statx, or, when
+    /// <paramref name="path"/> is null, the descriptor itself with fstat or statx's AT_EMPTY_PATH.
+    /// </summary>
+    /// <returns>What's there, or null if the call failed or the platform's layout isn't known.</returns>
+    private static unsafe FileStatus? ReadStatus(int fd, string? path, int flags)
     {
-        var flags = follow ? 0 : AT_SYMLINK_NOFOLLOW;
         var buffer = stackalloc byte[StatBufferSize];
         var bytes = new ReadOnlySpan<byte>(buffer, StatBufferSize);
         ulong device;
@@ -386,10 +403,12 @@ internal static partial class Native
         int mode;
         if (OperatingSystem.IsMacOS())
         {
-            var result = RuntimeInformation.ProcessArchitecture switch
+            var result = (RuntimeInformation.ProcessArchitecture, path) switch
             {
-                Architecture.Arm64 => FStatAtMacArm64(dirfd, path, buffer, flags),
-                Architecture.X64 => FStatAtMacX64(dirfd, path, buffer, flags),
+                (Architecture.Arm64, null) => FStatMacArm64(fd, buffer),
+                (Architecture.X64, null) => FStatMacX64(fd, buffer),
+                (Architecture.Arm64, _) => FStatAtMacArm64(fd, path, buffer, flags),
+                (Architecture.X64, _) => FStatAtMacX64(fd, path, buffer, flags),
                 _ => -1,
             };
             if (result != 0)
@@ -403,7 +422,10 @@ internal static partial class Native
         else if (OperatingSystem.IsLinux())
         {
             const uint STATX_TYPE = 0x1, STATX_NLINK = 0x4, STATX_INO = 0x100;
-            if (StatxNative(dirfd, path, flags, STATX_TYPE | STATX_NLINK | STATX_INO, buffer) != 0)
+            const int AT_EMPTY_PATH = 0x1000;
+            if (path == null)
+                flags |= AT_EMPTY_PATH;
+            if (StatxNative(fd, path ?? "", flags, STATX_TYPE | STATX_NLINK | STATX_INO, buffer) != 0)
                 return null;
             // stx_nlink (uint32) at 16, stx_mode (uint16) at 28, stx_ino (uint64) at 32, stx_dev_major and
             // stx_dev_minor (uint32) at 136.
@@ -417,7 +439,7 @@ internal static partial class Native
             return null;
         }
         var type = mode & ModeTypeMask;
-        return new(device, inode, type == ModeDirectory, type == ModeSymlink, links);
+        return new(device, inode, type == ModeDirectory, type == ModeSymlink, links, type == ModeRegular);
     }
 
     /// <summary>The largest symlink target <see cref="ReadLink"/> reads: PATH_MAX on Linux, above macOS's.</summary>
@@ -507,13 +529,16 @@ internal static partial class Native
     /// <param name="relative">
     /// The file, relative to <paramref name="root"/>, with no empty, "." or ".." component.
     /// </param>
-    /// <returns>The file's bytes and mode, both read through the one descriptor.</returns>
+    /// <returns>
+    /// The file's bytes and mode, both read through the one descriptor, and what each directory on the way and the
+    /// file are, from the descriptors opened.
+    /// </returns>
     /// <exception cref="UnauthorizedAccessException">Permission is denied, naming the path.</exception>
     /// <exception cref="FileNotFoundException">Nothing is at the path, or a directory on the way is gone.</exception>
     /// <exception cref="IOException">
     /// Anything else stopped it: the path isn't below <paramref name="root"/>, a directory on the way isn't one (a
-    /// symlink, say), the file is a symlink, isn't a regular file or is over 1 MB, or the platform's flags aren't
-    /// known.
+    /// symlink, say), the file is a symlink, isn't a regular file or is over 1 MB, a descriptor can't be stat'ed, or
+    /// the platform's flags aren't known.
     /// </exception>
     /// <remarks>
     /// The project can be written by an agent while this runs, so a path checked and then read could have a directory
@@ -521,7 +546,7 @@ internal static partial class Native
     /// descriptors, each step is taken in the directory reached without a symlink. The final open doesn't block, so a
     /// FIFO opens at once and is refused by its type, and type, size, bytes and mode all come from that descriptor.
     /// </remarks>
-    public static RegularFile ReadInsideProject(string root, string relative)
+    public static ProjectFile ReadInsideProject(string root, string relative)
     {
         // O_NOFOLLOW and O_DIRECTORY differ by architecture on Linux, so this fails closed where they aren't known.
         if (!CanStat || (!OperatingSystem.IsMacOS()
@@ -538,6 +563,7 @@ internal static partial class Native
         try
         {
             var at = root;
+            var steps = new List<FileStatus>();
             foreach (var part in parts[..^1])
             {
                 at = Path.Combine(at, part);
@@ -546,6 +572,7 @@ internal static partial class Native
                     throw ReadInsideException(at, "isn't a directory (a symlink, say)");
                 CloseNative(fd);
                 fd = next;
+                steps.Add(StatOpen(fd) ?? throw new IOException($"{at} can't be stat'ed"));
             }
             var path = Path.Combine(root, relative);
             int file = OpenAtNative(fd, parts[^1], O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
@@ -556,7 +583,8 @@ internal static partial class Native
                 throw new IOException($"{path} isn't a regular file");
             var bytes = ReadBounded(handle)
                 ?? throw new IOException($"{path} is over 1 MB or changed while it was read");
-            return new(bytes, File.GetUnixFileMode(handle));
+            steps.Add(StatOpen(file) ?? throw new IOException($"{path} can't be stat'ed"));
+            return new(new(bytes, File.GetUnixFileMode(handle)), steps);
         }
         finally
         {

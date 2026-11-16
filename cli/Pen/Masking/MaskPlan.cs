@@ -1,0 +1,47 @@
+namespace Pen.Masking;
+
+/// <summary>What a session mounts over the project to hide and replace files, and what to warn about.</summary>
+/// <param name="HiddenFiles">The regular files that get an empty read-only file mounted over them.</param>
+/// <param name="HiddenDirs">The directories that get an empty read-only directory mounted over them.</param>
+/// <param name="Replacements">The files that get a read-only copy of another file mounted over them.</param>
+/// <param name="Warnings">
+/// What the user should know: what couldn't be looked in or hidden, extra hard links. Each is safe to print.
+/// </param>
+/// <remarks>
+/// Every path is a real path in the project, with no symlink in it, and none is inside another: a file or
+/// directory inside a hidden directory isn't listed, and a replaced file isn't also hidden. The hidden files and
+/// directories are sorted by <see cref="MaskedPath.RelativePath"/>; the replacements are in [replace]'s order.
+/// </remarks>
+internal sealed record MaskPlan(
+    IReadOnlyList<MaskedPath> HiddenFiles,
+    IReadOnlyList<MaskedPath> HiddenDirs,
+    IReadOnlyList<Replacement> Replacements,
+    IReadOnlyList<string> Warnings)
+{
+    /// <summary>A plan that hides and replaces nothing.</summary>
+    public static MaskPlan Empty { get; } = new([], [], [], []);
+
+    /// <summary>Gets how many mounts the plan needs: one per hidden file, hidden directory and replacement.</summary>
+    public int MountCount => HiddenFiles.Count + HiddenDirs.Count + Replacements.Count;
+
+    /// <summary>Gets whether the plan hides and replaces nothing.</summary>
+    public bool IsEmpty => MountCount == 0;
+}
+
+/// <summary>A file or directory in the project that a mount covers.</summary>
+/// <param name="Path">
+/// Its absolute host path, also its path in the container, since the project is mounted at the same path.
+/// </param>
+/// <param name="RelativePath">Its path in the project, /-separated, for messages.</param>
+/// <remarks>
+/// <see cref="RelativePath"/> is the name on disk as it is, which the agent can choose: pass it through
+/// <see cref="Pen.Platform.Out.Field"/> before printing it.
+/// </remarks>
+internal sealed record MaskedPath(string Path, string RelativePath);
+
+/// <summary>A file in the project that the agent sees with another file's contents.</summary>
+/// <param name="Target">The file covered.</param>
+/// <param name="Source">The source as written in [replace], for messages.</param>
+/// <param name="Bytes">The source's contents, as read when the plan was made.</param>
+/// <param name="Mode">The source's read and execute bits: no write, setuid, setgid or sticky bit.</param>
+internal sealed record Replacement(MaskedPath Target, string Source, byte[] Bytes, UnixFileMode Mode);

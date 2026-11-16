@@ -52,6 +52,22 @@ public class ReadInsideProjectTests
     }
 
     [Fact]
+    public void GivesWhatEachDirectoryOnTheWayAndTheFileAre()
+    {
+        using var t = new TempDir();
+        var file = Path.Combine(t.Sub("a", "b"), "agent.env");
+        File.WriteAllText(file, "x");
+
+        var steps = Native.ReadInsideProject(t.Path, "a/b/agent.env").Steps;
+
+        string[] paths = [Path.Combine(t.Path, "a"), Path.Combine(t.Path, "a", "b"), file];
+        Assert.Equal(paths.Select(p => Native.Stat(p, follow: false)!.Value), steps);
+        Assert.True(steps[^1].IsRegularFile);
+        File.WriteAllText(Path.Combine(t.Path, "top"), "y");
+        Assert.Equal([Native.Stat(Path.Combine(t.Path, "top"), follow: false)!.Value], Native.ReadInsideProject(t.Path, "top").Steps);
+    }
+
+    [Fact]
     public void ReadsAFileAtTheTopAndAnEmptyFile()
     {
         using var t = new TempDir();

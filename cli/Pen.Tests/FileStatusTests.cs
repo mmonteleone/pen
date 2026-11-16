@@ -2,7 +2,7 @@ using System.Diagnostics;
 
 namespace Pen.Tests;
 
-/// <summary>Native.Stat reports a file's link count.</summary>
+/// <summary>Native.Stat reports a file's link count and type.</summary>
 public class FileStatusTests
 {
     [Fact]
@@ -35,5 +35,24 @@ public class FileStatusTests
 
         Assert.Equal(1UL, Native.Stat(link, follow: false)!.Value.Links);
         Assert.Equal(2UL, Native.Stat(link, follow: true)!.Value.Links);
+    }
+
+    [Fact]
+    public void OnlyARegularFileIsARegularFile()
+    {
+        using var t = new TempDir();
+        var file = Path.Combine(t.Path, "f");
+        File.WriteAllText(file, "x");
+        var link = Path.Combine(t.Path, "link");
+        File.CreateSymbolicLink(link, file);
+        var fifo = Path.Combine(t.Path, "fifo");
+        var r = Process.RunAndCaptureText(new ProcessStartInfo("mkfifo", [fifo]) { RedirectStandardOutput = true, RedirectStandardError = true });
+        Assert.Equal(0, r.ExitStatus.ExitCode);
+
+        Assert.True(Native.Stat(file, follow: false)!.Value.IsRegularFile);
+        Assert.True(Native.Stat(link, follow: true)!.Value.IsRegularFile);
+        Assert.False(Native.Stat(link, follow: false)!.Value.IsRegularFile);
+        Assert.False(Native.Stat(t.Path, follow: false)!.Value.IsRegularFile);
+        Assert.False(Native.Stat(fifo, follow: false)!.Value.IsRegularFile);
     }
 }
