@@ -27,6 +27,7 @@ internal static class HelpText
           pen deny <domain…> [--global]
                                     deny domains, over every allow, applied to running sessions too
           pen deny                  list the denied domains
+          pen init                  write a starting .pen/config.toml for this project
           pen trust [--yes|--list]  review and approve what this project's .pen/ asks for
           pen ps                    list running sessions, in every project
           pen sign [<base>]         on the host: re-sign unpushed commits with your key
@@ -116,6 +117,22 @@ internal static class HelpText
 
               --global     add them to ~/.config/pen/config.toml instead, for every
                            project, and apply them to all running sessions
+            """,
+        ["init"] = """
+            usage: pen init
+
+            Writes .pen/config.toml for this project: a commented template of every project
+            setting. Toolchains found in the project's files (global.json, go.mod,
+            Cargo.toml, pom.xml, build.gradle and the like) are turned on in tools, and
+            secret files found (.env files, keys and certificates, a secrets directory) in
+            hide, each with a comment saying what it was found from; everything else stays
+            commented. It looks three directories deep at most, and skips dependency and
+            build directories such as node_modules. .pen/ is per worktree, so a linked
+            worktree gets its own.
+
+            It never overwrites: if .pen/config.toml exists already, edit it instead. Review
+            what it wrote, then commit it. The tools it turns on need your approval like any
+            other change to .pen/: the next session asks, or run pen trust.
             """,
         ["trust"] = """
             usage: pen trust [--yes | --list]

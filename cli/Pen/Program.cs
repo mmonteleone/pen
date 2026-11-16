@@ -110,6 +110,7 @@ internal static class Program
             CommandKind.Allow => ListBlocked(ProjectContext.Load(host, project, user)),
             CommandKind.Deny => ListDenied(ProjectContext.Load(host, project, user)),
             CommandKind.Trust => RunTrust(ProjectContext.Load(host, project, user), command),
+            CommandKind.Init => new InitCommand(host, project, RecipeCatalog.Embedded).Run(),
             CommandKind.Sign => RunSign(host, project, command),
             CommandKind.Clean => new CleanCommand(host, project, Console.In).Run(),
             _ => throw new InvalidOperationException($"unhandled command {command.Kind}"),

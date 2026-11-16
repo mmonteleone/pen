@@ -123,7 +123,7 @@ internal static class ProjectTemplate
     }
 
     /// <summary>Writes a tool as its bare name when it follows the recipe's default, else as name:version.</summary>
-    private static string FormatTool(DetectedTool tool) => tool.IsPinned ? tool.Tool.ToString() : tool.Tool.Name;
+    internal static string FormatTool(DetectedTool tool) => tool.IsPinned ? tool.Tool.ToString() : tool.Tool.Name;
 
     private static string DescribeUnknownVersion(DetectedTool tool) => tool.UnknownVersions.Count switch
     {
@@ -187,7 +187,7 @@ internal static class ProjectTemplate
     }
 
     /// <summary>Lists the first <see cref="MaxListed"/> items, then says how many more there are.</summary>
-    private static string ListCapped(IReadOnlyList<string> items)
+    internal static string ListCapped(IReadOnlyList<string> items)
     {
         var listed = string.Join(", ", items.Take(MaxListed));
         return items.Count > MaxListed ? $"{listed} and {items.Count - MaxListed} more" : listed;

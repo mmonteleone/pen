@@ -43,8 +43,7 @@ public sealed class AllowCommandTests(AllowCommandTests.Fixture fixture) : IClas
             () => AssertHas(fixture.AllowAgain, "already in .pen/config.toml"),
             () => Assert.Equal(
                 1,
-                fixture.ProjectConfigLinesAfterAgain.Count(
-                    line => line.Contains("example.com", StringComparison.Ordinal))));
+                fixture.ProjectConfigLinesAfterAgain.Count(line => line == "  \"example.com\",")));
 
     [Fact(DisplayName = "pen allow applies to a session with a tool")]
     public void AppliesToASessionWithATool() => AssertHas(fixture.AllowWithTool, "applied to 1 running session");

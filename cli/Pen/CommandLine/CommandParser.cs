@@ -14,6 +14,7 @@ internal static class CommandParser
         ["upgrade"] = CommandKind.Upgrade,
         ["allow"] = CommandKind.Allow,
         ["deny"] = CommandKind.Deny,
+        ["init"] = CommandKind.Init,
         ["trust"] = CommandKind.Trust,
         ["sign"] = CommandKind.Sign,
         ["clean"] = CommandKind.Clean,
@@ -105,7 +106,7 @@ internal static class CommandParser
             CommandKind.Run => ParseRun(rest),
             CommandKind.Upgrade => ParseUpgrade(rest),
             CommandKind.Clean => ParseClean(rest),
-            CommandKind.Ps => ParseWithoutArguments(name, kind, rest),
+            CommandKind.Ps or CommandKind.Init => ParseWithoutArguments(name, kind, rest),
             CommandKind.Allow => ParseAllow(rest, startDir),
             CommandKind.Deny => ParseDomains(name, kind, rest, startDir),
             CommandKind.Trust => ParseTrust(rest),
@@ -163,7 +164,7 @@ internal static class CommandParser
         return new(CommandKind.Clean, []) { Stale = stale };
     }
 
-    /// <summary>Parses the arguments of a subcommand that takes none (pen ps).</summary>
+    /// <summary>Parses the arguments of a subcommand that takes none (pen ps, pen init).</summary>
     private static Command ParseWithoutArguments(string name, CommandKind kind, List<string> rest)
     {
         if (rest.Count > 0)

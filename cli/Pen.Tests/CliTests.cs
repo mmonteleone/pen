@@ -90,6 +90,7 @@ public class CliTests
     [InlineData("Sign", "sign", "origin/main")]
     [InlineData("Clean", "clean")]
     [InlineData("Ps", "ps")]
+    [InlineData("Init", "init")]
     public void SubcommandsAreRecognized(string kind, params string[] args)
     {
         var c = P(args);
@@ -190,6 +191,7 @@ public class CliTests
     [InlineData("sign", "sign", "--help")]
     [InlineData("clean", "clean", "-h")]
     [InlineData("ps", "ps", "--help")]
+    [InlineData("init", "init", "-h")]
     [InlineData("clean", "clean", "--stale", "--help")]
     public void SubcommandHelp(string topic, params string[] args)
     {
@@ -212,7 +214,7 @@ public class CliTests
     [Fact]
     public void EverySubcommandHasHelp_AndTheUsageMentionsIt()
     {
-        foreach (var name in new[] { "run", "upgrade", "allow", "deny", "sign", "clean", "ps" })
+        foreach (var name in new[] { "run", "upgrade", "allow", "deny", "trust", "init", "sign", "clean", "ps" })
             Assert.True(HelpText.Subcommands.ContainsKey(name), name);
         Assert.Contains("pen <subcommand> --help", HelpText.Usage);
     }
@@ -266,6 +268,7 @@ public class CliTests
     [Theory]
     [InlineData("ps", "-a")]
     [InlineData("ps", "all")]
+    [InlineData("init", "x")]
     [InlineData("clean", "--yes")]
     [InlineData("clean", "--all")]
     [InlineData("clean", "--stale", "all")]
@@ -353,6 +356,7 @@ public class CliTests
     [InlineData("clean")]
     [InlineData("clean", "--stale")]
     [InlineData("ps")]
+    [InlineData("init")]
     [InlineData("--help")]
     [InlineData("--version")]
     public void PortWithAnythingButRunningIsAnError(params string[] what)

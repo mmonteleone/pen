@@ -2,7 +2,8 @@ using System.Text.RegularExpressions;
 
 namespace Pen.SmokeTests;
 
-/// <summary>The installed pen's command line: version, help, usage errors and where --port and --tool go.</summary>
+/// <summary>The installed pen's command line: version, help, usage errors, pen init and where --port and --tool
+/// go.</summary>
 public sealed class CliDispatchTests(SmokeFixture fixture) : IClassFixture<SmokeFixture>
 {
     private PenCli Cli => fixture.Cli;
@@ -48,6 +49,42 @@ public sealed class CliDispatchTests(SmokeFixture fixture) : IClassFixture<Smoke
                 help.ExitCode == 0 && help.Stdout.StartsWith("usage: pen deny", StringComparison.Ordinal),
                 help.Describe()),
             () => Assert.True(star.IsUsageError("pen deny: \"*\" would block everything"), star.Describe()));
+    }
+
+    [Fact(DisplayName = "pen init writes .pen/config.toml with the go tool and .env hidden, and says so")]
+    public void InitWritesTheDetectedSettings()
+    {
+        var project = fixture.CreateProject();
+        File.WriteAllText(Path.Combine(project.Dir, "go.mod"), "module example.com/smoke\n");
+        File.WriteAllText(Path.Combine(project.Dir, ".env"), "SECRET=smoke\n");
+        var cli = Cli.WithWorkingDirectory(project.Dir);
+
+        var first = cli.Run("init");
+        var second = cli.Run("init");
+
+        var path = Path.Combine(project.Dir, ".pen", "config.toml");
+        var active = File.Exists(path) ? ReadActiveLines(path) : [];
+        Assert.Multiple(
+            () => Assert.True(
+                first.ExitCode == 0 && first.HasLineStartingWith("pen: created .pen/config.toml")
+                    && first.HasLineStartingWith("  tools: go (go.mod)")
+                    && first.HasLineStartingWith("  hide: .env (found .env)"),
+                first.Describe()),
+            () => Assert.Equal(["tools = [\"go\"]", "hide = [", "\".env\",", "]"], active),
+            () => Assert.True(
+                second.ExitCode == 1 && second.Output.Contains(
+                    ".pen/config.toml already exists: edit it", StringComparison.Ordinal),
+                second.Describe()));
+    }
+
+    [Fact(DisplayName = "pen init --help describes it")]
+    public void InitHasHelp()
+    {
+        var help = Cli.Run("init", "--help");
+
+        Assert.True(
+            help.ExitCode == 0 && help.Stdout.StartsWith("usage: pen init", StringComparison.Ordinal),
+            help.Describe());
     }
 
     [Fact(DisplayName = "pen --port 0 is a usage error (exit 2), before any session")]
@@ -121,6 +158,14 @@ public sealed class CliDispatchTests(SmokeFixture fixture) : IClassFixture<Smoke
 
         Assert.True(result.CapturedStdout == "1", result.Describe());
     }
+
+    /// <summary>Reads a config file's lines that aren't blank or comments, trimmed and without trailing
+    /// comments.</summary>
+    private static List<string> ReadActiveLines(string path) =>
+        File.ReadAllLines(path)
+            .Select(line => line.Split(" #", 2)[0].Trim())
+            .Where(line => line.Length > 0 && !line.StartsWith('#'))
+            .ToList();
 
     private void AssertBadPort(params string[] args)
     {
