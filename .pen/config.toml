@@ -1,15 +1,7 @@
 docker = true
 
-allow = [
-  "ports.ubuntu.com",
-  "cli.github.com",
-  "download.docker.com",
-  "nodejs.org",
-  "registry.npmjs.org",
-  "builds.dotnet.microsoft.com",
-  "dl.google.com",
-  "go.dev",
-]
+# Pen's own Go recipe build in Docker-in-Docker reads the release list here
+allow = ["go.dev"]
 
 tools = [
   "dotnet:11",

@@ -73,13 +73,13 @@ The base image has `git`, `gh`, the Docker CLI (with buildx and compose plugins)
 
 These are in the base image, so every session has them, and the domains for npm, PyPI and uv's downloads are allowed by default.
 
-Node is the newest LTS release when the base is built, installed in `/usr/local` with npm and npx. `pen upgrade` rebuilds the base and picks up the newest LTS then. `npm install -g` can't write to the image's `/usr/local` prefix during a session; use `npx`, project dependencies or a `.pen/Dockerfile`. `npm_config_nodedir=/usr/local` makes node-gyp use the tarball's headers rather than download them, and `NPM_CONFIG_UPDATE_NOTIFIER=false` turns off npm's update notices because npm updates with the image.
+Node is the newest LTS release when the base is built, installed in `/usr/local` with npm and npx. `pen upgrade` rebuilds the base and picks up the newest LTS then. `npm install -g` can't write to the image's `/usr/local` prefix during a session; use `npx`, project dependencies or a `.pen/Dockerfile`. node-gyp downloads Node's headers from nodejs.org, a default domain, to build native modules, and `NPM_CONFIG_UPDATE_NOTIFIER=false` turns off npm's update notices because npm updates with the image.
 
 Python is Ubuntu's `python3` (3.12) with `pip`, `venv`, `python3-dev` and a `python` alias. Use a virtual environment (`python3 -m venv`, `uv venv`) for `pip install`: the interpreter is read-only and marked `EXTERNALLY-MANAGED`. uv and uvx are at a version pinned by Pen. If a project needs another Python, uv downloads it into `~/.local/share/uv/python` from `releases.astral.sh` (or GitHub) and checks its hash.
 
 uv's cache is `~/.cache/uv` in the home volume. `UV_LINK_MODE=copy` avoids attempts to hardlink from that volume into the project. `uv tool install` puts commands in `~/.local/bin`, which isn't on `PATH`; use `uvx`, run them by path or add the directory in your shell config.
 
-A different Node major version or system Python needs a [`.pen/Dockerfile`](#project-settings). `/usr/local/bin` comes before `/usr/bin` on `PATH`, so a Node from Ubuntu or NodeSource in `/usr/bin` is hidden by the base's: install the other Node into `/usr/local` in place of the base's, or put its directory first with `ENV PATH=…` and set `npm_config_nodedir` to its prefix. The base's `python3` is Ubuntu's `/usr/bin/python3`, and uv also finds Pythons on `PATH`.
+A different Node major version or system Python needs a [`.pen/Dockerfile`](#project-settings). `/usr/local/bin` comes before `/usr/bin` on `PATH`, so a Node from Ubuntu or NodeSource in `/usr/bin` is hidden by the base's: install the other Node into `/usr/local` in place of the base's, or put its directory first with `ENV PATH=…`. The base's `python3` is Ubuntu's `/usr/bin/python3`, and uv also finds Pythons on `PATH`.
 
 <details>
 <summary>Domains added by each tool</summary>
@@ -182,7 +182,7 @@ pen allow --defaults            # list Pen's default allowlist
 
 The change is saved and applied to running sessions in the same directory (`--global`: all projects). Retry the blocked request; you don't need to restart the agent. If a live update fails, repeat `pen allow example.com`, even if the domain is already saved. Blocked domains also appear when a session ends.
 
-Pen's defaults cover GitHub, npm, PyPI and uv's Python downloads, container registries and developer docs. [Agents](#agents) and [tools](#tools) add their provider and other package-registry domains when installed. You can allow other domains with the commands above.
+Pen's defaults cover GitHub, npm, PyPI and uv's Python downloads, the hosts image builds download from (Ubuntu's, Docker's and the GitHub CLI's apt repositories, and Go, Rust and .NET releases), container registries and developer docs. [Agents](#agents) and [tools](#tools) add their provider and other package-registry domains when installed. You can allow other domains with the commands above.
 
 Allowed domains can accept uploads, including with credentials supplied by a prompt injection. The proxy restricts destinations; it doesn't keep your code private from those destinations. See [network limits and the older-Docker DNS caveat](limitations.md#network-and-credentials).
 

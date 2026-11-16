@@ -12,21 +12,29 @@ public sealed class BaseRuntimeTests(BaseRuntimeTests.Fixture fixture) : IClassF
     [Fact(DisplayName = "...and npm builds a native addon with node-gyp")]
     public void NpmBuildsAnAddon() => AssertHas(fixture.Node, "hello addon");
 
-    [Fact(DisplayName = "...against /usr/local's headers, with no header download")]
-    public void AddonUsesTheBasesHeaders() =>
+    [Fact(DisplayName =
+        "...on the base's node, with Node's headers downloaded from nodejs.org through the proxy")]
+    public void AddonDownloadsNodesHeaders() =>
         Assert.True(
-            HasLine(fixture.Node, "no-header-download")
-                && HasLine(fixture.Node, "nodedir=/usr/local node=/usr/local/bin/node"),
+            HasLine(fixture.Node, "header-download") && HasLine(fixture.Node, "node=/usr/local/bin/node"),
+            fixture.Node.Describe());
+
+    [Fact(DisplayName = "...without npm's Unknown env config warning")]
+    public void NpmHasNoUnknownConfigWarning() =>
+        Assert.True(
+            fixture.Node.OutputComplete
+                && !fixture.Node.Output.Contains("Unknown env config", StringComparison.Ordinal),
             fixture.Node.Describe());
 
     [Fact(DisplayName = "...and fetch gets 200 through the proxy")]
     public void FetchGoesThroughTheProxy() =>
         Assert.True(fixture.Node.HasStdoutLine("fetch 200"), fixture.Node.Describe());
 
-    [Fact(DisplayName = "...without Node's experimental proxy agent warning on stderr")]
+    // Only Node's own fetch is checked: node-gyp's header download runs npm's bundled undici, which may print it.
+    [Fact(DisplayName = "...without Node's experimental proxy agent warning from fetch")]
     public void FetchHasNoProxyAgentWarning() =>
         Assert.True(
-            fixture.Node.OutputComplete && !Regex.IsMatch(fixture.Node.Stderr, "UNDICI-EHPA|EnvHttpProxyAgent"),
+            fixture.Node.OutputComplete && HasLine(fixture.Node, "fetch-no-proxy-warning"),
             fixture.Node.Describe());
 
     [Fact(DisplayName = "...with nothing blocked")]
@@ -125,8 +133,8 @@ public sealed class BaseRuntimeTests(BaseRuntimeTests.Fixture fixture) : IClassF
             File.WriteAllText(path, text);
         }
 
-        /// <summary>Installs a package from the registry, builds a native addon with node-gyp against the base's
-        /// headers (npm_config_nodedir) and fetches through the proxy that NODE_USE_ENV_PROXY has Node use.</summary>
+        /// <summary>Installs a package from the registry, builds a native addon with node-gyp against Node's headers,
+        /// which it downloads, and fetches through the proxy that NODE_USE_ENV_PROXY has Node use.</summary>
         private void RunNode()
         {
             WriteFile(
@@ -155,9 +163,12 @@ public sealed class BaseRuntimeTests(BaseRuntimeTests.Fixture fixture) : IClassF
                 cd nodehi && npm init -y >/dev/null && npm install --no-fund --no-audit ms@2 >/dev/null &&
                 node -e "console.log(\"hello node \" + require(\"ms\")(60000))" &&
                 rm -rf ~/.cache/node-gyp && (cd addon && npm install --no-fund --no-audit >/dev/null) &&
-                node -e "console.log(require(\"./addon\").hello())" && { [ -e ~/.cache/node-gyp ] || echo no-header-download; } &&
-                echo "nodedir=$(npm config get nodedir) node=$(command -v node)"
-                node -e "fetch(\"https://registry.yarnpkg.com/ms\").then(r => console.log(\"fetch \" + r.status))"
+                node -e "console.log(require(\"./addon\").hello())" && { [ -e ~/.cache/node-gyp ] && echo header-download; echo "node=$(command -v node)"; }
+                npm config list >/dev/null
+                err=$(mktemp)
+                node -e "fetch(\"https://registry.yarnpkg.com/ms\").then(r => console.log(\"fetch \" + r.status))" 2>"$err"
+                grep -qE "UNDICI-EHPA|EnvHttpProxyAgent" "$err" || echo fetch-no-proxy-warning
+                cat "$err" >&2; rm -f "$err"
                 """);
             Delete("nodehi");
         }

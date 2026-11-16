@@ -17,7 +17,7 @@ registry.npmjs.org
 registry.yarnpkg.com
 # Yarn 2+ releases, fetched by corepack when a project brings it
 repo.yarnpkg.com
-# Node headers for node-gyp, if it ignores npm_config_nodedir; also the API docs
+# node-gyp downloads Node's headers from here to build native modules; also the API docs
 nodejs.org
 
 # --- PyPI and uv (Python and uv are in the base image) ----------------------
@@ -26,6 +26,23 @@ files.pythonhosted.org
 # uv's Python downloads (python-build-standalone): it tries Astral's mirror before
 # GitHub
 releases.astral.sh
+
+# --- Image builds -----------------------------------------------------------
+# Download-only hosts for images built inside a session with Docker-in-Docker, which go
+# through this proxy. Pen's own base, tools and project-layer builds run on the host and don't.
+# Ubuntu's apt archives (amd64, security updates, arm64)
+archive.ubuntu.com
+security.ubuntu.com
+ports.ubuntu.com
+# Docker's and GitHub CLI's apt repositories
+download.docker.com
+cli.github.com
+# Go release archives
+dl.google.com
+# rustup and Rust toolchains
+static.rust-lang.org
+# .NET SDKs and runtimes
+builds.dotnet.microsoft.com
 
 # --- Docs -------------------------------------------------------------------
 # Read-only for an agent without credentials. Sites anyone can write to

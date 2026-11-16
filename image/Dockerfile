@@ -87,14 +87,11 @@ ENV GIT_CONFIG_COUNT=2 \
 # agent service rather than here: ENV would also apply to RUN steps of a
 # project layer (FROM pen:latest), which build without a proxy.
 # NODE_USE_ENV_PROXY: Node's own fetch honours those proxy variables.
-# npm_config_nodedir: node-gyp builds native modules against the headers in Node's tarball
-# (/usr/local/include/node) instead of downloading them.
 # NPM_CONFIG_UPDATE_NOTIFIER: no "new version of npm available" notices, since npm comes
 # with the image.
 # UV_LINK_MODE: uv's cache (~/.cache/uv, the home volume) and a project's .venv are never on
 # the same filesystem, so uv would warn on every install that it can't hardlink, and then copy.
 ENV NODE_USE_ENV_PROXY=1 \
-    npm_config_nodedir=/usr/local \
     NPM_CONFIG_UPDATE_NOTIFIER=false \
     UV_LINK_MODE=copy \
     GIT_TERMINAL_PROMPT=0 \

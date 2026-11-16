@@ -72,7 +72,8 @@ public sealed class BaseImageTests(BaseImageTests.Fixture fixture) : IClassFixtu
     public void VenvWorks() => AssertPassed("venv");
 
     [Fact(DisplayName =
-        "npm_config_nodedir=/usr/local, NPM_CONFIG_UPDATE_NOTIFIER=false and UV_LINK_MODE=copy in the base's environment")]
+        "NPM_CONFIG_UPDATE_NOTIFIER=false as the only npm config, and UV_LINK_MODE=copy, " +
+        "in the base's environment")]
     public void NodeAndUvSettingsAreSet() => AssertPassed("node_uv_env");
 
     [Fact(DisplayName = "no zsh new-user script (/usr/share/zsh/*/scripts/newuser), so a fresh home gets no menu")]
@@ -166,7 +167,7 @@ public sealed class BaseImageTests(BaseImageTests.Fixture fixture) : IClassFixtu
                 dir=$(mktemp -d) && python3 -m venv "$dir/v" && "$dir/v/bin/python" -c 'import sys; sys.exit(sys.prefix == sys.base_prefix)' && "$dir/v/bin/pip" --version
                 """);
             probe.Add("node_uv_env", """
-                [ "$npm_config_nodedir" = /usr/local ] && [ "$NPM_CONFIG_UPDATE_NOTIFIER" = false ] && [ "$UV_LINK_MODE" = copy ]
+                [ "$NPM_CONFIG_UPDATE_NOTIFIER" = false ] && [ "$(env | grep -i '^npm_config_' | cut -d= -f1)" = NPM_CONFIG_UPDATE_NOTIFIER ] && [ "$UV_LINK_MODE" = copy ]
                 """);
             probe.Add("no_zsh_newuser", """
                 test -d /usr/share/zsh && test -z "$(find /usr/share/zsh -path '*/scripts/newuser')"
