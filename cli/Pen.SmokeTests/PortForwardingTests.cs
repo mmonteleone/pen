@@ -316,7 +316,7 @@ public sealed class PortForwardingTests(PortForwardingTests.Fixture fixture)
             """;
 
         /// <summary>Builds a sandbox command serving /tmp/srv/hello.txt over HTTP on the port, for any path, with
-        /// socat (the base has no Python).</summary>
+        /// socat.</summary>
         private static string ServeHello() =>
             $"printf %s {ShellQuote.Quote(Respond)} >/tmp/srv/respond && chmod +x /tmp/srv/respond && "
             + $"socat TCP-LISTEN:{Port},fork,reuseaddr EXEC:/tmp/srv/respond";
