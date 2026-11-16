@@ -120,4 +120,4 @@ Releases aren't published or automated yet. The intended process is:
 
 Releases distribute the CLI only. Each binary embeds the Dockerfile and supporting files; Docker builds the base image on the user's machine.
 
-The planned user workflow is in the [README](README.md#once-published-planned). When switching to Homebrew, remove `~/.local/bin/pen` or put Homebrew earlier on your `PATH`. Config, logins and project volumes don't depend on the installation method.
+When switching to Homebrew after releases are available, remove `~/.local/bin/pen` or put Homebrew earlier on your `PATH`. Config, logins and project volumes don't depend on the installation method.

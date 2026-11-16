@@ -7,42 +7,31 @@ cd ~/source/repos/myproject
 pen claude
 ```
 
-Agents run with permission prompts off. You review their edits and commits on the host, then push. Logins and caches persist per project, and your repo needs no pen-specific files.
-
-Pen is a Docker container, an egress proxy and some git and credential handling, packaged as one command so you don't assemble them yourself.
+Agents run with permission prompts off. When they finish, review their edits and commits on the host, then push. Logins and caches persist per project, and your repo needs no Pen-specific files.
 
 ## What it does
 
 - Mounts your project read-write, leaving your other host files and credentials outside the container.
 - Sends outbound traffic through a domain allowlist. `pen allow` adds domains without restarting.
 - Mounts repo config and `.git/hooks` read-only and checks git metadata at session end for known ways to make host git run code. [Limitations apply.](docs/limitations.md)
-- Takes a read-only GitHub token per repo owner. Your host SSH and signing keys stay outside.
+- Passes in the GitHub token you supply for the repo's owner. Use a read-only token; your host SSH and signing keys stay outside.
 - Keeps agent logins, settings and caches between sessions. Several agents can run at once, including in linked worktrees.
 - Adds [toolchains](docs/usage.md#tools) (Node, Python, .NET, Go, Rust, Java), a [project Dockerfile](docs/usage.md#project-settings), [dev-server ports](docs/usage.md#dev-servers) or [Docker-in-Docker](docs/usage.md#docker-in-docker) as needed.
 
-If your agent's sandbox or a dev container already does what you need, you're probably all set. Pen adds a shared setup for terminal agents, network restrictions and some host git protections. It uses containers, with a shared kernel; use a VM if you need a separate kernel.
+Pen gives these terminal agents a shared container setup, network restrictions and host git checks. If your existing agent sandbox or dev container covers those needs, you may not need Pen. Containers share a kernel; use a VM if you need a separate one.
 
 The project is a live mount, so keep backups, and keep host git (including IDE integrations and git-aware prompts) out of the repo and its worktrees while a session runs. [Read the limitations](docs/limitations.md) before relying on Pen.
 
 ## Requirements
 
-**To run Pen:**
+Pen runs on **macOS or Linux** with **Docker and Compose v2**. On macOS, OrbStack and Colima are options. Linux supports rootful and rootless Docker and needs glibc 2.34+ (Ubuntu 22.04+, Debian 12+, etc.).
 
-- macOS or Linux only.
-  - For Linux, glibc 2.34+ (Ubuntu 22.04+, Debian 12+, etc).
-- Docker with Compose v2.
-  - OrbStack and Colima are great options on macOS.
-  - Linux can use rootful or rootless Docker.
+Installation is from source for now:
 
-**To build Pen from source** _(the only option for now btw)_:
+- **macOS:** install the .NET 11 SDK pinned in [`cli/global.json`](cli/global.json) and Xcode command-line tools (`xcode-select --install`).
+- **Linux:** the installer builds in a container; no host .NET SDK is needed.
 
-- macOS:
-  - .NET 11 SDK (see [`cli/global.json`](cli/global.json))
-  - Xcode command-line tools (`xcode-select --install`).
-- Linux:
-  - nothing more. The installer builds in a container, so no host .NET SDK is needed.
-
-> [!NOTE] Homebrew and standalone release binaries are planned. Neither will need a host .NET SDK.
+Homebrew and standalone release binaries are planned.
 
 ## Get started
 
@@ -54,7 +43,7 @@ cd pen
 cli/install.sh
 ```
 
-This installs `~/.local/bin/pen`, so make sure that's in your `PATH`.
+This installs `pen` to `~/.local/bin/`. Make sure that directory is in your `PATH`.
 
 ### Start a session
 
@@ -65,33 +54,34 @@ cd ~/source/repos/myproject
 pen claude  # or: pen codex, pen opencode, pen pi
 ```
 
-The first session builds `pen:latest` locally from the Dockerfile bundled in the CLI, then installs the agent on top of it. This may take a few minutes. Later sessions reuse them until the bundled image files change or you run `pen upgrade`.
+The first session builds the sandbox image and installs your chosen agent. This may take a few minutes; later sessions reuse the images. Run `pen upgrade` to refresh agents and tools.
 
-The first run also creates `~/.config/pen/`. Log in to your agent inside the sandbox; each project keeps its own login. Shared instructions and settings go in [`~/.config/pen/home/`](docs/usage.md#agent-config-the-home-seed), using their usual home-directory paths.
+Log in to your agent inside the sandbox when prompted. Each project keeps its own login. The first run also creates `~/.config/pen/`; put shared instructions and settings in [`~/.config/pen/home/`](docs/usage.md#agent-config-the-home-seed), using their usual home-directory paths.
 
 For private GitHub access, [supply a read-only token](docs/usage.md#github) for the project's owner. Pen passes its permissions through unchanged, so a write-capable token allows writes.
 
-When the agent exits, read any warnings, then review its changes and commits on the host. Run `pen sign` if you sign commits, then push as usual. Run git setup commands such as `git remote add` on the host, between sessions: `.git/config` is read-only in the sandbox.
+When all sessions in the repo have ended, read any warnings, then review changes and commits on the host. Run `pen sign` if you sign commits, then push as usual. Run git setup commands such as `git remote add` on the host between sessions: `.git/config` is read-only in the sandbox.
 
 ### Allowing a blocked domain
 
-A new project often needs domains Pen doesn't allow by default, such as a package registry. Blocked domains are listed when the session ends, and you can allow them without restarting:
+If a download is blocked, run `pen allow` in another host terminal from the same project directory:
 
 ```sh
 pen allow                # list recently blocked domains
 pen allow example.com    # allow one, including in running sessions
-pen claude               # retry
 ```
+
+Retry the request in the agent; no restart is needed. Blocked domains also appear when a session ends. [Tools](docs/usage.md#tools) add their own package-registry domains automatically.
 
 ## Commands
 
 ```sh
 pen                          # shell in the sandbox
-pen run make test            # run a command in the sandbox
+pen run git status           # run a command in the sandbox
 pen --tool node run npm ci   # ...with Node and npm installed
 pen allow                    # show recently blocked domains
 pen allow example.com        # allow a domain, including in running sessions
-pen --tool list              # list the agents and tools pen can install
+pen --tool list              # list the agents and tools Pen can install
 pen --tool dotnet:10 claude  # add a toolchain for this session
 pen --port 5173 claude       # reach a sandbox dev server at localhost:5173
 pen --docker claude          # give the session its own Docker daemon
@@ -100,12 +90,12 @@ pen ps                       # list running sessions across projects
 pen sign                     # sign unpushed commits on the host
 pen upgrade                  # rebuild the base image, agents and tools
 pen reset                    # wipe this project's logins and caches
-pen prune                    # remove unused project state and old tools images
+pen prune                    # remove unused project state and old tool images
 ```
 
 Options go before the agent name. Dev servers must listen on `0.0.0.0` inside the sandbox. Linked worktrees share the repo's logins and caches.
 
-For a new project, try its restore or build through pen first. Missing domains appear on exit; add them with `pen allow`. A repo's [`.pen/` settings](docs/usage.md#project-settings) need your approval before they can add domains, tools, Docker, a Dockerfile or a different owner's token.
+For a new project, add its toolchain and try a restore or build first, such as `pen --tool node run npm ci`. A repo's [`.pen/` settings](docs/usage.md#project-settings) need your approval before they can add domains, tools, Docker, a Dockerfile or a different owner's token.
 
 ## Limitations
 
