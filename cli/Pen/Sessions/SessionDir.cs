@@ -144,6 +144,11 @@ internal sealed class SessionDir(string projectKey, string path)
     /// </summary>
     public string RestoredManifest => GetPath("restored-manifest.json");
 
+    /// <summary>
+    /// Gets the path of the files mounted over what the session hides and replaces (<see cref="Masking.MaskFiles"/>).
+    /// </summary>
+    public string MasksDir => GetPath("masks");
+
     /// <summary>Gets the path of the command run in the sandbox, for pen ps.</summary>
     /// <remarks>Each argument is NUL-terminated; empty means a shell.</remarks>
     public string CommandFile => GetPath("command");

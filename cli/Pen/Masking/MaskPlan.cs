@@ -1,3 +1,5 @@
+using Pen.Platform;
+
 namespace Pen.Masking;
 
 /// <summary>What a session mounts over the project to hide and replace files, and what to warn about.</summary>
@@ -26,6 +28,56 @@ internal sealed record MaskPlan(
 
     /// <summary>Gets whether the plan hides and replaces nothing.</summary>
     public bool IsEmpty => MountCount == 0;
+
+    /// <summary>Refuses to start if a path the plan mounts over isn't what it was when the plan was made.</summary>
+    /// <exception cref="PenException">
+    /// A hidden file, hidden directory or replaced file is gone, is of another type, is another file (by device and
+    /// inode), or isn't its own real path any more (a directory on its way is a symlink now), naming the first.
+    /// </exception>
+    /// <remarks>
+    /// The plan is made before the image, which can take minutes, and the mounts are made only when the session
+    /// starts. Docker creates a missing mount point, and its missing parents, in the project on the host, and a
+    /// mount through a symlink lands wherever that leads; so each path is looked at again, without following a
+    /// symlink, just before the mounts are written.
+    /// </remarks>
+    public void ThrowIfChanged()
+    {
+        foreach (var file in HiddenFiles)
+            ThrowIfChanged(file, "hides", isDirectory: false);
+        foreach (var dir in HiddenDirs)
+            ThrowIfChanged(dir, "hides", isDirectory: true);
+        foreach (var replacement in Replacements)
+            ThrowIfChanged(replacement.Target, "replaces", isDirectory: false);
+    }
+
+    /// <summary>Refuses to start if <paramref name="masked"/> isn't what it was when the plan was made.</summary>
+    /// <param name="masked">The path.</param>
+    /// <param name="verb">"hides" or "replaces", for the message.</param>
+    /// <param name="isDirectory">Whether it was a directory; otherwise it was a regular file.</param>
+    private static void ThrowIfChanged(MaskedPath masked, string verb, bool isDirectory)
+    {
+        var kind = isDirectory ? "directory" : "file";
+        var status = Native.Stat(masked.Path, follow: false);
+        string change;
+        if (status is not { } now)
+            change = "is gone";
+        else if (now.IsSymlink)
+            change = "is a symlink now";
+        else if (isDirectory ? !now.IsDirectory : !now.IsRegularFile)
+            change = $"is no longer a {kind}";
+        else if (now.Device != masked.Device || now.Inode != masked.Inode)
+            change = $"is another {kind} now";
+        else if (Native.RealPath(masked.Path) is not { } real)
+            change = "can't be looked at now";
+        else if (real == masked.Path)
+            return;
+        else if (string.Equals(real, masked.Path, StringComparison.OrdinalIgnoreCase))
+            change = "is spelled differently now";
+        else
+            change = "is reached by another path now";
+        throw new PenException($"not starting: {Out.Field(masked.RelativePath)}, which this session {verb}, " +
+            $"{change}: the project changed while the session was being prepared, so run pen again");
+    }
 }
 
 /// <summary>A file or directory in the project that a mount covers.</summary>
@@ -33,11 +85,13 @@ internal sealed record MaskPlan(
 /// Its absolute host path, also its path in the container, since the project is mounted at the same path.
 /// </param>
 /// <param name="RelativePath">Its path in the project, /-separated, for messages.</param>
+/// <param name="Device">The device it was on when the plan was made.</param>
+/// <param name="Inode">Its inode number on that device then.</param>
 /// <remarks>
 /// <see cref="RelativePath"/> is the name on disk as it is, which the agent can choose: pass it through
-/// <see cref="Pen.Platform.Out.Field"/> before printing it.
+/// <see cref="Out.Field"/> before printing it.
 /// </remarks>
-internal sealed record MaskedPath(string Path, string RelativePath);
+internal sealed record MaskedPath(string Path, string RelativePath, ulong Device, ulong Inode);
 
 /// <summary>A file in the project that the agent sees with another file's contents.</summary>
 /// <param name="Target">The file covered.</param>

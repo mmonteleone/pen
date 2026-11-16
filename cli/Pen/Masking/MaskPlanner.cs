@@ -159,7 +159,7 @@ internal sealed class MaskPlanner
         List<string> warnings = [.. _warnings];
         if (_moreWarnings > 0)
             warnings.Add($"and {_moreWarnings} more warning{(_moreWarnings == 1 ? "" : "s")}");
-        return new MaskPlan(ToMasked(files.Keys), ToMasked(dirs.Keys), replacements, warnings);
+        return new MaskPlan(ToMasked(files), ToMasked(dirs), replacements, warnings);
     }
 
     /// <summary>Gives a warning, once, keeping the first <see cref="MaxWarnings"/> and counting the rest.</summary>
@@ -620,7 +620,7 @@ internal sealed class MaskPlanner
         var targets = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (target, source) in _replace)
         {
-            var path = FindTarget(target);
+            var (path, found) = FindTarget(target);
             if (FindHiddenDir(path) is { } dir)
             {
                 throw new PenException($"replace: target \"{Out.Field(target)}\" is in {Format(dir)}/, which hide " +
@@ -647,7 +647,8 @@ internal sealed class MaskPlanner
                     "another name");
             }
 
-            replacements.Add(new(new(path, Relative(path)), source, copy.Bytes, copy.Mode & ReadAndExecuteBits));
+            var masked = new MaskedPath(path, Relative(path), found.Device, found.Inode);
+            replacements.Add(new(masked, source, copy.Bytes, copy.Mode & ReadAndExecuteBits));
         }
         return replacements;
     }
@@ -668,13 +669,13 @@ internal sealed class MaskPlanner
     }
 
     /// <summary>Finds a [replace] target: a regular file in the project, with no symlink on the way.</summary>
-    /// <returns>Its real path, in the case it has on disk.</returns>
+    /// <returns>Its real path, in the case it has on disk, and what lstat said about it.</returns>
     /// <exception cref="PenException">It isn't there, isn't a regular file, or a symlink is on the way.</exception>
     /// <remarks>
     /// A target that doesn't exist is refused because Docker would create an empty file on the host as the mount
     /// point. The real path is the one to mount: on a folding file system the target may be spelled in another case.
     /// </remarks>
-    private string FindTarget(string target)
+    private (string Path, FileStatus Status) FindTarget(string target)
     {
         var parts = target.Split('/');
         if (parts.Any(part => part is "" or "." or "..") || IsOffLimitsPath(target))
@@ -703,7 +704,7 @@ internal sealed class MaskPlanner
             ?? throw new PenException($"replace: target \"{Out.Field(target)}\" changed while pen looked at it");
         if (!IsHideable(real))
             throw OutsideProject(target);
-        return real;
+        return (real, status.Value);
     }
 
     /// <summary>Refuses a [replace] target that's off limits.</summary>
@@ -798,9 +799,9 @@ internal sealed class MaskPlanner
     /// <summary>Gets a path's path in the project, safe to print (<see cref="Out.Field"/>).</summary>
     private string Format(string path) => Out.Field(Relative(path));
 
-    /// <summary>Lists paths as masked paths, sorted by their path in the project.</summary>
-    private List<MaskedPath> ToMasked(IEnumerable<string> paths) =>
-        paths.Select(path => new MaskedPath(path, Relative(path)))
+    /// <summary>Lists found paths as masked paths, sorted by their path in the project.</summary>
+    private List<MaskedPath> ToMasked(Dictionary<string, Found> paths) =>
+        paths.Select(path => new MaskedPath(path.Key, Relative(path.Key), path.Value.Device, path.Value.Inode))
             .OrderBy(masked => masked.RelativePath, StringComparer.Ordinal)
             .ToList();
 }

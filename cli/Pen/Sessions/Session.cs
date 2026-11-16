@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using Pen.Configuration;
 using Pen.GitProtection;
 using Pen.Images;
+using Pen.Masking;
 using Pen.Platform;
 using Pen.Projects;
 using Pen.Proxy;
@@ -71,11 +72,18 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         HooksPath.WarnIfWritable(Project, context.Host, Out.WriteLine, Environment.GetEnvironmentVariable);
         foreach (var warning in ListEgressWarnings(prepared.Tools, prepared.Deny))
             Out.WriteLine(warning);
+        // The case probe goes in .pen, so it too waits for the signals to be held.
+        if (MaskMessages.FormatSummary(prepared.Masks) is { } summary)
+            Out.WriteLine(summary);
+        var penDir = Path.Combine(Project.Dir, ".pen");
+        var maskWarnings = MaskMessages.ListWarnings(prepared.Masks, penDir, request.Docker, RepoGuard.MayFoldCase);
+        foreach (var warning in maskWarnings)
+            Out.WriteLine(warning);
 
         var session = CreateSessionDir();
         using var sessionLock = FileLock.TryTake(session.LockFile, exclusive: true)
             ?? throw new InvalidOperationException("new session's lock is taken");
-        var env = WriteSessionDir(session, request, prepared, forwarded);
+        var env = WriteSessionDirOrDelete(session, () => WriteSessionDir(session, request, prepared, forwarded));
         // An empty command is still recorded as such (pen ps shows "(shell)"); the sandbox runs a login shell
         // matching the host's (InteractiveShell.For).
         var command = request.Command.Count > 0
@@ -94,8 +102,11 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         /// <summary>Gets the session's tools, merged and canonical.</summary>
         public required IReadOnlyList<ToolSpec> Tools { get; init; }
 
-        /// <summary>Gets the mounts over the project mount.</summary>
+        /// <summary>Gets the git-protection mounts over the project mount.</summary>
         public required IReadOnlyList<Mount> Mounts { get; init; }
+
+        /// <summary>Gets what the session hides and replaces, mounted after <see cref="Mounts"/>.</summary>
+        public required MaskPlan Masks { get; init; }
 
         /// <summary>
         /// Gets the submodule repos in the common git dir now, split by what the open sessions listed
@@ -131,8 +142,8 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     }
 
     /// <summary>
-    /// Checks the repo, settles the tools and what's approved, prepares the mounts, ensures the image and finds the
-    /// token and the allow and deny lists.
+    /// Checks the repo, settles the tools and what's approved, prepares the mounts, plans what's hidden and replaced,
+    /// ensures the image and finds the token and the allow and deny lists.
     /// </summary>
     /// <returns>What the later steps need.</returns>
     private Preparation Prepare(SessionRequest request)
@@ -144,6 +155,9 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         // Before anything below uses a setting from .pen/.
         var trust = new TrustGate(context, answers, catalog).RequireForSession(flagTools);
         var mounts = RepoGuard.PrepareMounts(Project.Dir, context.Host.Home);
+        // A hide or [replace] that can't be used stops the session here, before anything is made for it.
+        var masks = new MaskPlanner(Project.Dir, Project.CommonGitDir, [.. mounts.Select(mount => mount.Path)],
+            [.. context.User.Hide, .. context.ProjectConfig.Hide], context.ProjectConfig.Replace).Plan();
         // PrepareMounts protects every module repo; the session-end check takes as the submodules' own only those
         // listed.
         var modules = Project.IsRepo
@@ -165,6 +179,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         {
             Tools = tools,
             Mounts = mounts,
+            Masks = masks,
             Modules = modules,
             Image = image,
             Rootless = rootless,
@@ -390,6 +405,33 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         return env;
     }
 
+    /// <summary>
+    /// Writes a new session's files with <paramref name="write"/>, deleting them if that fails: without compose.yaml
+    /// the session never opened and nothing ran in it.
+    /// </summary>
+    /// <param name="session">The new session, whose lock this holds.</param>
+    /// <param name="write">Writes the session's files, compose.yaml last.</param>
+    /// <returns>What <paramref name="write"/> returns.</returns>
+    internal static T WriteSessionDirOrDelete<T>(SessionDir session, Func<T> write)
+    {
+        try
+        {
+            return write();
+        }
+        catch
+        {
+            try
+            {
+                DeleteSessionFiles(session);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // Not open, so the next run here deletes what's left once it's old (FinishDeadSessions).
+            }
+            throw;
+        }
+    }
+
     /// <summary>Builds the env compose runs with, which compose.yaml interpolates.</summary>
     private Dictionary<string, string> BuildEnv(Preparation prepared)
     {
@@ -425,7 +467,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     }
 
     /// <summary>
-    /// Writes the stack's files: squid.conf, the ACL files, the override, proxy.log and compose.yaml.
+    /// Writes the stack's files: squid.conf, the ACL files, the mask files, the override, proxy.log and compose.yaml.
     /// </summary>
     private static void WriteStackFiles(
         SessionDir session,
@@ -441,14 +483,27 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         File.WriteAllText(session.OpenEgressFile, acls.OpenEgressText);
         var dindContainer = docker ? session.DindContainer : null;
         var ports = new PortForward(forwarded, session.PortsContainer, session.Container);
+        // The plan was made before the image was ensured, and Docker would create a mount point that's gone since.
+        prepared.Masks.ThrowIfChanged();
+        var mounts = WriteMasks(session, prepared.Mounts, prepared.Masks);
         File.WriteAllText(session.OverrideFile,
-            SessionCompose.GenerateOverride(prepared.Mounts, prepared.Rootless, dindContainer, ports));
+            SessionCompose.GenerateOverride(mounts, prepared.Rootless, dindContainer, ports));
         File.WriteAllText(session.ProxyLog, "");
         // Squid's own user writes the log on Linux; the session dir itself is 700.
         File.SetUnixFileMode(session.ProxyLog, (UnixFileMode)0b110_110_110);
         // compose.yaml goes last: its presence is what marks a session as open.
         File.WriteAllText(session.ComposeFile, Embedded.ReadText("compose.yaml"));
     }
+
+    /// <summary>
+    /// Writes the files mounted over what's hidden and replaced, and lists every mount over the project.
+    /// </summary>
+    /// <param name="session">The session, whose masks dir gets the files.</param>
+    /// <param name="protection">The git-protection mounts.</param>
+    /// <param name="masks">What the session hides and replaces.</param>
+    /// <returns><paramref name="protection"/>, then the mask mounts (<see cref="MaskFiles.Write"/>).</returns>
+    internal static List<Mount> WriteMasks(SessionDir session, IReadOnlyList<Mount> protection, MaskPlan masks) =>
+        [.. protection, .. MaskFiles.Write(session.MasksDir, masks)];
 
     /// <summary>Creates the docker compose run of the agent, with the secrets in its env.</summary>
     /// <param name="session">The session.</param>
