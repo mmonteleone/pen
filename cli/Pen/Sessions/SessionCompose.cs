@@ -167,11 +167,12 @@ internal static class SessionCompose
         writer.WriteStartArray("volumes");
         foreach (var mount in mounts)
         {
-            var path = mount.Path.Replace("$", "$$", StringComparison.Ordinal);
+            var source = (mount.Source ?? mount.Path).Replace("$", "$$", StringComparison.Ordinal);
+            var target = mount.Path.Replace("$", "$$", StringComparison.Ordinal);
             writer.WriteStartObject();
             writer.WriteString("type", "bind");
-            writer.WriteString("source", path);
-            writer.WriteString("target", path);
+            writer.WriteString("source", source);
+            writer.WriteString("target", target);
             writer.WriteBoolean("read_only", mount.ReadOnly);
             // A missing source is an error, never created (as root, on Linux).
             writer.WriteStartObject("bind");

@@ -152,6 +152,9 @@ internal static partial class Native
     private const int O_RDONLY = 0, O_WRONLY = 1, O_RDWR = 2, ENOENT = 2, EPERM = 1, EACCES = 13, ENOTDIR = 20;
     private static int O_CLOEXEC => OperatingSystem.IsMacOS() ? 0x1000000 : 0x80000;
     private static int O_NONBLOCK => OperatingSystem.IsMacOS() ? 0x4 : 0x800;
+    private const int ENXIO = 6, ENODEV = 19;
+    private static int EOPNOTSUPP => OperatingSystem.IsMacOS() ? 102 : 95;
+    private static int ELOOP => OperatingSystem.IsMacOS() ? 62 : 40;
     private static int O_NOFOLLOW
     {
         get
@@ -379,6 +382,7 @@ internal static partial class Native
         var bytes = new ReadOnlySpan<byte>(buffer, StatBufferSize);
         ulong device;
         ulong inode;
+        ulong links;
         int mode;
         if (OperatingSystem.IsMacOS())
         {
@@ -390,17 +394,20 @@ internal static partial class Native
             };
             if (result != 0)
                 return null;
-            // st_dev (int32) at 0, st_mode (uint16) at 4, st_ino (uint64) at 8.
+            // st_dev (int32) at 0, st_mode (uint16) at 4, st_nlink (uint16) at 6, st_ino (uint64) at 8.
             device = MemoryMarshal.Read<uint>(bytes);
             mode = MemoryMarshal.Read<ushort>(bytes[4..]);
+            links = MemoryMarshal.Read<ushort>(bytes[6..]);
             inode = MemoryMarshal.Read<ulong>(bytes[8..]);
         }
         else if (OperatingSystem.IsLinux())
         {
-            const uint STATX_TYPE = 0x1, STATX_INO = 0x100;
-            if (StatxNative(dirfd, path, flags, STATX_TYPE | STATX_INO, buffer) != 0)
+            const uint STATX_TYPE = 0x1, STATX_NLINK = 0x4, STATX_INO = 0x100;
+            if (StatxNative(dirfd, path, flags, STATX_TYPE | STATX_NLINK | STATX_INO, buffer) != 0)
                 return null;
-            // stx_mode (uint16) at 28, stx_ino (uint64) at 32, stx_dev_major and stx_dev_minor (uint32) at 136.
+            // stx_nlink (uint32) at 16, stx_mode (uint16) at 28, stx_ino (uint64) at 32, stx_dev_major and
+            // stx_dev_minor (uint32) at 136.
+            links = MemoryMarshal.Read<uint>(bytes[16..]);
             mode = MemoryMarshal.Read<ushort>(bytes[28..]);
             inode = MemoryMarshal.Read<ulong>(bytes[32..]);
             device = ((ulong)MemoryMarshal.Read<uint>(bytes[136..]) << 32) | MemoryMarshal.Read<uint>(bytes[140..]);
@@ -409,7 +416,8 @@ internal static partial class Native
         {
             return null;
         }
-        return new(device, inode, (mode & ModeTypeMask) == ModeDirectory, (mode & ModeTypeMask) == ModeSymlink);
+        var type = mode & ModeTypeMask;
+        return new(device, inode, type == ModeDirectory, type == ModeSymlink, links);
     }
 
     /// <summary>The largest symlink target <see cref="ReadLink"/> reads: PATH_MAX on Linux, above macOS's.</summary>
@@ -491,14 +499,97 @@ internal static partial class Native
         }
     }
 
+    /// <summary>
+    /// Reads the regular file at <paramref name="relative"/> below <paramref name="root"/>, opening each directory on
+    /// the way down from <paramref name="root"/>, and the file itself, without following a symlink.
+    /// </summary>
+    /// <param name="root">A directory to start from, opened as named.</param>
+    /// <param name="relative">
+    /// The file, relative to <paramref name="root"/>, with no empty, "." or ".." component.
+    /// </param>
+    /// <returns>The file's bytes and mode, both read through the one descriptor.</returns>
+    /// <exception cref="UnauthorizedAccessException">Permission is denied, naming the path.</exception>
+    /// <exception cref="FileNotFoundException">Nothing is at the path, or a directory on the way is gone.</exception>
+    /// <exception cref="IOException">
+    /// Anything else stopped it: the path isn't below <paramref name="root"/>, a directory on the way isn't one (a
+    /// symlink, say), the file is a symlink, isn't a regular file or is over 1 MB, or the platform's flags aren't
+    /// known.
+    /// </exception>
+    /// <remarks>
+    /// The project can be written by an agent while this runs, so a path checked and then read could have a directory
+    /// on the way swapped for a symlink in between, and the read would copy whatever that leads to. Through
+    /// descriptors, each step is taken in the directory reached without a symlink. The final open doesn't block, so a
+    /// FIFO opens at once and is refused by its type, and type, size, bytes and mode all come from that descriptor.
+    /// </remarks>
+    public static RegularFile ReadInsideProject(string root, string relative)
+    {
+        // O_NOFOLLOW and O_DIRECTORY differ by architecture on Linux, so this fails closed where they aren't known.
+        if (!CanStat || (!OperatingSystem.IsMacOS()
+            && RuntimeInformation.ProcessArchitecture is not (Architecture.X64 or Architecture.Arm64)))
+        {
+            throw new IOException("pen can't read a file in the project safely on this platform");
+        }
+        var parts = relative.Split('/');
+        if (Path.IsPathRooted(relative) || relative.Contains('\0') || parts.Any(part => part is "" or "." or ".."))
+            throw new IOException($"{relative} isn't a path below {root}");
+        int fd = OpenNative(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        if (fd < 0)
+            throw ReadInsideException(root, "isn't a directory");
+        try
+        {
+            var at = root;
+            foreach (var part in parts[..^1])
+            {
+                at = Path.Combine(at, part);
+                int next = OpenAtNative(fd, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+                if (next < 0)
+                    throw ReadInsideException(at, "isn't a directory (a symlink, say)");
+                CloseNative(fd);
+                fd = next;
+            }
+            var path = Path.Combine(root, relative);
+            int file = OpenAtNative(fd, parts[^1], O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+            if (file < 0)
+                throw ReadInsideException(path, "is a symlink");
+            using var handle = new SafeFileHandle(file, ownsHandle: true);
+            if (handle.Type != System.IO.FileHandleType.RegularFile)
+                throw new IOException($"{path} isn't a regular file");
+            var bytes = ReadBounded(handle)
+                ?? throw new IOException($"{path} is over 1 MB or changed while it was read");
+            return new(bytes, File.GetUnixFileMode(handle));
+        }
+        finally
+        {
+            CloseNative(fd);
+        }
+    }
+
+    /// <summary>Turns the last call's errno, in <see cref="ReadInsideProject"/>, into an exception.</summary>
+    /// <param name="path">The path the step opened.</param>
+    /// <param name="refused">What's wrong with <paramref name="path"/> if O_NOFOLLOW or O_DIRECTORY refused it.</param>
+    private static Exception ReadInsideException(string path, string refused)
+    {
+        int errno = Marshal.GetLastPInvokeError();
+        if (errno is EACCES or EPERM)
+            return new UnauthorizedAccessException($"Access to the path '{path}' is denied.");
+        if (errno == ENOENT)
+            return new FileNotFoundException($"{path} doesn't exist", path);
+        if (errno == ELOOP || errno == ENOTDIR)
+            return new IOException($"{path} {refused}");
+        // A socket or device node can't be opened for reading: ENXIO, EOPNOTSUPP or ENODEV.
+        if (errno is ENXIO or ENODEV || errno == EOPNOTSUPP)
+            return new IOException($"{path} isn't a regular file");
+        return new IOException($"{path}: {Marshal.GetPInvokeErrorMessage(errno)}");
+    }
+
     /// <summary>Turns the last call's errno into the exception for <paramref name="path"/>.</summary>
     private static Exception ErrnoException(string path)
     {
         int errno = Marshal.GetLastPInvokeError();
         if (errno is EACCES or EPERM)
             return new UnauthorizedAccessException($"Access to the path '{path}' is denied.");
-        // ELOOP (62 on macOS, 40 on Linux), or ENOTDIR: O_NOFOLLOW met a symlink, or O_DIRECTORY something else.
-        if (errno == (OperatingSystem.IsMacOS() ? 62 : 40) || errno == ENOTDIR)
+        // ELOOP or ENOTDIR: O_NOFOLLOW met a symlink, or O_DIRECTORY something else.
+        if (errno == ELOOP || errno == ENOTDIR)
             return new IOException($"{path} isn't a directory any more (a symlink, say)");
         return new IOException($"{path}: {Marshal.GetPInvokeErrorMessage(errno)}");
     }

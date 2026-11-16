@@ -100,6 +100,112 @@ public class DockerTests
     }
 
     [Fact]
+    public void MountsWithoutASourceWriteTheSameOverrideAsBefore()
+    {
+        // The exact bytes written before mounts could have a separate source: a path over itself.
+        const string expected = """
+            {
+              "x-pen": "this session's mounts over the project mount and its services, written by pen",
+              "services": {
+                "agent": {
+                  "read_only": true,
+                  "environment": {
+                    "DOCKER_HOST": "tcp://dind:2375",
+                    "PEN_DOCKER": "1"
+                  },
+                  "depends_on": {
+                    "dind": {
+                      "condition": "service_healthy"
+                    }
+                  },
+                  "volumes": [
+                    {
+                      "type": "bind",
+                      "source": "/p/.git",
+                      "target": "/p/.git",
+                      "read_only": false,
+                      "bind": {
+                        "create_host_path": false
+                      }
+                    },
+                    {
+                      "type": "bind",
+                      "source": "/p/a$$b/config",
+                      "target": "/p/a$$b/config",
+                      "read_only": true,
+                      "bind": {
+                        "create_host_path": false
+                      }
+                    },
+                    {
+                      "type": "bind",
+                      "source": "/p/.pen",
+                      "target": "/p/.pen",
+                      "read_only": true,
+                      "bind": {
+                        "create_host_path": false
+                      }
+                    }
+                  ]
+                },
+                "dind": {
+                  "container_name": "x-dind",
+                  "volumes": [
+                    {
+                      "type": "bind",
+                      "source": "/p/.git",
+                      "target": "/p/.git",
+                      "read_only": false,
+                      "bind": {
+                        "create_host_path": false
+                      }
+                    },
+                    {
+                      "type": "bind",
+                      "source": "/p/a$$b/config",
+                      "target": "/p/a$$b/config",
+                      "read_only": true,
+                      "bind": {
+                        "create_host_path": false
+                      }
+                    },
+                    {
+                      "type": "bind",
+                      "source": "/p/.pen",
+                      "target": "/p/.pen",
+                      "read_only": true,
+                      "bind": {
+                        "create_host_path": false
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+            """;
+        Assert.Equal(expected + "\n", SessionCompose.GenerateOverride(
+            [new("/p/.git", false), new("/p/a$b/config", true, Verify: true), new("/p/.pen", true)],
+            readOnlyRoot: true, dindContainer: "x-dind", ports: null));
+    }
+
+    [Fact]
+    public void AMountWithASourceMountsItAtItsPathAndEscapesDollarsInBoth()
+    {
+        Mount[] mounts = [new("/p/a$b/.env", true, Source: "/run/s$1/masks/replace-0"), new("/p/.pen", true)];
+        var s = Services(SessionCompose.GenerateOverride(mounts, readOnlyRoot: false, dindContainer: "x-dind", ports: null));
+        foreach (var service in new[] { s.GetProperty("agent"), s.GetProperty("dind") })
+        {
+            var volumes = service.GetProperty("volumes").EnumerateArray().ToList();
+            Assert.Equal("/run/s$$1/masks/replace-0", volumes[0].GetProperty("source").GetString());
+            Assert.Equal("/p/a$$b/.env", volumes[0].GetProperty("target").GetString());
+            Assert.True(volumes[0].GetProperty("read_only").GetBoolean());
+            Assert.False(volumes[0].GetProperty("bind").GetProperty("create_host_path").GetBoolean());
+            Assert.Equal("/p/.pen", volumes[1].GetProperty("source").GetString());
+            Assert.Equal("/p/.pen", volumes[1].GetProperty("target").GetString());
+        }
+    }
+
+    [Fact]
     public void ADockerSessionWithPortsWaitsForBoth()
     {
         var agent = Services(SessionCompose.GenerateOverride([], readOnlyRoot: false, dindContainer: "x-dind", ports: new([80], "x-ports", "x-agent"))).GetProperty("agent");
