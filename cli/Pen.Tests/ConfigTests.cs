@@ -77,6 +77,69 @@ public class ConfigTests
         Assert.StartsWith($"{UserFile}: allow: ", Error(() => User($"allow = [\"ok.com\", {entry}]")));
 
     [Fact]
+    public void ABareTldIsRejectedInProjectAllow() =>
+        Assert.StartsWith($"{ProjFile}: allow: ", Error(() => Proj("allow = [\"ok.com\", \".com\"]")));
+
+    [Fact]
+    public void DenyIsAListOfDomains_InEitherFile()
+    {
+        Assert.Equal(["gist.github.com", ".foo.io"], User("deny = [\"Gist.GitHub.com\", '.foo.io']").Deny);
+        Assert.Equal(["a.com", "b.com"], Proj("deny = [\n  \"a.com\",  # comment\n  \"b.com\",\n]").Deny);
+        Assert.Empty(Proj("deny = []").Deny);
+        Assert.Empty(Proj("deny = [\"a.com\"]").Allow);
+        Assert.Empty(Proj("allow = [\"a.com\"]").Deny);
+        var both = User("allow = [\".github.com\"]\ndeny = [\"gist.github.com\"]");
+        Assert.Equal([".github.com"], both.Allow);
+        Assert.Equal(["gist.github.com"], both.Deny);
+        Assert.Equal($"{ProjFile}: deny must be a list of domains, e.g. deny = [\"example.com\"]",
+            Error(() => Proj("deny = \"a.com\"")));
+    }
+
+    [Theory]
+    [InlineData("\"not a domain\"")]
+    [InlineData("\"1.2.3.4\"")]
+    [InlineData("\".com\"")]
+    [InlineData("\".\"")]
+    [InlineData("\"*.example.com\"")]
+    [InlineData("\"**\"")]
+    [InlineData("\"https://example.com\"")]
+    [InlineData("1")]
+    public void InvalidDenyEntries(string entry)
+    {
+        Assert.StartsWith($"{UserFile}: deny: ", Error(() => User($"deny = [\"ok.com\", {entry}]")));
+        Assert.StartsWith($"{ProjFile}: deny: ", Error(() => Proj($"deny = [\"ok.com\", {entry}]")));
+    }
+
+    [Fact]
+    public void DenyRefusesTheStar()
+    {
+        Assert.Equal($"{UserFile}: deny = [\"*\"] would block everything; remove the allow entries instead",
+            Error(() => User("deny = [\"*\"]")));
+        Assert.Equal($"{ProjFile}: deny = [\"*\"] would block everything; remove the allow entries instead",
+            Error(() => Proj("deny = [\"a.com\", '*']")));
+    }
+
+    [Fact]
+    public void AllowTakesTheStar_InEitherFile()
+    {
+        Assert.Equal(["*"], User("allow = [\"*\"]").Allow);
+        Assert.Equal(["a.com", "*"], Proj("allow = [\"a.com\", '*']").Allow);
+    }
+
+    [Theory]
+    [InlineData("\".\"")]
+    [InlineData("\"*.example.com\"")]
+    [InlineData("\"**\"")]
+    [InlineData("\" *\"")]
+    [InlineData("\"*.\"")]
+    [InlineData("\".*\"")]
+    public void AllowTakesTheStarOnlyAsTheWholeEntry(string entry)
+    {
+        Assert.StartsWith($"{UserFile}: allow: ", Error(() => User($"allow = [{entry}]")));
+        Assert.StartsWith($"{ProjFile}: allow: ", Error(() => Proj($"allow = [{entry}]")));
+    }
+
+    [Fact]
     public void DockerIsAProjectBoolean()
     {
         Assert.Null(Proj("").Docker);

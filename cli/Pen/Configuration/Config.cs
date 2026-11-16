@@ -15,8 +15,8 @@ namespace Pen.Configuration;
 /// </summary>
 /// <remarks>
 /// TOML errors name the file and line; Pen's own checks name the file and key. Keys are either
-/// user-only or project-only, except allow and tools, whose lists are appended (allow: defaults,
-/// user, project; tools: user, project, --tool).
+/// user-only or project-only, except allow, deny and tools, whose lists are appended (allow: defaults,
+/// user, project; deny: user, project; tools: user, project, --tool).
 /// </remarks>
 internal sealed partial class Config
 {
@@ -31,8 +31,10 @@ internal sealed partial class Config
     public Dictionary<string, string> GitHubTokens { get; } = new(StringComparer.Ordinal);
     /// <summary>[env] values for the agent service, in file order (user only).</summary>
     public List<KeyValuePair<string, string>> Env { get; } = [];
-    /// <summary>Extra allowed domains, normalized to lowercase (both).</summary>
+    /// <summary>Extra allowed domains, or "*" for any domain name, in lowercase (both).</summary>
     public List<string> Allow { get; } = [];
+    /// <summary>Denied domains, normalized to lowercase (both). A deny beats every allow.</summary>
+    public List<string> Deny { get; } = [];
     /// <summary>Which owner's token to use (project only).</summary>
     public string? GitHubOwner { get; private set; }
     /// <summary>docker = true|false: Docker-in-Docker for every session (project only); null when unset.</summary>
@@ -158,7 +160,10 @@ internal sealed partial class Config
         switch (key)
         {
             case "allow":
-                ReadAllow(value, error);
+                ReadDomains("allow", value, Allow, allowStar: true, error);
+                break;
+            case "deny":
+                ReadDomains("deny", value, Deny, allowStar: false, error);
                 break;
             case "github":
                 ReadGitHubTokens(value, error);
@@ -183,20 +188,30 @@ internal sealed partial class Config
         }
     }
 
-    private void ReadAllow(object value, Func<string, PenException> error)
+    /// <summary>Validates a list of domains, allow's or deny's, and adds them to <paramref name="list"/>.</summary>
+    /// <param name="key">The key, which errors name.</param>
+    /// <param name="value">The key's value.</param>
+    /// <param name="list">Gets the domains, lowercased.</param>
+    /// <param name="allowStar">Whether "*", any domain name, is valid as a whole entry (allow's, not deny's).</param>
+    /// <param name="error">Makes the exception for a problem.</param>
+    private static void ReadDomains(string key, object value, List<string> list, bool allowStar,
+        Func<string, PenException> error)
     {
         if (value is not TomlArray domains)
-            throw error("allow must be a list of domains, e.g. allow = [\"example.com\"]");
+            throw error($"{key} must be a list of domains, e.g. {key} = [\"example.com\"]");
         foreach (var item in domains)
         {
             var domain = item is string text ? text.ToLowerInvariant() : null;
-            if (domain == null || !Allowlist.IsValidDomain(domain))
+            if (!allowStar && domain == Allowlist.AnyDomain)
+                throw error($"{key} = [\"*\"] would block everything; remove the allow entries instead");
+            if (domain == null
+                || !(allowStar ? Allowlist.IsValidAllowEntry(domain) : Allowlist.IsValidDomain(domain)))
             {
-                throw error($"allow: {DescribeItem(item)} " +
+                throw error($"{key}: {DescribeItem(item)} " +
                     "isn't a domain (use example.com, or .example.com to include its subdomains)");
             }
 
-            Allow.Add(domain);
+            list.Add(domain);
         }
     }
 

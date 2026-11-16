@@ -1,12 +1,19 @@
 using System.Net;
 using System.Text.RegularExpressions;
+using Pen.Configuration;
 using Pen.Platform;
 
 namespace Pen.Proxy;
 
-/// <summary>Parses, merges and matches the proxy's allowlist, and finds the blocked hosts in a proxy log.</summary>
+/// <summary>
+/// Parses, merges and matches the proxy's allow and deny lists, renders its ACL files, and finds the blocked hosts
+/// in a proxy log.
+/// </summary>
 internal static partial class Allowlist
 {
+    /// <summary>The allow entry for any domain name. It never covers a raw IP.</summary>
+    public const string AnyDomain = "*";
+
     /// <summary>
     /// Tells whether <paramref name="domain"/> is a plain domain or a .domain wildcard, with at least two labels,
     /// and not an IP address.
@@ -18,6 +25,11 @@ internal static partial class Allowlist
         var bare = domain.TrimStart('.');
         return !IPAddress.TryParse(bare, out _) && !bare.Split('.').All(label => label.All(char.IsAsciiDigit));
     }
+
+    /// <summary>
+    /// Tells whether <paramref name="entry"/> is valid in allow: a domain or <see cref="AnyDomain"/>.
+    /// </summary>
+    public static bool IsValidAllowEntry(string entry) => entry == AnyDomain || IsValidDomain(entry);
 
     [GeneratedRegex(@"^\.?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\z")]
     private static partial Regex DomainRegex();
@@ -34,9 +46,10 @@ internal static partial class Allowlist
             .Where(domain => domain.Length > 0);
 
     /// <summary>Merges the sources in order, dropping duplicates and entries a wildcard already covers.</summary>
-    /// <returns>The merged list, lowercased.</returns>
+    /// <returns>The merged list, lowercased; just <see cref="AnyDomain"/> when any source has it.</returns>
     /// <remarks>
     /// ".github.com" covers "github.com" and "api.github.com"; Squid complains about overlapping dstdomain entries.
+    /// <see cref="AnyDomain"/> covers every other entry.
     /// </remarks>
     public static List<string> Merge(params IEnumerable<string>[] sources)
     {
@@ -44,6 +57,8 @@ internal static partial class Allowlist
             .Select(domain => domain.Trim().ToLowerInvariant())
             .Where(domain => domain.Length > 0)
             .ToList();
+        if (all.Contains(AnyDomain))
+            return [AnyDomain];
         var wildcards = all.Where(domain => domain.StartsWith('.')).ToHashSet(StringComparer.Ordinal);
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var result = new List<string>();
@@ -74,18 +89,77 @@ internal static partial class Allowlist
         }
     }
 
+    /// <summary>Merges the deny lists of the user's and the project's config.</summary>
+    /// <returns>The merged list, lowercased, as <see cref="Merge"/> gives it.</returns>
+    /// <remarks>The project's deny needs no approval: it can only take egress away.</remarks>
+    public static List<string> MergeDeny(Config user, Config project) => Merge(user.Deny, project.Deny);
+
     /// <summary>
-    /// Tells whether <paramref name="host"/> is allowed by a merged list (exact, or under a wildcard).
+    /// Tells whether <paramref name="host"/> is allowed by a merged list (exact, under a wildcard, or by
+    /// <see cref="AnyDomain"/> when it isn't an IP).
     /// </summary>
     public static bool IsAllowed(IEnumerable<string> list, string host) =>
         IsAllowed(list.ToHashSet(StringComparer.Ordinal), host);
 
     /// <inheritdoc cref="IsAllowed(IEnumerable{string}, string)"/>
-    public static bool IsAllowed(HashSet<string> list, string host) =>
-        list.Contains(host) || ListWildcardsOver(host).Any(list.Contains);
+    public static bool IsAllowed(HashSet<string> list, string host) => IsCovered(list, host);
+
+    /// <summary>Tells whether <paramref name="host"/> is denied by a merged list (exact or under a wildcard).</summary>
+    public static bool IsDenied(IEnumerable<string> list, string host) =>
+        IsDenied(list.ToHashSet(StringComparer.Ordinal), host);
+
+    /// <inheritdoc cref="IsDenied(IEnumerable{string}, string)"/>
+    public static bool IsDenied(HashSet<string> list, string host) => IsCovered(list, host);
+
+    /// <summary>Tells whether an entry in <paramref name="list"/> covers <paramref name="host"/>.</summary>
+    private static bool IsCovered(HashSet<string> list, string host) =>
+        list.Contains(host)
+            || ListWildcardsOver(host).Any(list.Contains)
+            || (list.Contains(AnyDomain) && !IsIpLiteral(host));
+
+    /// <summary>Tells whether <paramref name="host"/> is an IP address, in brackets or not, not a name.</summary>
+    /// <remarks>
+    /// Broad on purpose, since <see cref="AnyDomain"/> covers whatever isn't an IP: all-numeric labels (1.2.3.4.,
+    /// 2130706433) and anything with a colon or a bracket count too, as no domain name has one.
+    /// </remarks>
+    internal static bool IsIpLiteral(string host)
+    {
+        if (host.AsSpan().IndexOfAny(":[]") >= 0)
+            return true;
+        return IPAddress.TryParse(host, out _) || host.Split('.').All(label => label.All(char.IsAsciiDigit));
+    }
 
     /// <summary>Renders <paramref name="domains"/> as an allowlist file, one per line.</summary>
     public static string Render(IEnumerable<string> domains) => string.Join('\n', domains) + "\n";
+
+    /// <summary>What a dstdomain ACL file (allowlist.txt, denylist.txt) with no entries holds.</summary>
+    /// <remarks>
+    /// Squid takes an empty ACL file with a warning. If it refused one, this would need an entry that matches
+    /// nothing, such as .invalid (RFC 6761), which listings would then hide.
+    /// </remarks>
+    private const string NoDomains = "";
+    /// <summary>What open-egress.txt holds when egress isn't open.</summary>
+    /// <remarks>Empty, as <see cref="NoDomains"/> is; the regex that matches nothing would be a^.</remarks>
+    private const string ClosedEgress = "";
+    /// <summary>What open-egress.txt holds for <see cref="AnyDomain"/>: a dstdom_regex matching every name.</summary>
+    private const string OpenEgress = ".\n";
+
+    /// <summary>Renders the proxy's three ACL files from merged allow and deny lists.</summary>
+    /// <returns>
+    /// With <see cref="AnyDomain"/>, an empty allowlist.txt and an open-egress.txt that matches any name;
+    /// otherwise the allowed domains and a closed open-egress.txt. denylist.txt holds the denied domains either way.
+    /// </returns>
+    public static AclFiles RenderFiles(IReadOnlyList<string> allow, IReadOnlyList<string> deny)
+    {
+        // Config rejects it in deny, so this is defence in depth: a "*" there would render as a domain.
+        if (deny.Contains(AnyDomain))
+            throw new ArgumentException($"deny can't contain {AnyDomain}.", nameof(deny));
+        bool open = allow.Contains(AnyDomain);
+        return new(
+            AllowlistText: open || allow.Count == 0 ? NoDomains : Render(allow),
+            DenylistText: deny.Count == 0 ? NoDomains : Render(deny),
+            OpenEgressText: open ? OpenEgress : ClosedEgress);
+    }
 
     /// <summary>Finds the hosts the proxy denied in <paramref name="logLines"/>.</summary>
     /// <returns>Each host once, in first-seen order.</returns>
@@ -160,3 +234,6 @@ internal static partial class Allowlist
         return line;
     }
 }
+
+/// <summary>The contents of the proxy's ACL files: allowlist.txt, denylist.txt and open-egress.txt.</summary>
+internal sealed record AclFiles(string AllowlistText, string DenylistText, string OpenEgressText);
