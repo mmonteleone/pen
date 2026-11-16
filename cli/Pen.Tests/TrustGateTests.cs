@@ -30,6 +30,8 @@ public class TrustGateTests
           *" run --rm "*)
             printf '%s' "${GH_TOKEN:-none}" >token-seen
             find home -name allowlist.txt -exec cp {} allowlist-seen \;
+            find home -name denylist.txt -exec cp {} denylist-seen \;
+            find home -name open-egress.txt -exec cp {} open-egress-seen \;
             ;;
         esac
         exit 0
@@ -795,6 +797,23 @@ public class TrustGateTests
         File.WriteAllText(f.Project.ProjectConfigPath, "tools = [\"pen-test:2\"]\n");
         Assert.Throws<PenException>(() => f.Run(NoTerminal));
         Assert.Empty(f.Calls);
+    }
+
+    [Fact]
+    public void AProjectDenyNeedsNoApproval_ReachesTheProxy_AndWarnsWhenItTakesWhatAToolNeeds()
+    {
+        using var f = ToolsFixture(projectToml: "deny = [\"example.org\", \"gist.github.com\"]\n");
+        var stderr = Console.Error;
+        var captured = new StringWriter();
+        Console.SetError(captured);
+        try { Assert.Equal(0, f.Run(NoTerminal, flagTools: [PenTest])); }
+        finally { Console.SetError(stderr); }
+        Assert.Contains("pen: deny covers example.org, which pen-test needs\n", captured.ToString());
+        Assert.DoesNotContain("egress is open", captured.ToString());
+        Assert.Equal("example.org\ngist.github.com\n", f.Seen("denylist-seen"));
+        Assert.Equal("", f.Seen("open-egress-seen"));
+        // Deny beats allow in squid; the allowlist still holds what allow merged.
+        Assert.Contains("example.org", f.Seen("allowlist-seen").Split('\n'));
     }
 
     [Fact]

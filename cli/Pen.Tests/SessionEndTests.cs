@@ -160,6 +160,73 @@ public class SessionEndTests
         Assert.True(File.Exists(session.PreviousProxyLog));
     }
 
+    [Fact]
+    public void TheEndListsDeniedHostsApart_WithNoPenAllowForThem()
+    {
+        using var t = new TempDir();
+        var session = Create(t, docker: false);
+        File.Delete(Path.Combine(t.Path, "repo", ".git", "commondir"));
+        File.WriteAllText(session.AllowlistFile, "");
+        File.WriteAllText(session.DenylistFile, "gist.github.com\n");
+        File.WriteAllText(session.OpenEgressFile, ".\n");
+        File.WriteAllText(session.ProxyLog,
+            "2026-11-02T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT gist.github.com:443 -\n" +
+            "2026-11-02T10:00:01Z 172.18.0.3 TCP_TUNNEL/200 CONNECT example.org:443 1.2.3.4\n" +
+            "2026-11-02T10:00:02Z 172.18.0.3 TCP_DENIED/403 CONNECT 1.1.1.1:443 -\n");
+        var (docker, _) = FakeHost(t);
+        using var _ = docker;
+
+        var output = CapturingStderr(() => Session.End(session));
+
+        Assert.Contains("pen: denied by config: gist.github.com\n", output);
+        Assert.Contains("pen: blocked (raw IP, private address, unresolvable name, another port or blocked earlier): 1.1.1.1\n",
+            output);
+        Assert.DoesNotContain("pen allow", output);
+        Assert.DoesNotContain("example.org", output);
+    }
+
+    [Fact]
+    public void ReadEgress_ReadsOpenEgressNextToTheNamedDomains()
+    {
+        using var t = new TempDir();
+        var session = Create(t, docker: false);
+        File.WriteAllText(session.AllowlistFile, "github.com\n127.0.0.1.nip.io\n");
+        File.WriteAllText(session.DenylistFile, "");
+        File.WriteAllText(session.OpenEgressFile, ".\n");
+        var (allow, deny) = session.ReadEgress();
+        Assert.Equal(new[] { "*", "127.0.0.1.nip.io", "github.com" }, allow.Order(StringComparer.Ordinal));
+        Assert.Empty(deny);
+
+        File.WriteAllText(session.OpenEgressFile, "");
+        Assert.Equal(new[] { "127.0.0.1.nip.io", "github.com" }, session.ReadEgress().Allow.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void TheEndInOpenEgressWithNoDeny_GroupsWhatsBlocked_AndLeavesOutWhatsAllowedByName()
+    {
+        using var t = new TempDir();
+        var session = Create(t, docker: false);
+        File.Delete(Path.Combine(t.Path, "repo", ".git", "commondir"));
+        File.WriteAllText(session.AllowlistFile, "github.com\n127.0.0.1.nip.io\n");
+        File.WriteAllText(session.DenylistFile, "");
+        File.WriteAllText(session.OpenEgressFile, ".\n");
+        File.WriteAllText(session.ProxyLog,
+            "2026-11-02T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT localhost:443 -\n" +
+            "2026-11-02T10:00:01Z 172.18.0.3 TCP_DENIED/403 CONNECT 127.0.0.1.nip.io:443 -\n" +
+            "2026-11-02T10:00:02Z 172.18.0.3 TCP_DENIED/403 GET http://nx.invalid/ -\n");
+        var (docker, _) = FakeHost(t);
+        using var _ = docker;
+
+        var output = CapturingStderr(() => Session.End(session));
+
+        // Without the open-egress read, this would be the plain blocked line offering pen allow.
+        Assert.Contains(
+            "pen: blocked (raw IP, private address, unresolvable name, another port or blocked earlier): localhost, nx.invalid\n",
+            output);
+        Assert.DoesNotContain("pen allow", output);
+        Assert.DoesNotContain("nip.io", output);
+    }
+
     /// <summary>Docker that succeeds, and a git that logs its calls and says commit.gpgsign is on, so a reminder goes on to call git in the repo.</summary>
     private static (FakeDocker Docker, string GitCalls) FakeHost(TempDir t)
     {

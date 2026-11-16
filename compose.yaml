@@ -1,6 +1,7 @@
 # Pen session stack: one compose project per session ("<project key>-<session>").
 # The CLI copies this file into the session's dir next to squid.conf,
-# allowlist.txt and proxy.log, so the relative paths below resolve there.
+# allowlist.txt, denylist.txt, open-egress.txt and proxy.log, so the relative
+# paths below resolve there.
 #
 # Required env (set by the CLI):
 #   PROJECT_DIR     host absolute path of the project, mounted at the same path
@@ -90,6 +91,14 @@ services:
       - type: bind
         source: ./allowlist.txt
         target: /etc/squid/allowlist.txt
+        read_only: true
+      - type: bind
+        source: ./denylist.txt
+        target: /etc/squid/denylist.txt
+        read_only: true
+      - type: bind
+        source: ./open-egress.txt
+        target: /etc/squid/open-egress.txt
         read_only: true
       - type: bind
         source: ./proxy.log

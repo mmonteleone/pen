@@ -73,6 +73,11 @@ internal static partial class Allowlist
         return result;
     }
 
+    /// <summary>Merges the sources as <see cref="Merge"/> does, leaving out <see cref="AnyDomain"/>.</summary>
+    /// <returns>The domains the sources allow by name, which the proxy allows in open egress too.</returns>
+    public static List<string> MergeNamed(params IEnumerable<string>[] sources) =>
+        Merge(sources.Select(source => source.Where(domain => domain.Trim() != AnyDomain)).ToArray());
+
     /// <summary>Lists the wildcards that match <paramref name="domain"/>, a domain or a wildcard.</summary>
     /// <remarks>
     /// a.x.com is under .a.x.com, .x.com and .com. A few per name, so a list of any length is checked in time
@@ -141,25 +146,38 @@ internal static partial class Allowlist
     /// <summary>What open-egress.txt holds when egress isn't open.</summary>
     /// <remarks>Empty, as <see cref="NoDomains"/> is; the regex that matches nothing would be a^.</remarks>
     private const string ClosedEgress = "";
-    /// <summary>What open-egress.txt holds for <see cref="AnyDomain"/>: a dstdom_regex matching every name.</summary>
-    private const string OpenEgress = ".\n";
+    /// <summary>The dstdom_regex open-egress.txt holds for <see cref="AnyDomain"/>, which matches every name.</summary>
+    private const string AnyNamePattern = ".";
+    /// <summary>What open-egress.txt holds for <see cref="AnyDomain"/>.</summary>
+    private const string OpenEgress = AnyNamePattern + "\n";
 
-    /// <summary>Renders the proxy's three ACL files from merged allow and deny lists.</summary>
+    /// <summary>Renders the proxy's three ACL files.</summary>
+    /// <param name="namedAllow">The domains allowed by name, merged by <see cref="MergeNamed"/>.</param>
+    /// <param name="open">Whether allow has <see cref="AnyDomain"/>.</param>
+    /// <param name="deny">The merged deny list.</param>
     /// <returns>
-    /// With <see cref="AnyDomain"/>, an empty allowlist.txt and an open-egress.txt that matches any name;
-    /// otherwise the allowed domains and a closed open-egress.txt. denylist.txt holds the denied domains either way.
+    /// allowlist.txt with the domains allowed by name, open or not, since the proxy lets them reach what open egress
+    /// doesn't (a private address); open-egress.txt matching any name when <paramref name="open"/>, otherwise
+    /// nothing; denylist.txt with the denied domains.
     /// </returns>
-    public static AclFiles RenderFiles(IReadOnlyList<string> allow, IReadOnlyList<string> deny)
+    public static AclFiles RenderFiles(IReadOnlyList<string> namedAllow, bool open, IReadOnlyList<string> deny)
     {
-        // Config rejects it in deny, so this is defence in depth: a "*" there would render as a domain.
-        if (deny.Contains(AnyDomain))
+        // A "*" in either would render as a domain to squid. Config rejects it in deny, and a merged allow list
+        // that has it holds nothing else, so passing one here is a caller's mistake, not a list to cut down.
+        if (deny.Any(domain => domain.Trim() == AnyDomain))
             throw new ArgumentException($"deny can't contain {AnyDomain}.", nameof(deny));
-        bool open = allow.Contains(AnyDomain);
+        if (namedAllow.Any(domain => domain.Trim() == AnyDomain))
+            throw new ArgumentException($"the named allow list can't contain {AnyDomain}.", nameof(namedAllow));
         return new(
-            AllowlistText: open || allow.Count == 0 ? NoDomains : Render(allow),
+            AllowlistText: namedAllow.Count == 0 ? NoDomains : Render(namedAllow),
             DenylistText: deny.Count == 0 ? NoDomains : Render(deny),
             OpenEgressText: open ? OpenEgress : ClosedEgress);
     }
+
+    /// <summary>Tells whether an open-egress.txt holding <paramref name="openEgressText"/> opens egress.</summary>
+    /// <remarks>Only the line <see cref="RenderFiles"/> writes for <see cref="AnyDomain"/> does.</remarks>
+    public static bool IsOpenEgress(string openEgressText) =>
+        openEgressText.Split('\n').Any(line => line.Trim() == AnyNamePattern);
 
     /// <summary>Finds the hosts the proxy denied in <paramref name="logLines"/>.</summary>
     /// <returns>Each host once, in first-seen order.</returns>
@@ -224,14 +242,88 @@ internal static partial class Allowlist
     {
         if (hosts.Count == 0)
             return null;
-        var shown = hosts.Skip(Math.Max(0, hosts.Count - MaxListed)).ToList();
-        var line = "blocked: " + string.Join(", ", shown.Select(FormatShownHost));
-        if (hosts.Count > shown.Count)
-            line += $" and {hosts.Count - shown.Count} more (pen allow lists the latest)";
+        var (line, shown) = FormatHostList("blocked: ", hosts, " (pen allow lists the latest)");
         var allowable = shown.Where(IsValidDomain).ToList();
         if (allowable.Count > 0)
             line += $" → pen allow {string.Join(' ', allowable)} (add --global for all projects)";
         return line;
+    }
+
+    /// <summary>
+    /// Formats the session-end lines for <paramref name="hosts"/>, first blocked first, as a session's ACL files
+    /// say why each was blocked.
+    /// </summary>
+    /// <param name="hosts">The blocked hosts, in the order they were first blocked.</param>
+    /// <param name="allow">
+    /// What the session allows now: allowlist.txt's domains, allowed by name, plus <see cref="AnyDomain"/> when open.
+    /// </param>
+    /// <param name="deny">What the session denies now: denylist.txt.</param>
+    /// <returns>
+    /// With no deny and no <see cref="AnyDomain"/>, <see cref="FormatBlockedLine"/>'s line for the hosts not allowed
+    /// now. Otherwise up to three lines: the denied hosts; the raw IPs, and in open egress every other name not
+    /// allowed by name (it resolved privately or not at all, asked for another port, or was blocked before egress
+    /// opened); and the hosts not allowed, which alone get the pen allow line. Hosts allowed by name now are left
+    /// out, as they are with no deny. None when nothing is left to report.
+    /// </returns>
+    public static List<string> FormatBlockedLines(
+        IReadOnlyList<string> hosts,
+        HashSet<string> allow,
+        HashSet<string> deny)
+    {
+        bool open = allow.Contains(AnyDomain);
+        if (deny.Count == 0 && !open)
+            return FormatBlockedLine(hosts.Where(host => !IsAllowed(allow, host)).ToList()) is { } only ? [only] : [];
+
+        var named = open ? allow.Where(entry => entry != AnyDomain).ToHashSet(StringComparer.Ordinal) : allow;
+        var denied = new List<string>();
+        var unreachable = new List<string>();
+        var notAllowed = new List<string>();
+        foreach (var host in hosts)
+        {
+            if (IsDenied(deny, host))
+                denied.Add(host);
+            else if (IsAllowed(named, host))
+                continue;
+            else if (open || IsIpLiteral(host))
+                unreachable.Add(host);
+            else
+                notAllowed.Add(host);
+        }
+
+        var lines = new List<string>();
+        if (denied.Count > 0)
+            lines.Add(FormatHostList("denied by config: ", denied, " (pen allow lists the latest)").Line);
+        if (unreachable.Count > 0)
+            lines.Add(FormatHostList(open ? OpenBlockedPrefix : "blocked (raw IP): ", unreachable, "").Line);
+        if (FormatBlockedLine(notAllowed) is { } line)
+            lines.Add(line);
+        return lines;
+    }
+
+    /// <summary>The session-end prefix for what open egress blocked that deny didn't.</summary>
+    /// <remarks>
+    /// The log doesn't say which; a name blocked before egress opened is among them too. Of the rest, pen allow
+    /// would let through only a name that resolves privately, which open egress keeps out on purpose, so it isn't
+    /// offered.
+    /// </remarks>
+    private const string OpenBlockedPrefix =
+        "blocked (raw IP, private address, unresolvable name, another port or blocked earlier): ";
+
+    /// <summary>
+    /// Formats <paramref name="prefix"/> and the <see cref="MaxListed"/> most recent of <paramref name="hosts"/>,
+    /// with how many more there were and <paramref name="moreNote"/>.
+    /// </summary>
+    /// <returns>The text, and the hosts shown.</returns>
+    private static (string Line, List<string> Shown) FormatHostList(
+        string prefix,
+        IReadOnlyList<string> hosts,
+        string moreNote)
+    {
+        var shown = hosts.Skip(Math.Max(0, hosts.Count - MaxListed)).ToList();
+        var line = prefix + string.Join(", ", shown.Select(FormatShownHost));
+        if (hosts.Count > shown.Count)
+            line += $" and {hosts.Count - shown.Count} more{moreNote}";
+        return (line, shown);
     }
 }
 

@@ -69,6 +69,8 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         // signals held, so Ctrl-C can't end Pen between the probe's create and delete.
         RepoGuard.WarnIfCaseMayFold(Project, Out.WriteLine, RepoGuard.MayFoldCase);
         HooksPath.WarnIfWritable(Project, context.Host, Out.WriteLine, Environment.GetEnvironmentVariable);
+        foreach (var warning in ListEgressWarnings(prepared.Tools, prepared.Deny))
+            Out.WriteLine(warning);
 
         var session = CreateSessionDir();
         using var sessionLock = FileLock.TryTake(session.LockFile, exclusive: true)
@@ -113,13 +115,24 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         /// <summary>Gets the domains the tools bring.</summary>
         public required IReadOnlyList<string> ToolDomains { get; init; }
 
-        /// <summary>Gets the merged allowlist.</summary>
+        /// <summary>
+        /// Gets the merged allowlist: just <see cref="Proxy.Allowlist.AnyDomain"/> when a source has it.
+        /// </summary>
         public required IReadOnlyList<string> Allowlist { get; init; }
+
+        /// <summary>
+        /// Gets the merged allowlist without <see cref="Proxy.Allowlist.AnyDomain"/>: the domains allowed by name,
+        /// which reach a private address even in open egress.
+        /// </summary>
+        public required IReadOnlyList<string> NamedAllowlist { get; init; }
+
+        /// <summary>Gets the merged deny list, which beats every allow.</summary>
+        public required IReadOnlyList<string> Deny { get; init; }
     }
 
     /// <summary>
     /// Checks the repo, settles the tools and what's approved, prepares the mounts, ensures the image and finds the
-    /// token and the allowlist.
+    /// token and the allow and deny lists.
     /// </summary>
     /// <returns>What the later steps need.</returns>
     private Preparation Prepare(SessionRequest request)
@@ -143,8 +156,9 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         var owner = GitHub.FindProjectOwner(Project, context.ProjectConfig);
         var token = GitHub.SelectToken(owner, context.User, RuntimeDir, context.Host);
         var toolDomains = ToolSpec.ListDomains(tools, catalog);
-        var allowlist = Allowlist.Merge(Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")),
-            context.User.Allow, context.ProjectConfig.Allow, toolDomains);
+        IEnumerable<string>[] allowSources = [Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")),
+            context.User.Allow, context.ProjectConfig.Allow, toolDomains];
+        var deny = Allowlist.MergeDeny(context.User, context.ProjectConfig);
         return new()
         {
             Tools = tools,
@@ -154,8 +168,82 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
             Rootless = rootless,
             Token = token,
             ToolDomains = toolDomains,
-            Allowlist = allowlist,
+            Allowlist = Allowlist.Merge(allowSources),
+            NamedAllowlist = Allowlist.MergeNamed(allowSources),
+            Deny = deny,
         };
+    }
+
+    /// <summary>Lists the warnings about the session's egress: open egress, and deny taking what tools need.</summary>
+    private List<string> ListEgressWarnings(IReadOnlyList<ToolSpec> tools, IReadOnlyList<string> deny)
+    {
+        var needs = tools.Select(tool => tool.Name).Distinct(StringComparer.Ordinal)
+            .Select(name => (name, catalog.TryGet(name, out var recipe) ? (IReadOnlyList<string>)recipe.Allow : []));
+        return FormatEgressWarnings(context.User, context.Host.Display(context.Host.UserConfigPath),
+            context.ProjectConfig, deny, needs);
+    }
+
+    /// <summary>Formats the warnings about a session's egress.</summary>
+    /// <param name="user">The user's config.</param>
+    /// <param name="userConfigPath">Names the user's config.toml.</param>
+    /// <param name="projectConfig">The project's config.</param>
+    /// <param name="deny">The merged deny list.</param>
+    /// <param name="toolDomains">Each of the session's tools, by name, with the domains its recipe brings.</param>
+    /// <returns>
+    /// One line when allow has <see cref="Allowlist.AnyDomain"/>, naming the files; then one per domain a tool
+    /// needs that deny covers, in part or whole, naming the narrower of the two and the tools.
+    /// </returns>
+    internal static List<string> FormatEgressWarnings(
+        Config user,
+        string userConfigPath,
+        Config projectConfig,
+        IReadOnlyList<string> deny,
+        IEnumerable<(string Tool, IReadOnlyList<string> Domains)> toolDomains)
+    {
+        var warnings = new List<string>();
+        var openIn = new List<string>();
+        if (user.Allow.Contains(Allowlist.AnyDomain))
+            openIn.Add(userConfigPath);
+        if (projectConfig.Allow.Contains(Allowlist.AnyDomain))
+            openIn.Add(".pen/" + Config.FileName);
+        if (openIn.Count > 0)
+            warnings.Add($"egress is open: any domain is allowed (allow = [\"*\"] in {string.Join(" and ", openIn)})");
+
+        // A deny entry under a tool's wildcard takes part of what it needs, and one over a tool's domain all of it.
+        var covered = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var order = new List<string>();
+        foreach (var (tool, domains) in toolDomains)
+        {
+            foreach (var domain in domains)
+            {
+                foreach (var entry in deny)
+                {
+                    string taken;
+                    if (Allowlist.IsDenied([entry], domain))
+                        taken = domain;
+                    else if (Allowlist.IsAllowed([domain], entry))
+                        taken = entry;
+                    else
+                        continue;
+                    if (!covered.TryGetValue(taken, out var needers))
+                    {
+                        covered[taken] = needers = [];
+                        order.Add(taken);
+                    }
+                    if (!needers.Contains(tool))
+                        needers.Add(tool);
+                }
+            }
+        }
+        foreach (var taken in order)
+        {
+            var needers = covered[taken];
+            var who = needers.Count == 1
+                ? needers[0] + " needs"
+                : string.Join(", ", needers[..^1]) + " and " + needers[^1] + " need";
+            warnings.Add($"deny covers {taken}, which {who}");
+        }
+        return warnings;
     }
 
     /// <summary>Adds the agent the command's first word names to the --tool list.</summary>
@@ -335,7 +423,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     }
 
     /// <summary>
-    /// Writes the stack's files: squid.conf, the allowlist, the override, proxy.log and compose.yaml.
+    /// Writes the stack's files: squid.conf, the ACL files, the override, proxy.log and compose.yaml.
     /// </summary>
     private static void WriteStackFiles(
         SessionDir session,
@@ -344,7 +432,11 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         IReadOnlyList<int> forwarded)
     {
         File.WriteAllText(session.GetPath("squid.conf"), Embedded.ReadText("proxy/squid.conf"));
-        File.WriteAllText(session.GetPath("allowlist.txt"), Allowlist.Render(prepared.Allowlist));
+        var acls = Allowlist.RenderFiles(prepared.NamedAllowlist, prepared.Allowlist.Contains(Allowlist.AnyDomain),
+            prepared.Deny);
+        File.WriteAllText(session.AllowlistFile, acls.AllowlistText);
+        File.WriteAllText(session.DenylistFile, acls.DenylistText);
+        File.WriteAllText(session.OpenEgressFile, acls.OpenEgressText);
         var dindContainer = docker ? session.DindContainer : null;
         var ports = new PortForward(forwarded, session.PortsContainer, session.Container);
         File.WriteAllText(session.OverrideFile,
@@ -447,11 +539,12 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         RemoveWriters(session);
         // The .git check, now that the agent is gone and before anything runs git.
         var check = CheckGit(session, env);
-        // What the session ended up allowing (pen allow may have added to it),
-        // so the blocked line doesn't suggest a domain that's allowed by now.
-        var allowed = ReadAllowed(session);
+        // What the session ended up allowing and denying (pen allow may have
+        // changed it), so the blocked line doesn't suggest a domain that's
+        // allowed by now, and says which hosts deny blocked.
+        var egress = session.ReadEgress();
         StopStack(session, env, check.KeepFiles);
-        ReportBlocked(session, allowed);
+        ReportBlocked(session, egress.Allow, egress.Deny);
         return check.Result;
     }
 
@@ -517,16 +610,6 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         return new(new(true, null), KeepFiles: false);
     }
 
-    /// <summary>Reads the domains the session's allowlist holds now.</summary>
-    /// <returns>The domains; none when the file is missing.</returns>
-    private static HashSet<string> ReadAllowed(SessionDir session)
-    {
-        var allowedFile = session.GetPath("allowlist.txt");
-        if (!File.Exists(allowedFile))
-            return [];
-        return Allowlist.ParseList(File.ReadAllText(allowedFile)).ToHashSet(StringComparer.Ordinal);
-    }
-
     /// <summary>Stops the session's stack, then deletes its files unless <paramref name="keepFiles"/>.</summary>
     /// <remarks>A stack that won't stop keeps the files, for a retry by the next pen command.</remarks>
     private static void StopStack(SessionDir session, Dictionary<string, string> env, bool keepFiles)
@@ -555,17 +638,15 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     }
 
     /// <summary>
-    /// Writes the line about what the proxy blocked and isn't in <paramref name="allowed"/>, if anything.
+    /// Writes the lines about what the proxy blocked and isn't in <paramref name="allowed"/>, if anything, with the
+    /// hosts <paramref name="denied"/> covers apart (<see cref="Allowlist.FormatBlockedLines"/>).
     /// </summary>
-    private static void ReportBlocked(SessionDir session, HashSet<string> allowed)
+    private static void ReportBlocked(SessionDir session, HashSet<string> allowed, HashSet<string> denied)
     {
         if (!File.Exists(session.ProxyLog) && !File.Exists(session.PreviousProxyLog))
             return;
-        var blocked = Allowlist.FindBlockedHosts(session.ReadProxyLogLines())
-            .Where(host => !Allowlist.IsAllowed(allowed, host))
-            .ToList();
-        var line = Allowlist.FormatBlockedLine(blocked);
-        if (line != null)
+        var blocked = Allowlist.FindBlockedHosts(session.ReadProxyLogLines());
+        foreach (var line in Allowlist.FormatBlockedLines(blocked, allowed, denied))
             Out.WriteLine(line);
     }
 

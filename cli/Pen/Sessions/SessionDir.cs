@@ -9,7 +9,7 @@ namespace Pen.Sessions;
 /// <param name="projectKey">The key of the session's project.</param>
 /// <param name="path">The directory, sessions/&lt;id&gt; under the project's runtime dir.</param>
 /// <remarks>
-/// It holds the session's lock, the generated compose.yaml, squid.conf and allowlist, the env compose needs, the
+/// It holds the session's lock, the generated compose.yaml, squid.conf and ACL files, the env compose needs, the
 /// records pen ps and the session-end check read, and the proxy log, which outlives the session.
 /// </remarks>
 internal sealed class SessionDir(string projectKey, string path)
@@ -42,6 +42,36 @@ internal sealed class SessionDir(string projectKey, string path)
     /// Gets the path of the compose override: mounts over the project mount, dind's and the ports service's settings.
     /// </summary>
     public string OverrideFile => GetPath("session.yaml");
+
+    /// <summary>Gets the path of the proxy's allowlist ACL file: the allowed domains, empty in open egress.</summary>
+    public string AllowlistFile => GetPath("allowlist.txt");
+
+    /// <summary>Gets the path of the proxy's deny ACL file: the denied domains, which beat every allow.</summary>
+    /// <remarks>
+    /// A session started by a Pen without deny has none, and no deny or open ACL in its squid.conf either.
+    /// </remarks>
+    public string DenylistFile => GetPath("denylist.txt");
+
+    /// <summary>Gets the path of the proxy's open-egress ACL file, which matches any name in open egress.</summary>
+    public string OpenEgressFile => GetPath("open-egress.txt");
+
+    /// <summary>Gets whether the session's proxy has the deny and open ACLs, as one started by this Pen does.</summary>
+    public bool HasDenyAndOpen => File.Exists(DenylistFile);
+
+    /// <summary>Reads what the session's proxy enforces now, from its ACL files.</summary>
+    /// <returns>
+    /// The allowed domains, with <see cref="Allowlist.AnyDomain"/> in open egress, and the denied ones; a missing
+    /// file adds none.
+    /// </returns>
+    public (HashSet<string> Allow, HashSet<string> Deny) ReadEgress()
+    {
+        static IEnumerable<string> ReadList(string file) =>
+            File.Exists(file) ? Allowlist.ParseList(File.ReadAllText(file)) : [];
+        var allow = ReadList(AllowlistFile).ToHashSet(StringComparer.Ordinal);
+        if (File.Exists(OpenEgressFile) && Allowlist.IsOpenEgress(File.ReadAllText(OpenEgressFile)))
+            allow.Add(Allowlist.AnyDomain);
+        return (allow, ReadList(DenylistFile).ToHashSet(StringComparer.Ordinal));
+    }
 
     /// <summary>Gets the path of the proxy's log.</summary>
     public string ProxyLog => GetPath("proxy.log");

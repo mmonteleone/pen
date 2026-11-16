@@ -196,12 +196,14 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
             : SessionRegistry.FindRunningIn(project!.Key, host.GetRuntimeDir(project.Key), project.Dir);
 
     /// <summary>
-    /// Regenerates one running session's allowlist from the current config files and has its Squid reload it.
+    /// Regenerates one running session's ACL files from the current config files and has its Squid reload them.
     /// </summary>
     /// <returns>Whether it worked; a failure is reported, naming the session.</returns>
     /// <remarks>
-    /// Of its project's config, only the approved domains count; the tools' domains are the ones it started with
-    /// (tool-domains), so a tools entry added to .pen/ since adds nothing.
+    /// <para>Of its project's config, only the approved domains count; the tools' domains are the ones it started
+    /// with (tool-domains), so a tools entry added to .pen/ since adds nothing. The deny lists count in full.</para>
+    /// <para>A session started by a Pen without deny gets only its allowlist, never with
+    /// <see cref="Allowlist.AnyDomain"/> (see <see cref="WriteAclFiles"/>).</para>
     /// </remarks>
     internal static bool Apply(HostEnv host, SessionDir session)
     {
@@ -210,11 +212,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
             var env = session.ReadEnv();
             if (!env.TryGetValue("PROJECT_DIR", out var projectDir))
                 throw new PenException("its session.env is missing");
-            var merged = MergeAllowlist(host, session, projectDir);
-            // Truncate and write, never rename: the proxy's single-file bind
-            // mount pins the inode.
-            using (var file = new FileStream(session.GetPath("allowlist.txt"), FileMode.Truncate, FileAccess.Write))
-                file.Write(Encoding.UTF8.GetBytes(Allowlist.Render(merged)));
+            var pending = WriteAclFiles(session, MergeEgress(host, session, projectDir));
 
             var startInfo = Proc.CreateStartInfo("docker",
                 session.BuildComposeArgs("exec", "-T", "proxy", "squid", "-k", "reconfigure"), env);
@@ -226,6 +224,11 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
                 throw new PenException(
                     $"squid -k reconfigure failed: {(result.StandardError + result.StandardOutput).Trim()}");
             }
+            if (pending != null)
+            {
+                Out.WriteLine($"the running session {session.ComposeProject} was started by an older Pen: " +
+                    $"{pending} only to sessions started from now on");
+            }
             return true;
         }
         catch (Exception error) when (error is PenException or IOException or UnauthorizedAccessException)
@@ -235,21 +238,71 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
         }
     }
 
+    /// <summary>What a running session gets now, merged from the config files.</summary>
+    /// <param name="Allow">The merged allow list; just <see cref="Allowlist.AnyDomain"/> when a source has it.</param>
+    /// <param name="NamedAllow">The merged allow list without <see cref="Allowlist.AnyDomain"/>.</param>
+    /// <param name="Deny">The merged deny list.</param>
+    internal sealed record Egress(List<string> Allow, List<string> NamedAllow, List<string> Deny);
+
     /// <summary>
-    /// Merges the allowlist <paramref name="session"/>, started in <paramref name="projectDir"/>, gets now.
+    /// Merges what <paramref name="session"/>, started in <paramref name="projectDir"/>, gets now.
     /// </summary>
     /// <returns>
-    /// The defaults, the user's allow, the project's approved allow and the session's tools' domains.
+    /// The allow lists from the defaults, the user's allow, the project's approved allow and the session's tools'
+    /// domains, and the deny list from the user's and the project's deny.
     /// </returns>
-    private static List<string> MergeAllowlist(HostEnv host, SessionDir session, string projectDir)
+    private static Egress MergeEgress(HostEnv host, SessionDir session, string projectDir)
     {
         var user = Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User);
         var projectConfig = Config.Load(Path.Combine(projectDir, ".pen"),
             Out.Field(Path.Combine(projectDir, ".pen")), ConfigKind.Project);
         var approved = TrustStore.Load(host.GetRuntimeDir(session.ProjectKey), projectDir)
             .SelectApprovedDomains(projectConfig.Allow);
-        return Allowlist.Merge(Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")), user.Allow,
-            approved, session.ReadToolDomains());
+        IEnumerable<string>[] sources = [Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")), user.Allow,
+            approved, session.ReadToolDomains()];
+        return new(Allowlist.Merge(sources), Allowlist.MergeNamed(sources), Allowlist.MergeDeny(user, projectConfig));
+    }
+
+    /// <summary>Writes <paramref name="egress"/> into <paramref name="session"/>'s ACL files.</summary>
+    /// <returns>
+    /// What its proxy can't take (sessions started from now on get it), worded for the notice; null when it took
+    /// everything.
+    /// </returns>
+    /// <remarks>
+    /// <para>Each file is truncated and written, never renamed: the proxy's single-file bind mounts pin the inodes.
+    /// A file that's gone fails the write rather than being made, since the proxy wouldn't see a new one.</para>
+    /// <para>A session without a denylist.txt was started by a Pen whose squid.conf has no deny or open ACL, so only
+    /// its allowlist.txt is written, from the allow list without <see cref="Allowlist.AnyDomain"/>: a literal "*"
+    /// there would be a domain to squid, and leaving the file as it was would keep domains taken out of the config
+    /// since. The named domains are what the config grants by name now, so it never gets more than that.</para>
+    /// </remarks>
+    internal static string? WriteAclFiles(SessionDir session, Egress egress)
+    {
+        if (!session.HasDenyAndOpen)
+        {
+            Overwrite(session.AllowlistFile, Allowlist.Render(egress.NamedAllow));
+            bool open = egress.Allow.Contains(Allowlist.AnyDomain);
+            return (egress.Deny.Count > 0, open) switch
+            {
+                (true, true) => "deny and allow = [\"*\"] apply",
+                (true, false) => "deny applies",
+                (false, true) => "allow = [\"*\"] applies",
+                _ => null,
+            };
+        }
+
+        var acls = Allowlist.RenderFiles(egress.NamedAllow, egress.Allow.Contains(Allowlist.AnyDomain), egress.Deny);
+        Overwrite(session.DenylistFile, acls.DenylistText);
+        Overwrite(session.AllowlistFile, acls.AllowlistText);
+        Overwrite(session.OpenEgressFile, acls.OpenEgressText);
+        return null;
+    }
+
+    /// <summary>Truncates the existing file at <paramref name="path"/> and writes <paramref name="text"/>.</summary>
+    private static void Overwrite(string path, string text)
+    {
+        using var file = new FileStream(path, FileMode.Truncate, FileAccess.Write);
+        file.Write(Encoding.UTF8.GetBytes(text));
     }
 
     /// <summary>Formats pen allow --defaults: the built-in allowlist from its first section on.</summary>
@@ -301,7 +354,8 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     }
 
     /// <summary>
-    /// Runs pen allow without domains: lists what the project's sessions had blocked and isn't allowed now.
+    /// Runs pen allow without domains: lists what the project's sessions had blocked and isn't allowed now, and
+    /// apart from it what deny covers now.
     /// </summary>
     /// <param name="context">The project and both configs, which say what a session would be allowed.</param>
     /// <returns>0.</returns>
@@ -314,38 +368,69 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
 
         var logs = Directory.EnumerateDirectories(Path.Combine(runtimeDir, "sessions"))
             .Select(dir => new SessionDir(project.Key, dir).ReadProxyLogLines());
-        var allowed = MergeAllowedNow(context);
-        var blocked = FindBlockedAcross(logs).Where(entry => !Allowlist.IsAllowed(allowed, entry.Host)).ToList();
-        if (blocked.Count == 0)
+        var (allowed, denied) = MergeAllowedNow(context);
+        // Deny beats every allow, so a denied host is listed apart even when allow covers it, "*" included.
+        var all = FindBlockedAcross(logs);
+        var deniedNow = all.Where(entry => Allowlist.IsDenied(denied, entry.Host)).ToList();
+        var blocked = all.Where(entry => !Allowlist.IsDenied(denied, entry.Host)
+            && !Allowlist.IsAllowed(allowed, entry.Host)).ToList();
+        if (blocked.Count == 0 && deniedNow.Count == 0)
         {
             Out.WriteStdout("nothing blocked in this project's sessions (last 7 days) that isn't allowed now\n");
             return 0;
         }
 
-        WriteBlocked(blocked);
+        if (blocked.Count > 0)
+            WriteBlocked(blocked);
+        if (deniedNow.Count > 0)
+            WriteDenied(deniedNow);
         return 0;
     }
 
-    /// <summary>Merges what a session started now would be allowed.</summary>
-    /// <remarks>Only approved domains and tools from .pen/ count, so an unapproved domain there stays listed.</remarks>
-    private HashSet<string> MergeAllowedNow(ProjectContext context)
+    /// <summary>Merges what a session started now would be allowed and denied.</summary>
+    /// <returns>
+    /// The merged allow list, which may be just <see cref="Allowlist.AnyDomain"/>, and the merged deny list.
+    /// </returns>
+    /// <remarks>
+    /// Only approved domains and tools from .pen/ count, so an unapproved domain there stays listed. Deny needs no
+    /// approval, so all of it counts.
+    /// </remarks>
+    private (HashSet<string> Allowed, HashSet<string> Denied) MergeAllowedNow(ProjectContext context)
     {
         var store = TrustStore.For(host, context.Project);
         var approved = store.SelectApprovedDomains(context.ProjectConfig.Allow);
         var toolDomains = ToolSpec.ListDomains(
             context.User.Tools.Concat(store.SelectApprovedTools(context.ProjectConfig.Tools, catalog)),
             catalog);
-        return Allowlist.Merge(Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")), context.User.Allow,
-                approved, toolDomains)
+        var allowed = Allowlist.Merge(Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")),
+                context.User.Allow, approved, toolDomains)
             .ToHashSet(StringComparer.Ordinal);
+        var denied = Allowlist.MergeDeny(context.User, context.ProjectConfig).ToHashSet(StringComparer.Ordinal);
+        return (allowed, denied);
     }
 
     /// <summary>Writes the newest of <paramref name="blocked"/> to stdout, and the pen allow line for them.</summary>
     /// <remarks>Only the newest few: the agent decides how many there are.</remarks>
     private static void WriteBlocked(List<Blocked> blocked)
     {
-        var shown = blocked.Take(Allowlist.MaxListed).ToList();
-        Out.WriteStdout("blocked in this project's sessions, newest first:\n");
+        var shown = WriteHosts("blocked in this project's sessions, newest first:", blocked);
+        var allowable = shown.Select(entry => entry.Host).Where(Allowlist.IsValidDomain).ToList();
+        if (allowable.Count > 0)
+            Out.WriteStdout($"pen allow {string.Join(' ', allowable)}   (add --global for all projects)\n");
+    }
+
+    /// <summary>Writes the newest of <paramref name="denied"/>, which deny covers now, to stdout.</summary>
+    /// <remarks>No pen allow line: deny beats every allow, so it wouldn't let them through.</remarks>
+    private static void WriteDenied(List<Blocked> denied) =>
+        WriteHosts("denied by config, blocked in this project's sessions, newest first:", denied);
+
+    /// <summary>Writes <paramref name="heading"/> and the newest of <paramref name="hosts"/> to stdout.</summary>
+    /// <returns>The ones shown.</returns>
+    /// <remarks>Only the newest few: the agent decides how many there are.</remarks>
+    private static List<Blocked> WriteHosts(string heading, List<Blocked> hosts)
+    {
+        var shown = hosts.Take(Allowlist.MaxListed).ToList();
+        Out.WriteStdout(heading + "\n");
         foreach (var entry in shown)
         {
             var when = entry.Last == DateTimeOffset.MinValue
@@ -353,10 +438,8 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
                 : entry.Last.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
             Out.WriteStdout($"  {Allowlist.FormatShownHost(entry.Host),-40} {when}\n");
         }
-        if (blocked.Count > shown.Count)
-            Out.WriteStdout($"  and {blocked.Count - shown.Count} more, blocked earlier\n");
-        var allowable = shown.Select(entry => entry.Host).Where(Allowlist.IsValidDomain).ToList();
-        if (allowable.Count > 0)
-            Out.WriteStdout($"pen allow {string.Join(' ', allowable)}   (add --global for all projects)\n");
+        if (hosts.Count > shown.Count)
+            Out.WriteStdout($"  and {hosts.Count - shown.Count} more, blocked earlier\n");
+        return shown;
     }
 }
