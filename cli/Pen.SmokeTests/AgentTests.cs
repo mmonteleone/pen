@@ -29,7 +29,7 @@ public sealed class AgentTests(AgentTests.Fixture fixture) : IClassFixture<Agent
     public void InstallDirsAreReadOnly() => Assert.True(Agents.HasPassed("install_dirs_read_only"), Agents.Describe());
 
     [Fact(DisplayName =
-        "the agents' recipes bring their domains (api.anthropic.com, api.openai.com, opencode.ai, models.dev, registry.npmjs.org)")]
+        "the agents' recipes bring their domains (api.anthropic.com, api.openai.com, opencode.ai, models.dev)")]
     public void RecipesBringTheirDomains() => Assert.True(Agents.HasPassed("domains"), Agents.Describe());
 
     [Fact(DisplayName = "auto-updaters off (env)")]
@@ -171,7 +171,7 @@ public sealed class AgentTests(AgentTests.Fixture fixture) : IClassFixture<Agent
                     for d in claude codex opencode pi; do ! touch /opt/pen/$d/lib/node_modules/.x 2>/dev/null || exit 1; done; ! touch /usr/local/bin/.x 2>/dev/null && ! touch /etc/codex/.x 2>/dev/null
                     """)
                 .Add("domains", """
-                    for d in api.anthropic.com api.openai.com opencode.ai models.dev registry.npmjs.org; do [ "$(curl -s -o /dev/null -w "%{http_connect}" -I https://$d)" != 403 ] || { echo "$d blocked" >&2; exit 1; }; done
+                    for d in api.anthropic.com api.openai.com opencode.ai models.dev; do [ "$(curl -s -o /dev/null -w "%{http_connect}" -I https://$d)" != 403 ] || { echo "$d blocked" >&2; exit 1; }; done
                     """)
                 .Add("auto_updaters_off", """
                     [ "$DISABLE_AUTOUPDATER" = 1 ] && [ "$CLAUDE_CODE_DISABLE_AUTOUPDATE" = 1 ] && [ "$OPENCODE_DISABLE_AUTOUPDATE" = 1 ] && [ "$PI_SKIP_VERSION_CHECK" = 1 ] && grep -q "check_for_update_on_startup = false" /etc/codex/managed_config.toml

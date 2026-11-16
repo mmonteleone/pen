@@ -34,8 +34,11 @@ public sealed class ProxyNetworkTests(ProxyNetworkTests.Fixture fixture) : IClas
     [Fact(DisplayName = "opencode.ai → 403 in a session without agents or tools (they bring their domains)")]
     public void OpenCodeIsDeniedWithoutAgents() => AssertCode("opencode_ai", "403", connect: true);
 
-    [Fact(DisplayName = "registry.npmjs.org → 403 in a session without agents or tools (they bring their domains)")]
-    public void NpmIsDeniedWithoutAgents() => AssertCode("registry_npmjs_org", "403", connect: true);
+    [Fact(DisplayName = "registry.npmjs.org and pypi.org are allowed in a session without agents or tools (defaults)")]
+    public void PackageRegistriesAreAllowedWithoutTools() =>
+        Assert.Multiple(
+            () => AssertCode("registry_npmjs_org", "200", connect: true),
+            () => AssertCode("pypi_org", "200", connect: true));
 
     [Fact(DisplayName = "port other than 443 refused for CONNECT")]
     public void OtherPortsAreRefused() => AssertCode("port_8443", "403", connect: true);
@@ -110,6 +113,7 @@ public sealed class ProxyNetworkTests(ProxyNetworkTests.Fixture fixture) : IClas
                 ("api_openai_com", "https://api.openai.com"),
                 ("opencode_ai", "https://opencode.ai"),
                 ("registry_npmjs_org", "https://registry.npmjs.org"),
+                ("pypi_org", "https://pypi.org"),
                 ("port_8443", "https://github.com:8443"),
             ];
             var setup = new StringBuilder();

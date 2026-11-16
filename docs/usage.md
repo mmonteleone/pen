@@ -69,6 +69,18 @@ The base image has `git`, `gh`, the Docker CLI (with buildx and compose plugins)
 
 </details>
 
+### Node and Python
+
+These are in the base image, so every session has them, and the domains for npm, PyPI and uv's downloads are allowed by default.
+
+Node is the newest LTS release when the base is built, installed in `/usr/local` with npm and npx. `pen upgrade` rebuilds the base and picks up the newest LTS then. `npm install -g` can't write to the image's `/usr/local` prefix during a session; use `npx`, project dependencies or a `.pen/Dockerfile`. `npm_config_nodedir=/usr/local` makes node-gyp use the tarball's headers rather than download them, and `NPM_CONFIG_UPDATE_NOTIFIER=false` turns off npm's update notices because npm updates with the image.
+
+Python is Ubuntu's `python3` (3.12) with `pip`, `venv`, `python3-dev` and a `python` alias. Use a virtual environment (`python3 -m venv`, `uv venv`) for `pip install`: the interpreter is read-only and marked `EXTERNALLY-MANAGED`. uv and uvx are at a version pinned by Pen. If a project needs another Python, uv downloads it into `~/.local/share/uv/python` from `releases.astral.sh` (or GitHub) and checks its hash.
+
+uv's cache is `~/.cache/uv` in the home volume. `UV_LINK_MODE=copy` avoids attempts to hardlink from that volume into the project. `uv tool install` puts commands in `~/.local/bin`, which isn't on `PATH`; use `uvx`, run them by path or add the directory in your shell config.
+
+A different Node major version or system Python needs a [`.pen/Dockerfile`](#project-settings). `/usr/local/bin` comes before `/usr/bin` on `PATH`, so a Node from Ubuntu or NodeSource in `/usr/bin` is hidden by the base's: install the other Node into `/usr/local` in place of the base's, or put its directory first with `ENV PATH=…` and set `npm_config_nodedir` to its prefix. The base's `python3` is Ubuntu's `/usr/bin/python3`, and uv also finds Pythons on `PATH`.
+
 <details>
 <summary>Domains added by each tool</summary>
 
@@ -123,18 +135,6 @@ Cargo's cache and installed commands go to `~/.cargo` in the home volume. `~/.ca
 Ubuntu's headless JDKs install in `/usr/lib/jvm`. `java` and `javac` use the newest installed version. Use the project's Maven or Gradle wrappers (`mvnw`, `gradlew`); Maven and Gradle aren't installed.
 
 Java ignores `HTTPS_PROXY`, so Pen configures each JDK to use `proxy:3128` and sets `MAVEN_OPTS` for Maven to use those settings. Dockerfile build steps have no proxy: a step that downloads with Java needs `JAVA_TOOL_OPTIONS="-Dhttp.proxyHost= -Dhttps.proxyHost="` to connect directly.
-
-### Node and Python
-
-These are in the base image, so every session has them, and the domains for npm, PyPI and uv's downloads are allowed by default.
-
-Node is the newest LTS release when the base is built, installed in `/usr/local` with npm and npx. `pen upgrade` rebuilds the base and picks up the newest LTS then. `npm install -g` can't write to the image's `/usr/local` prefix during a session; use `npx`, project dependencies or a `.pen/Dockerfile`. `npm_config_nodedir=/usr/local` makes node-gyp use the tarball's headers rather than download them, and `NPM_CONFIG_UPDATE_NOTIFIER=false` turns off npm's update notices because npm updates with the image.
-
-Python is Ubuntu's `python3` (3.12) with `pip`, `venv`, `python3-dev` and a `python` alias. Use a virtual environment (`python3 -m venv`, `uv venv`) for `pip install`: the interpreter is read-only and marked `EXTERNALLY-MANAGED`. uv and uvx are at a version pinned by Pen. If a project needs another Python, uv downloads it into `~/.local/share/uv/python` from `releases.astral.sh` (or GitHub) and checks its hash.
-
-uv's cache is `~/.cache/uv` in the home volume. `UV_LINK_MODE=copy` avoids attempts to hardlink from that volume into the project. `uv tool install` puts commands in `~/.local/bin`, which isn't on `PATH`; use `uvx`, run them by path or add the directory in your shell config.
-
-A different Node major version or system Python needs a [`.pen/Dockerfile`](#project-settings).
 
 ### CodeGraph
 
@@ -396,7 +396,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends postgresql-clie
 
 `FROM pen:latest` includes your selected tools, so build steps can use them. **Build steps have direct network access, outside the session allowlist.**
 
-Pen shows the Dockerfile and a path to a private snapshot of the build context for review. It builds from the approved snapshot. A change to the Dockerfile or any other build-context file needs approval again. The context excludes `config.toml`, so `COPY config.toml` won't work.
+Pen shows the Dockerfile and a path to a private snapshot of the build context for review. It builds from the approved snapshot. A change to the Dockerfile or any other build-context file needs approval again. The context excludes `config.toml`, so `COPY config.toml` won't work. Sessions always run a command (yours, or your shell for a plain `pen`), so a `CMD` in the Dockerfile isn't used.
 
 <details>
 <summary>Tool approvals and build-context restrictions</summary>
