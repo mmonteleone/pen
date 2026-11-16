@@ -1,0 +1,21 @@
+docker = true
+
+allow = [
+  "ports.ubuntu.com",
+  "cli.github.com",
+  "download.docker.com",
+  "nodejs.org",
+  "registry.npmjs.org",
+  "builds.dotnet.microsoft.com",
+  "dl.google.com",
+  "go.dev",
+]
+
+tools = [
+  "dotnet:11",
+  "codegraph",
+  "claude",
+  "codex",
+  "pi",
+  "opencode"
+]
