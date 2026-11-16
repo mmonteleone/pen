@@ -286,7 +286,7 @@ A submodule whose checkout has its own `.git` directory (made by older git, or b
 
 ## Configuration
 
-Pen creates `~/.config/pen/` on first run. A project needs no Pen files unless you want to share its setup.
+Pen creates `~/.config/pen/` on first run. A project needs no Pen files unless you want to share its setup; `pen init` writes a starting `.pen/config.toml`.
 
 | Location | Use it for |
 |---|---|
@@ -380,7 +380,7 @@ Pen creates the seed once and never updates it. Seeds from before tools were add
 
 ### Project settings
 
-Use `.pen/config.toml` to share a project's setup. It is usually committed, so secrets (`[github]` and `[env]`) aren't allowed here. Include only the settings you need:
+Use `.pen/config.toml` to share a project's setup. It is usually committed, so secrets (`[github]` and `[env]`) aren't allowed here. Include only the settings you need. `pen init` writes a starting file (see [below](#starting-with-pen-init)):
 
 ```toml
 # .pen/config.toml
@@ -415,6 +415,16 @@ pen trust --yes   # approve without asking, for scripts
 ```
 
 Approvals are per directory, so a new worktree starts with none. Domains added through `pen allow` count as approved; unapproved domains never reach running sessions. `pen upgrade` skips unapproved project tools and Dockerfiles.
+
+#### Starting with `pen init`
+
+`pen init` writes `.pen/config.toml` for the project: a commented template of every project setting, with what it finds turned on. It looks at most three directories deep and skips dependency and build directories such as `node_modules`, `vendor`, `target`, `bin`, `obj`, `dist` and `build`. Each line it turns on has a comment saying what it was found from.
+
+- Toolchains go in `tools`: .NET from `global.json` or project files (its SDK major from `global.json` pins the version, otherwise the default applies), Go from `go.mod`, Rust from `Cargo.toml` (its channel from `rust-toolchain.toml` or `rust-toolchain`), Java from Maven or Gradle files (its major from `.java-version`). Agents stay commented.
+- Secret files go in `hide`: `.env` and `.env.<suffix>` files, except those ending in example, sample, template, dist or defaults (also as the last part of a longer suffix), key files (`*.pem`, `*.key`, `*.p12`, `*.pfx`) and a `secrets/` directory. A key-file pattern is anchored at each directory where one was found, such as `/certs/*.pem`, so it doesn't reach dependency directories.
+- Docker files, and a `.env` beside a `.env.example` (as a `[replace]` example), appear only as commented hints.
+
+It never overwrites: if `.pen/config.toml` exists, it stops and you edit that file. Review what it wrote and commit it. Nothing it writes is approved for you: its tools need approval like any other change to `.pen/`, at the next session or with `pen trust`. `pen allow` and `pen deny` create the same commented template when there's no `.pen/config.toml` yet. The first session in a project without one mentions `pen init` once.
 
 #### Extra software with a Dockerfile
 
@@ -462,7 +472,7 @@ Patterns follow gitignore's rules, simplified:
 
 A pattern is refused if it contains `[`, `]` or `\`, has `.` or `..` or an empty segment, is empty or contains a NUL character, starts or ends with whitespace, starts with `!` or `#`, has a `.git` segment, has `.pen` (any case) as its first segment (`.pen/…` or `/.pen/…`; `.penrc` is fine), or would hide the whole project (`*`, `**/*`).
 
-`[replace]` maps a target to a source, both paths relative to the project and written in quotes as the key and the value. The sandbox sees a copy of the source at the target's path:
+`[replace]` maps a target to a source, both paths relative to the project and written in quotes as the key and the value. The inline form `replace = { ".env" = ".pen/agent.env" }`, which the `pen init` template uses, is equivalent; written as a `[replace]` table, it must come after every other key in the file. The sandbox sees a copy of the source at the target's path:
 
 - The target must be an existing regular file, reached without passing through a symlink, and outside `.git` and `.pen`; a source can't be in `.git` either. Replacing a file in a directory that `hide` hides is refused. A replaced file that `hide` also matches is replaced: replace wins.
 - The source must be a regular file of at most 1 MB, read without following symlinks, with no other hard links. A source that `hide` hides is refused, since `.pen/` can be edited by the agent and would otherwise show it what you hide. A source in `.pen/` is fine, but with a [`.pen/Dockerfile`](#extra-software-with-a-dockerfile) it's also part of the build context: it's in the snapshot Pen builds from, and every change to it asks for approval again. A source elsewhere in the project avoids that.
@@ -547,6 +557,7 @@ pen [--docker] [--port <n>]… [--tool <spec>]… [<cmd…>]
 pen [--docker] [--port <n>]… [--tool <spec>]… run <cmd…>
                                 same, for a command that clashes with a subcommand name
 pen --tool list                 list the agents and tools pen can install
+pen init                        write a starting .pen/config.toml for this project
 pen allow <domain…> [--global]  allow domains for this project (or all projects)
 pen allow                       list recently blocked domains
 pen allow --defaults            list the domains pen allows out of the box

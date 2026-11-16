@@ -80,6 +80,7 @@ Retry the request in the agent; no restart is needed. Blocked domains also appea
 pen                          # shell in the sandbox
 pen run git status           # run a command in the sandbox
 pen run npm ci               # ...such as npm, with Node preinstalled
+pen init                     # write a starting .pen/config.toml for this project
 pen allow                    # show recently blocked domains
 pen allow example.com        # allow a domain, including in running sessions
 pen --tool list              # list the agents and tools Pen can install
@@ -96,7 +97,7 @@ pen clean --stale            # remove moved/deleted projects' state and old tool
 
 Options go before the agent name. Dev servers must listen on `0.0.0.0` inside the sandbox. Linked worktrees share the repo's logins and caches.
 
-For a new project, try a restore or build first, such as `pen run npm ci`, adding a toolchain the base lacks with `--tool` (`pen --tool go run go build ./...`). A repo's [`.pen/` settings](docs/usage.md#project-settings) need your approval before they can add domains, tools, Docker, a Dockerfile or a different owner's token.
+For a new project, run `pen init` to write a starting `.pen/config.toml` with the toolchains and secret files it finds (review it and commit it; it never overwrites). Or try a restore or build first, such as `pen run npm ci`, adding a toolchain the base lacks with `--tool` (`pen --tool go run go build ./...`). A repo's [`.pen/` settings](docs/usage.md#project-settings) need your approval before they can add domains, tools, Docker, a Dockerfile or a different owner's token.
 
 ## Limitations
 
