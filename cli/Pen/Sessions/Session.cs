@@ -80,6 +80,10 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
                 RepoGuard.MayFoldCase);
         foreach (var warning in maskWarnings)
             Out.WriteLine(warning);
+        // Last of the messages, past the refusals in Prepare and the locks, so a session that won't start rarely
+        // uses up the hint.
+        if (InitHint.TryClaim(Project.PenDir, RuntimeDir))
+            Out.WriteLine(InitHint.Message);
 
         var session = CreateSessionDir();
         using var sessionLock = FileLock.TryTake(session.LockFile, exclusive: true)
