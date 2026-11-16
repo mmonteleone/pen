@@ -12,7 +12,7 @@ Agents run with permission prompts off. When they finish, review their edits and
 ## What it does
 
 - Mounts your project read-write, leaving your other host files and credentials outside the container.
-- Sends outbound traffic through a domain allowlist. `pen allow` adds domains without restarting.
+- Sends outbound traffic through a domain allowlist. `pen allow` adds domains without restarting, and `pen deny` blocks them over any allow.
 - Mounts repo config and `.git/hooks` read-only and checks git metadata at session end for known ways to make host git run code. [Limitations apply.](docs/limitations.md)
 - Passes in the GitHub token you supply for the repo's owner. Use a read-only token; your host SSH and signing keys stay outside.
 - Keeps agent logins, settings and caches between sessions. Several agents can run at once, including in linked worktrees.

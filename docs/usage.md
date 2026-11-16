@@ -178,11 +178,37 @@ pen allow example.com           # allow this domain for the project
 pen allow .example.com          # allow the domain and all its subdomains
 pen allow example.com --global  # allow it in every project
 pen allow --defaults            # list Pen's default allowlist
+pen deny gist.github.com        # block a domain, over every allow
+pen deny                        # list denied domains
 ```
 
 The change is saved and applied to running sessions in the same directory (`--global`: all projects). Retry the blocked request; you don't need to restart the agent. If a live update fails, repeat `pen allow example.com`, even if the domain is already saved. Blocked domains also appear when a session ends.
 
 Pen's defaults cover GitHub, npm, PyPI and uv's Python downloads, the hosts image builds download from (Ubuntu's, Docker's and the GitHub CLI's apt repositories, and Go, Rust and .NET releases), container registries and developer docs. [Agents](#agents) and [tools](#tools) add their provider and other package-registry domains when installed. You can allow other domains with the commands above.
+
+### Denying domains
+
+`pen deny <domain…> [--global]` adds domains to `deny` in `.pen/config.toml` (`--global`: `~/.config/pen/config.toml`) and applies them to running sessions the same way `pen allow` does. `pen deny` alone lists the denied domains, the file each is in, and which of Pen's defaults or agent and tool domains each covers. `deny` is also a config key in both files, and the lists add together.
+
+Deny wins over every allow: the defaults, both config files, agent and tool domains, and `*`. An exact deny blocks one host under an allowed wildcard: with `.github.com` allowed, `pen deny gist.github.com` blocks only `gist.github.com`. A leading dot denies subdomains too. Denying a domain an agent or tool needs breaks it, and Pen warns at session start when that happens. A project's `deny` needs no [approval](#project-settings), since it can only narrow access.
+
+### Open egress
+
+`pen allow '*'` (or `allow = ["*"]` in either config file) allows any domain name. Quote the `*`: an unquoted one is expanded by the shell, and Pen warns when an argument looks like a file name it expanded.
+
+```sh
+pen allow '*'            # any domain name, for this project
+pen allow '*' --global   # ...for every project
+```
+
+Open egress still blocks:
+
+- raw IP addresses in any spelling;
+- names that resolve to private, loopback or link-local addresses, which covers the host, other containers and metadata services;
+- names that don't resolve;
+- anything in `deny`.
+
+A domain allowed by name keeps working even if it resolves to a private address; `*` doesn't add that. A project's `*` needs [approval](#project-settings), with its own line in the prompt. A `*` in your user config covers only a project's `*`; the project's named domains still ask. Pen warns at every session start while egress is open, and `pen ps` shows `open` in its EGRESS column. Open egress gives up the main limit on where data can go; see [its limits](limitations.md#open-egress).
 
 Allowed domains can accept uploads, including with credentials supplied by a prompt injection. The proxy restricts destinations; it doesn't keep your code private from those destinations. See [network limits and the older-Docker DNS caveat](limitations.md#network-and-credentials).
 
@@ -264,9 +290,9 @@ Pen creates `~/.config/pen/` on first run. A project needs no Pen files unless y
 
 | Location | Use it for |
 |---|---|
-| `~/.config/pen/config.toml` | Your default tools, allowed domains, GitHub tokens and environment variables |
+| `~/.config/pen/config.toml` | Your default tools, allowed and denied domains, GitHub tokens and environment variables |
 | `~/.config/pen/home/` | Shared agent instructions and settings, using their usual home-directory paths |
-| `.pen/config.toml` | This project's tools, allowed domains, ports, Docker and GitHub owner; no secrets |
+| `.pen/config.toml` | This project's tools, allowed and denied domains, ports, Docker and GitHub owner; no secrets |
 | `.pen/Dockerfile` | Extra software beyond the built-in tools |
 
 Config files use [TOML](https://toml.io): quote strings; unknown keys are errors so typos don't go unnoticed. Put secrets only in your user config:
@@ -275,6 +301,7 @@ Config files use [TOML](https://toml.io): quote strings; unknown keys are errors
 # ~/.config/pen/config.toml
 tools = ["dotnet:10"]
 allow = ["example.com"]
+deny = ["gist.github.com"]
 
 [github]
 my-org = "github_pat_…"
@@ -283,7 +310,7 @@ my-org = "github_pat_…"
 CLAUDE_CODE_OAUTH_TOKEN = "…"
 ```
 
-`allow` and `tools` lists add together across user and project config. `--tool` adds to the tool list; `allow` also includes Pen's defaults. Other keys belong to just one file. Changes apply to the next session, with [approval](#project-settings) where required. `pen allow` also updates running sessions.
+`allow`, `deny` and `tools` lists add together across user and project config. `--tool` adds to the tool list; `allow` also includes Pen's defaults, and `deny` beats every `allow` entry. Other keys belong to just one file. Changes apply to the next session, with [approval](#project-settings) where required. `pen allow` also updates running sessions.
 
 ### Logins and API keys
 
@@ -359,6 +386,7 @@ Use `.pen/config.toml` to share a project's setup. It is usually committed, so s
 # .pen/config.toml
 tools = ["go", "rust"]
 allow = [".internal.example.org"]
+deny = ["gist.github.com"]
 ports = [5173]
 docker = true
 github_owner = "my-org"
@@ -368,13 +396,13 @@ The `.pen/` directory is read-only inside the sandbox. Because its contents may 
 
 | Setting | What needs approval |
 |---|---|
-| `allow` | Domains not already allowed |
+| `allow` | Domains not already allowed, and `*` (any domain) on its own line |
 | `tools` | Each tool's version and domains |
 | `docker = true` | Access to Docker-in-Docker |
 | `github_owner` | An owner different from the one in `origin` |
 | `.pen/Dockerfile` | The Dockerfile and everything else in `.pen/` except `config.toml` |
 
-Ports need no approval because they only publish to host loopback. If you decline, the session doesn't start. Without a terminal, settings that need approval are refused.
+`deny` needs no approval because it only narrows access, and ports need none because they only publish to host loopback. If you decline, the session doesn't start. Without a terminal, settings that need approval are refused.
 
 ```sh
 pen trust         # review and approve before starting a session
@@ -479,6 +507,8 @@ pen --tool list                 list the agents and tools pen can install
 pen allow <domain…> [--global]  allow domains for this project (or all projects)
 pen allow                       list recently blocked domains
 pen allow --defaults            list the domains pen allows out of the box
+pen deny <domain…> [--global]   deny domains over every allow, for this project (or all projects)
+pen deny                        list denied domains
 pen trust [--yes | --list]       review and approve what this project's .pen/ asks for
 pen ps                          list running sessions, ports and tools across projects
 pen sign [<base>]               re-sign your unpushed commits with your own key

@@ -35,6 +35,14 @@ Unless overridden by git config: `lfs.url`, `lfs.pushurl`, `remote.<name>.lfsurl
 
 The allowlist limits destinations, not what the agent sends. AI providers, GitHub and package registries accept uploads with credentials that an attacker can supply. Some toolchains add broad destinations: Go needs `storage.googleapis.com`, which allows uploads through signed URLs. Sites accepting anonymous writes need no credentials at all.
 
+### Open egress
+
+`pen allow '*'` allows any domain name, which gives up the destination limit: the main defence against data being sent somewhere unexpected. Anything the agent can read can then be uploaded to any host that accepts it. Use it only for work where that is acceptable, and prefer naming domains.
+
+In open mode `deny` is best-effort: it blocks the names you list, but any other name for the same service (a CNAME, a mirror, a CDN domain) gets through.
+
+Blocking private destinations is best-effort too. Squid keeps a resolved answer for about a minute, so a DNS rebind to a private address is caught only once that answer expires. A domain allowed by name still reaches private addresses, even in open mode. Raw IPs stay blocked either way.
+
 The session allowlist doesn't apply when building a [`.pen/Dockerfile`](usage.md#project-settings). Its build steps reach the network directly, which is part of what you approve.
 
 Use [read-only GitHub tokens](usage.md#github), scoped to the repos you need. Pen passes tokens through without checking their permissions. Logins or keys you add inside the sandbox carry their usual permissions too.
