@@ -17,13 +17,13 @@ Start an agent, open a shell or run a single command:
 ```sh
 pen claude                  # or: pen codex, pen opencode, pen pi
 pen                         # interactive shell
-pen --tool node run npm ci  # run npm with Node installed
-pen --tool python run uv sync
+pen run npm ci              # run npm
+pen run uv sync             # run uv
 ```
 
-Pen installs the agent you name. A plain `pen` shell has no agents or language toolchains unless you [add them](#tools). Agents run with permission prompts off; the container is the boundary.
+Pen installs the agent you name. A plain `pen` opens your shell when your host `$SHELL` is bash, zsh or fish, and bash otherwise. Put the shell's config in the [home seed](#agent-config-the-home-seed) (`.config/fish/config.fish`, `.zshrc`). Node, Python and C build tools are preinstalled; a plain `pen` shell has no agents or other toolchains unless you [add them](#tools). Agents run with permission prompts off; the container is the boundary.
 
-Put Pen's options before the command. Everything after the command name goes to that command: `pen --tool node claude --help` passes `--help` to Claude. `pen run <command>` also lets you run a command whose name matches a Pen subcommand, such as `pen run clean`.
+Put Pen's options before the command. Everything after the command name goes to that command: `pen --tool go claude --help` passes `--help` to Claude. `pen run <command>` also lets you run a command whose name matches a Pen subcommand, such as `pen run clean`.
 
 Log in inside the sandbox when prompted; see [logins and API keys](#logins-and-api-keys). Your project files are mounted directly, so edits appear on the host immediately. Logins, sandbox settings and caches persist per project; linked worktrees share them.
 
@@ -37,14 +37,14 @@ Add the tools your project needs with `--tool`:
 
 ```sh
 pen --tool list                              # list available agents and tools
-pen --tool node claude                       # Node and npm
-pen --tool python codex                      # Python, uv and uvx
+pen --tool go claude                         # Go
+pen --tool rust codex                        # Rust, with clippy and rustfmt
 pen --tool dotnet:8 --tool dotnet:10 claude  # two .NET SDKs
 ```
 
-Use `name` for the default version or `name:version` to choose one. To keep tools installed for future sessions, add `tools = ["node", "python"]` to your [user or project config](#configuration). The lists and command-line options add together; order and duplicates don't matter. Project tools need [approval](#project-settings).
+Use `name` for the default version or `name:version` to choose one. To keep tools installed for future sessions, add `tools = ["go", "rust"]` to your [user or project config](#configuration). The lists and command-line options add together; order and duplicates don't matter. Project tools need [approval](#project-settings).
 
-Each tool also allows the network domains it needs. For example, `node` brings npm's registry access. Tools are built into an image once and reused across projects with the same selection. Use [`pen upgrade`](#upgrading-and-cleaning-up) to refresh them.
+Each tool also allows the network domains it needs. For example, `go` brings the Go module proxy. Tools are built into an image once and reused across projects with the same selection. Use [`pen upgrade`](#upgrading-and-cleaning-up) to refresh them.
 
 | Tool | Default | Accepted versions | Multiple versions together |
 |---|---|---|---|
@@ -52,20 +52,20 @@ Each tool also allows the network domains it needs. For example, `node` brings n
 | `go` | `1.27` | `1.21` to `1.27` | no |
 | `rust` | `stable` | `stable`, a minor version from `1.49` to `1.99` (`1.85` or `1.85.0`), or a patch release the recipe lists (`1.85.1`) | yes |
 | `java` | `21` | `8`, `11`, `17`, `21`, `25` | yes |
-| `node` | `26` | `20`, `22`, `24`, `26` (major version) | no |
-| `python` | `3.15` | `3.9` to `3.15` (minor version) | yes |
 | `codegraph` | `1` | `1` (major version) | no |
 
-Versions are taken literally: `go:1.27` is accepted; `go:1.27.0` isn't. Each selection installs the newest matching release when the image is built. Python uses the newest patch release known to Pen's bundled uv; a newer patch needs a Pen update. New versions outside the table also need a Pen update.
+Versions are taken literally: `go:1.27` is accepted; `go:1.27.0` isn't. Each selection installs the newest matching release when the image is built. New versions outside the table also need a Pen update.
 
 <details>
 <summary>What's included without tools</summary>
 
 The base image has `git`, `gh`, the Docker CLI (with buildx and compose plugins), `curl`, `wget`, `jq`, `ripgrep`, `fd`, `vim`, `less`, `unzip`, `xz`, `bzip2`, `patch`, `gnupg`, `openssl` and `socat`.
 
-Add `node` for `node`, `npm` and `npx`, or `python` for Python, uv and uvx. The base has no C build tools. The `python`, `node` and `rust` tools bring Ubuntu's `build-essential`; `go` brings `gcc` and `libc6-dev`. The `node` tool also includes Ubuntu's `python3` for node-gyp.
-
-Pen has a private Node in `/opt/pen/node` for installing npm recipes and running Codex and Pi. For your own commands, use the `node` tool.
+- Node LTS with `npm` and `npx`; see [Node and Python](#node-and-python).
+- Python 3 with `pip`, `venv`, `uv` and `uvx`.
+- Ubuntu's `build-essential` (`gcc`, `g++`, `make` and headers) and `python3-dev`.
+- `fish` and `zsh`, besides bash.
+- `ssh` and `ssh-keygen`. The sandbox reaches the network only through the HTTP proxy (plain HTTP, and HTTPS on port 443), so ssh can't connect out; GitHub SSH remotes (`git@github.com:`, `ssh://git@github.com/`) are rewritten to HTTPS.
 
 </details>
 
@@ -78,8 +78,6 @@ Pen has a private Node in `/opt/pen/node` for installing npm recipes and running
 | `go` | `proxy.golang.org`, `sum.golang.org`, `storage.googleapis.com` |
 | `rust` | `index.crates.io`, `static.crates.io` |
 | `java` | `repo.maven.apache.org`, `repo1.maven.org`, `services.gradle.org`, `downloads.gradle.org`, `plugins.gradle.org`, `plugins-artifacts.gradle.org` |
-| `node` | `registry.npmjs.org`, `registry.yarnpkg.com`, `repo.yarnpkg.com`, `nodejs.org` |
-| `python` | `pypi.org`, `files.pythonhosted.org`, `releases.astral.sh` |
 | `codegraph` | none |
 
 </details>
@@ -126,30 +124,17 @@ Ubuntu's headless JDKs install in `/usr/lib/jvm`. `java` and `javac` use the new
 
 Java ignores `HTTPS_PROXY`, so Pen configures each JDK to use `proxy:3128` and sets `MAVEN_OPTS` for Maven to use those settings. Dockerfile build steps have no proxy: a step that downloads with Java needs `JAVA_TOOL_OPTIONS="-Dhttp.proxyHost= -Dhttps.proxyHost="` to connect directly.
 
-### Node
+### Node and Python
 
-Node installs in `/usr/local` from the official tarball, with the newest release of the selected major version, npm and npx. Node 20, 22 and 24 also include corepack.
+These are in the base image, so every session has them, and the domains for npm, PyPI and uv's downloads are allowed by default.
 
-Use `npx`, project dependencies or a `.pen/Dockerfile` for packages. `npm install -g` can't write to the image's `/usr/local` prefix during a session.
+Node is the newest LTS release when the base is built, installed in `/usr/local` with npm and npx. `pen upgrade` rebuilds the base and picks up the newest LTS then. `npm install -g` can't write to the image's `/usr/local` prefix during a session; use `npx`, project dependencies or a `.pen/Dockerfile`. `npm_config_nodedir=/usr/local` makes node-gyp use the tarball's headers rather than download them, and `NPM_CONFIG_UPDATE_NOTIFIER=false` turns off npm's update notices because npm updates with the image.
 
-Ubuntu's `python3` and `build-essential` are included for node-gyp. `npm_config_nodedir=/usr/local` makes it use the tarball's headers rather than download them. Pen also sets:
-
-- `NODE_OPTIONS=--disable-warning=UNDICI-EHPA` to silence Node 22's experimental proxy warning. Your own `NODE_OPTIONS` replaces it.
-- `NPM_CONFIG_UPDATE_NOTIFIER=false` because npm updates with the image.
-
-Node 20's `fetch()` ignores the proxy and can't reach the network during a session; npm works. MCP servers started with `npx` need this tool in every project that uses them.
-
-### Python
-
-Pen installs uv's managed CPython builds in `/usr/local/share/uv/python`, with `python3.X` and `python3.X-config` on `PATH` for each selected version. `python3`, `python` and `python3-config` use the newest. These take precedence over Ubuntu's Python from the Node tool. Ubuntu's `build-essential` is included for C extensions.
-
-uv and uvx install in `/usr/local/bin` at a version pinned by Pen. Each Python's patch release is the newest that uv version knows, so a newer patch needs a Pen update.
-
-Use a virtual environment (`python3 -m venv`, `uv venv`) for `pip install`: the image's interpreters are read-only and marked `EXTERNALLY-MANAGED`. uv finds installed Pythons on `PATH` for `uv venv`, `uv run` and `uv sync`. If a project needs another Python, uv downloads it into `~/.local/share/uv/python` from `releases.astral.sh` or GitHub and checks its hash.
+Python is Ubuntu's `python3` (3.12) with `pip`, `venv`, `python3-dev` and a `python` alias. Use a virtual environment (`python3 -m venv`, `uv venv`) for `pip install`: the interpreter is read-only and marked `EXTERNALLY-MANAGED`. uv and uvx are at a version pinned by Pen. If a project needs another Python, uv downloads it into `~/.local/share/uv/python` from `releases.astral.sh` (or GitHub) and checks its hash.
 
 uv's cache is `~/.cache/uv` in the home volume. `UV_LINK_MODE=copy` avoids attempts to hardlink from that volume into the project. `uv tool install` puts commands in `~/.local/bin`, which isn't on `PATH`; use `uvx`, run them by path or add the directory in your shell config.
 
-MCP servers started with `uvx` need this tool in every project that uses them.
+A different Node major version or system Python needs a [`.pen/Dockerfile`](#project-settings).
 
 ### CodeGraph
 
@@ -197,7 +182,7 @@ pen allow --defaults            # list Pen's default allowlist
 
 The change is saved and applied to running sessions in the same directory (`--global`: all projects). Retry the blocked request; you don't need to restart the agent. If a live update fails, repeat `pen allow example.com`, even if the domain is already saved. Blocked domains also appear when a session ends.
 
-Pen's defaults cover GitHub, container registries and developer docs. [Agents](#agents) and [tools](#tools) add their provider and package-registry domains when installed. You can allow other domains with the commands above.
+Pen's defaults cover GitHub, npm, PyPI and uv's Python downloads, container registries and developer docs. [Agents](#agents) and [tools](#tools) add their provider and other package-registry domains when installed. You can allow other domains with the commands above.
 
 Allowed domains can accept uploads, including with credentials supplied by a prompt injection. The proxy restricts destinations; it doesn't keep your code private from those destinations. See [network limits and the older-Docker DNS caveat](limitations.md#network-and-credentials).
 
@@ -206,7 +191,7 @@ Allowed domains can accept uploads, including with credentials supplied by a pro
 Forward a port to open a sandbox dev server in your host browser:
 
 ```sh
-pen --port 5173 --tool node claude
+pen --port 5173 claude
 ```
 
 Have the server listen on `0.0.0.0` inside the sandbox, for example with `vite --host`. Then open `http://localhost:5173` on the host. For ASP.NET Core, set `ASPNETCORE_URLS=http://0.0.0.0:5000` and forward port 5000.
@@ -346,7 +331,7 @@ For project-specific settings, use each agent's usual project files. To change t
 
 Seed files overwrite matching sandbox files on every start, regardless of modification times. Removing a file from the seed stops managing it but leaves its last sandbox copy; delete that copy inside the sandbox too if you want it removed. Files that aren't in the seed, including logins and session state, stay in the project's home volume.
 
-MCP servers started with `npx` need the [`node` tool](#tools); those started with `uvx` need `python`. Add the tool to your user config so it's in every project that uses the server. The seed Pen creates registers no MCP servers.
+The seed Pen creates registers no MCP servers.
 
 <details>
 <summary>Claude MCP settings, credentials and project memory</summary>
@@ -372,7 +357,7 @@ Use `.pen/config.toml` to share a project's setup. It is usually committed, so s
 
 ```toml
 # .pen/config.toml
-tools = ["node", "python"]
+tools = ["go", "rust"]
 allow = [".internal.example.org"]
 ports = [5173]
 docker = true
@@ -521,7 +506,7 @@ Only the command's first word selects an agent automatically. `pen run claude` i
 
 `latest` means the newest release when the image is built. It isn't checked on each session. Run [`pen upgrade`](#upgrading-and-cleaning-up) to rebuild with current releases; pinned releases stay at the requested version.
 
-OpenCode and Pi can reach Anthropic and OpenAI by default. For another provider, use `pen allow` for its API domain. Pi packages from npm (`pi install npm:<pkg>`) also need the `node` tool: without it, the command fails with `spawn npm ENOENT`.
+OpenCode and Pi can reach Anthropic and OpenAI by default. For another provider, use `pen allow` for its API domain. Pi packages from npm (`pi install npm:<pkg>`) work, since npm is in the base.
 
 <details>
 <summary>Supported releases and domains</summary>
@@ -530,7 +515,7 @@ OpenCode and Pi can reach Anthropic and OpenAI by default. For another provider,
 |---|---|---|---|---|
 | `claude` | `claude` (Claude Code, from npm) | `latest` | `latest` or an exact release, 2.1.113 or later (`2.1.300`) | `.anthropic.com`, `.claude.ai`, `.claude.com` |
 | `codex` | `codex` (Codex, from npm) | `latest` | `latest` or an exact release, 0.1.2504211509 or later (`0.167.0`) | `.openai.com`, `.chatgpt.com` |
-| `opencode` | `opencode` (OpenCode, from npm) | `latest` | `latest` or an exact release, 1.15.1 or later (`1.19.0`) | `.opencode.ai`, `models.dev`, `registry.npmjs.org` (for its plugin package), `.anthropic.com`, `.claude.ai`, `.claude.com`, `.openai.com`, `.chatgpt.com` |
+| `opencode` | `opencode` (OpenCode, from npm) | `latest` | `latest` or an exact release, 1.15.1 or later (`1.19.0`) | `.opencode.ai`, `models.dev`, `.anthropic.com`, `.claude.ai`, `.claude.com`, `.openai.com`, `.chatgpt.com` |
 | `pi` | `pi` (Pi, from npm) | `latest` | `latest` or an exact release, 0.84.3 or later (`1.5.2`) | `.anthropic.com`, `.claude.ai`, `.claude.com`, `.openai.com`, `.chatgpt.com` |
 
 </details>
@@ -545,7 +530,7 @@ Agents install in `/opt/pen/<agent>`, which sessions can't write. Auto-updaters 
 - OpenCode: `OPENCODE_DISABLE_AUTOUPDATE=1`.
 - Pi: `PI_SKIP_VERSION_CHECK=1`.
 
-Claude Code and OpenCode are native binaries. Codex and Pi run on Pen's private Node, so the `node` tool's version doesn't affect them. That private Node's `npm` isn't on the session's `PATH`; add the `node` tool when you need npm.
+Claude Code and OpenCode are native binaries. Codex and Pi run on the base's Node through wrappers that call `/usr/local/bin/node` directly, so a Node from nvm or volta in the home volume doesn't affect them.
 
 </details>
 

@@ -16,7 +16,7 @@ Agents run with permission prompts off. When they finish, review their edits and
 - Mounts repo config and `.git/hooks` read-only and checks git metadata at session end for known ways to make host git run code. [Limitations apply.](docs/limitations.md)
 - Passes in the GitHub token you supply for the repo's owner. Use a read-only token; your host SSH and signing keys stay outside.
 - Keeps agent logins, settings and caches between sessions. Several agents can run at once, including in linked worktrees.
-- Adds [toolchains](docs/usage.md#tools) (Node, Python, .NET, Go, Rust, Java), a [project Dockerfile](docs/usage.md#project-settings), [dev-server ports](docs/usage.md#dev-servers) or [Docker-in-Docker](docs/usage.md#docker-in-docker) as needed.
+- Has Node, Python and C build tools preinstalled. Adds [toolchains](docs/usage.md#tools) (.NET, Go, Rust, Java), a [project Dockerfile](docs/usage.md#project-settings), [dev-server ports](docs/usage.md#dev-servers) or [Docker-in-Docker](docs/usage.md#docker-in-docker) as needed.
 
 Pen gives these terminal agents a shared container setup, network restrictions and host git checks. If your existing agent sandbox or dev container covers those needs, you may not need Pen. Containers share a kernel; use a VM if you need a separate one.
 
@@ -78,7 +78,7 @@ Retry the request in the agent; no restart is needed. Blocked domains also appea
 ```sh
 pen                          # shell in the sandbox
 pen run git status           # run a command in the sandbox
-pen --tool node run npm ci   # ...with Node and npm installed
+pen run npm ci               # ...such as npm, with Node preinstalled
 pen allow                    # show recently blocked domains
 pen allow example.com        # allow a domain, including in running sessions
 pen --tool list              # list the agents and tools Pen can install
@@ -95,7 +95,7 @@ pen clean --stale            # remove moved/deleted projects' state and old tool
 
 Options go before the agent name. Dev servers must listen on `0.0.0.0` inside the sandbox. Linked worktrees share the repo's logins and caches.
 
-For a new project, add its toolchain and try a restore or build first, such as `pen --tool node run npm ci`. A repo's [`.pen/` settings](docs/usage.md#project-settings) need your approval before they can add domains, tools, Docker, a Dockerfile or a different owner's token.
+For a new project, try a restore or build first, such as `pen run npm ci`, adding a toolchain the base lacks with `--tool` (`pen --tool go run go build ./...`). A repo's [`.pen/` settings](docs/usage.md#project-settings) need your approval before they can add domains, tools, Docker, a Dockerfile or a different owner's token.
 
 ## Limitations
 
