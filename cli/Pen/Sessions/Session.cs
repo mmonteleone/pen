@@ -74,7 +74,12 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         using var sessionLock = FileLock.TryTake(session.LockFile, exclusive: true)
             ?? throw new InvalidOperationException("new session's lock is taken");
         var env = WriteSessionDir(session, request, prepared, forwarded);
-        var startInfo = CreateAgentStartInfo(session, request.Command, prepared.Token, env);
+        // An empty command is still recorded as such (pen ps shows "(shell)"); the sandbox runs a login shell
+        // matching the host's (InteractiveShell.For).
+        var command = request.Command.Count > 0
+            ? request.Command
+            : InteractiveShell.For(Environment.GetEnvironmentVariable("SHELL"));
+        var startInfo = CreateAgentStartInfo(session, command, prepared.Token, env);
         var exitCode = RunAgent(session, startInfo, env, signals);
 
         EndAndRemind(session);
