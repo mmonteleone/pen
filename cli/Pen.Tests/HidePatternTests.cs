@@ -21,6 +21,13 @@ public class HidePatternTests
     private static bool Dir(string pattern, string path) => Parse(pattern).IsMatch(path, isDirectory: true);
 
     [Fact]
+    public void APatternOfAtMost1024CharactersParsesAndALongerOneIsRefused()
+    {
+        Parse(new string('a', 1024));
+        Assert.Equal("a pattern can't be longer than 1024 characters", Refuse(new string('a', 1025)));
+    }
+
+    [Fact]
     public void ANameWithoutSlashMatchesAtAnyDepth()
     {
         var pattern = Parse(".env");
@@ -241,6 +248,7 @@ public class HidePatternTests
     [Fact]
     public void ANfcPatternMatchesAnNfdName()
     {
+        Assert.SkipUnless(OperatingSystem.IsMacOS(), "only macOS file systems take NFC and NFD spellings for one name");
         var pattern = Parse("caf\u00e9.env");
         Assert.True(pattern.IsMatch("caf\u0065\u0301.env", false));
         Assert.True(pattern.IsMatch("dir/CAFE\u0301.env", false));
@@ -250,10 +258,19 @@ public class HidePatternTests
     [Fact]
     public void AnNfdPatternMatchesAnNfcName()
     {
+        Assert.SkipUnless(OperatingSystem.IsMacOS(), "only macOS file systems take NFC and NFD spellings for one name");
         var pattern = Parse("a/caf\u0065\u0301");
         Assert.True(pattern.IsMatch("a/caf\u00e9", true));
         Assert.Equal("a/caf\u00e9", pattern.LiteralPath);
         Assert.True(Parse("caf\u0065\u0301*").IsMatch("caf\u00e9s", false));
+    }
+
+    [Fact]
+    public void NfcAndNfdSpellingsAreDifferentNames_OnLinux()
+    {
+        Assert.SkipUnless(OperatingSystem.IsLinux(), "Linux file systems tell NFC and NFD spellings apart; macOS ones don't");
+        Assert.False(Parse("caf\u00e9.env").IsMatch("caf\u0065\u0301.env", false));
+        Assert.False(Parse("a/caf\u0065\u0301").IsMatch("a/caf\u00e9", true));
     }
 
     [Fact]

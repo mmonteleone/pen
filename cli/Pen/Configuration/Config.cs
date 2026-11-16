@@ -353,6 +353,8 @@ internal sealed partial class Config
     {
         if (path.Length == 0)
             return "is empty";
+        if (path.Length > HidePattern.MaxLength)
+            return $"can't be longer than {HidePattern.MaxLength} characters";
         if (path.StartsWith('/'))
             return "must be relative to the project, not absolute";
         if (path.EndsWith('/'))

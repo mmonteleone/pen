@@ -1,10 +1,13 @@
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Unicode;
 using Microsoft.Win32.SafeHandles;
 
 namespace Pen.Platform;
 
-/// <summary>The few libc calls Pen needs. Same signatures on macOS and Linux.</summary>
+/// <summary>
+/// The few libc calls Pen needs, same signatures on macOS and Linux, and CoreFoundation's normalization on macOS.
+/// </summary>
 internal static partial class Native
 {
     private const string Libc = "libc";
@@ -665,6 +668,70 @@ internal static partial class Native
         {
             if (added)
                 handle.DangerousRelease();
+        }
+    }
+
+    private const string CoreFoundation = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
+
+    // CFStringNormalizationForm is a CFIndex; kCFStringNormalizationFormC is 2.
+    private const nint CFStringNormalizationFormC = 2;
+
+    /// <summary>A CFRange: where a range of a CFString starts and how long it is, both CFIndex.</summary>
+    private readonly record struct CFRange(nint Location, nint Length);
+
+    [LibraryImport(CoreFoundation, EntryPoint = "CFStringCreateMutable")]
+    private static partial nint CFStringCreateMutable(nint allocator, nint maxLength);
+
+    [LibraryImport(CoreFoundation, EntryPoint = "CFStringAppendCharacters")]
+    private static unsafe partial void CFStringAppendCharacters(nint text, char* characters, nint count);
+
+    [LibraryImport(CoreFoundation, EntryPoint = "CFStringNormalize")]
+    private static partial void CFStringNormalize(nint text, nint form);
+
+    [LibraryImport(CoreFoundation, EntryPoint = "CFStringGetLength")]
+    private static partial nint CFStringGetLength(nint text);
+
+    [LibraryImport(CoreFoundation, EntryPoint = "CFStringGetCharacters")]
+    private static unsafe partial void CFStringGetCharacters(nint text, CFRange range, char* buffer);
+
+    [LibraryImport(CoreFoundation, EntryPoint = "CFRelease")]
+    private static partial void CFRelease(nint value);
+
+    /// <summary>Gets a name in Unicode normalization form C on macOS, and as it is elsewhere.</summary>
+    /// <returns>The name in form C; <paramref name="text"/> itself when it's all ASCII or not on macOS.</returns>
+    /// <remarks>
+    /// <para>
+    /// Pen runs with invariant globalization, where string.Normalize returns its input unchanged, so this asks
+    /// CoreFoundation, which every macOS has. macOS file systems (APFS, HFS+) treat NFC and NFD spellings as one
+    /// name, so names compared in form C match as they do there.
+    /// </para>
+    /// <para>
+    /// Linux file systems treat NFC and NFD spellings as different names, so there names are compared by their
+    /// exact code points, as the file system does.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="OutOfMemoryException">CoreFoundation couldn't make the string.</exception>
+    public static unsafe string NormalizeFormC(string text)
+    {
+        if (!OperatingSystem.IsMacOS() || Ascii.IsValid(text))
+            return text;
+        var mutable = CFStringCreateMutable(0, 0);
+        if (mutable == 0)
+            throw new OutOfMemoryException("CoreFoundation couldn't make a string to normalize");
+        try
+        {
+            fixed (char* characters = text)
+                CFStringAppendCharacters(mutable, characters, text.Length);
+            CFStringNormalize(mutable, CFStringNormalizationFormC);
+            var length = (int)CFStringGetLength(mutable);
+            var buffer = new char[length];
+            fixed (char* destination = buffer)
+                CFStringGetCharacters(mutable, new CFRange(0, length), destination);
+            return new string(buffer);
+        }
+        finally
+        {
+            CFRelease(mutable);
         }
     }
 

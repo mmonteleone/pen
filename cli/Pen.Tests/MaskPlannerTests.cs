@@ -470,7 +470,7 @@ public class MaskPlannerTests
     }
 
     [Fact]
-    public void TheLiteralLookup_MatchesLikeTheWalk_IgnoringCaseAndNormalization()
+    public void TheLiteralLookup_MatchesLikeTheWalk_IgnoringCase_AndNormalizationOnMacOS()
     {
         using var t = new TempDir();
         Write(t.Path, "Secrets/Key.env");
@@ -481,8 +481,12 @@ public class MaskPlannerTests
         var (fast, walked) = PlanBothWays(t.Path, "/secrets/key.ENV", "/caf\u00e9/TOKEN", "apps/web/.env");
 
         AssertSame(fast, walked);
-        // The on-disk spelling is the one mounted.
-        Assert.Equal(["Apps/Web/.ENV", "Secrets/Key.env", "cafe\u0301/token"], Files(fast));
+        // The on-disk spelling is the one mounted. Linux file systems tell NFC and NFD spellings apart, so there
+        // the NFC pattern names another directory.
+        string[] expected = OperatingSystem.IsMacOS()
+            ? ["Apps/Web/.ENV", "Secrets/Key.env", "cafe\u0301/token"]
+            : ["Apps/Web/.ENV", "Secrets/Key.env"];
+        Assert.Equal(expected, Files(fast));
     }
 
     [Fact]
@@ -607,7 +611,6 @@ public class MaskPlannerTests
         var replacement = Assert.Single(plan.Replacements);
         Assert.Equal(env, replacement.Target.Path);
         Assert.Equal(".env", replacement.Target.RelativePath);
-        Assert.Equal(".pen/agent.env", replacement.Source);
         Assert.Equal("KEY="u8.ToArray(), replacement.Bytes);
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.OtherRead, replacement.Mode);
         Assert.Empty(plan.HiddenFiles);
@@ -828,6 +831,20 @@ public class MaskPlannerTests
     }
 
     [Fact]
+    public void MoreThan1000Replacements_AreRefused_BeforeAnyIsLookedAt()
+    {
+        using var t = new TempDir();
+        // No target or source exists, so looking at any one would be refused differently.
+        var entries = Enumerable.Range(0, 1001).Select(i => ($"t{i}", $"s{i}")).ToArray();
+
+        var e = Refused(() => Replace(t.Path, [], entries));
+        var atTheCap = Refused(() => Replace(t.Path, [], entries[..1000]));
+
+        Assert.Equal("[replace] needs 1001 mounts, and pen allows at most 1000: replace fewer files", e.Message);
+        Assert.StartsWith("replace: target \"t0\"", atTheCap.Message);
+    }
+
+    [Fact]
     public void Exactly1000Mounts_AreAllowed_CountingReplacements()
     {
         using var t = new TempDir();
@@ -978,10 +995,10 @@ public class MaskPlannerTests
     // ---- git-protection mounts in the tree ----
 
     [Theory]
-    [InlineData("*.inc", "conf/git.inc, which pen mounts read-only to protect git's config")]
-    [InlineData("conf/", "conf, which holds conf/git.inc, which pen mounts read-only to protect git's config")]
-    [InlineData("pdir/x", "pdir/x, which is in pdir, which pen mounts read-only to protect git's config")]
-    public void HidingAGitProtectionMount_OrWhatsInOrAroundOne_IsRefused(string pattern, string overlap)
+    [InlineData("*.inc", "conf/git.inc", "conf/git.inc, which pen mounts read-only to protect git's config")]
+    [InlineData("conf/", "conf", "conf, which holds conf/git.inc, which pen mounts read-only to protect git's config")]
+    [InlineData("pdir/x", "pdir/x", "pdir/x, which is in pdir, which pen mounts read-only to protect git's config")]
+    public void HidingAGitProtectionMount_OrWhatsInOrAroundOne_IsRefused(string pattern, string path, string overlap)
     {
         using var t = new TempDir();
         var inc = Write(t.Path, "conf/git.inc");
@@ -990,7 +1007,7 @@ public class MaskPlannerTests
 
         var e = Refused(() => PlanProtected(t.Path, null, [inc, Path.Combine(t.Path, "pdir")], [pattern]));
 
-        Assert.Equal($"hide \"{pattern}\" matches {overlap}, so it can't be hidden as well: change the pattern to leave it out", e.Message);
+        Assert.Equal($"hide \"{pattern}\" matches {overlap}, so it can't be hidden as well: anchor or narrow the pattern so it leaves {path} out (hide has no negation)", e.Message);
     }
 
     [Fact]
@@ -1095,7 +1112,7 @@ public class MaskPlannerTests
         const string Through = "couldn't hide l\\nink/secret.env: l\\nink on the way is a symlink, which pen doesn't follow; hide the path it leads to";
         Assert.Contains(Through, walked.Warnings);
         Assert.Equal(["couldn't hide p\\nq: the repo's git dir is in it, which pen doesn't hide", Through], literal.Warnings);
-        Assert.Equal("hide \"c\\nf/\" matches c\\nf, which holds c\\nf/git.inc, which pen mounts read-only to protect git's config, so it can't be hidden as well: change the pattern to leave it out", protectedMount.Message);
+        Assert.Equal("hide \"c\\nf/\" matches c\\nf, which holds c\\nf/git.inc, which pen mounts read-only to protect git's config, so it can't be hidden as well: anchor or narrow the pattern so it leaves c\\nf out (hide has no negation)", protectedMount.Message);
         Assert.Equal("replace: source \"s\\nk\" (for \"README.md\") is hidden: hide \"s\\nk\" matches s\\nk, and [replace] can't show the agent what hide keeps from it", hiddenSource.Message);
         Assert.Equal("replace: source \"a\\nb/.git/config\" (for \"README.md\") can't be in .git", inGit.Message);
         Assert.StartsWith("replace: source \"m\\nissing\" (for \"README.md\") can't be used: ", missing.Message);

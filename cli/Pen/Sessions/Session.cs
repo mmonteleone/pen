@@ -75,8 +75,9 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         // The case probe goes in .pen, so it too waits for the signals to be held.
         if (MaskMessages.FormatSummary(prepared.Masks) is { } summary)
             Out.WriteLine(summary);
-        var penDir = Path.Combine(Project.Dir, ".pen");
-        var maskWarnings = MaskMessages.ListWarnings(prepared.Masks, penDir, request.Docker, RepoGuard.MayFoldCase);
+        var maskWarnings =
+            MaskMessages.ListWarnings(prepared.Masks, Project.PenDir, request.Docker, OperatingSystem.IsMacOS(),
+                RepoGuard.MayFoldCase);
         foreach (var warning in maskWarnings)
             Out.WriteLine(warning);
 

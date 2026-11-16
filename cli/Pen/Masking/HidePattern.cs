@@ -1,4 +1,4 @@
-using System.Text;
+using Pen.Platform;
 
 namespace Pen.Masking;
 
@@ -8,9 +8,10 @@ namespace Pen.Masking;
 /// at the project root. A trailing / matches directories only. * and ? match within one path segment.
 /// ** as a whole segment matches zero or more directories, except at the end, where it matches one or more
 /// entries inside, as in gitignore; ** inside a segment (a**b) is a plain *. Matching is ordinal and ignores
-/// case and Unicode normalization form (both sides compare as Form C, since APFS treats NFC and NFD spellings
-/// as one name), so on a filesystem that tells them apart a pattern hides more than asked, which is the safe
-/// direction.
+/// case; on macOS it ignores Unicode normalization form too (both sides compare as form C, through
+/// <see cref="Native.NormalizeFormC"/>, since APFS and HFS+ treat NFC and NFD spellings as one name), while on
+/// Linux, whose file systems tell them apart, NFC and NFD spellings are different names. On a file system that
+/// tells case or form apart where Pen ignores it, a pattern hides more than asked, which is the safe direction.
 /// Patterns can't name a .git segment anywhere or start with .pen, and <see cref="IsMatch"/> never matches
 /// a path that has a .git segment or starts with .pen, whatever its wildcards would say.
 /// </remarks>
@@ -59,6 +60,9 @@ internal sealed class HidePattern
     /// <summary>Formats the pattern as written.</summary>
     public override string ToString() => Text;
 
+    /// <summary>The longest pattern accepted: normalizing a long decomposed name is quadratic.</summary>
+    internal const int MaxLength = 1024;
+
     /// <summary>Parses <paramref name="text"/> into <paramref name="pattern"/>.</summary>
     /// <returns>What's wrong with the pattern, or null when it parsed and <paramref name="pattern"/> is set.</returns>
     public static string? TryParse(string text, out HidePattern? pattern)
@@ -74,6 +78,8 @@ internal sealed class HidePattern
             return "! (negation) isn't supported";
         if (text.StartsWith('#'))
             return "# isn't a comment here, and a pattern can't start with it";
+        if (text.Length > MaxLength)
+            return $"a pattern can't be longer than {MaxLength} characters";
         var body = text;
         var isDirectoryOnly = body.EndsWith('/');
         if (isDirectoryOnly)
@@ -84,7 +90,7 @@ internal sealed class HidePattern
         if (body.Length == 0)
             return "a pattern can't be empty";
 
-        var parts = body.Split('/').Select(part => part.Normalize(NormalizationForm.FormC)).ToArray();
+        var parts = body.Split('/').Select(Native.NormalizeFormC).ToArray();
         if (FindProblem(parts) is { } problem)
             return problem;
         var isAnchored = hasLeadingSlash || parts.Length > 1;
@@ -146,8 +152,7 @@ internal sealed class HidePattern
     {
         if (relativePath.Length == 0 || (IsDirectoryOnly && !isDirectory) || IsOffLimits(relativePath))
             return false;
-        if (!relativePath.IsNormalized(NormalizationForm.FormC))
-            relativePath = relativePath.Normalize(NormalizationForm.FormC);
+        relativePath = Native.NormalizeFormC(relativePath);
         if (!IsAnchored)
             return _segments[0].Matches(relativePath.AsSpan(relativePath.LastIndexOf('/') + 1));
         return MatchesSegments(relativePath);

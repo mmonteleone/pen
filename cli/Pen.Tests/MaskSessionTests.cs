@@ -21,7 +21,7 @@ public class MaskSessionTests
     private static MaskedPath M(string relative) => new("/p/" + relative, relative, 0, 0);
 
     private static Replacement R(string target, string content, UnixFileMode mode) =>
-        new(M(target), ".pen/" + target, Encoding.UTF8.GetBytes(content), mode);
+        new(M(target), Encoding.UTF8.GetBytes(content), mode);
 
     private static MaskPlan Plan(string[] files, string[] dirs, params Replacement[] replacements) =>
         new([.. files.Select(M)], [.. dirs.Select(M)], replacements, []);
@@ -516,8 +516,9 @@ public class MaskSessionTests
 
     // ---- the warnings ----
 
-    private static List<string> Warnings(MaskPlan plan, bool docker, bool folds, List<string> probed) =>
-        MaskMessages.ListWarnings(plan, "/p/.pen", docker, dir =>
+    private static List<string> Warnings(MaskPlan plan, bool docker, bool folds, List<string> probed,
+        bool isMacOS = false) =>
+        MaskMessages.ListWarnings(plan, "/p/.pen", docker, isMacOS, dir =>
         {
             probed.Add(dir);
             return folds;
@@ -593,5 +594,29 @@ public class MaskSessionTests
 
         Assert.Equal([MaskMessages.DockerWarning], warnings);
         Assert.Contains("aren't enforced with --docker", MaskMessages.DockerWarning);
+    }
+
+    [Fact]
+    public void ANonAsciiNameOnMacOSWarnsAboutOtherUnicodeSpellings()
+    {
+        Assert.Equal([MaskMessages.UnicodeWarning],
+            Warnings(Plan(["caf\u00e9.env"], []), docker: false, folds: false, [], isMacOS: true));
+        Assert.Equal([MaskMessages.UnicodeWarning],
+            Warnings(Plan([], [], R("d/caf\u00e9.env", "", Mode444)), docker: false, folds: false, [], isMacOS: true));
+    }
+
+    [Fact]
+    public void AnAsciiNameOrAnotherPlatformGetsNoUnicodeWarning()
+    {
+        Assert.Empty(Warnings(Plan([".env"], []), docker: false, folds: false, [], isMacOS: true));
+        Assert.Empty(Warnings(Plan(["caf\u00e9.env"], []), docker: false, folds: false, [], isMacOS: false));
+        Assert.Empty(Warnings(Plan([], ["caf\u00e9"]), docker: false, folds: false, [], isMacOS: true));
+    }
+
+    [Fact]
+    public void TheCaseWarningIsNotDuplicatedByTheUnicodeWarning()
+    {
+        Assert.Equal([MaskMessages.CaseWarning],
+            Warnings(Plan(["caf\u00e9.env"], []), docker: false, folds: true, [], isMacOS: true));
     }
 }

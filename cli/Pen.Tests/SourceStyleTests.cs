@@ -54,6 +54,34 @@ public class SourceStyleTests
             $"lines over {MaxLineLength} characters in cli/:\n" + string.Join("\n", offenders));
     }
 
+    // string.Normalize and IsNormalized, which do nothing under the invariant globalization pen is built with.
+    private static readonly Regex StringNormalization =
+        new("\\bIsNormalized\\s*\\(|\\.Normalize\\s*\\(|\\bNormalizationForm\\b", RegexOptions.Compiled);
+
+    [Fact]
+    public void PenNeverNormalizesThroughString_ItDoesNothingUnderInvariantGlobalization()
+    {
+        var pen = Path.Combine(FindCliDir(), "Pen");
+
+        var offenders = new List<string>();
+        var files = Directory.EnumerateFiles(pen, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !IsBuildOutput(Path.GetRelativePath(pen, f)))
+            .OrderBy(f => f, StringComparer.Ordinal);
+        foreach (var file in files)
+        {
+            var lines = File.ReadAllLines(file);
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (!lines[i].TrimStart().StartsWith("//", StringComparison.Ordinal)
+                    && StringNormalization.IsMatch(lines[i]))
+                    offenders.Add($"{Path.GetRelativePath(pen, file)}:{i + 1}");
+            }
+        }
+
+        Assert.True(offenders.Count == 0,
+            "string normalization in cli/Pen (use Native.NormalizeFormC):\n" + string.Join("\n", offenders));
+    }
+
     /// <summary>Finds the raw string literal a line ends inside, given the one it starts inside.</summary>
     /// <param name="line">The line.</param>
     /// <param name="closing">The closing quotes of the raw string the line starts inside, or null if none.</param>

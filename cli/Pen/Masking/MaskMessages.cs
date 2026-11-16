@@ -16,6 +16,13 @@ internal static class MaskMessages
         "agent may read a hidden or replaced file under another spelling (.ENV for .env); hide its directory to " +
         "keep it out of reach";
 
+    /// <summary>
+    /// The warning given on macOS where a hidden or replaced file's name isn't ASCII: another Unicode spelling (NFC
+    /// or NFD) of it reaches the file past its mount on any APFS volume, and the case probe can't see that.
+    /// </summary>
+    internal const string UnicodeWarning = "warning: on macOS, another Unicode spelling of a hidden or replaced " +
+        "file's name reaches the file: hide its directory to keep it out of reach";
+
     /// <summary>The warning given in a docker session that hides or replaces anything.</summary>
     internal const string DockerWarning = "warning: hidden and replaced files aren't enforced with --docker: " +
         "the agent can use the privileged Docker daemon to undo their mounts";
@@ -51,11 +58,13 @@ internal static class MaskMessages
     /// <param name="plan">What the session hides and replaces.</param>
     /// <param name="penDir">The project's .pen dir, where the case probe goes.</param>
     /// <param name="docker">Whether it's a docker session.</param>
+    /// <param name="isMacOS">Whether the host is macOS: <see cref="OperatingSystem.IsMacOS"/> in production.</param>
     /// <param name="probe">
     /// Whether a directory may fold case: <see cref="GitProtection.RepoGuard.MayFoldCase(string)"/> in production.
     /// </param>
     /// <returns>
-    /// <see cref="CaseWarning"/> if a file is hidden or replaced and <paramref name="penDir"/> may fold case, then
+    /// <see cref="CaseWarning"/> if a file is hidden or replaced and <paramref name="penDir"/> may fold case, or
+    /// else <see cref="UnicodeWarning"/> on macOS for a non-ASCII name, then
     /// the plan's own warnings, then <see cref="DockerWarning"/> in a docker session that hides or replaces anything.
     /// </returns>
     /// <remarks>
@@ -63,11 +72,21 @@ internal static class MaskMessages
     /// the same mount. .pen is Pen's own dir, which always exists by now, so probing it adds nothing to the user's
     /// tree.
     /// </remarks>
-    public static List<string> ListWarnings(MaskPlan plan, string penDir, bool docker, Func<string, bool> probe)
+    public static List<string> ListWarnings(MaskPlan plan, string penDir, bool docker, bool isMacOS,
+        Func<string, bool> probe)
     {
         var warnings = new List<string>();
-        if (plan.HiddenFiles.Count + plan.Replacements.Count > 0 && probe(penDir))
+        var folds = plan.HiddenFiles.Count + plan.Replacements.Count > 0 && probe(penDir);
+        if (folds)
+        {
             warnings.Add(CaseWarning);
+        }
+        else if (isMacOS && plan.HiddenFiles.Select(file => file.RelativePath)
+            .Concat(plan.Replacements.Select(replacement => replacement.Target.RelativePath))
+            .Any(path => path.Any(character => character > 127)))
+        {
+            warnings.Add(UnicodeWarning);
+        }
         warnings.AddRange(plan.Warnings);
         if (docker && !plan.IsEmpty)
             warnings.Add(DockerWarning);

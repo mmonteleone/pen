@@ -1,5 +1,4 @@
 using System.IO.Enumeration;
-using System.Text;
 using Pen.GitProtection;
 using Pen.Platform;
 
@@ -132,6 +131,12 @@ internal sealed class MaskPlanner
             return MaskPlan.Empty;
         if (!Native.CanStat)
             throw new PenException("pen can't hide or replace files on this platform: remove hide and [replace]");
+        // Each [replace] source is read into memory, and .pen/config.toml is the agent's to write.
+        if (_replace.Count > MaxMounts)
+        {
+            throw new PenException($"[replace] needs {_replace.Count} mounts, and pen allows at most {MaxMounts}: " +
+                "replace fewer files");
+        }
         if (_hide.Count > 0 && _hide.All(pattern => pattern.IsLiteral))
             FindLiterals();
         else if (_hide.Count > 0)
@@ -206,7 +211,8 @@ internal sealed class MaskPlanner
             if (DescribeProtected(path) is { } overlap)
             {
                 throw new PenException($"hide \"{Out.Field(found.Pattern.Text)}\" matches {overlap}, so it can't " +
-                    "be hidden as well: change the pattern to leave it out");
+                    $"be hidden as well: anchor or narrow the pattern so it leaves {Format(path)} out (hide has no " +
+                    "negation)");
             }
         }
     }
@@ -283,11 +289,12 @@ internal sealed class MaskPlanner
         }
     }
 
-    /// <summary>Tells whether a listed name is a literal pattern's segment, ignoring case and normalization.</summary>
+    /// <summary>
+    /// Tells whether a listed name is a literal pattern's segment, ignoring case, and normalization on macOS.
+    /// </summary>
     private static bool IsSameName(string name, string segment) =>
         name.Equals(segment, StringComparison.OrdinalIgnoreCase)
-        || (!name.IsNormalized(NormalizationForm.FormC)
-            && name.Normalize(NormalizationForm.FormC).Equals(segment, StringComparison.OrdinalIgnoreCase));
+        || Native.NormalizeFormC(name).Equals(segment, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Hides <paramref name="entry"/> of <paramref name="dir"/> if a pattern matches it.</summary>
     /// <returns>
@@ -366,7 +373,7 @@ internal sealed class MaskPlanner
         Native.Stat(dir.Path, follow: false) is { IsDirectory: true, IsSymlink: false } status
         && status.Device == dir.Device && status.Inode == dir.Inode;
 
-    /// <summary>Warns that a directory changed while pen looked at it, so it isn't looked in.</summary>
+    /// <summary>Warns that a directory changed while Pen looked at it, so it isn't looked in.</summary>
     private void WarnChangedDir(string relative) =>
         Warn($"couldn't look in {Name(relative)} for files to hide: it changed while pen looked at it");
 
@@ -648,7 +655,7 @@ internal sealed class MaskPlanner
             }
 
             var masked = new MaskedPath(path, Relative(path), found.Device, found.Inode);
-            replacements.Add(new(masked, source, copy.Bytes, copy.Mode & ReadAndExecuteBits));
+            replacements.Add(new(masked, copy.Bytes, copy.Mode & ReadAndExecuteBits));
         }
         return replacements;
     }

@@ -95,7 +95,6 @@ internal sealed record MaskedPath(string Path, string RelativePath, ulong Device
 
 /// <summary>A file in the project that the agent sees with another file's contents.</summary>
 /// <param name="Target">The file covered.</param>
-/// <param name="Source">The source as written in [replace], for messages.</param>
 /// <param name="Bytes">The source's contents, as read when the plan was made.</param>
 /// <param name="Mode">The source's read and execute bits: no write, setuid, setgid or sticky bit.</param>
-internal sealed record Replacement(MaskedPath Target, string Source, byte[] Bytes, UnixFileMode Mode);
+internal sealed record Replacement(MaskedPath Target, byte[] Bytes, UnixFileMode Mode);

@@ -242,6 +242,17 @@ public class ConfigTests
     public void ReplaceValuesMustBePaths(string text, string message) =>
         Assert.StartsWith($"{ProjFile}: {message}", Error(() => Proj(text)));
 
+    [Fact]
+    public void AReplacePathOfAtMost1024CharactersIsAcceptedAndALongerOneRefused()
+    {
+        Assert.Single(Proj($"[replace]\n\"{new string('a', 1024)}\" = \"{new string('b', 1024)}\"").Replace);
+        var problem = "can't be longer than 1024 characters";
+        Assert.Equal($"{ProjFile}: replace: target \"{new string('a', 1025)}\" {problem}",
+            Error(() => Proj($"[replace]\n\"{new string('a', 1025)}\" = \"src\"")));
+        Assert.Equal($"{ProjFile}: replace: source \"{new string('b', 1025)}\" (for \"t\") {problem}",
+            Error(() => Proj($"[replace]\n\"t\" = \"{new string('b', 1025)}\"")));
+    }
+
     [Theory]
     [InlineData("", "is empty")]
     [InlineData("/etc/passwd", "must be relative to the project, not absolute")]
