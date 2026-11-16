@@ -291,7 +291,7 @@ public class ScanFailClosedTests
         MkFifo(fifo);
         var e = Within10s(() => Assert.Throws<PenException>(() => Config.ReadText(fifo, ".pen/config.toml")));
         Assert.Contains(".pen/config.toml isn't a regular file", e.Message);
-        var viaAllow = Within10s(() => Assert.Throws<PenException>(() => AllowCommand.Append(fifo, ".pen/config.toml", ConfigKind.Project, ["a.example"], "")));
+        var viaAllow = Within10s(() => Assert.Throws<PenException>(() => AllowCommand.Append(fifo, ".pen/config.toml", ConfigKind.Project, "allow", ["a.example"], "")));
         Assert.Contains(".pen/config.toml isn't a regular file", viaAllow.Message);
         var huge = Path.Combine(t.Path, "huge");
         Sparse(huge, ThreeGb);

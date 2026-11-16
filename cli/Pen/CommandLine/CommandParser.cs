@@ -1,4 +1,5 @@
 using System.Globalization;
+using Pen.Commands;
 using Pen.Proxy;
 using Pen.Sessions;
 using Pen.Tools;
@@ -13,6 +14,7 @@ internal static class CommandParser
         ["run"] = CommandKind.Run,
         ["upgrade"] = CommandKind.Upgrade,
         ["allow"] = CommandKind.Allow,
+        ["deny"] = CommandKind.Deny,
         ["trust"] = CommandKind.Trust,
         ["sign"] = CommandKind.Sign,
         ["clean"] = CommandKind.Clean,
@@ -27,7 +29,7 @@ internal static class CommandParser
     /// is the command to run. Options before the command are Pen's: --docker,
     /// --port and --tool (for running), help and version. Any other one is an error.
     /// </remarks>
-    public static Command Parse(IReadOnlyList<string> args)
+    public static Command Parse(IReadOnlyList<string> args, Func<string?>? startDir = null)
     {
         // The options for running, in any order and repeatable.
         var options = new RunOptions();
@@ -43,14 +45,14 @@ internal static class CommandParser
         if (options.IsToolList)
             return new(CommandKind.ToolList, []);
         if (options.FirstName == null)
-            return ParseCommand(args);
-        return ParseWithRunOptions(args.Skip(index).ToList(), options);
+            return ParseCommand(args, startDir);
+        return ParseWithRunOptions(args.Skip(index).ToList(), options, startDir);
     }
 
     /// <summary>Parses the command that follows Pen's options for running, and adds those options to it.</summary>
-    private static Command ParseWithRunOptions(List<string> after, RunOptions options)
+    private static Command ParseWithRunOptions(List<string> after, RunOptions options, Func<string?>? startDir)
     {
-        var command = ParseCommand(after);
+        var command = ParseCommand(after, startDir);
         if (command.Kind != CommandKind.Run)
         {
             throw CreateUsageError(after.Count > 0 && Subcommands.ContainsKey(after[0])
@@ -64,7 +66,7 @@ internal static class CommandParser
     }
 
     /// <summary>Parses a command line that doesn't start with an option for running.</summary>
-    private static Command ParseCommand(IReadOnlyList<string> args)
+    private static Command ParseCommand(IReadOnlyList<string> args, Func<string?>? startDir)
     {
         if (args.Count == 0)
             return new(CommandKind.Run, []);
@@ -82,7 +84,7 @@ internal static class CommandParser
         }
 
         if (Subcommands.TryGetValue(first, out var kind))
-            return ParseSubcommand(first, kind, rest);
+            return ParseSubcommand(first, kind, rest, startDir);
         if (first.StartsWith('-'))
             throw CreateUsageError($"unknown option \"{first}\"");
 
@@ -90,7 +92,7 @@ internal static class CommandParser
     }
 
     /// <summary>Parses the arguments after a subcommand's name.</summary>
-    private static Command ParseSubcommand(string name, CommandKind kind, List<string> rest)
+    private static Command ParseSubcommand(string name, CommandKind kind, List<string> rest, Func<string?>? startDir)
     {
         if (IsHelpRequest(kind, rest))
             return new(CommandKind.Help, [name]);
@@ -100,7 +102,8 @@ internal static class CommandParser
             CommandKind.Upgrade => ParseUpgrade(rest),
             CommandKind.Clean => ParseClean(rest),
             CommandKind.Ps => ParseWithoutArguments(name, kind, rest),
-            CommandKind.Allow => ParseAllow(rest),
+            CommandKind.Allow => ParseAllow(rest, startDir),
+            CommandKind.Deny => ParseDomains(name, kind, rest, startDir),
             CommandKind.Trust => ParseTrust(rest),
             CommandKind.Sign => ParseSign(rest),
             _ => new(kind, rest),
@@ -165,7 +168,7 @@ internal static class CommandParser
     }
 
     /// <summary>Parses pen allow's arguments: --defaults alone, or domains and --global.</summary>
-    private static Command ParseAllow(List<string> rest)
+    private static Command ParseAllow(List<string> rest, Func<string?>? startDir)
     {
         if (rest.Contains("--defaults"))
         {
@@ -174,6 +177,12 @@ internal static class CommandParser
             return new(CommandKind.Allow, []) { Defaults = true };
         }
 
+        return ParseDomains("allow", CommandKind.Allow, rest, startDir);
+    }
+
+    /// <summary>Parses the domains and --global of pen allow or pen deny (<paramref name="name"/>).</summary>
+    private static Command ParseDomains(string name, CommandKind kind, List<string> rest, Func<string?>? startDir)
+    {
         var global = false;
         var domains = new List<string>();
         foreach (var arg in rest)
@@ -184,27 +193,46 @@ internal static class CommandParser
                 continue;
             }
 
-            var domain = ReadDomain(arg);
+            var domain = ReadDomain(name, arg, allowStar: kind == CommandKind.Allow, startDir);
             if (!domains.Contains(domain))
                 domains.Add(domain);
         }
         if (global && domains.Count == 0)
-            throw CreateUsageError("pen allow --global: missing the domains to allow");
-        return new(CommandKind.Allow, domains) { Global = global };
+            throw CreateUsageError($"pen {name} --global: missing the domains to {name}");
+        return new(kind, domains) { Global = global };
     }
 
-    /// <summary>Reads one domain argument of pen allow.</summary>
-    /// <returns>The domain, lowercased.</returns>
+    /// <summary>Reads one domain argument of pen allow or pen deny (<paramref name="name"/>).</summary>
+    /// <param name="name">The subcommand, for messages.</param>
+    /// <param name="arg">The argument.</param>
+    /// <param name="allowStar">
+    /// Whether <see cref="Allowlist.AnyDomain"/> is valid: pen allow's, not pen deny's.
+    /// </param>
+    /// <param name="startDir">
+    /// The start directory, or null: an argument that isn't a domain but names an entry there gets the advice for
+    /// a shell that expanded an unquoted *.
+    /// </param>
+    /// <returns>The domain, lowercased, or <see cref="Allowlist.AnyDomain"/>.</returns>
     /// <exception cref="PenException">The argument is an unknown option or isn't a domain.</exception>
-    private static string ReadDomain(string arg)
+    private static string ReadDomain(string name, string arg, bool allowStar, Func<string?>? startDir)
     {
         if (arg.StartsWith('-'))
-            throw CreateUsageError($"pen allow: unknown option \"{arg}\"");
+            throw CreateUsageError($"pen {name}: unknown option \"{arg}\"");
+        if (arg == Allowlist.AnyDomain)
+        {
+            if (allowStar)
+                return arg;
+            throw CreateUsageError($"pen {name}: \"*\" would block everything; remove the allow entries instead");
+        }
+
         var domain = arg.ToLowerInvariant();
         if (!Allowlist.IsValidDomain(domain))
         {
-            throw CreateUsageError($"pen allow: \"{arg}\" isn't a domain (use " +
-                "example.com, or .example.com to include its subdomains)");
+            var message = $"pen {name}: \"{arg}\" isn't a domain (use " +
+                "example.com, or .example.com to include its subdomains)";
+            if (startDir?.Invoke() is { } dir && AllowCommand.NamesEntry(dir, arg))
+                message += "; " + AllowCommand.GlobAdvice(name);
+            throw CreateUsageError(message);
         }
 
         return domain;

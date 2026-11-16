@@ -20,9 +20,13 @@ internal static class HelpText
           pen --tool list           list the agents and tools pen can install
           pen upgrade [--no-cache]  rebuild the base image, agents and tools; --no-cache skips the cache
           pen allow <domain…> [--global]
-                                    allow domains, applied to running sessions too
+                                    allow domains, applied to running sessions too;
+                                    pen allow '*' (quoted) allows any domain
           pen allow                 list recently blocked domains
           pen allow --defaults      list the domains pen allows out of the box
+          pen deny <domain…> [--global]
+                                    deny domains, over every allow, applied to running sessions too
+          pen deny                  list the denied domains
           pen trust [--yes|--list]  review and approve what this project's .pen/ asks for
           pen ps                    list running sessions, in every project
           pen sign [<base>]         on the host: re-sign unpushed commits with your key
@@ -87,10 +91,29 @@ internal static class HelpText
             With domains, adds them to allow in .pen/config.toml (creating it if needed),
             approves them for this directory (see pen trust) and applies them to this
             project's running sessions. A leading dot (.example.com) also allows subdomains.
+            pen allow '*', quoted so the shell doesn't expand it, allows any domain name
+            (never a raw IP, nor a name that resolves to a private address); deny still
+            wins over it (see pen deny).
 
               --global     add them to ~/.config/pen/config.toml instead, for every
                            project, and apply them to all running sessions
               --defaults   list the domains pen allows out of the box
+            """,
+        ["deny"] = """
+            usage: pen deny
+                   pen deny <domain…> [--global]
+
+            With no arguments, lists the denied domains, the config file each is in, and
+            which of pen's defaults or the agents' and tools' domains each takes.
+
+            With domains, adds them to deny in .pen/config.toml (creating it if needed) and
+            applies them to this project's running sessions. Deny wins over every allow:
+            the defaults, either config.toml, agents' and tools' domains, and '*'. A leading
+            dot (.example.com) also denies subdomains; gist.github.com denies one host under
+            an allowed .github.com.
+
+              --global     add them to ~/.config/pen/config.toml instead, for every
+                           project, and apply them to all running sessions
             """,
         ["trust"] = """
             usage: pen trust [--yes | --list]
@@ -111,8 +134,8 @@ internal static class HelpText
 
             Lists the running sessions of every project: the project's directory, the
             session's id (its containers are named pen-<dir>-<hash>-<id>-…), docker for
-            a session with Docker-in-Docker, its ports and tools, how long it has been running,
-            and its command.
+            a session with Docker-in-Docker, open for one whose egress is open (allow = ["*"]),
+            its ports and tools, how long it has been running, and its command.
             """,
         ["sign"] = """
             usage: pen sign [<base>]

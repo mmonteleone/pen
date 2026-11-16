@@ -40,7 +40,7 @@ internal sealed partial class PsCommand(HostEnv host)
             .OrderBy(row => row.Project, StringComparer.Ordinal)
             .ThenBy(row => row.Started ?? DateTime.MaxValue)
             .Select(row => row.Cells.Prepend(row.Project).ToArray())
-            .Prepend(["PROJECT", "SESSION", "DOCKER", "PORTS", "TOOLS", "AGE", "COMMAND"])
+            .Prepend(["PROJECT", "SESSION", "DOCKER", "EGRESS", "PORTS", "TOOLS", "AGE", "COMMAND"])
             .ToList();
 
         var widths = Enumerable.Range(0, rows[0].Length).Select(i => rows.Max(row => row[i].Length)).ToArray();
@@ -63,6 +63,7 @@ internal sealed partial class PsCommand(HostEnv host)
         [
             Out.Field(session.Id),
             File.Exists(session.DockerMarker) ? "docker" : "",
+            session.HasOpenEgress ? "open" : "",
             string.Join(',', session.ReadPorts()),
             string.Join(',', session.ReadTools().Select(Out.Field)),
             started is { } time ? FormatAge(now - time) : "?",

@@ -29,7 +29,7 @@ public class AllowCommandTests
     }
 
     private static string Add(string text, params string[] domains) =>
-        ConfigEdit.AddAllowed(text, "x.toml", ConfigKind.User, domains).Text;
+        ConfigEdit.AddToList(text, "x.toml", ConfigKind.User, "allow", domains).Text;
 
     [Fact]
     public void AddsToAMultiLineArray_KeepingCommentsAndIndent()
@@ -94,7 +94,7 @@ public class AllowCommandTests
     public void KeepsAProjectFilesOtherKeys_PortsIncluded()
     {
         var text = "github_owner = \"acme\"\ndocker = true\nports = [3000, 5173]\nallow = [\"a.io\"]\n";
-        var result = ConfigEdit.AddAllowed(text, ".pen/config.toml", ConfigKind.Project, ["b.io"]).Text;
+        var result = ConfigEdit.AddToList(text, ".pen/config.toml", ConfigKind.Project, "allow", ["b.io"]).Text;
         Assert.Equal(text.Replace("[\"a.io\"]", "[\n  \"a.io\",\n  \"b.io\",\n]"), result);
         Assert.Equal([3000, 5173], Config.Parse(result, "x", ConfigKind.Project).Ports);
     }
@@ -107,7 +107,7 @@ public class AllowCommandTests
     public void SkipsWhatsAllowed_AndRefusesABrokenFile()
     {
         var text = "allow = [\"a.io\"]\n";
-        var edit = ConfigEdit.AddAllowed(text, "x", ConfigKind.User, ["A.io", "a.io"]);
+        var edit = ConfigEdit.AddToList(text, "x", ConfigKind.User, "allow", ["A.io", "a.io"]);
         Assert.Same(text, edit.Text);
         Assert.Empty(edit.Added);
         Assert.StartsWith("x.toml: unknown key", Assert.Throws<PenException>(() => Add("allw = 1\n", "b.io")).Message);
@@ -122,14 +122,14 @@ public class AllowCommandTests
     {
         using var t = new TempDir();
         var path = Path.Combine(t.Path, "config.toml");
-        Assert.Equal(["example.com", ".foo.io"], AllowCommand.Append(path, ".pen/config.toml", ConfigKind.Project, ["example.com", ".foo.io"], AllowCommand.ProjectConfigStub));
+        Assert.Equal(["example.com", ".foo.io"], AllowCommand.Append(path, ".pen/config.toml", ConfigKind.Project, "allow", ["example.com", ".foo.io"], AllowCommand.ProjectConfigStub));
         var text = File.ReadAllText(path);
         Assert.StartsWith(AllowCommand.ProjectConfigStub, text);
         Assert.Equal(["example.com", ".foo.io"], Config.Parse(text, "x", ConfigKind.Project).Allow);
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead, File.GetUnixFileMode(path));
 
         File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        Assert.Equal(["b.io"], AllowCommand.Append(path, "x", ConfigKind.Project, ["b.io", "example.com"], ""));
+        Assert.Equal(["b.io"], AllowCommand.Append(path, "x", ConfigKind.Project, "allow", ["b.io", "example.com"], ""));
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path));
         Assert.Equal(["example.com", ".foo.io", "b.io"], Config.Load(t.Path, ".pen", ConfigKind.Project).Allow);
         Assert.Single(Directory.GetFiles(t.Path)); // no temp file left
@@ -141,7 +141,7 @@ public class AllowCommandTests
         using var t = new TempDir();
         var path = Path.Combine(t.Path, "config.toml");
         File.WriteAllText(path, "allw = 1\n");
-        Assert.Throws<PenException>(() => AllowCommand.Append(path, ".pen/config.toml", ConfigKind.Project, ["b.io"], AllowCommand.ProjectConfigStub));
+        Assert.Throws<PenException>(() => AllowCommand.Append(path, ".pen/config.toml", ConfigKind.Project, "allow", ["b.io"], AllowCommand.ProjectConfigStub));
         Assert.Equal("allw = 1\n", File.ReadAllText(path));
     }
 
@@ -313,7 +313,7 @@ public class AllowCommandTests
     }
 
     [Fact]
-    public void ListingWithTheStar_ShowsDeniedHostsApart_WithoutPenAllow()
+    public void ListingWithTheStar_ShowsWhatOpenEgressBlockedApart_AsTheEndLinesDo_WithoutPenAllow()
     {
         using var t = new TempDir();
         var host = t.Host();
@@ -324,7 +324,8 @@ public class AllowCommandTests
         File.WriteAllText(Path.Combine(dir, "proxy.log"),
             "2026-11-01T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT gist.github.com:443 -\n" +
             "2026-11-01T10:00:01Z 172.18.0.3 TCP_DENIED/403 CONNECT example.com:443 -\n" +
-            "2026-11-01T10:00:02Z 172.18.0.3 TCP_DENIED/403 CONNECT 1.2.3.4:443 -\n");
+            "2026-11-01T10:00:02Z 172.18.0.3 TCP_DENIED/403 CONNECT 1.2.3.4:443 -\n" +
+            "2026-11-01T10:00:03Z 172.18.0.3 TCP_DENIED/403 CONNECT github.com:443 -\n");
         var user = Config.Parse("allow = [\"*\"]\n", "u", ConfigKind.User);
         var projectConfig = Config.Parse("deny = [\"gist.github.com\"]\n", "p", ConfigKind.Project);
         var stdout = Console.Out;
@@ -333,13 +334,41 @@ public class AllowCommandTests
         try { new AllowCommand(host, RecipeCatalog.Embedded).ListBlocked(new ProjectContext(host, project, user, projectConfig)); }
         finally { Console.SetOut(stdout); }
         var lines = captured.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        Assert.Equal("blocked in this project's sessions, newest first:", lines[0]);
+        // example.com resolved privately, say, or was blocked before egress opened: "*" covers it, but it's listed.
+        Assert.Equal("blocked in this project's sessions (raw IP, private address, unresolvable name, another port or blocked earlier), newest first:", lines[0]);
         Assert.StartsWith("  1.2.3.4 ", lines[1]);
-        Assert.Equal("denied by config, blocked in this project's sessions, newest first:", lines[2]);
-        Assert.StartsWith("  gist.github.com ", lines[3]);
-        Assert.Equal(4, lines.Length);
+        Assert.StartsWith("  example.com ", lines[2]);
+        Assert.Equal("denied by config, blocked in this project's sessions, newest first:", lines[3]);
+        Assert.StartsWith("  gist.github.com ", lines[4]);
+        Assert.Equal(5, lines.Length); // github.com is allowed by name, a default
         Assert.DoesNotContain("pen allow", captured.ToString());
-        Assert.DoesNotContain("example.com", captured.ToString());
+    }
+
+    [Fact]
+    public void ListingWithDenyButNoStar_ShowsRawIpsApart_AsTheEndLinesDo()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        var project = Project.Resolve(t.Sub("repo"), host);
+        Session.EnsureRuntimeDir(host, project);
+        var dir = t.Sub("home", ".local", "state", "pen", project.Key, "sessions", "12345678");
+        File.WriteAllText(Path.Combine(dir, "proxy.log"),
+            "2026-11-01T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT 1.2.3.4:443 -\n" +
+            "2026-11-01T10:00:01Z 172.18.0.3 TCP_DENIED/403 CONNECT example.com:443 -\n");
+        var user = Config.Parse("deny = [\"pastebin.com\"]\n", "u", ConfigKind.User);
+        var stdout = Console.Out;
+        var captured = new StringWriter();
+        Console.SetOut(captured);
+        try { new AllowCommand(host, RecipeCatalog.Embedded).ListBlocked(new ProjectContext(host, project, user, new Config())); }
+        finally { Console.SetOut(stdout); }
+        Assert.Equal(
+            "blocked in this project's sessions, newest first:\n" +
+            $"  {"example.com",-40} {new DateTimeOffset(2026, 11, 1, 10, 0, 1, TimeSpan.Zero).ToLocalTime():yyyy-MM-dd HH:mm}\n" +
+            "pen allow example.com   (add --global for all projects)\n" +
+            "blocked in this project's sessions (raw IP), newest first:\n" +
+            $"  {"1.2.3.4",-40} {new DateTimeOffset(2026, 11, 1, 10, 0, 0, TimeSpan.Zero).ToLocalTime():yyyy-MM-dd HH:mm}\n",
+            captured.ToString());
     }
 
     [Fact]
@@ -388,5 +417,113 @@ public class AllowCommandTests
         Assert.StartsWith("  pastebin.com ", lines[1]);
         Assert.Equal(2, lines.Length);
         Assert.DoesNotContain("pen allow", captured.ToString());
+    }
+
+    // Adding to deny, and what pen allow adds.
+
+    private static string AddDeny(string text, params string[] domains) =>
+        ConfigEdit.AddToList(text, "x.toml", ConfigKind.User, "deny", domains).Text;
+
+    [Fact]
+    public void AddToList_CreatesADenyArray_LeavingAllowAlone()
+    {
+        var text = "allow = [\"a.io\"]\n\n[github]\nacme = \"t\"\n";
+        var result = AddDeny(text, "gist.github.com");
+        Assert.Equal("allow = [\"a.io\"]\n\ndeny = [\n  \"gist.github.com\",\n]\n\n[github]\nacme = \"t\"\n", result);
+        var config = Config.Parse(result, "x", ConfigKind.User);
+        Assert.Equal(["a.io"], config.Allow);
+        Assert.Equal(["gist.github.com"], config.Deny);
+    }
+
+    [Fact]
+    public void AddToList_AddsToAnExistingDenyArray_SkippingWhatsDenied_NotWhatsAllowed()
+    {
+        var text = "allow = [\"b.io\"]\ndeny = [\"a.io\"]\n";
+        var edit = ConfigEdit.AddToList(text, "x", ConfigKind.Project, "deny", ["A.io", "b.io"]);
+        Assert.Equal(["b.io"], edit.Added);
+        Assert.Equal("allow = [\"b.io\"]\ndeny = [\n  \"a.io\",\n  \"b.io\",\n]\n", edit.Text);
+        Assert.Same(text, ConfigEdit.AddToList(text, "x", ConfigKind.Project, "deny", ["a.io"]).Text);
+    }
+
+    [Fact]
+    public void AddToList_TakesTheStarInAllow()
+    {
+        var result = Add("allow = [\"a.io\"]\n", "*");
+        Assert.Equal("allow = [\n  \"a.io\",\n  \"*\",\n]\n", result);
+        Assert.Equal(["a.io", "*"], Config.Parse(result, "x", ConfigKind.User).Allow);
+    }
+
+    [Fact]
+    public void AddToList_MessagesNameTheKey()
+    {
+        Assert.StartsWith("x.toml: deny must be a list", Assert.Throws<PenException>(() => AddDeny("deny = \"a.io\"\n", "b.io")).Message);
+        // A domain the file can't hold makes the re-parse fail, which the check reports for that key.
+        Assert.Equal("x.toml: couldn't add to deny automatically; add \"*\" by hand",
+            Assert.Throws<PenException>(() => AddDeny("", "*")).Message);
+        Assert.Throws<ArgumentException>(() => ConfigEdit.AddToList("", "x", ConfigKind.User, "tools", ["a.io"]));
+    }
+
+    [Fact]
+    public void DenyWins_NamesEachFileWhoseDenyCoversTheDomain_ButNotForTheStar()
+    {
+        List<(string Where, List<string> Deny)> denies =
+        [
+            ("~/.config/pen/config.toml", ["pastebin.com", ".example.org"]),
+            (".pen/config.toml", ["pastebin.com"]),
+        ];
+        Assert.Equal(
+            [
+                "pastebin.com is also denied by ~/.config/pen/config.toml and .pen/config.toml; deny wins",
+                "a.example.org is also denied by ~/.config/pen/config.toml; deny wins",
+                ".example.org is also denied by ~/.config/pen/config.toml; deny wins",
+                "example.org is also denied by ~/.config/pen/config.toml; deny wins",
+            ],
+            AllowCommand.FormatDenyWins(denies, ["pastebin.com", "a.example.org", ".example.org", "example.org", ".pastebin.com", "*"]));
+    }
+
+    [Fact]
+    public void RunWarnsWhenADenyStillCoversTheDomain()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        File.WriteAllText(host.UserConfigPath, "deny = [\".pastebin.com\"]\n");
+        var err = CapturingStderr(() => Assert.Equal(0, new AllowCommand(host, RecipeCatalog.Embedded).Run(["api.pastebin.com", "ok.example"], global: true)));
+        Assert.Contains($"pen: api.pastebin.com is also denied by {host.Display(host.UserConfigPath)}; deny wins\n", err);
+        Assert.DoesNotContain("ok.example is also", err);
+        Assert.Equal(["api.pastebin.com", "ok.example"], Config.Load(host.ConfigDir, "x", ConfigKind.User).Allow);
+    }
+
+    [Fact]
+    public void AProjectStarIsApprovedLikeAnyDomainPenAllowWrites()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        var project = Project.Resolve(t.Sub("repo"), host);
+        Session.EnsureRuntimeDir(host, project);
+        Assert.False(TrustStore.For(host, project).CoversDomain("*"));
+        var addition = AllowCommand.AddAllowed(host, project, global: false, ["*"]);
+        Assert.Equal(".pen/config.toml", addition.Where);
+        Assert.Equal(["*"], addition.Added);
+        Assert.Equal(["*"], Config.Load(project.PenDir, ".pen", ConfigKind.Project).Allow);
+        Assert.True(TrustStore.For(host, project).CoversDomain("*"));
+    }
+
+    [Fact]
+    public void GlobHint_ForArgumentsNamedLikeFilesHere_IgnoringCase()
+    {
+        using var t = new TempDir();
+        var dir = t.Sub("cwd");
+        File.WriteAllText(Path.Combine(dir, "README.md"), "");
+        Directory.CreateDirectory(Path.Combine(dir, "src.io"));
+        Assert.Null(AllowCommand.FormatGlobHint("allow", dir, ["example.com"], ".pen/config.toml"));
+        Assert.Equal("readme.md names a file here: did your shell expand *? quote it: pen allow '*'; " +
+            "it was added to .pen/config.toml: remove it there if it isn't a domain",
+            AllowCommand.FormatGlobHint("allow", dir, ["readme.md", "example.com"], ".pen/config.toml"));
+        Assert.Equal("readme.md src.io name files here: did your shell expand *? pen deny takes domains, not '*'; " +
+            "they were added to ~/.config/pen/config.toml: remove them there if they aren't domains",
+            AllowCommand.FormatGlobHint("deny", dir, ["readme.md", "src.io"], "~/.config/pen/config.toml"));
+        Assert.Null(AllowCommand.FormatGlobHint("allow", Path.Combine(dir, "missing"), ["readme.md"], "x"));
     }
 }

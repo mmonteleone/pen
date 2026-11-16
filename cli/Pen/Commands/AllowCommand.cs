@@ -20,11 +20,11 @@ namespace Pen.Commands;
 /// <param name="catalog">The recipes that say which domains a tool brings.</param>
 internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
 {
-    /// <summary>The text of a new .pen/config.toml, which pen allow creates when there's none.</summary>
+    /// <summary>The text of a new .pen/config.toml, which pen allow and pen deny create when there's none.</summary>
     public const string ProjectConfigStub = """
         # pen project config (TOML), read-only inside the sandbox. Not for secrets:
         # it's usually committed. Edits apply to the next session, once approved;
-        # `pen allow` also applies to running ones.
+        # `pen allow` and `pen deny` also apply to running ones.
         #
         # github_owner = "<owner>"   whose GitHub token to use (default: origin's owner)
         # docker = true              Docker-in-Docker for every session
@@ -34,7 +34,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
         """;
 
     /// <summary>Adds <paramref name="domains"/> to allow and applies them to running sessions.</summary>
-    /// <param name="domains">The domains to allow (lowercased).</param>
+    /// <param name="domains">The domains to allow (lowercased), or <see cref="Allowlist.AnyDomain"/>.</param>
     /// <param name="global">
     /// Add to the user's config.toml and apply to every project's sessions (--global), rather than to .pen/ and
     /// the sessions started in this directory.
@@ -42,56 +42,210 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     /// <returns>0, or 1 when applying to a running session failed; a failure to add throws.</returns>
     public int Run(IReadOnlyList<string> domains, bool global)
     {
-        var project = TryResolveProject(global);
-        if (project != null)
-        {
-            Session.EnsureRuntimeDir(host, project);
-            Session.FinishDeadSessions(project.Key, host.GetRuntimeDir(project.Key));
-        }
+        var project = PrepareProject(host, global);
+        var addition = AddAllowed(host, project, global, domains);
+        WriteAdded(addition, domains);
+        WriteGlobHint("allow", addition);
+        WarnIfDenied(project, domains);
 
-        var where = global ? host.Display(host.UserConfigPath) : ".pen/" + Config.FileName;
-        var added = global
-            ? Append(host.UserConfigPath, where, ConfigKind.User, domains, stub: "")
-            : AddToProject(project!, where, domains);
-        var skipped = domains.Except(added).ToList();
-        if (added.Count > 0)
-            Out.WriteLine($"added to {where}: {string.Join(' ', added)}");
-        if (skipped.Count > 0)
-            Out.WriteLine($"already in {where}: {string.Join(' ', skipped)}");
-
-        return ApplyToRunning(project, global) ? 0 : 1;
+        return ApplyToRunning(host, project, global) ? 0 : 1;
     }
 
-    /// <summary>Resolves the project in the start directory.</summary>
+    /// <summary>Resolves the project in the start directory, and finishes its sessions whose Pen died.</summary>
     /// <returns>The project, or null with <paramref name="global"/> when there isn't one to resolve there.</returns>
     /// <remarks>--global works from anywhere; without it, a failure to resolve throws.</remarks>
-    private Project? TryResolveProject(bool global)
+    internal static Project? PrepareProject(HostEnv host, bool global)
     {
+        Project? project;
         try
         {
-            return Project.Resolve(StartDir.Get(), host);
+            project = Project.Resolve(StartDir.Get(), host);
         }
         catch (PenException) when (global)
         {
             return null;
         }
+
+        Session.EnsureRuntimeDir(host, project);
+        Session.FinishDeadSessions(project.Key, host.GetRuntimeDir(project.Key));
+        return project;
     }
 
-    /// <summary>Adds <paramref name="domains"/> to the project's .pen/config.toml and approves them.</summary>
-    /// <returns>The domains that weren't in the file yet.</returns>
-    private IReadOnlyList<string> AddToProject(Project project, string where, IReadOnlyList<string> domains)
+    /// <summary>
+    /// Adds <paramref name="domains"/> to allow, as <see cref="AddToConfig"/> does, approving them for the project
+    /// unless <paramref name="global"/>.
+    /// </summary>
+    /// <returns>The file, as messages name it, and the domains that weren't in its allow yet.</returns>
+    /// <remarks>
+    /// The user typed them, so they're approved, also if they were already in the file;
+    /// <see cref="Allowlist.AnyDomain"/> too.
+    /// </remarks>
+    internal static ConfigAddition AddAllowed(
+        HostEnv host,
+        Project? project,
+        bool global,
+        IReadOnlyList<string> domains)
     {
-        RepoGuard.EnsureDirectory(project.Dir, project.PenDir);
-        RepoGuard.RequireNotLink(project.Dir, project.ProjectConfigPath);
-        var added = Append(project.ProjectConfigPath, where, ConfigKind.Project, domains, ProjectConfigStub);
-        // The user typed them, so they're approved, also if they were already in the file.
-        TrustStore.For(host, project).ApproveDomains(domains);
-        return added;
+        var addition = AddToConfig(host, project, global, ConfigEdit.AllowKey, domains);
+        if (!global)
+            TrustStore.For(host, project!).ApproveDomains(domains);
+        return addition;
     }
 
-    /// <summary>Applies the config files' allow to the running sessions the new domains are for.</summary>
+    /// <summary>
+    /// Adds <paramref name="domains"/> to <paramref name="key"/> in the user's config.toml (with
+    /// <paramref name="global"/>) or the project's .pen/config.toml, creating that from
+    /// <see cref="ProjectConfigStub"/> if it's missing.
+    /// </summary>
+    /// <returns>The file, as messages name it, and the domains that weren't in its list yet.</returns>
+    internal static ConfigAddition AddToConfig(
+        HostEnv host,
+        Project? project,
+        bool global,
+        string key,
+        IReadOnlyList<string> domains)
+    {
+        if (global)
+        {
+            var userPath = host.Display(host.UserConfigPath);
+            return new(userPath, Append(host.UserConfigPath, userPath, ConfigKind.User, key, domains, stub: ""));
+        }
+
+        var where = ".pen/" + Config.FileName;
+        RepoGuard.EnsureDirectory(project!.Dir, project.PenDir);
+        RepoGuard.RequireNotLink(project.Dir, project.ProjectConfigPath);
+        var added = Append(project.ProjectConfigPath, where, ConfigKind.Project, key, domains, ProjectConfigStub);
+        return new(where, added);
+    }
+
+    /// <summary>Says which of <paramref name="domains"/> were added, and which were there already.</summary>
+    internal static void WriteAdded(ConfigAddition addition, IReadOnlyList<string> domains)
+    {
+        var skipped = domains.Except(addition.Added).ToList();
+        if (addition.Added.Count > 0)
+            Out.WriteLine($"added to {addition.Where}: {string.Join(' ', addition.Added)}");
+        if (skipped.Count > 0)
+            Out.WriteLine($"already in {addition.Where}: {string.Join(' ', skipped)}");
+    }
+
+    /// <summary>Warns about each of <paramref name="domains"/> a deny in either config file still covers.</summary>
+    /// <remarks>A config file that can't be read now is left out: applying to a running session reports it.</remarks>
+    private void WarnIfDenied(Project? project, IReadOnlyList<string> domains)
+    {
+        var denies = new List<(string Where, List<string> Deny)>();
+        try
+        {
+            denies.Add((host.Display(host.UserConfigPath),
+                Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User).Deny));
+            if (project != null)
+                denies.Add((".pen/" + Config.FileName, Config.Load(project.PenDir, ".pen", ConfigKind.Project).Deny));
+        }
+        catch (PenException)
+        {
+            // Warn from what could be read.
+        }
+
+        foreach (var line in FormatDenyWins(denies, domains))
+            Out.WriteLine(line);
+    }
+
+    /// <summary>Formats the warning for each of <paramref name="domains"/> a deny list covers.</summary>
+    /// <param name="denies">Each config file's deny list, with the file as messages name it.</param>
+    /// <param name="domains">The domains just allowed.</param>
+    /// <returns>One line per covered domain, naming the files whose deny covers it.</returns>
+    /// <remarks><see cref="Allowlist.AnyDomain"/> is left out: deny is meant to narrow it.</remarks>
+    internal static List<string> FormatDenyWins(
+        IReadOnlyList<(string Where, List<string> Deny)> denies,
+        IReadOnlyList<string> domains)
+    {
+        var lines = new List<string>();
+        foreach (var domain in domains.Where(domain => domain != Allowlist.AnyDomain))
+        {
+            var by = denies.Where(file => Allowlist.IsDenied(file.Deny, domain)).Select(file => file.Where).ToList();
+            if (by.Count > 0)
+                lines.Add($"{domain} is also denied by {string.Join(" and ", by)}; deny wins");
+        }
+        return lines;
+    }
+
+    /// <summary>
+    /// Says, when an added argument of pen <paramref name="command"/> is also the name of a file or directory in
+    /// the start directory, that the shell may have expanded an unquoted *, and where the names went.
+    /// </summary>
+    /// <param name="command">The subcommand.</param>
+    /// <param name="addition">What was added, and to which file.</param>
+    /// <remarks>The domains are still added: a file and a domain can share a name.</remarks>
+    internal static void WriteGlobHint(string command, ConfigAddition addition)
+    {
+        if (TryStartDir() is { } dir && FormatGlobHint(command, dir, addition.Added, addition.Where) is { } hint)
+            Out.WriteLine(hint);
+    }
+
+    /// <summary>Gets the start directory.</summary>
+    /// <returns>The directory, or null when it can't be read (a command that needs it reports that).</returns>
+    internal static string? TryStartDir()
+    {
+        try
+        {
+            return StartDir.Get();
+        }
+        catch (PenException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Formats <see cref="WriteGlobHint"/>'s hint for <paramref name="dir"/>.</summary>
+    /// <param name="command">The subcommand.</param>
+    /// <param name="dir">The start directory.</param>
+    /// <param name="domains">The domains that were added.</param>
+    /// <param name="where">The config file they were added to, as messages name it.</param>
+    /// <returns>The hint, or null when no argument is named like one, or the directory can't be listed.</returns>
+    /// <remarks>Names are compared ignoring case, since the parser lowercased the arguments.</remarks>
+    internal static string? FormatGlobHint(
+        string command,
+        string dir,
+        IReadOnlyList<string> domains,
+        string where)
+    {
+        var matches = domains.Where(domain => NamesEntry(dir, domain)).ToList();
+        if (matches.Count == 0)
+            return null;
+        var what = matches.Count == 1 ? "names a file here" : "name files here";
+        var were = matches.Count == 1 ? "it was" : "they were";
+        return $"{string.Join(' ', matches.Select(Out.Field))} {what}: {GlobAdvice(command)}; " +
+            $"{were} added to {where}: remove {(matches.Count == 1 ? "it" : "them")} there if " +
+            $"{(matches.Count == 1 ? "it isn't a domain" : "they aren't domains")}";
+    }
+
+    /// <summary>Tells whether <paramref name="name"/> names an entry of <paramref name="dir"/>, ignoring case.
+    /// </summary>
+    /// <returns>False when the directory can't be listed.</returns>
+    internal static bool NamesEntry(string dir, string name)
+    {
+        try
+        {
+            return Directory.EnumerateFileSystemEntries(dir)
+                .Any(entry => string.Equals(Path.GetFileName(entry), name, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Formats the advice for an argument of pen <paramref name="command"/> named like a file.</summary>
+    /// <remarks>
+    /// pen deny never takes <see cref="Allowlist.AnyDomain"/>, so its advice doesn't suggest quoting it.
+    /// </remarks>
+    internal static string GlobAdvice(string command) =>
+        "did your shell expand *? " + (command == "deny"
+            ? "pen deny takes domains, not '*'"
+            : $"quote it: pen {command} '*'");
+
+    /// <summary>Applies the config files to the running sessions a change in them is for.</summary>
     /// <returns>Whether every one of them took it; each failure is reported, naming the session.</returns>
-    private bool ApplyToRunning(Project? project, bool global)
+    internal static bool ApplyToRunning(HostEnv host, Project? project, bool global)
     {
         int applied = 0;
         int failed = 0;
@@ -112,28 +266,30 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     }
 
     /// <summary>
-    /// Adds the domains not already allowed to the config.toml at <paramref name="path"/>, creating it from
-    /// <paramref name="stub"/> if it's missing.
+    /// Adds the domains not already in <paramref name="key"/> to the config.toml at <paramref name="path"/>, creating
+    /// it from <paramref name="stub"/> if it's missing.
     /// </summary>
     /// <param name="path">The config.toml to change.</param>
     /// <param name="displayPath">Names the file in messages.</param>
     /// <param name="kind">Which keys the file may hold.</param>
-    /// <param name="domains">The domains to allow.</param>
+    /// <param name="key">The list to add to: allow or deny.</param>
+    /// <param name="domains">The domains to add.</param>
     /// <param name="stub">The text a missing file starts from.</param>
     /// <returns>The domains added, lowercased, in order; none when the file is left alone.</returns>
     /// <remarks>
-    /// The edit is <see cref="ConfigEdit.AddAllowed"/>'s, and the file is replaced by rename, keeping its mode.
+    /// The edit is <see cref="ConfigEdit.AddToList"/>'s, and the file is replaced by rename, keeping its mode.
     /// </remarks>
     public static IReadOnlyList<string> Append(
         string path,
         string displayPath,
         ConfigKind kind,
+        string key,
         IReadOnlyList<string> domains,
         string stub)
     {
         var existing = Config.ReadText(path, displayPath);
         bool exists = existing != null;
-        var edit = ConfigEdit.AddAllowed(existing ?? stub, displayPath, kind, domains);
+        var edit = ConfigEdit.AddToList(existing ?? stub, displayPath, kind, key, domains);
         if (edit.Added.Count == 0)
             return edit.Added;
 
@@ -184,7 +340,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
         }
     }
 
-    /// <summary>Finds the running sessions an added domain applies to.</summary>
+    /// <summary>Finds the running sessions an added domain (allowed or denied) applies to.</summary>
     /// <returns>
     /// With <paramref name="global"/>, every project's; otherwise only those started in
     /// <paramref name="project"/>'s dir.
@@ -356,8 +512,8 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     }
 
     /// <summary>
-    /// Runs pen allow without domains: lists what the project's sessions had blocked and isn't allowed now, and
-    /// apart from it what deny covers now.
+    /// Runs pen allow without domains: lists what the project's sessions had blocked and isn't allowed now, apart
+    /// from it what nothing pen allow adds would let through, and what deny covers now.
     /// </summary>
     /// <param name="context">The project and both configs, which say what a session would be allowed.</param>
     /// <returns>0.</returns>
@@ -370,13 +526,15 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
 
         var logs = Directory.EnumerateDirectories(Path.Combine(runtimeDir, "sessions"))
             .Select(dir => new SessionDir(project.Key, dir).ReadProxyLogLines());
-        var (allowed, denied) = MergeAllowedNow(context);
-        // Deny beats every allow, so a denied host is listed apart even when allow covers it, "*" included.
-        var all = FindBlockedAcross(logs);
-        var deniedNow = all.Where(entry => Allowlist.IsDenied(denied, entry.Host)).ToList();
-        var blocked = all.Where(entry => !Allowlist.IsDenied(denied, entry.Host)
-            && !Allowlist.IsAllowed(allowed, entry.Host)).ToList();
-        if (blocked.Count == 0 && deniedNow.Count == 0)
+        var (named, open, denied) = MergeAllowedNow(context);
+        // Grouped as the session-end lines are: deny beats every allow, "*" included, and in open egress a name it
+        // blocked anyway (one resolving privately, say) is listed apart, with no pen allow line.
+        var groups = FindBlockedAcross(logs)
+            .ToLookup(entry => Allowlist.ClassifyBlocked(entry.Host, named, open, denied));
+        var blocked = groups[BlockedAs.NotAllowed].ToList();
+        var unreachable = groups[BlockedAs.Unreachable].ToList();
+        var deniedNow = groups[BlockedAs.Denied].ToList();
+        if (blocked.Count == 0 && unreachable.Count == 0 && deniedNow.Count == 0)
         {
             Out.WriteStdout("nothing blocked in this project's sessions (last 7 days) that isn't allowed now\n");
             return 0;
@@ -384,6 +542,11 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
 
         if (blocked.Count > 0)
             WriteBlocked(blocked);
+        if (unreachable.Count > 0)
+        {
+            WriteHosts($"blocked in this project's sessions ({Allowlist.DescribeUnreachable(open)}), newest first:",
+                unreachable);
+        }
         if (deniedNow.Count > 0)
             WriteDenied(deniedNow);
         return 0;
@@ -391,24 +554,26 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
 
     /// <summary>Merges what a session started now would be allowed and denied.</summary>
     /// <returns>
-    /// The merged allow list, which may be just <see cref="Allowlist.AnyDomain"/>, and the merged deny list.
+    /// What the merged allow list allows by name, whether it has <see cref="Allowlist.AnyDomain"/>, and the merged
+    /// deny list.
     /// </returns>
     /// <remarks>
     /// Only approved domains and tools from .pen/ count, so an unapproved domain there stays listed. Deny needs no
     /// approval, so all of it counts.
     /// </remarks>
-    private (HashSet<string> Allowed, HashSet<string> Denied) MergeAllowedNow(ProjectContext context)
+    private (HashSet<string> Named, bool Open, HashSet<string> Denied) MergeAllowedNow(ProjectContext context)
     {
         var store = TrustStore.For(host, context.Project);
         var approved = TrustGate.SelectAllowedDomains(context.User, context.ProjectConfig, store);
         var toolDomains = ToolSpec.ListDomains(
             context.User.Tools.Concat(store.SelectApprovedTools(context.ProjectConfig.Tools, catalog)),
             catalog);
-        var allowed = Allowlist.Merge(Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")),
-                context.User.Allow, approved, toolDomains)
-            .ToHashSet(StringComparer.Ordinal);
+        IEnumerable<string>[] sources = [Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")),
+            context.User.Allow, approved, toolDomains];
+        var named = Allowlist.MergeNamed(sources).ToHashSet(StringComparer.Ordinal);
+        bool open = Allowlist.Merge(sources).Contains(Allowlist.AnyDomain);
         var denied = Allowlist.MergeDeny(context.User, context.ProjectConfig).ToHashSet(StringComparer.Ordinal);
-        return (allowed, denied);
+        return (named, open, denied);
     }
 
     /// <summary>Writes the newest of <paramref name="blocked"/> to stdout, and the pen allow line for them.</summary>
@@ -445,3 +610,8 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
         return shown;
     }
 }
+
+/// <summary>What <see cref="AllowCommand.AddToConfig"/> changed.</summary>
+/// <param name="Where">The config.toml, as messages name it.</param>
+/// <param name="Added">The domains that weren't in its list yet, lowercased, in order.</param>
+internal sealed record ConfigAddition(string Where, IReadOnlyList<string> Added);

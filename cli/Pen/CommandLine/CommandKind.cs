@@ -12,6 +12,9 @@ internal enum CommandKind
     /// <summary>pen allow.</summary>
     Allow,
 
+    /// <summary>pen deny.</summary>
+    Deny,
+
     /// <summary>pen trust.</summary>
     Trust,
 

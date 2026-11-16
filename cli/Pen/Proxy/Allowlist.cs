@@ -280,34 +280,63 @@ internal static partial class Allowlist
         var notAllowed = new List<string>();
         foreach (var host in hosts)
         {
-            if (IsDenied(deny, host))
-                denied.Add(host);
-            else if (IsAllowed(named, host))
-                continue;
-            else if (open || IsIpLiteral(host))
-                unreachable.Add(host);
-            else
-                notAllowed.Add(host);
+            switch (ClassifyBlocked(host, named, open, deny))
+            {
+                case BlockedAs.Denied:
+                    denied.Add(host);
+                    break;
+                case BlockedAs.Unreachable:
+                    unreachable.Add(host);
+                    break;
+                case BlockedAs.NotAllowed:
+                    notAllowed.Add(host);
+                    break;
+            }
         }
 
         var lines = new List<string>();
         if (denied.Count > 0)
             lines.Add(FormatHostList("denied by config: ", denied, " (pen allow lists the latest)").Line);
         if (unreachable.Count > 0)
-            lines.Add(FormatHostList(open ? OpenBlockedPrefix : "blocked (raw IP): ", unreachable, "").Line);
+            lines.Add(FormatHostList($"blocked ({DescribeUnreachable(open)}): ", unreachable, "").Line);
         if (FormatBlockedLine(notAllowed) is { } line)
             lines.Add(line);
         return lines;
     }
 
-    /// <summary>The session-end prefix for what open egress blocked that deny didn't.</summary>
+    /// <summary>Says why a blocked host is in the group of <see cref="ClassifyBlocked"/>'s Unreachable.</summary>
+    /// <param name="open">Whether egress is open.</param>
     /// <remarks>
     /// The log doesn't say which; a name blocked before egress opened is among them too. Of the rest, pen allow
     /// would let through only a name that resolves privately, which open egress keeps out on purpose, so it isn't
     /// offered.
     /// </remarks>
-    private const string OpenBlockedPrefix =
-        "blocked (raw IP, private address, unresolvable name, another port or blocked earlier): ";
+    internal static string DescribeUnreachable(bool open) =>
+        open ? "raw IP, private address, unresolvable name, another port or blocked earlier" : "raw IP";
+
+    /// <summary>
+    /// Tells why <paramref name="host"/>, which a proxy blocked, is blocked now, as session-end lines and the pen
+    /// allow listing group it.
+    /// </summary>
+    /// <param name="host">The blocked host.</param>
+    /// <param name="named">What's allowed by name, without <see cref="AnyDomain"/>.</param>
+    /// <param name="open">Whether allow has <see cref="AnyDomain"/>.</param>
+    /// <param name="deny">What's denied.</param>
+    /// <returns>
+    /// Denied when deny covers it, whatever allows it; AllowedNow when it's allowed by name; with neither deny nor
+    /// open egress, NotAllowed for the rest. Otherwise Unreachable for a raw IP, and in open egress for every name
+    /// left, and NotAllowed for the rest, which alone pen allow would let through.
+    /// </returns>
+    internal static BlockedAs ClassifyBlocked(string host, HashSet<string> named, bool open, HashSet<string> deny)
+    {
+        if (IsDenied(deny, host))
+            return BlockedAs.Denied;
+        if (IsAllowed(named, host))
+            return BlockedAs.AllowedNow;
+        if (deny.Count == 0 && !open)
+            return BlockedAs.NotAllowed;
+        return open || IsIpLiteral(host) ? BlockedAs.Unreachable : BlockedAs.NotAllowed;
+    }
 
     /// <summary>
     /// Formats <paramref name="prefix"/> and the <see cref="MaxListed"/> most recent of <paramref name="hosts"/>,
@@ -325,6 +354,22 @@ internal static partial class Allowlist
             line += $" and {hosts.Count - shown.Count} more{moreNote}";
         return (line, shown);
     }
+}
+
+/// <summary>Why a host a proxy blocked is blocked now (<see cref="Allowlist.ClassifyBlocked"/>).</summary>
+internal enum BlockedAs
+{
+    /// <summary>Deny covers it.</summary>
+    Denied,
+
+    /// <summary>It's allowed by name now, so it isn't reported.</summary>
+    AllowedNow,
+
+    /// <summary>It's a raw IP, or in open egress a name it didn't let through: pen allow wouldn't help.</summary>
+    Unreachable,
+
+    /// <summary>Nothing allows it: pen allow would let it through.</summary>
+    NotAllowed,
 }
 
 /// <summary>The contents of the proxy's ACL files: allowlist.txt, denylist.txt and open-egress.txt.</summary>

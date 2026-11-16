@@ -4,60 +4,81 @@ using Tomlyn.Syntax;
 
 namespace Pen.Configuration;
 
-/// <summary>Edits a hand-written config.toml for pen allow, adding domains to its top-level allow array.</summary>
+/// <summary>
+/// Edits a hand-written config.toml for pen allow and pen deny, adding domains to its top-level allow or deny
+/// array.
+/// </summary>
 /// <remarks>
 /// Domains are inserted into the array (or a new one is added) at positions from the syntax tree, leaving every
-/// other byte of the file alone. The result is re-parsed and must equal the old settings plus the new domains, or
-/// nothing is written.
+/// other byte of the file alone. The result is re-parsed and must equal the old settings plus the new domains in
+/// that list, or nothing is written.
 /// </remarks>
 internal static class ConfigEdit
 {
-    /// <summary>Adds the domains not already allowed to <paramref name="text"/>'s allow array.</summary>
+    /// <summary>The lists <see cref="AddToList"/> can add to.</summary>
+    public const string AllowKey = "allow";
+    /// <inheritdoc cref="AllowKey"/>
+    public const string DenyKey = "deny";
+
+    /// <summary>Adds the domains not already in <paramref name="key"/> to <paramref name="text"/>'s array.</summary>
     /// <param name="text">The config.toml text.</param>
     /// <param name="displayPath">Names the file in errors.</param>
     /// <param name="kind">Which keys the file may hold.</param>
-    /// <param name="domains">The domains to allow.</param>
+    /// <param name="key">The list to add to: <see cref="AllowKey"/> or <see cref="DenyKey"/>.</param>
+    /// <param name="domains">The domains to add.</param>
     /// <returns>
     /// The edited text, or <paramref name="text"/> itself if nothing needed adding, and the domains added.
     /// </returns>
     /// <remarks>A broken file is reported (as a PenException) before anything is changed.</remarks>
-    public static AllowEdit AddAllowed(string text, string displayPath, ConfigKind kind, IReadOnlyList<string> domains)
+    public static ListEdit AddToList(
+        string text,
+        string displayPath,
+        ConfigKind kind,
+        string key,
+        IReadOnlyList<string> domains)
     {
+        if (key is not (AllowKey or DenyKey))
+            throw new ArgumentException($"no list {key} to add to.", nameof(key));
         var before = Config.Parse(text, displayPath, kind);
         var added = domains.Select(domain => domain.ToLowerInvariant())
             .Distinct()
-            .Where(domain => !before.Allow.Contains(domain))
+            .Where(domain => !SelectList(before, key).Contains(domain))
             .ToList();
         if (added.Count == 0)
             return new(text, added);
 
-        var result = InsertDomains(text, displayPath, added);
-        // Belt and braces: the edit must change nothing but allow.
-        if (!IsOnlyAllowAdded(before, Reparse(result, displayPath, kind), added))
+        var result = InsertDomains(text, displayPath, key, added);
+        // Belt and braces: the edit must change nothing but that list.
+        if (!IsOnlyAdded(before, Reparse(result, displayPath, kind), key, added))
         {
-            throw new PenException($"{displayPath}: couldn't add to allow " +
+            throw new PenException($"{displayPath}: couldn't add to {key} " +
                 $"automatically; add {string.Join(", ", added.Select(Quote))} by hand");
         }
 
         return new(result, added);
     }
 
-    /// <summary>Inserts <paramref name="added"/> into the text's top-level allow array, or adds one.</summary>
-    private static string InsertDomains(string text, string displayPath, List<string> added)
+    /// <summary>Gets the list <paramref name="key"/> names in <paramref name="config"/>.</summary>
+    private static List<string> SelectList(Config config, string key) => key == AllowKey ? config.Allow : config.Deny;
+
+    /// <summary>
+    /// Inserts <paramref name="added"/> into the text's top-level <paramref name="key"/> array, or adds one.
+    /// </summary>
+    private static string InsertDomains(string text, string displayPath, string key, List<string> added)
     {
         var newline = text.Contains("\r\n") ? "\r\n" : "\n";
         var document = SyntaxParser.Parse(text, displayPath, validate: true);
-        var allow = document.KeyValues.FirstOrDefault(kv => KeyName(kv) == "allow");
-        if (allow == null)
-            return Insert(text, NewArrayOffset(text, document), Block(added, "  ", newline) + newline);
-        if (allow.Value is ArraySyntax array)
+        var list = document.KeyValues.FirstOrDefault(kv => KeyName(kv) == key);
+        if (list == null)
+            return Insert(text, NewArrayOffset(text, document), Block(key, added, "  ", newline) + newline);
+        if (list.Value is ArraySyntax array)
         {
             return array.OpenBracket!.Span.Start.Line == array.CloseBracket!.Span.Start.Line
                 ? Rewrite(text, array, added, newline)
                 : InsertBeforeClose(text, array, added, newline);
         }
 
-        throw new PenException($"{displayPath}: allow isn't written as a list pen " +
+        throw new PenException($"{displayPath}: {key} isn't written as a list pen " +
             $"can add to; add {string.Join(", ", added.Select(Quote))} by hand");
     }
 
@@ -76,10 +97,13 @@ internal static class ConfigEdit
     }
 
     /// <summary>
-    /// Tells whether <paramref name="after"/> is <paramref name="before"/> with only the domains added.
+    /// Tells whether <paramref name="after"/> is <paramref name="before"/> with only the domains added to
+    /// <paramref name="key"/>'s list.
     /// </summary>
-    private static bool IsOnlyAllowAdded(Config before, Config after, List<string> added) =>
-        after.Allow.SequenceEqual(before.Allow.Concat(added))
+    private static bool IsOnlyAdded(Config before, Config after, string key, List<string> added) =>
+        after.Allow.SequenceEqual(key == AllowKey ? before.Allow.Concat(added) : before.Allow)
+            && after.Deny.SequenceEqual(key == DenyKey ? before.Deny.Concat(added) : before.Deny)
+            && after.Tools.SequenceEqual(before.Tools)
             && after.GitHubOwner == before.GitHubOwner
             && after.Docker == before.Docker
             && after.Ports.SequenceEqual(before.Ports)
@@ -101,9 +125,9 @@ internal static class ConfigEdit
 
     private static string Quote(string domain) => "\"" + domain + "\"";
 
-    /// <summary>Formats a new multi-line allow array holding <paramref name="domains"/>.</summary>
-    private static string Block(IEnumerable<string> domains, string indent, string newline) =>
-        "allow = [" + newline + string.Concat(domains.Select(d => indent + Quote(d) + "," + newline)) + "]" + newline;
+    /// <summary>Formats a new multi-line <paramref name="key"/> array holding <paramref name="domains"/>.</summary>
+    private static string Block(string key, IEnumerable<string> domains, string indent, string newline) =>
+        key + " = [" + newline + string.Concat(domains.Select(d => indent + Quote(d) + "," + newline)) + "]" + newline;
 
     private static string Insert(string text, int offset, string insertion) =>
         text[..offset] + insertion + text[offset..];
@@ -112,7 +136,7 @@ internal static class ConfigEdit
     private static int LineStart(string text, int offset) =>
         offset == 0 ? 0 : text.LastIndexOf('\n', offset - 1) + 1;
 
-    /// <summary>Finds where a new top-level allow goes.</summary>
+    /// <summary>Finds where a new top-level array goes.</summary>
     /// <returns>
     /// The start of the comment block directly above the first [table], or of the table's header line; with no
     /// tables, the end of the text.

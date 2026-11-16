@@ -2,8 +2,8 @@ using System.Text.RegularExpressions;
 
 namespace Pen.SmokeTests;
 
-/// <summary>pen allow &lt;domain…&gt;: what it writes to .pen/config.toml or, with --global, the user's config, and
-/// how it reaches running sessions without a restart.</summary>
+/// <summary>pen allow &lt;domain…&gt; and pen deny &lt;domain…&gt;: what they write to .pen/config.toml or, with
+/// --global, the user's config, and how they reach running sessions without a restart.</summary>
 public sealed class AllowCommandTests(AllowCommandTests.Fixture fixture) : IClassFixture<AllowCommandTests.Fixture>
 {
     [Fact(DisplayName = "pen allow applies to both running sessions")]
@@ -83,6 +83,48 @@ public sealed class AllowCommandTests(AllowCommandTests.Fixture fixture) : IClas
             log);
     }
 
+    [Fact(DisplayName = "pen deny applies to a running session")]
+    public void DenyAppliesLive() => AssertHas(fixture.Deny, "applied to 1 running session");
+
+    [Fact(DisplayName = "...which can no longer reach the host it reached before")]
+    public void DeniedHostIsBlocked() =>
+        Assert.True(
+            fixture.EgressSession.OutputSoFar.Contains("com-reachable", StringComparison.Ordinal)
+                && fixture.EgressSession.OutputSoFar.Contains("com-denied", StringComparison.Ordinal),
+            fixture.EgressSession.OutputSoFar);
+
+    [Fact(DisplayName = "pen allow warns when a deny still covers the domain")]
+    public void AllowWarnsThatDenyWins() =>
+        AssertHas(fixture.AllowDenied, "example.com is also denied by .pen/config.toml; deny wins");
+
+    [Fact(DisplayName = "pen deny lists the denied domain with its file")]
+    public void DenyListsIt() =>
+        Assert.True(
+            fixture.DenyListing.StdoutLines.Any(line => line.StartsWith("  example.com ", StringComparison.Ordinal)
+                && line.Contains(".pen/config.toml", StringComparison.Ordinal)),
+            fixture.DenyListing.Describe());
+
+    [Fact(DisplayName = "pen allow '*' opens a running session's egress")]
+    public void StarOpensLive() =>
+        Assert.Multiple(
+            () => AssertHas(fixture.AllowStar, "applied to 1 running session"),
+            () => Assert.True(
+                fixture.EgressSession.OutputSoFar.Contains("org-open", StringComparison.Ordinal),
+                fixture.EgressSession.OutputSoFar));
+
+    [Fact(DisplayName = "...and pen ps marks it open")]
+    public void PsMarksItOpen() =>
+        Assert.True(
+            fixture.PsWhileOpen.StdoutLines.Any(line => line.Contains(fixture.EgressSessionId, StringComparison.Ordinal)
+                && Regex.IsMatch(line, @"\sopen\s")),
+            $"session {fixture.EgressSessionId}; {fixture.PsWhileOpen.Describe()}");
+
+    [Fact(DisplayName = "...and once '*' is out of the config, the next pen deny closes it again")]
+    public void TheNextDenyClosesIt() =>
+        Assert.Multiple(
+            () => AssertHas(fixture.DenyAfterClosing, "applied to 1 running session"),
+            () => AssertHas(fixture.EgressSessionResult, "org-closed"));
+
     private static void AssertHas(CommandResult result, string text) =>
         Assert.True(result.Output.Contains(text, StringComparison.Ordinal), $"no \"{text}\"; {result.Describe()}");
 
@@ -118,6 +160,24 @@ public sealed class AllowCommandTests(AllowCommandTests.Fixture fixture) : IClas
 
         internal IReadOnlyList<string> UserConfigLines { get; private set; } = [];
 
+        internal RunningCommand EgressSession { get; private set; } = null!;
+
+        internal string EgressSessionId { get; private set; } = "";
+
+        internal CommandResult EgressSessionResult { get; private set; } = null!;
+
+        internal CommandResult Deny { get; private set; } = null!;
+
+        internal CommandResult AllowDenied { get; private set; } = null!;
+
+        internal CommandResult DenyListing { get; private set; } = null!;
+
+        internal CommandResult AllowStar { get; private set; } = null!;
+
+        internal CommandResult PsWhileOpen { get; private set; } = null!;
+
+        internal CommandResult DenyAfterClosing { get; private set; } = null!;
+
         internal string UserConfigMode { get; private set; } = null!;
 
         private string ProjectConfig => Path.Combine(Project.Dir, ".pen", "config.toml");
@@ -128,6 +188,7 @@ public sealed class AllowCommandTests(AllowCommandTests.Fixture fixture) : IClas
             RunAllowWithTwoSessions();
             RunAllowWithATool();
             RunAllowGlobal();
+            RunDenyAndOpenEgress();
         }
 
         private void RunAllowWithTwoSessions()
@@ -179,6 +240,54 @@ public sealed class AllowCommandTests(AllowCommandTests.Fixture fixture) : IClas
             OtherSession = session.WaitForExit();
             UserConfigLines = File.ReadAllLines(Home.ConfigPath);
             UserConfigMode = Files.GetMode(Home.ConfigPath);
+        }
+
+        /// <summary>
+        /// Runs pen deny on a domain a running session reaches, then pen allow for it, pen allow '*', and once '*'
+        /// is taken out of .pen/config.toml by hand, another pen deny, each after the session saw the one before.
+        /// </summary>
+        private void RunDenyAndOpenEgress()
+        {
+            var session = Track(Cli.Start("run", "bash", "-c", """
+                code() { curl -s --max-time 5 -o /dev/null -w %{http_code} -I "$1"; }
+                until_ok() { for i in $(seq 90); do [ "$(code "$1")" = 200 ] && { echo "$2"; return; }; sleep 0.5; done; echo "never-$2"; exit 1; }
+                until_blocked() { for i in $(seq 90); do [ "$(code "$1")" != 200 ] && { echo "$2"; return; }; sleep 0.5; done; echo "never-$2"; exit 1; }
+                until_ok https://example.com com-reachable
+                until_blocked https://example.com com-denied
+                until_ok https://example.org org-open
+                until_blocked https://example.org org-closed
+                """));
+            EgressSession = session;
+            if (!Polling.WaitForContainer($"^{Key}-.*-agent$"))
+                throw new InvalidOperationException($"the egress session didn't start: {session.OutputSoFar}");
+            var agent = new Regex($"^{Key}-([0-9a-f]{{8}})-(.*-)?agent$");
+            EgressSessionId = Docker.ListRunningNames().Select(name => agent.Match(name))
+                .FirstOrDefault(match => match.Success)?.Groups[1].Value ?? "?";
+
+            WaitForOutput(session, "com-reachable");
+            Deny = Cli.Run("deny", "example.com").RequireSuccess();
+            WaitForOutput(session, "com-denied");
+            AllowDenied = Cli.Run("allow", "example.com").RequireSuccess();
+            DenyListing = Cli.Run("deny").RequireSuccess();
+            AllowStar = Cli.Run("allow", "*").RequireSuccess();
+            WaitForOutput(session, "org-open");
+            PsWhileOpen = Cli.Run("ps").RequireSuccess();
+
+            File.WriteAllLines(ProjectConfig, File.ReadAllLines(ProjectConfig).Where(line => line.Trim() != "\"*\","));
+            DenyAfterClosing = Cli.Run("deny", "pastebin.com").RequireSuccess();
+            EgressSessionResult = session.WaitForExit();
+        }
+
+        /// <summary>Waits up to 60 s for <paramref name="marker"/> in <paramref name="session"/>'s output.</summary>
+        private static void WaitForOutput(RunningCommand session, string marker)
+        {
+            if (!Polling.WaitUntil(
+                    () => session.OutputSoFar.Contains(marker, StringComparison.Ordinal) || session.HasExited,
+                    TimeSpan.FromSeconds(60))
+                || !session.OutputSoFar.Contains(marker, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"no {marker} from the session: {session.OutputSoFar}");
+            }
         }
     }
 }

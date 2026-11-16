@@ -58,6 +58,11 @@ internal sealed class SessionDir(string projectKey, string path)
     /// <summary>Gets whether the session's proxy has the deny and open ACLs, as one started by this Pen does.</summary>
     public bool HasDenyAndOpen => File.Exists(DenylistFile);
 
+    /// <summary>Gets whether the session's open-egress.txt opens egress.</summary>
+    /// <remarks>False without one, as in a session started by a Pen without open egress.</remarks>
+    public bool HasOpenEgress =>
+        File.Exists(OpenEgressFile) && Allowlist.IsOpenEgress(File.ReadAllText(OpenEgressFile));
+
     /// <summary>Reads what the session's proxy enforces now, from its ACL files.</summary>
     /// <returns>
     /// The allowed domains, with <see cref="Allowlist.AnyDomain"/> in open egress, and the denied ones; a missing
@@ -68,7 +73,7 @@ internal sealed class SessionDir(string projectKey, string path)
         static IEnumerable<string> ReadList(string file) =>
             File.Exists(file) ? Allowlist.ParseList(File.ReadAllText(file)) : [];
         var allow = ReadList(AllowlistFile).ToHashSet(StringComparer.Ordinal);
-        if (File.Exists(OpenEgressFile) && Allowlist.IsOpenEgress(File.ReadAllText(OpenEgressFile)))
+        if (HasOpenEgress)
             allow.Add(Allowlist.AnyDomain);
         return (allow, ReadList(DenylistFile).ToHashSet(StringComparer.Ordinal));
     }

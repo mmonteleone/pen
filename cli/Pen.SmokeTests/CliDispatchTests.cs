@@ -33,7 +33,21 @@ public sealed class CliDispatchTests(SmokeFixture fixture) : IClassFixture<Smoke
 
         Assert.Multiple(
             () => Assert.Contains("pen allow", help, StringComparison.Ordinal),
+            () => Assert.Contains("pen deny", help, StringComparison.Ordinal),
             () => Assert.Contains("pen upgrade", help, StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "pen deny --help describes it, and pen deny '*' is a usage error")]
+    public void DenyHasHelp_AndRefusesTheStar()
+    {
+        var help = Cli.Run("deny", "--help");
+        var star = Cli.Run("deny", "*");
+
+        Assert.Multiple(
+            () => Assert.True(
+                help.ExitCode == 0 && help.Stdout.StartsWith("usage: pen deny", StringComparison.Ordinal),
+                help.Describe()),
+            () => Assert.True(star.IsUsageError("pen deny: \"*\" would block everything"), star.Describe()));
     }
 
     [Fact(DisplayName = "pen --port 0 is a usage error (exit 2), before any session")]

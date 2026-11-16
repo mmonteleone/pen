@@ -85,6 +85,7 @@ public class CliTests
 
     [Theory]
     [InlineData("Allow", "allow")]
+    [InlineData("Deny", "deny")]
     [InlineData("Sign", "sign")]
     [InlineData("Sign", "sign", "origin/main")]
     [InlineData("Clean", "clean")]
@@ -106,6 +107,76 @@ public class CliTests
         Assert.False(P("allow", "a.io").Global);
     }
 
+    [Fact]
+    public void DenyTakesDomainsAndGlobal_Lowercased_WithoutDuplicates()
+    {
+        var c = P("deny", "Gist.GitHub.com", "--global", ".foo.io", "gist.github.com");
+        Assert.Equal(CommandKind.Deny, c.Kind);
+        Assert.True(c.Global);
+        Assert.Equal(["gist.github.com", ".foo.io"], c.Args);
+        Assert.False(P("deny", "a.io").Global);
+        Assert.Empty(P("deny").Args);
+    }
+
+    [Fact]
+    public void AllowTakesTheStar_DenyRefusesIt()
+    {
+        Assert.Equal(["*", "a.io"], P("allow", "*", "a.io").Args);
+        Assert.True(P("allow", "--global", "*").Global);
+        var e = Assert.Throws<PenException>(() => P("deny", "a.io", "*"));
+        Assert.Equal(2, e.ExitCode);
+        Assert.StartsWith("pen deny: \"*\" would block everything; remove the allow entries instead", e.Message);
+    }
+
+    [Theory]
+    [InlineData("allow", "**")]
+    [InlineData("allow", "*.example.com")]
+    [InlineData("allow", ".")]
+    [InlineData("deny", ".com")]
+    [InlineData("deny", "*.example.com")]
+    [InlineData("deny", "1.2.3.4")]
+    public void OnlyTheExactStarIsntADomain(string command, string arg)
+    {
+        var e = Assert.Throws<PenException>(() => P(command, arg));
+        Assert.StartsWith($"pen {command}: \"{arg}\" isn't a domain", e.Message);
+    }
+
+    [Theory]
+    [InlineData("allow", "LICENSE", "license", "did your shell expand *? quote it: pen allow '*'")]
+    [InlineData("deny", "Makefile", "makefile", "did your shell expand *? pen deny takes domains, not '*'")]
+    public void ANonDomainNamingAnEntryHere_GetsTheGlobAdvice(string command, string entry, string arg, string advice)
+    {
+        using var t = new TempDir();
+        var dir = t.Sub("cwd");
+        File.WriteAllText(Path.Combine(dir, entry), "");
+        var e = Assert.Throws<PenException>(() => CommandParser.Parse([command, arg], () => dir));
+        Assert.StartsWith($"pen {command}: \"{arg}\" isn't a domain", e.Message);
+        Assert.Contains("; " + advice, e.Message);
+    }
+
+    [Fact]
+    public void ANonDomainNamingNoEntryHere_GetsNoGlobAdvice()
+    {
+        using var t = new TempDir();
+        var dir = t.Sub("cwd");
+        File.WriteAllText(Path.Combine(dir, "LICENSE"), "");
+        var e = Assert.Throws<PenException>(() => CommandParser.Parse(["allow", "other"], () => dir));
+        Assert.DoesNotContain("expand", e.Message);
+        e = Assert.Throws<PenException>(() => CommandParser.Parse(["allow", "license"], () => null));
+        Assert.DoesNotContain("expand", e.Message);
+    }
+
+    [Theory]
+    [InlineData("deny", "--global")]
+    [InlineData("deny", "--defaults")]
+    [InlineData("deny", "--globl", "a.io")]
+    public void BadDenyArgumentsAreUsageErrors_WordedForDeny(params string[] args)
+    {
+        var e = Assert.Throws<PenException>(() => P(args));
+        Assert.Equal(2, e.ExitCode);
+        Assert.StartsWith("pen deny", e.Message);
+    }
+
     [Theory]
     [InlineData("run", "run", "--help")]
     [InlineData("run", "run", "-h")]
@@ -114,6 +185,8 @@ public class CliTests
     [InlineData("allow", "allow", "--help")]
     [InlineData("allow", "allow", "example.com", "--help")]
     [InlineData("allow", "allow", "--defaults", "--help")]
+    [InlineData("deny", "deny", "--help")]
+    [InlineData("deny", "deny", "a.io", "-h")]
     [InlineData("sign", "sign", "--help")]
     [InlineData("clean", "clean", "-h")]
     [InlineData("ps", "ps", "--help")]
@@ -139,7 +212,7 @@ public class CliTests
     [Fact]
     public void EverySubcommandHasHelp_AndTheUsageMentionsIt()
     {
-        foreach (var name in new[] { "run", "upgrade", "allow", "sign", "clean", "ps" })
+        foreach (var name in new[] { "run", "upgrade", "allow", "deny", "sign", "clean", "ps" })
             Assert.True(HelpText.Subcommands.ContainsKey(name), name);
         Assert.Contains("pen <subcommand> --help", HelpText.Usage);
     }
@@ -275,6 +348,7 @@ public class CliTests
     [Theory]
     [InlineData("upgrade")]
     [InlineData("allow")]
+    [InlineData("deny")]
     [InlineData("sign")]
     [InlineData("clean")]
     [InlineData("clean", "--stale")]

@@ -61,12 +61,12 @@ internal static class Program
     /// <remarks>
     /// Each step needs more than the one before, and each command runs as soon as it has
     /// what it needs: help and listings need nothing, pen ps and pen clean --stale the host,
-    /// pen upgrade and pen allow &lt;domain…&gt; the user config, the rest the project.
-    /// Only a session, pen allow (listing) and pen trust load the project config.
+    /// pen upgrade, pen allow &lt;domain…&gt; and pen deny &lt;domain…&gt; the user config, the rest the project.
+    /// Only a session, the pen allow and pen deny listings and pen trust load the project config.
     /// </remarks>
     private static int Run(string[] args)
     {
-        var command = CommandParser.Parse(args);
+        var command = CommandParser.Parse(args, AllowCommand.TryStartDir);
         switch (command.Kind)
         {
             case CommandKind.Help:
@@ -99,6 +99,8 @@ internal static class Program
                 return new UpgradeCommand(host, user, RecipeCatalog.Embedded).Run(command.NoCache);
             case CommandKind.Allow when command.Args.Count > 0:
                 return new AllowCommand(host, RecipeCatalog.Embedded).Run(command.Args, command.Global);
+            case CommandKind.Deny when command.Args.Count > 0:
+                return new DenyCommand(host, RecipeCatalog.Embedded).Run(command.Args, command.Global);
         }
 
         var project = Project.Resolve(StartDir.Get(), host);
@@ -106,6 +108,7 @@ internal static class Program
         {
             CommandKind.Run => RunSession(ProjectContext.Load(host, project, user), command),
             CommandKind.Allow => ListBlocked(ProjectContext.Load(host, project, user)),
+            CommandKind.Deny => ListDenied(ProjectContext.Load(host, project, user)),
             CommandKind.Trust => RunTrust(ProjectContext.Load(host, project, user), command),
             CommandKind.Sign => RunSign(host, project, command),
             CommandKind.Clean => new CleanCommand(host, project, Console.In).Run(),
@@ -151,6 +154,10 @@ internal static class Program
     /// <summary>Runs pen allow without domains: lists the recently blocked ones.</summary>
     private static int ListBlocked(ProjectContext context) =>
         new AllowCommand(context.Host, RecipeCatalog.Embedded).ListBlocked(context);
+
+    /// <summary>Runs pen deny without domains: lists what's denied.</summary>
+    private static int ListDenied(ProjectContext context) =>
+        new DenyCommand(context.Host, RecipeCatalog.Embedded).List(context);
 
     /// <summary>Runs pen trust.</summary>
     private static int RunTrust(ProjectContext context, Command command) =>

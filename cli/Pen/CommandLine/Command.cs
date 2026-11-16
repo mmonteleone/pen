@@ -5,7 +5,7 @@ namespace Pen.CommandLine;
 /// <summary>A parsed command line: the command Pen runs and its options.</summary>
 /// <param name="Kind">The command.</param>
 /// <param name="Args">
-/// For Run, the command to run in the sandbox (empty: a shell); for Allow, the domains (lowercased);
+/// For Run, the command to run in the sandbox (empty: a shell); for Allow and Deny, the domains (lowercased);
 /// for Sign, the base, if given; for Help, the subcommand to describe, if any.
 /// </param>
 internal sealed record Command(CommandKind Kind, IReadOnlyList<string> Args)
@@ -16,7 +16,7 @@ internal sealed record Command(CommandKind Kind, IReadOnlyList<string> Args)
     /// <summary>Gets whether pen clean --stale was given.</summary>
     public bool Stale { get; init; }
 
-    /// <summary>Gets whether pen allow --global was given.</summary>
+    /// <summary>Gets whether pen allow --global or pen deny --global was given.</summary>
     public bool Global { get; init; }
 
     /// <summary>Gets whether pen --docker was given.</summary>
