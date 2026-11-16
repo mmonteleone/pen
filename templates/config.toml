@@ -1,7 +1,7 @@
 # Pen user config (TOML: https://toml.io). Settings here apply to every
-# project. A project's .pen/config.toml takes allow, tools, github_owner, docker
-# and ports (no tokens or env, since it's usually committed); its allow and tools
-# add to these.
+# project. A project's .pen/config.toml takes allow, deny, tools, hide, [replace],
+# github_owner, docker and ports (no tokens or env, since it's usually committed);
+# its allow, deny, tools and hide add to these.
 # Changes apply to the next session. Keep this file private (mode 600): it
 # holds secrets.
 
@@ -24,6 +24,17 @@ allow = [
 # here are in every session, whatever the command, including a shell (`pen`).
 
 # tools = ["go", "claude", "codex"]
+
+# --- Hidden files ------------------------------------------------------------------
+# Files and directories the agent sees as empty, in every project. A name matches at
+# any depth; a leading or inner / anchors to the project; a trailing / means a
+# directory; * ? ** work as in .gitignore. A project's hide adds to these. A project's
+# .pen/config.toml can also show a different file in place of one, e.g.
+#   [replace]
+#   ".env" = ".pen/agent.env"
+# Not enforced with --docker. See docs/usage.md, "Hiding files from the agent".
+
+# hide = [".env", "secrets/", "**/*.pem"]
 
 # --- GitHub (read-only) --------------------------------------------------------
 # One fine-grained, read-only PAT per owner (your account or an org):

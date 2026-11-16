@@ -128,9 +128,22 @@ Directories inside `.git` are treated the same way, except under `.git/modules`,
 
 </details>
 
+## Hidden and replaced files
+
+[`hide` and `[replace]`](usage.md#hiding-files-from-the-agent) change only what the sandbox sees, with read-only mounts. They're best-effort, and these gaps remain:
+
+- **Case-insensitive filesystems.** Where the filesystem ignores case (macOS's default), another spelling of a hidden file's name (`.ENV` for `.env`) or of a replaced file's target can reach the host's real file past its single-file mount. Pen probes `.pen/` and warns when the filesystem isn't known to be case-sensitive. Hiding the directory resists other spellings.
+- **`--docker`.** Hidden and replaced files aren't enforced: the agent controls a privileged daemon that can undo the mounts. Pen says so at session start.
+- **Tracked files.** A hidden file that git tracks is still in git history, which the agent can read. `git commit -a` in the sandbox would commit the empty or replacement content in its place.
+- **Matches are taken at session start.** A file created later isn't hidden, and a replacement is a copy as of the start. More than 1,000 hidden files, hidden directories and replacements in total make the session refuse to start, so an agent that creates enough matching files can stop later sessions from starting.
+- **Between Pen's last check and the container starting.** Pen re-checks every hidden and replaced path just before it writes the session's files, and refuses to start if one changed. A change after that, by you or by a concurrent session's agent, can still make Docker create an empty file or directory in the project where a path was removed, or leave a hidden file visible if a parent directory was renamed. Keep the project tree still while a session starts.
+- **Extra hard links.** Pen warns when a hidden file has another name, which the agent can read. It doesn't warn about a hard link to a file inside a hidden directory.
+- **Anchored patterns.** Renaming a parent directory between sessions dodges a pattern anchored to it (`/config/prod.yaml`). Prefer name patterns (`prod.yaml`) or hide the directory.
+- **Symlinked directories.** An anchored literal pattern whose path goes through a symlinked directory hides nothing. Pen warns and doesn't follow the symlink: hide the path it leads to.
+
 ## Docker-in-Docker and the git protections
 
-With `--docker`, the agent controls a privileged daemon. An inner container using `--privileged --pid=host` and `nsenter` can undo Pen's read-only mounts and write `.git/config`, `.git/hooks` and `.pen/` on the host.
+With `--docker`, the agent controls a privileged daemon, and `hide` and `[replace]` aren't enforced (see [Hidden and replaced files](#hidden-and-replaced-files)). An inner container using `--privileged --pid=host` and `nsenter` can undo Pen's read-only mounts and write `.git/config`, `.git/hooks` and `.pen/` on the host.
 
 The session-end check restores the protected single files. **It doesn't check hooks.** A hook planted this way can run on the host without warning. Read `.git/hooks` and submodule `hooks` directories under `.git/modules` before using host git.
 

@@ -14,6 +14,7 @@ Agents run with permission prompts off. When they finish, review their edits and
 - Mounts your project read-write, leaving your other host files and credentials outside the container.
 - Sends outbound traffic through a domain allowlist. `pen allow` adds domains without restarting, and `pen deny` blocks them over any allow.
 - Mounts repo config and `.git/hooks` read-only and checks git metadata at session end for known ways to make host git run code. [Limitations apply.](docs/limitations.md)
+- Can [hide files from the agent](docs/usage.md#hiding-files-from-the-agent) (`.env`, `secrets/`) or show it a placeholder copy instead, without touching them on the host.
 - Passes in the GitHub token you supply for the repo's owner. Use a read-only token; your host SSH and signing keys stay outside.
 - Keeps agent logins, settings and caches between sessions. Several agents can run at once, including in linked worktrees.
 - Has Node, Python and C build tools preinstalled. Adds [toolchains](docs/usage.md#tools) (.NET, Go, Rust, Java), a [project Dockerfile](docs/usage.md#project-settings), [dev-server ports](docs/usage.md#dev-servers) or [Docker-in-Docker](docs/usage.md#docker-in-docker) as needed.

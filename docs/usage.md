@@ -290,9 +290,9 @@ Pen creates `~/.config/pen/` on first run. A project needs no Pen files unless y
 
 | Location | Use it for |
 |---|---|
-| `~/.config/pen/config.toml` | Your default tools, allowed and denied domains, GitHub tokens and environment variables |
+| `~/.config/pen/config.toml` | Your default tools, allowed and denied domains, hidden files, GitHub tokens and environment variables |
 | `~/.config/pen/home/` | Shared agent instructions and settings, using their usual home-directory paths |
-| `.pen/config.toml` | This project's tools, allowed and denied domains, ports, Docker and GitHub owner; no secrets |
+| `.pen/config.toml` | This project's tools, allowed and denied domains, ports, Docker, GitHub owner, hidden and replaced files; no secrets |
 | `.pen/Dockerfile` | Extra software beyond the built-in tools |
 
 Config files use [TOML](https://toml.io): quote strings; unknown keys are errors so typos don't go unnoticed. Put secrets only in your user config:
@@ -390,6 +390,10 @@ deny = ["gist.github.com"]
 ports = [5173]
 docker = true
 github_owner = "my-org"
+hide = [".env", "secrets/"]
+
+[replace]
+".env" = ".pen/agent.env"
 ```
 
 The `.pen/` directory is read-only inside the sandbox. Because its contents may have come from a clone or an earlier agent edit, Pen asks you to approve new settings before a session starts:
@@ -402,7 +406,7 @@ The `.pen/` directory is read-only inside the sandbox. Because its contents may 
 | `github_owner` | An owner different from the one in `origin` |
 | `.pen/Dockerfile` | The Dockerfile and everything else in `.pen/` except `config.toml` |
 
-`deny` needs no approval because it only narrows access, and ports need none because they only publish to host loopback. If you decline, the session doesn't start. Without a terminal, settings that need approval are refused.
+`deny` and `hide` need no approval because they only narrow access (so does `[replace]`, see [Hiding files from the agent](#hiding-files-from-the-agent)), and ports need none because they only publish to host loopback. If you decline, the session doesn't start. Without a terminal, settings that need approval are refused.
 
 ```sh
 pen trust         # review and approve before starting a session
@@ -435,6 +439,45 @@ Special files, oversized trees, invalid UTF-8 names and symlinks that don't poin
 
 </details>
 
+### Hiding files from the agent
+
+`hide` keeps files out of the agent's sight: the sandbox sees an empty file where a hidden file is, and an empty read-only directory where a hidden directory is. `[replace]` shows the agent a different file in place of one, for example a `.env` with placeholder values. Only the sandbox's view changes: Pen mounts read-only files over the matches, and your files are never touched.
+
+```toml
+# .pen/config.toml (hide also works in ~/.config/pen/config.toml)
+hide = [".env", "secrets/", "/config/prod.yaml", "**/*.pem"]
+
+[replace]
+".env" = ".pen/agent.env"
+```
+
+`hide` is valid in your user config and in `.pen/config.toml`; the lists are appended, user first, then project. `[replace]` is valid only in `.pen/config.toml`. Neither needs approval, because both only narrow what the agent sees.
+
+Patterns follow gitignore's rules, simplified:
+
+- A name such as `.env` matches at any depth. A `/` at the start, or anywhere in the middle, anchors the pattern to the project directory: `/config/prod.yaml` and `config/prod.yaml` match only there.
+- A trailing `/` matches directories only, and hides the directory with everything in it: `secrets/`.
+- `*` and `?` match within one path segment. `**` as a whole segment matches any number of directories: `**/*.pem`. A trailing `**` matches what's in a directory, not the directory.
+- Case and Unicode normalization are ignored, so `.env` also matches `.ENV`.
+
+A pattern is refused if it contains `[`, `]` or `\`, has `.` or `..` or an empty segment, is empty or contains a NUL character, starts or ends with whitespace, starts with `!` or `#`, has a `.git` segment, has `.pen` (any case) as its first segment (`.pen/…` or `/.pen/…`; `.penrc` is fine), or would hide the whole project (`*`, `**/*`).
+
+`[replace]` maps a target to a source, both paths relative to the project and written in quotes as the key and the value. The sandbox sees a copy of the source at the target's path:
+
+- The target must be an existing regular file, reached without passing through a symlink, and outside `.git` and `.pen`; a source can't be in `.git` either. Replacing a file in a directory that `hide` hides is refused. A replaced file that `hide` also matches is replaced: replace wins.
+- The source must be a regular file of at most 1 MB, read without following symlinks, with no other hard links. A source that `hide` hides is refused, since `.pen/` can be edited by the agent and would otherwise show it what you hide. A source in `.pen/` is fine.
+- The copy keeps the source's read and execute bits and is read-only. It's a copy as of the session start.
+
+A matched symlink hides what it leads to, if that is inside the project. A symlink that leads outside the project, or nowhere, is left alone, and so is anything in `.git` or `.pen`. Pen refuses a hidden or replaced path that is, holds or is inside one of the mounts it makes to protect git's config, such as a file included from `.git/config`, since Docker can't mount over them. At most 1,000 mounts are made in total: hidden files, hidden directories and replacements together (files inside a hidden directory don't count). Over that, the session is refused naming the pattern that matches the most, so hide the directory instead (`secrets/` rather than `secrets/*.env`).
+
+At the start of a session, Pen prints what it hid and replaced, and any warnings:
+
+```
+hidden from the agent: apps/web/.env, config/prod.yaml, keys/a.pem, keys/b.pem, secrets/ and 3 more; replaced: .env
+```
+
+Warnings include a file that has other hard links, a pattern that names a path through a symlinked directory (which hides nothing), a directory Pen couldn't list, a filesystem that isn't known to be case-sensitive, and `--docker` sessions, where hiding isn't enforced. See [Hidden and replaced files](limitations.md#hidden-and-replaced-files) for what hiding doesn't cover.
+
 ## Docker-in-Docker
 
 For Testcontainers, compose or image builds, give the session its own Docker daemon:
@@ -443,7 +486,7 @@ For Testcontainers, compose or image builds, give the session its own Docker dae
 pen --docker claude
 ```
 
-The daemon runs privileged and the agent controls it, which weakens isolation and lets it [defeat the git protections](limitations.md#docker-in-docker-and-the-git-protections). Use it only when the project needs Docker.
+The daemon runs privileged and the agent controls it, which weakens isolation and lets it [defeat the git protections](limitations.md#docker-in-docker-and-the-git-protections). Use it only when the project needs Docker. `hide` and `[replace]` aren't enforced with `--docker` either (see [Hiding files from the agent](#hiding-files-from-the-agent)).
 
 Set `docker = true` in `.pen/config.toml` to enable it for every session. The daemon is reachable at `DOCKER_HOST=tcp://dind:2375`, with traffic going through the same allowlist.
 
