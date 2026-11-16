@@ -2,7 +2,7 @@
 # A leading dot covers the domain and all its subdomains (.example.com).
 # Don't list a domain that a wildcard here already covers: Squid warns about
 # overlapping entries. Agents and tools bring their own domains (AI providers come with
-# the agents, npm with node), so a session has them only when it has that recipe.
+# the agents, NuGet with dotnet), so a session has them only when it has that recipe.
 # Extra domains go in `allow = [...]` in config.toml (user or project); Pen merges them
 # with these into each session's copy of this file.
 
@@ -11,6 +11,21 @@ github.com
 api.github.com
 codeload.github.com
 .githubusercontent.com
+
+# --- npm (Node is in the base image) ----------------------------------------
+registry.npmjs.org
+registry.yarnpkg.com
+# Yarn 2+ releases, fetched by corepack when a project brings it
+repo.yarnpkg.com
+# Node headers for node-gyp, if it ignores npm_config_nodedir; also the API docs
+nodejs.org
+
+# --- PyPI and uv (Python and uv are in the base image) ----------------------
+pypi.org
+files.pythonhosted.org
+# uv's Python downloads (python-build-standalone): it tries Astral's mirror before
+# GitHub
+releases.astral.sh
 
 # --- Docs -------------------------------------------------------------------
 # Read-only for an agent without credentials. Sites anyone can write to

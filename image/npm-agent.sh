@@ -6,23 +6,24 @@
 #       --since <release> [--allow-scripts] [--version-word first|last] -- <version>
 #
 # <version> is latest or an exact release (2.1.300). The package goes into
-# /opt/pen/<command> with Pen's private npm, which checks each package against the
-# registry's integrity hash; any failure fails the build. Only with --allow-scripts does the
-# package's own install script run (npm runs none by default). /usr/local/bin/<command> is
-# then a symlink to the native binary at <path> in the package (--native), which doesn't use
-# Pen's Node at run time, or an sh wrapper running the JavaScript entry at <path> on Pen's
-# Node (--node), so a session's own node (the node tool) doesn't affect it. A package
-# without <path> is older than the oldest supported release, <release>. Last, <command>
-# --version must print the release installed (its first or last word, last by default), and
-# a pinned version must match it. Variables the recipe exports (an auto-updater's off
-# switch) reach npm and that check.
+# /opt/pen/<command> with the base's npm (/usr/local/bin), which checks each package against
+# the registry's integrity hash; any failure fails the build. Only with --allow-scripts does
+# the package's own install script run (npm runs none by default). /usr/local/bin/<command>
+# is then a symlink to the native binary at <path> in the package (--native), which doesn't
+# use Node at run time, or an sh wrapper running the JavaScript entry at <path> on
+# /usr/local/bin/node (--node), by absolute path so a node earlier on a session's PATH (nvm
+# or volta in the home volume) doesn't affect it. A package without <path> is older than the
+# oldest supported release, <release>. Last, <command> --version must print the release
+# installed (its first or last word, last by default), and a pinned version must match it.
+# Variables the recipe exports (an auto-updater's off switch) reach npm and that check.
 #
 # It's in image/, so changing it changes Embedded.ImageHash: pen:latest rebuilds and gets a
 # new ID, and every tools image's tag, which covers that ID (ToolsImage.Tag), changes, so the
 # agents are reinstalled with it on next use.
 set -euo pipefail
 
-NODE_BIN=/opt/pen/node/bin
+NODE=/usr/local/bin/node
+NPM=/usr/local/bin/npm
 usage() { echo "npm-agent.sh: $*" >&2; exit 1; }
 
 [ $# -ge 2 ] || usage "usage: npm-agent.sh <command> <package> (--native <path> | --node <path>) --since <release> [--allow-scripts] [--version-word first|last] -- <version>"
@@ -51,7 +52,7 @@ PREFIX=/opt/pen/$cmd
 [ $# -eq 1 ] || { echo "$cmd: one version at a time" >&2; exit 1; }
 v=$1
 [[ $v =~ ^(latest|[0-9]+\.[0-9]+\.[0-9]+)$ ]] || { echo "$cmd: \"$v\" isn't latest or a release (x.y.z)" >&2; exit 1; }
-[ -x "$NODE_BIN/node" ] && [ -x "$NODE_BIN/npm" ] || { echo "$cmd: Pen's Node ($NODE_BIN) isn't in the base image" >&2; exit 1; }
+[ -x "$NODE" ] && [ -x "$NPM" ] || { echo "$cmd: the base image has no $NODE and $NPM" >&2; exit 1; }
 
 # A throwaway HOME and TMPDIR for the install and the check: npm's cache, Node's compile
 # cache and what the agent writes on its first run go there, so they leave nothing in the
@@ -62,7 +63,7 @@ trap 'rm -rf "$check_home"' EXIT
 mkdir "$check_home/home" "$check_home/tmp"
 run() { env HOME="$check_home/home" TMPDIR="$check_home/tmp" NPM_CONFIG_UPDATE_NOTIFIER=false "$@"; }
 
-run PATH="$NODE_BIN:$PATH" npm install -g --prefix "$PREFIX" --no-fund --no-audit "${scripts[@]}" "$package@$v"
+run "$NODE" "$NPM" install -g --prefix "$PREFIX" --no-fund --no-audit "${scripts[@]}" "$package@$v"
 
 target="$PREFIX/lib/node_modules/$package/$entry"
 if [ "$mode" = native ]; then
@@ -72,7 +73,7 @@ if [ "$mode" = native ]; then
 else
   [ -f "$target" ] || { echo "$cmd: releases before $since aren't supported (no $entry)" >&2; exit 1; }
   # %q leaves these validated paths as they are, and would escape anything sh treats specially.
-  printf '#!/bin/sh\nexec %q %q "$@"\n' "$NODE_BIN/node" "$target" >"/usr/local/bin/$cmd"
+  printf '#!/bin/sh\nexec %q %q "$@"\n' "$NODE" "$target" >"/usr/local/bin/$cmd"
   chmod 0755 "/usr/local/bin/$cmd"
 fi
 
