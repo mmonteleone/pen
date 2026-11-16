@@ -86,7 +86,9 @@ internal static class HelpText
                    pen allow --defaults
 
             With no arguments, lists domains the proxy blocked in this project's sessions
-            (last 7 days) that still aren't allowed.
+            (last 7 days) that still aren't allowed. With deny or open egress, it lists
+            apart the raw IPs blocked (in open egress, any name blocked anyway, such as one
+            that resolves to a private address) and the blocked hosts deny covers now.
 
             With domains, adds them to allow in .pen/config.toml (creating it if needed),
             approves them for this directory (see pen trust) and applies them to this

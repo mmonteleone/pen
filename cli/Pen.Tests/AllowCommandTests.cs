@@ -16,7 +16,7 @@ public class AllowCommandTests
         File.WriteAllText(s.EnvFile, $"PROJECT_DIR={project.Dir}\n");
         File.WriteAllText(s.GetPath("allowlist.txt"), "");
         using var sessionLock = FileLock.TryTake(s.LockFile, exclusive: true);
-        using var fake = new FakeDocker(t, "if [ ! -f retry ]; then exit 1; fi\n");
+        using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "if [ ! -f retry ]; then exit 1; fi\n");
         Assert.Equal(1, new AllowCommand(host, RecipeCatalog.Embedded).Run(["retry.example"], global: true));
         var config = File.ReadAllText(host.UserConfigPath);
         var written = File.GetLastWriteTimeUtc(host.UserConfigPath);
@@ -25,7 +25,8 @@ public class AllowCommandTests
         Assert.Equal(config, File.ReadAllText(host.UserConfigPath));
         Assert.Equal(written, File.GetLastWriteTimeUtc(host.UserConfigPath));
         Assert.Contains("retry.example", File.ReadAllText(s.GetPath("allowlist.txt")));
-        Assert.Equal(2, File.ReadAllLines(Path.Combine(t.Path, "calls")).Length);
+        // Each run reads the proxy's view, then reconfigures.
+        Assert.Equal(4, File.ReadAllLines(Path.Combine(t.Path, "calls")).Length);
     }
 
     private static string Add(string text, params string[] domains) =>
@@ -122,14 +123,14 @@ public class AllowCommandTests
     {
         using var t = new TempDir();
         var path = Path.Combine(t.Path, "config.toml");
-        Assert.Equal(["example.com", ".foo.io"], AllowCommand.Append(path, ".pen/config.toml", ConfigKind.Project, "allow", ["example.com", ".foo.io"], AllowCommand.ProjectConfigStub));
+        Assert.Equal(["example.com", ".foo.io"], AllowCommand.Append(new(path, ".pen/config.toml", ConfigKind.Project, AllowCommand.ProjectConfigStub), "allow", ["example.com", ".foo.io"]));
         var text = File.ReadAllText(path);
         Assert.StartsWith(AllowCommand.ProjectConfigStub, text);
         Assert.Equal(["example.com", ".foo.io"], Config.Parse(text, "x", ConfigKind.Project).Allow);
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead, File.GetUnixFileMode(path));
 
         File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        Assert.Equal(["b.io"], AllowCommand.Append(path, "x", ConfigKind.Project, "allow", ["b.io", "example.com"], ""));
+        Assert.Equal(["b.io"], AllowCommand.Append(new(path, "x", ConfigKind.Project, ""), "allow", ["b.io", "example.com"]));
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path));
         Assert.Equal(["example.com", ".foo.io", "b.io"], Config.Load(t.Path, ".pen", ConfigKind.Project).Allow);
         Assert.Single(Directory.GetFiles(t.Path)); // no temp file left
@@ -141,7 +142,7 @@ public class AllowCommandTests
         using var t = new TempDir();
         var path = Path.Combine(t.Path, "config.toml");
         File.WriteAllText(path, "allw = 1\n");
-        Assert.Throws<PenException>(() => AllowCommand.Append(path, ".pen/config.toml", ConfigKind.Project, "allow", ["b.io"], AllowCommand.ProjectConfigStub));
+        Assert.Throws<PenException>(() => AllowCommand.Append(new(path, ".pen/config.toml", ConfigKind.Project, AllowCommand.ProjectConfigStub), "allow", ["b.io"]));
         Assert.Equal("allw = 1\n", File.ReadAllText(path));
     }
 
@@ -198,14 +199,18 @@ public class AllowCommandTests
         using var t = new TempDir();
         var s = AclSession(t, old: false);
         var inodes = new[] { s.AllowlistFile, s.DenylistFile, s.OpenEgressFile }.Select(path => Native.Stat(path, follow: false)!.Value.Inode).ToList();
-        Assert.Null(AllowCommand.WriteAclFiles(s, Egress(["github.com", "*"], ["gist.github.com"])));
+        var written = AllowCommand.WriteAclFiles(s, Egress(["github.com", "*"], ["gist.github.com"]));
+        Assert.Null(written.Pending);
+        // What the proxy is checked to see before it reloads: all three, deny first.
+        Assert.Equal([new("denylist.txt", "gist.github.com\n"), new("allowlist.txt", "github.com\n"),
+            new AllowCommand.AclFile("open-egress.txt", ".\n")], written.Files);
         // In open egress too, a domain allowed by name stays in the allowlist: it may resolve privately.
         Assert.Equal("github.com\n", File.ReadAllText(s.AllowlistFile));
         Assert.Equal("gist.github.com\n", File.ReadAllText(s.DenylistFile));
         Assert.Equal(".\n", File.ReadAllText(s.OpenEgressFile));
         Assert.Equal(inodes, new[] { s.AllowlistFile, s.DenylistFile, s.OpenEgressFile }.Select(path => Native.Stat(path, follow: false)!.Value.Inode).ToList());
 
-        Assert.Null(AllowCommand.WriteAclFiles(s, Egress(["github.com"], [])));
+        Assert.Null(AllowCommand.WriteAclFiles(s, Egress(["github.com"], [])).Pending);
         Assert.Equal("github.com\n", File.ReadAllText(s.AllowlistFile));
         Assert.Equal("", File.ReadAllText(s.DenylistFile));
         Assert.Equal("", File.ReadAllText(s.OpenEgressFile));
@@ -216,16 +221,17 @@ public class AllowCommandTests
     {
         using var t = new TempDir();
         var s = AclSession(t, old: true);
-        Assert.Equal("deny and allow = [\"*\"] apply",
-            AllowCommand.WriteAclFiles(s, Egress(["github.com", "new.example", "*"], ["gist.github.com"])));
+        var written = AllowCommand.WriteAclFiles(s, Egress(["github.com", "new.example", "*"], ["gist.github.com"]));
+        Assert.Equal("deny and allow = [\"*\"] apply", written.Pending);
+        Assert.Equal([new AllowCommand.AclFile("allowlist.txt", "github.com\nnew.example\n")], written.Files);
         Assert.Equal("github.com\nnew.example\n", File.ReadAllText(s.AllowlistFile));
         Assert.False(File.Exists(s.DenylistFile));
         Assert.False(File.Exists(s.OpenEgressFile));
 
-        Assert.Equal("allow = [\"*\"] applies", AllowCommand.WriteAclFiles(s, Egress(["*"], [])));
+        Assert.Equal("allow = [\"*\"] applies", AllowCommand.WriteAclFiles(s, Egress(["*"], [])).Pending);
         Assert.DoesNotContain("*", File.ReadAllText(s.AllowlistFile));
-        Assert.Equal("deny applies", AllowCommand.WriteAclFiles(s, Egress(["github.com"], ["x.example"])));
-        Assert.Null(AllowCommand.WriteAclFiles(s, Egress(["github.com"], [])));
+        Assert.Equal("deny applies", AllowCommand.WriteAclFiles(s, Egress(["github.com"], ["x.example"])).Pending);
+        Assert.Null(AllowCommand.WriteAclFiles(s, Egress(["github.com"], [])).Pending);
         Assert.Equal("github.com\n", File.ReadAllText(s.AllowlistFile));
     }
 
@@ -277,9 +283,13 @@ public class AllowCommandTests
         File.WriteAllText(project.ProjectConfigPath, "deny = [\"gist.github.com\"]\n");
         var (s, l) = Running(t, host, project, old: false);
         using var _ = l;
-        using var fake = new FakeDocker(t, "exit 0\n");
+        using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
         var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s)));
         Assert.Equal("", err);
+        var calls = File.ReadAllLines(Path.Combine(t.Path, "calls"));
+        Assert.Equal(2, calls.Length);
+        Assert.EndsWith(" sh /etc/squid/denylist.txt /etc/squid/allowlist.txt /etc/squid/open-egress.txt", calls[0]);
+        Assert.EndsWith(" exec -T proxy squid -k reconfigure", calls[1]);
         // The domains allowed by name stay in the allowlist, as they'd reach a private address that "*" doesn't.
         Assert.Equal(Allowlist.Render(Allowlist.MergeNamed(
                 Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")), ["typed.example"])),
@@ -301,8 +311,13 @@ public class AllowCommandTests
         var project = Project.Resolve(t.Sub("repo"), host);
         var (s, l) = Running(t, host, project, old: true);
         using var _ = l;
-        using var fake = new FakeDocker(t, "exit 0\n");
+        using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
         var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s)));
+        // Its proxy has only the allowlist to check.
+        var calls = File.ReadAllLines(Path.Combine(t.Path, "calls"));
+        Assert.Equal(2, calls.Length);
+        Assert.EndsWith(" exec -T proxy sh -c " + "for f in \"$@\"; do printf '=== %s\\n' \"$f\"; cat -- \"$f\" || exit 1; done" + " sh /etc/squid/allowlist.txt", calls[0]);
+        Assert.EndsWith(" exec -T proxy squid -k reconfigure", calls[1]);
         var list = File.ReadAllText(s.AllowlistFile);
         Assert.DoesNotContain("*", list);
         Assert.Contains("typed.example\n", list);
@@ -310,6 +325,126 @@ public class AllowCommandTests
         Assert.False(File.Exists(s.DenylistFile));
         Assert.False(File.Exists(s.OpenEgressFile));
         Assert.Contains($"the running session {s.ComposeProject} was started by an older Pen: deny and allow = [\"*\"] apply only to sessions started from now on", err);
+    }
+
+    /// <summary>The fake's proxy reads, in order; the rest of the calls are reconfigures.</summary>
+    private static (int Reads, int Reconfigures) CountProxyCalls(TempDir t)
+    {
+        var calls = File.ReadAllLines(Path.Combine(t.Path, "calls"));
+        Assert.All(calls, call => Assert.True(call.Contains(" /etc/squid/") || call.EndsWith(" squid -k reconfigure")));
+        return (calls.Count(call => call.Contains(" /etc/squid/")), calls.Count(call => call.EndsWith(" squid -k reconfigure")));
+    }
+
+    [Fact]
+    public void Apply_WhenTheProxyKeepsSeeingOtherFiles_DoesntReconfigure_AndReportsTheSession()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        File.WriteAllText(host.UserConfigPath, "deny = [\"pastebin.com\"]\n");
+        var project = Project.Resolve(t.Sub("repo"), host);
+        var (s, l) = Running(t, host, project, old: false);
+        using var _ = l;
+        // A lagging bind mount: the proxy sees the files as just truncated, so reloading would drop the deny.
+        using var fake = new FakeDocker(t, """
+            case "$*" in *" /etc/squid/"*)
+              printf '=== /etc/squid/denylist.txt\n=== /etc/squid/allowlist.txt\n=== /etc/squid/open-egress.txt\n'
+              ;;
+            esac
+            exit 0
+
+            """);
+        var err = CapturingStderr(() => Assert.False(AllowCommand.Apply(host, s)));
+        Assert.Contains($"couldn't apply it to the running session {s.ComposeProject}: its proxy still sees other ACL files than were written, so Squid wasn't reloaded; run this again", err);
+        Assert.Equal((5, 0), CountProxyCalls(t));
+        Assert.Equal("pastebin.com\n", File.ReadAllText(s.DenylistFile));
+    }
+
+    [Fact]
+    public void Apply_WhenTheProxyCatchesUpOnARetry_ReconfiguresOnce()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        File.WriteAllText(host.UserConfigPath, "deny = [\"pastebin.com\"]\n");
+        var project = Project.Resolve(t.Sub("repo"), host);
+        var (s, l) = Running(t, host, project, old: false);
+        using var _ = l;
+        using var fake = new FakeDocker(t, """
+            case "$*" in *" /etc/squid/"*)
+              n=$(cat reads 2>/dev/null || echo 0)
+              echo $((n + 1)) >reads
+              if [ "$n" -lt 2 ]; then printf '=== /etc/squid/denylist.txt\n'; exit 0; fi
+              ;;
+            esac
+
+            """ + FakeDocker.ServingAclFiles + "exit 0\n");
+        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s)));
+        Assert.Equal("", err);
+        Assert.Equal((3, 1), CountProxyCalls(t));
+        Assert.EndsWith(" squid -k reconfigure", File.ReadAllLines(Path.Combine(t.Path, "calls"))[^1]);
+    }
+
+    [Fact]
+    public void Apply_WhenTheProxyCantBeRead_DoesntReconfigure()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        var project = Project.Resolve(t.Sub("repo"), host);
+        var (s, l) = Running(t, host, project, old: true);
+        using var _ = l;
+        using var fake = new FakeDocker(t, """
+            case "$*" in *" /etc/squid/"*) echo 'cat: /etc/squid/allowlist.txt: Permission denied' >&2; exit 1 ;; esac
+            exit 0
+
+            """);
+        var err = CapturingStderr(() => Assert.False(AllowCommand.Apply(host, s)));
+        Assert.Contains($"couldn't apply it to the running session {s.ComposeProject}: couldn't read its proxy's ACL files, so Squid wasn't reloaded; run this again: cat: /etc/squid/allowlist.txt: Permission denied", err);
+        Assert.Equal((1, 0), CountProxyCalls(t));
+    }
+
+    [Fact]
+    public void Apply_WaitsForAnotherHoldingTheSessionsAclLock()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        var project = Project.Resolve(t.Sub("repo"), host);
+        var (s, l) = Running(t, host, project, old: false);
+        using var _ = l;
+        using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
+        var other = FileLock.TryTake(s.AclLockFile, exclusive: true)!;
+        using var release = new Timer(_ => other.Dispose(), null, 500, Timeout.Infinite);
+        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s)));
+        Assert.Contains($"waiting for another pen allow or pen deny applying to the running session {s.ComposeProject}", err);
+        Assert.Equal((1, 1), CountProxyCalls(t));
+        // Not one of the files whose presence says what the session is.
+        Assert.True(s.IsOpen);
+        Session.DeleteSessionFiles(s);
+        Assert.False(File.Exists(s.AclLockFile));
+    }
+
+    [Fact]
+    public void Apply_ReadsTheConfigOnlyOnceItHoldsTheSessionsAclLock()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        var project = Project.Resolve(t.Sub("repo"), host);
+        var (s, l) = Running(t, host, project, old: false);
+        using var _ = l;
+        using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
+        var other = FileLock.TryTake(s.AclLockFile, exclusive: true)!;
+        bool applied = false;
+        var apply = new Thread(() => CapturingStderr(() => applied = AllowCommand.Apply(host, s)));
+        apply.Start();
+        Thread.Sleep(500);
+        File.WriteAllText(host.UserConfigPath, "deny = [\"pastebin.com\"]\n");
+        other.Dispose();
+        apply.Join();
+        Assert.True(applied);
+        Assert.Contains("pastebin.com", File.ReadAllText(s.DenylistFile));
     }
 
     [Fact]

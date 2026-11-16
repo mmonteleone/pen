@@ -66,7 +66,7 @@ internal static class Program
     /// </remarks>
     private static int Run(string[] args)
     {
-        var command = CommandParser.Parse(args, AllowCommand.TryStartDir);
+        var command = CommandParser.Parse(args, StartDir.TryGet);
         switch (command.Kind)
         {
             case CommandKind.Help:

@@ -190,7 +190,7 @@ Pen's defaults cover GitHub, npm, PyPI and uv's Python downloads, the hosts imag
 
 `pen deny <domain…> [--global]` adds domains to `deny` in `.pen/config.toml` (`--global`: `~/.config/pen/config.toml`) and applies them to running sessions the same way `pen allow` does. `pen deny` alone lists the denied domains, the file each is in, and which of Pen's defaults or agent and tool domains each covers. `deny` is also a config key in both files, and the lists add together.
 
-Deny wins over every allow: the defaults, both config files, agent and tool domains, and `*`. An exact deny blocks one host under an allowed wildcard: with `.github.com` allowed, `pen deny gist.github.com` blocks only `gist.github.com`. A leading dot denies subdomains too. Denying a domain an agent or tool needs breaks it, and Pen warns at session start when that happens. A project's `deny` needs no [approval](#project-settings), since it can only narrow access.
+Deny wins over every allow: the defaults, both config files, agent and tool domains, and `*`. An exact deny takes one host out of an allowed wildcard: with `.github.com` allowed, `pen deny gist.github.com` refuses requests for `gist.github.com` and leaves the rest of `.github.com` allowed. A leading dot denies subdomains too. Deny, like allow, matches only the name the agent asks the proxy for, so a service that shares servers with an allowed name may still be reachable through it; see [matching by name](limitations.md#matching-by-name). Denying a domain an agent or tool needs breaks it, and Pen warns at session start when that happens. A project's `deny` needs no [approval](#project-settings), since it can only narrow access.
 
 ### Open egress
 
@@ -310,7 +310,7 @@ my-org = "github_pat_…"
 CLAUDE_CODE_OAUTH_TOKEN = "…"
 ```
 
-`allow`, `deny` and `tools` lists add together across user and project config. `--tool` adds to the tool list; `allow` also includes Pen's defaults, and `deny` beats every `allow` entry. Other keys belong to just one file. Changes apply to the next session, with [approval](#project-settings) where required. `pen allow` also updates running sessions.
+`allow`, `deny` and `tools` lists add together across user and project config. `--tool` adds to the tool list; `allow` also includes Pen's defaults, and `deny` beats every `allow` entry. Other keys belong to just one file. Changes apply to the next session, with [approval](#project-settings) where required. `pen allow` and `pen deny` also update running sessions.
 
 ### Logins and API keys
 

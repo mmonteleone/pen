@@ -11,12 +11,12 @@ public class TrustGateTests
     private const string HostileToml = "allow = [\"evil.example\"]\ndocker = true\ngithub_owner = \"attacker\"\n";
 
     /// <summary>
-    /// Succeeds at everything; compose run records the session's allowlist and
+    /// Succeeds at everything, and the proxy sees the ACL files as written; compose run records the session's allowlist and
     /// token. A project-layer build keeps a copy of what it was given, and first
     /// puts the file "swap-in", if there is one, over .pen/Dockerfile: a swap
     /// after Pen's last look.
     /// </summary>
-    private const string RecordingDocker = """
+    private const string RecordingDocker = FakeDocker.ServingAclFiles + """
         if [ "$1" = build ]; then
           for a; do ctx=$a; done
           if [ "$ctx" != - ]; then

@@ -23,6 +23,20 @@ internal static class StartDir
             "u+rwx . if it's only this directory's) or cd to the project, then rerun");
     }
 
+    /// <summary>Gets the directory Pen started in, if it can be read.</summary>
+    /// <returns>The directory, or null when it can't be read (a command that needs it reports that).</returns>
+    public static string? TryGet()
+    {
+        try
+        {
+            return Get();
+        }
+        catch (PenException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Changes to Pen's state dir, or / if that can't be used.</summary>
     public static void Leave(HostEnv host)
     {

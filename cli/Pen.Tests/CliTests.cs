@@ -2,7 +2,7 @@ namespace Pen.Tests;
 
 public class CliTests
 {
-    private static Command P(params string[] args) => CommandParser.Parse(args);
+    private static Command P(params string[] args) => CommandParser.Parse(args, () => null);
 
     [Fact]
     public void AnIOExceptionNothingHandledIsOneCleanLine_AndBugsStillThrow()
@@ -391,5 +391,5 @@ public class CliTests
 
     [Fact]
     public void AnUnknownOptionAfterARunOptionIsAUsageError() =>
-        Assert.Equal(2, Assert.Throws<PenException>(() => CommandParser.Parse(["--tool", "pen-test", "--nope"])).ExitCode);
+        Assert.Equal(2, Assert.Throws<PenException>(() => CommandParser.Parse(["--tool", "pen-test", "--nope"], () => null)).ExitCode);
 }

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
+using Pen.CommandLine;
 using Pen.Configuration;
 using Pen.GitProtection;
 using Pen.Platform;
@@ -108,14 +109,15 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
         if (global)
         {
             var userPath = host.Display(host.UserConfigPath);
-            return new(userPath, Append(host.UserConfigPath, userPath, ConfigKind.User, key, domains, stub: ""));
+            var user = new ConfigTarget(host.UserConfigPath, userPath, ConfigKind.User, Stub: "");
+            return new(userPath, Append(user, key, domains));
         }
 
         var where = ".pen/" + Config.FileName;
         RepoGuard.EnsureDirectory(project!.Dir, project.PenDir);
         RepoGuard.RequireNotLink(project.Dir, project.ProjectConfigPath);
-        var added = Append(project.ProjectConfigPath, where, ConfigKind.Project, key, domains, ProjectConfigStub);
-        return new(where, added);
+        var target = new ConfigTarget(project.ProjectConfigPath, where, ConfigKind.Project, ProjectConfigStub);
+        return new(where, Append(target, key, domains));
     }
 
     /// <summary>Says which of <paramref name="domains"/> were added, and which were there already.</summary>
@@ -177,22 +179,8 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     /// <remarks>The domains are still added: a file and a domain can share a name.</remarks>
     internal static void WriteGlobHint(string command, ConfigAddition addition)
     {
-        if (TryStartDir() is { } dir && FormatGlobHint(command, dir, addition.Added, addition.Where) is { } hint)
+        if (StartDir.TryGet() is { } dir && FormatGlobHint(command, dir, addition.Added, addition.Where) is { } hint)
             Out.WriteLine(hint);
-    }
-
-    /// <summary>Gets the start directory.</summary>
-    /// <returns>The directory, or null when it can't be read (a command that needs it reports that).</returns>
-    internal static string? TryStartDir()
-    {
-        try
-        {
-            return StartDir.Get();
-        }
-        catch (PenException)
-        {
-            return null;
-        }
     }
 
     /// <summary>Formats <see cref="WriteGlobHint"/>'s hint for <paramref name="dir"/>.</summary>
@@ -208,40 +196,15 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
         IReadOnlyList<string> domains,
         string where)
     {
-        var matches = domains.Where(domain => NamesEntry(dir, domain)).ToList();
+        var matches = domains.Where(domain => ShellGlob.NamesEntry(dir, domain)).ToList();
         if (matches.Count == 0)
             return null;
         var what = matches.Count == 1 ? "names a file here" : "name files here";
         var were = matches.Count == 1 ? "it was" : "they were";
-        return $"{string.Join(' ', matches.Select(Out.Field))} {what}: {GlobAdvice(command)}; " +
+        return $"{string.Join(' ', matches.Select(Out.Field))} {what}: {ShellGlob.FormatAdvice(command)}; " +
             $"{were} added to {where}: remove {(matches.Count == 1 ? "it" : "them")} there if " +
             $"{(matches.Count == 1 ? "it isn't a domain" : "they aren't domains")}";
     }
-
-    /// <summary>Tells whether <paramref name="name"/> names an entry of <paramref name="dir"/>, ignoring case.
-    /// </summary>
-    /// <returns>False when the directory can't be listed.</returns>
-    internal static bool NamesEntry(string dir, string name)
-    {
-        try
-        {
-            return Directory.EnumerateFileSystemEntries(dir)
-                .Any(entry => string.Equals(Path.GetFileName(entry), name, StringComparison.OrdinalIgnoreCase));
-        }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-        {
-            return false;
-        }
-    }
-
-    /// <summary>Formats the advice for an argument of pen <paramref name="command"/> named like a file.</summary>
-    /// <remarks>
-    /// pen deny never takes <see cref="Allowlist.AnyDomain"/>, so its advice doesn't suggest quoting it.
-    /// </remarks>
-    internal static string GlobAdvice(string command) =>
-        "did your shell expand *? " + (command == "deny"
-            ? "pen deny takes domains, not '*'"
-            : $"quote it: pen {command} '*'");
 
     /// <summary>Applies the config files to the running sessions a change in them is for.</summary>
     /// <returns>Whether every one of them took it; each failure is reported, naming the session.</returns>
@@ -266,34 +229,25 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     }
 
     /// <summary>
-    /// Adds the domains not already in <paramref name="key"/> to the config.toml at <paramref name="path"/>, creating
-    /// it from <paramref name="stub"/> if it's missing.
+    /// Adds the domains not already in <paramref name="key"/> to the config.toml <paramref name="target"/>, creating
+    /// it from its stub if it's missing.
     /// </summary>
-    /// <param name="path">The config.toml to change.</param>
-    /// <param name="displayPath">Names the file in messages.</param>
-    /// <param name="kind">Which keys the file may hold.</param>
+    /// <param name="target">The config.toml to change.</param>
     /// <param name="key">The list to add to: allow or deny.</param>
     /// <param name="domains">The domains to add.</param>
-    /// <param name="stub">The text a missing file starts from.</param>
     /// <returns>The domains added, lowercased, in order; none when the file is left alone.</returns>
     /// <remarks>
     /// The edit is <see cref="ConfigEdit.AddToList"/>'s, and the file is replaced by rename, keeping its mode.
     /// </remarks>
-    public static IReadOnlyList<string> Append(
-        string path,
-        string displayPath,
-        ConfigKind kind,
-        string key,
-        IReadOnlyList<string> domains,
-        string stub)
+    public static IReadOnlyList<string> Append(ConfigTarget target, string key, IReadOnlyList<string> domains)
     {
-        var existing = Config.ReadText(path, displayPath);
+        var existing = Config.ReadText(target.Path, target.DisplayPath);
         bool exists = existing != null;
-        var edit = ConfigEdit.AddToList(existing ?? stub, displayPath, kind, key, domains);
+        var edit = ConfigEdit.AddToList(existing ?? target.Stub, target.DisplayPath, target.Kind, key, domains);
         if (edit.Added.Count == 0)
             return edit.Added;
 
-        ReplaceFile(path, edit.Text, ChooseMode(path, exists, kind));
+        ReplaceFile(target.Path, edit.Text, ChooseMode(target.Path, exists, target.Kind));
         return edit.Added;
     }
 
@@ -351,8 +305,24 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
             ? SessionRegistry.FindRunningEverywhere(host)
             : SessionRegistry.FindRunningIn(project!.Key, host.GetRuntimeDir(project.Key), project.Dir);
 
+    /// <summary>How many times the proxy's view of the ACL files is read before giving up.</summary>
+    private const int ProxyReadAttempts = 5;
+
+    /// <summary>How long to wait between reads of the proxy's view of the ACL files.</summary>
+    private static readonly TimeSpan ProxyReadDelay = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>How long to wait for another pen allow or pen deny applying to the same session.</summary>
+    private static readonly TimeSpan AclLockWait = TimeSpan.FromSeconds(60);
+
+    /// <summary>Where the proxy's ACL files are mounted, in its container.</summary>
+    private const string ProxyAclDir = "/etc/squid/";
+
+    /// <summary>The script that prints each ACL file it's given after a line naming it.</summary>
+    private const string PrintAclsScript = """for f in "$@"; do printf '=== %s\n' "$f"; cat -- "$f" || exit 1; done""";
+
     /// <summary>
-    /// Regenerates one running session's ACL files from the current config files and has its Squid reload them.
+    /// Regenerates one running session's ACL files from the current config files and has its Squid reload them, once
+    /// its proxy sees what was written.
     /// </summary>
     /// <returns>Whether it worked; a failure is reported, naming the session.</returns>
     /// <remarks>
@@ -361,6 +331,10 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     /// in full.</para>
     /// <para>A session started by a Pen without deny gets only its allowlist, never with
     /// <see cref="Allowlist.AnyDomain"/> (see <see cref="WriteAclFiles"/>).</para>
+    /// <para>The session's acl.lock is held from reading the config files to the reconfigure, so another pen allow or
+    /// pen deny can't truncate a file between this one's write and reload, and whichever reloads last read the config
+    /// last. Only these take it, one session at a time, so it can't deadlock with a session, pen sign or pen clean.
+    /// </para>
     /// </remarks>
     internal static bool Apply(HostEnv host, SessionDir session)
     {
@@ -369,22 +343,20 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
             var env = session.ReadEnv();
             if (!env.TryGetValue("PROJECT_DIR", out var projectDir))
                 throw new PenException("its session.env is missing");
-            var pending = WriteAclFiles(session, MergeEgress(host, session, projectDir));
 
-            var startInfo = Proc.CreateStartInfo("docker",
-                session.BuildComposeArgs("exec", "-T", "proxy", "squid", "-k", "reconfigure"), env);
-            startInfo.RedirectStandardOutput = startInfo.RedirectStandardError = true;
-            Session.ScrubComposeEnv(startInfo);
-            var result = Process.RunAndCaptureText(startInfo);
+            using var aclLock = TakeAclLock(session);
+            var written = WriteAclFiles(session, MergeEgress(host, session, projectDir));
+            AwaitProxyView(session, env, written.Files);
+            var result = RunInProxy(session, env, "squid", "-k", "reconfigure");
             if (result.ExitStatus.ExitCode != 0)
             {
                 throw new PenException(
                     $"squid -k reconfigure failed: {(result.StandardError + result.StandardOutput).Trim()}");
             }
-            if (pending != null)
+            if (written.Pending != null)
             {
                 Out.WriteLine($"the running session {session.ComposeProject} was started by an older Pen: " +
-                    $"{pending} only to sessions started from now on");
+                    $"{written.Pending} only to sessions started from now on");
             }
             return true;
         }
@@ -395,11 +367,107 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
         }
     }
 
+    /// <summary>
+    /// Takes <paramref name="session"/>'s acl.lock exclusive, waiting while another pen allow or pen deny holds it.
+    /// </summary>
+    /// <exception cref="PenException">It's still held after <see cref="AclLockWait"/>.</exception>
+    private static FileLock TakeAclLock(SessionDir session)
+    {
+        var held = FileLock.TryTake(session.AclLockFile, exclusive: true);
+        if (held != null)
+            return held;
+        Out.WriteLine(
+            $"waiting for another pen allow or pen deny applying to the running session {session.ComposeProject}");
+        var waited = Stopwatch.StartNew();
+        while ((held = FileLock.TryTake(session.AclLockFile, exclusive: true)) == null)
+        {
+            if (waited.Elapsed > AclLockWait)
+                throw new PenException("another pen allow or pen deny is still applying to it; run this again");
+            Thread.Sleep(200);
+        }
+        return held;
+    }
+
+    /// <summary>
+    /// Reads <paramref name="files"/> as <paramref name="session"/>'s proxy sees them until they hold what was
+    /// written, retrying a few times.
+    /// </summary>
+    /// <param name="session">The session.</param>
+    /// <param name="env">The env its compose calls run with.</param>
+    /// <param name="files">Each ACL file written, by name, with its text.</param>
+    /// <exception cref="PenException">
+    /// Reading them failed, or they still differ after <see cref="ProxyReadAttempts"/> reads: Squid isn't reloaded.
+    /// </exception>
+    /// <remarks>
+    /// A VM's file sharing (seen with OrbStack) can show the proxy a host-written file as it was a moment ago, empty
+    /// right after the truncate; reloading then would drop the deny list without a word. All the files are printed by
+    /// one exec, each after a line naming it.
+    /// After a failed check the session dir's files hold the new lists while Squid still enforces the old ones, so
+    /// pen ps and the session-end lines report from the new files until an apply succeeds.
+    /// </remarks>
+    private static void AwaitProxyView(
+        SessionDir session,
+        IReadOnlyDictionary<string, string> env,
+        IReadOnlyList<AclFile> files)
+    {
+        var paths = files.Select(file => ProxyAclDir + file.Name).ToList();
+        var expected = FormatProxyView(files);
+        for (int attempt = 1; ; attempt++)
+        {
+            var result = RunInProxy(session, env, ["sh", "-c", PrintAclsScript, "sh", .. paths]);
+            if (result.ExitStatus.ExitCode != 0)
+            {
+                throw new PenException(
+                    "couldn't read its proxy's ACL files, so Squid wasn't reloaded; run this again: " +
+                    (result.StandardError + result.StandardOutput).Trim());
+            }
+            if (result.StandardOutput == expected)
+                return;
+            if (attempt == ProxyReadAttempts)
+            {
+                throw new PenException("its proxy still sees other ACL files than were written, so Squid wasn't " +
+                    "reloaded; run this again");
+            }
+            Thread.Sleep(ProxyReadDelay);
+        }
+    }
+
+    /// <summary>Formats what the proxy prints for <paramref name="files"/> when it sees what was written.</summary>
+    private static string FormatProxyView(IReadOnlyList<AclFile> files) =>
+        string.Concat(files.Select(file => $"=== {ProxyAclDir}{file.Name}\n{file.Text}"));
+
+    /// <summary>Runs <paramref name="command"/> in <paramref name="session"/>'s proxy container.</summary>
+    /// <returns>Its exit status and output.</returns>
+    private static ProcessTextOutput RunInProxy(
+        SessionDir session,
+        IReadOnlyDictionary<string, string> env,
+        params string[] command)
+    {
+        var startInfo = Proc.CreateStartInfo("docker",
+            session.BuildComposeArgs(["exec", "-T", "proxy", .. command]), env);
+        startInfo.RedirectStandardOutput = startInfo.RedirectStandardError = true;
+        Session.ScrubComposeEnv(startInfo);
+        return Process.RunAndCaptureText(startInfo);
+    }
+
     /// <summary>What a running session gets now, merged from the config files.</summary>
     /// <param name="Allow">The merged allow list; just <see cref="Allowlist.AnyDomain"/> when a source has it.</param>
     /// <param name="NamedAllow">The merged allow list without <see cref="Allowlist.AnyDomain"/>.</param>
     /// <param name="Deny">The merged deny list.</param>
     internal sealed record Egress(List<string> Allow, List<string> NamedAllow, List<string> Deny);
+
+    /// <summary>One ACL file <see cref="WriteAclFiles"/> wrote.</summary>
+    /// <param name="Name">Its name, the same in the session dir and in the proxy's /etc/squid.</param>
+    /// <param name="Text">What was written.</param>
+    internal sealed record AclFile(string Name, string Text);
+
+    /// <summary>What <see cref="WriteAclFiles"/> did.</summary>
+    /// <param name="Files">The files written, in the order they were.</param>
+    /// <param name="Pending">
+    /// What the session's proxy can't take (sessions started from now on get it), worded for the notice; null when it
+    /// took everything.
+    /// </param>
+    internal sealed record AclWrite(IReadOnlyList<AclFile> Files, string? Pending);
 
     /// <summary>
     /// Merges what <paramref name="session"/>, started in <paramref name="projectDir"/>, gets now.
@@ -422,10 +490,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     }
 
     /// <summary>Writes <paramref name="egress"/> into <paramref name="session"/>'s ACL files.</summary>
-    /// <returns>
-    /// What its proxy can't take (sessions started from now on get it), worded for the notice; null when it took
-    /// everything.
-    /// </returns>
+    /// <returns>The files written, and what its proxy can't take.</returns>
     /// <remarks>
     /// <para>Each file is truncated and written, never renamed: the proxy's single-file bind mounts pin the inodes.
     /// A file that's gone fails the write rather than being made, since the proxy wouldn't see a new one.</para>
@@ -434,33 +499,38 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     /// there would be a domain to squid, and leaving the file as it was would keep domains taken out of the config
     /// since. The named domains are what the config grants by name now, so it never gets more than that.</para>
     /// </remarks>
-    internal static string? WriteAclFiles(SessionDir session, Egress egress)
+    internal static AclWrite WriteAclFiles(SessionDir session, Egress egress)
     {
         if (!session.HasDenyAndOpen)
         {
-            Overwrite(session.AllowlistFile, Allowlist.Render(egress.NamedAllow));
+            var allowlist = Overwrite(session.AllowlistFile, Allowlist.Render(egress.NamedAllow));
             bool open = egress.Allow.Contains(Allowlist.AnyDomain);
-            return (egress.Deny.Count > 0, open) switch
+            var pending = (egress.Deny.Count > 0, open) switch
             {
                 (true, true) => "deny and allow = [\"*\"] apply",
                 (true, false) => "deny applies",
                 (false, true) => "allow = [\"*\"] applies",
                 _ => null,
             };
+            return new([allowlist], pending);
         }
 
         var acls = Allowlist.RenderFiles(egress.NamedAllow, egress.Allow.Contains(Allowlist.AnyDomain), egress.Deny);
-        Overwrite(session.DenylistFile, acls.DenylistText);
-        Overwrite(session.AllowlistFile, acls.AllowlistText);
-        Overwrite(session.OpenEgressFile, acls.OpenEgressText);
-        return null;
+        var denylist = Overwrite(session.DenylistFile, acls.DenylistText);
+        var named = Overwrite(session.AllowlistFile, acls.AllowlistText);
+        var openEgress = Overwrite(session.OpenEgressFile, acls.OpenEgressText);
+        return new([denylist, named, openEgress], null);
     }
 
     /// <summary>Truncates the existing file at <paramref name="path"/> and writes <paramref name="text"/>.</summary>
-    private static void Overwrite(string path, string text)
+    /// <returns>The file, by name, with what was written.</returns>
+    private static AclFile Overwrite(string path, string text)
     {
-        using var file = new FileStream(path, FileMode.Truncate, FileAccess.Write);
-        file.Write(Encoding.UTF8.GetBytes(text));
+        using (var file = new FileStream(path, FileMode.Truncate, FileAccess.Write))
+        {
+            file.Write(Encoding.UTF8.GetBytes(text));
+        }
+        return new(Path.GetFileName(path), text);
     }
 
     /// <summary>Formats pen allow --defaults: the built-in allowlist from its first section on.</summary>
@@ -610,6 +680,13 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
         return shown;
     }
 }
+
+/// <summary>A config.toml <see cref="AllowCommand.Append"/> adds to.</summary>
+/// <param name="Path">The file.</param>
+/// <param name="DisplayPath">Names the file in messages.</param>
+/// <param name="Kind">Which keys the file may hold.</param>
+/// <param name="Stub">The text the file starts from when it's missing.</param>
+internal sealed record ConfigTarget(string Path, string DisplayPath, ConfigKind Kind, string Stub);
 
 /// <summary>What <see cref="AllowCommand.AddToConfig"/> changed.</summary>
 /// <param name="Where">The config.toml, as messages name it.</param>

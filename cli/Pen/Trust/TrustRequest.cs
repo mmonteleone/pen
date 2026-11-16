@@ -64,9 +64,17 @@ internal sealed record TrustRequest(
     }
 
     /// <summary>Formats every item, with no limit, for pen trust --list.</summary>
-    public IEnumerable<string> FormatAllLines() =>
-        DescribeGrants().Concat(Tools.Select(FormatToolLine)).Concat(NamedDomains.Select(FormatDomainLine))
-            .Concat(HasNamedDomainBesideAny ? [NamedBesideAnyLine] : []);
+    public IEnumerable<string> FormatAllLines()
+    {
+        foreach (var line in DescribeGrants())
+            yield return line;
+        foreach (var tool in Tools)
+            yield return FormatToolLine(tool);
+        foreach (var domain in NamedDomains)
+            yield return FormatDomainLine(domain);
+        if (HasNamedDomainBesideAny)
+            yield return NamedBesideAnyLine;
+    }
 
     /// <summary>The question to approve, which says so when it covers items not listed.</summary>
     public string Question

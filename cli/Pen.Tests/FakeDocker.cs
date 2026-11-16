@@ -14,5 +14,26 @@ internal sealed class FakeDocker : IDisposable
         Environment.SetEnvironmentVariable("PATH", bin + ":" + _path);
     }
 
+    /// <summary>
+    /// A body's first lines, answering the proxy reads of pen allow and pen deny from the session dir's own ACL files
+    /// (as an up-to-date bind mount would) by running the real script with its cat redirected there. Other calls go
+    /// on to the rest of the body.
+    /// </summary>
+    public const string ServingAclFiles = """
+        case "$*" in *" exec -T proxy sh -c "*" /etc/squid/"*)
+          dir=
+          while [ "$1" != exec ]; do
+            if [ "$1" = -f ] && [ -z "$dir" ]; then dir=$(dirname -- "$2"); fi
+            shift
+          done
+          shift 5
+          script=$1
+          shift 2
+          PROXY_ACL_DIR=$dir exec sh -c 'cat() { command cat -- "$PROXY_ACL_DIR/${2#/etc/squid/}"; }; '"$script" sh "$@"
+          ;;
+        esac
+
+        """;
+
     public void Dispose() => Environment.SetEnvironmentVariable("PATH", _path);
 }

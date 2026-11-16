@@ -37,7 +37,7 @@ public class DenyCommandTests
         File.WriteAllText(s.DenylistFile, "");
         File.WriteAllText(s.OpenEgressFile, "");
         using var sessionLock = FileLock.TryTake(s.LockFile, exclusive: true);
-        using var fake = new FakeDocker(t, "exit 0\n");
+        using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
 
         var where = host.Display(host.UserConfigPath);
         var err = CapturingStderr(() => Assert.Equal(0, new DenyCommand(host, Catalog).Run(["gist.github.com"], global: true)));

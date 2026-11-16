@@ -43,7 +43,9 @@ internal sealed class SessionDir(string projectKey, string path)
     /// </summary>
     public string OverrideFile => GetPath("session.yaml");
 
-    /// <summary>Gets the path of the proxy's allowlist ACL file: the allowed domains, empty in open egress.</summary>
+    /// <summary>
+    /// Gets the path of the proxy's allowlist ACL file: the domains allowed by name, in open egress too.
+    /// </summary>
     public string AllowlistFile => GetPath("allowlist.txt");
 
     /// <summary>Gets the path of the proxy's deny ACL file: the denied domains, which beat every allow.</summary>
@@ -101,6 +103,16 @@ internal sealed class SessionDir(string projectKey, string path)
 
     /// <summary>Gets the path of the session's lock, which its Pen holds exclusive while it runs.</summary>
     public string LockFile => GetPath("session.lock");
+
+    /// <summary>
+    /// Gets the path of the lock pen allow and pen deny hold exclusive while they rewrite the session's ACL files and
+    /// have its proxy reload them.
+    /// </summary>
+    /// <remarks>
+    /// Nothing else takes it, and a session's presence goes by compose.yaml, not by it. Deleting the session's files
+    /// deletes it with the rest.
+    /// </remarks>
+    public string AclLockFile => GetPath("acl.lock");
 
     /// <summary>Gets the path of the env compose runs with, one NAME=value per line.</summary>
     public string EnvFile => GetPath("session.env");
