@@ -36,6 +36,12 @@ internal sealed class BranchSigner(HostGit git)
     {
         var branchRef = git.TryReadOutput("symbolic-ref", "-q", "HEAD")
             ?? throw new PenException("HEAD is detached: check out the branch to sign");
+        // HEAD can name any ref, directly or through a symbolic branch, and only a branch is signed and moved.
+        if (!IsBranch(branchRef))
+        {
+            throw new PenException(
+                $"HEAD is on {Out.Field(branchRef)}, which isn't a branch: check out the branch to sign");
+        }
         var head = git.ReadOutput("rev-parse", "--verify", "HEAD^{commit}");
         var resolved = ResolveBase(baseArg)
             ?? throw new PenException($"{Out.Field(branchRef["refs/heads/".Length..])} has no " +
@@ -102,7 +108,10 @@ internal sealed class BranchSigner(HostGit git)
     }
 
     /// <summary>Formats the session-end reminder: how many commits ahead of the base don't verify.</summary>
-    /// <returns>The reminder, or null when the host's global commit.gpgsign is off or nothing is unsigned.</returns>
+    /// <returns>
+    /// The reminder, or null when the host's global commit.gpgsign is off, HEAD is detached or on a ref that isn't a
+    /// branch (which pen sign refuses) or nothing is unsigned.
+    /// </returns>
     /// <remarks>It never throws: it's advice, after the real work is done.</remarks>
     public string? FormatReminder()
     {
@@ -112,6 +121,8 @@ internal sealed class BranchSigner(HostGit git)
                 return null;
             var head = git.TryReadOutput("rev-parse", "--verify", "-q", "HEAD^{commit}");
             if (string.IsNullOrEmpty(head))
+                return null;
+            if (git.TryReadOutput("symbolic-ref", "-q", "HEAD") is not { } branchRef || !IsBranch(branchRef))
                 return null;
             var resolved = ResolveBase(null);
             if (resolved is null)
@@ -127,6 +138,8 @@ internal sealed class BranchSigner(HostGit git)
             return null;
         }
     }
+
+    private static bool IsBranch(string fullRef) => fullRef.StartsWith("refs/heads/", StringComparison.Ordinal);
 
     /// <summary>Lists the bases to try: <paramref name="arg"/> if given, else the upstream and origin/HEAD.</summary>
     private static string[] ListBaseCandidates(string? arg) =>

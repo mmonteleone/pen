@@ -481,6 +481,97 @@ public class SignTests
     /// <summary>The text without the colors <see cref="Out"/> may add around fields.</summary>
     private static string Plain(string text) => System.Text.RegularExpressions.Regex.Replace(text, "\u001b\\[[0-9;]*m", "");
 
+    /// <summary>Every ref with what it points to (symbolic or not), plus HEAD's ref and commit.</summary>
+    private static string Refs(Fixture f) =>
+        f.Git.ReadOutput("for-each-ref", "--format=%(refname) %(symref) %(objectname)") + "\n"
+        + f.Git.ReadOutput("symbolic-ref", "HEAD") + " " + f.Head();
+
+    /// <summary>Points HEAD at <paramref name="target"/>, through refs/heads/alias when <paramref name="viaAlias"/>.</summary>
+    private static void PointHeadAt(Fixture f, string target, bool viaAlias)
+    {
+        if (viaAlias)
+        {
+            f.Git.ReadOutput("symbolic-ref", "refs/heads/alias", target);
+            target = "refs/heads/alias";
+        }
+        f.Git.ReadOutput("symbolic-ref", "HEAD", target);
+    }
+
+    [Theory]
+    [InlineData("refs/x", true, false)]
+    [InlineData("refs/x", false, false)]
+    [InlineData("refs/tags/v1.0", true, false)]
+    [InlineData("refs/x", true, true)]
+    [InlineData("refs/tags/refs/heads/v1", true, false)]
+    [InlineData("refs/headsX/y", true, false)]
+    public void HeadOnARefThatIsntABranch_IsRefused_ChangingNothing(string target, bool withBase, bool viaAlias)
+    {
+        using var f = new Fixture();
+        if (withBase) SetBase(f);
+        var unsigned = f.Commit("a", "1", "A <a@x.io>", "2026-01-01T00:00:00Z", "one");
+        f.Git.ReadOutput("update-ref", target, unsigned);
+        PointHeadAt(f, target, viaAlias);
+        var before = Refs(f);
+
+        PenException? e = null;
+        var stderr = CapturingStderr(() => e = Assert.Throws<PenException>(() => new BranchSigner(f.Git).Sign(null)));
+
+        Assert.Equal($"HEAD is on {target}, which isn't a branch: check out the branch to sign", e!.Message);
+        Assert.Equal(1, e.ExitCode);
+        Assert.Equal("", stderr); // refused before the listing
+        Assert.Equal(before, Refs(f));
+    }
+
+    [Fact]
+    public void HeadOnASymbolicBranchToABranch_SignsThatBranch()
+    {
+        using var f = new Fixture();
+        SetBase(f);
+        var old = f.Commit("a", "1", "A <a@x.io>", "2026-01-01T00:00:00Z", "one");
+        PointHeadAt(f, "refs/heads/main", viaAlias: true);
+
+        var report = Plain(ReportOf(f));
+
+        var head = f.Head();
+        Assert.Equal(
+            $"pen: signed: main is now {head[..12]} (was {old[..12]}; the old commits stay in the reflog)\n", report);
+        Assert.Equal(head, f.Git.ReadOutput("rev-parse", "refs/heads/main"));
+        Assert.Equal("refs/heads/main", f.Git.ReadOutput("symbolic-ref", "--no-recurse", "refs/heads/alias"));
+        Assert.Equal("refs/heads/alias", f.Git.ReadOutput("symbolic-ref", "--no-recurse", "HEAD"));
+        AssertSameButSigned(f, old, head);
+    }
+
+    [Fact]
+    public void TheReminderIsntGiven_WhenHeadIsOnARefThatIsntABranch()
+    {
+        using var f = new Fixture();
+        SetBase(f);
+        f.Global("commit.gpgsign", "true");
+        var unsigned = f.Commit("a", "1", "A <a@x.io>", "2026-01-01T00:00:00Z", "one");
+        const string Reminder = "1 unsigned commit; review, then run pen sign";
+        Assert.Equal(Reminder, new BranchSigner(f.Git).FormatReminder());
+
+        f.Git.ReadOutput("update-ref", "refs/x", unsigned);
+        PointHeadAt(f, "refs/x", viaAlias: false);
+        Assert.Null(new BranchSigner(f.Git).FormatReminder());
+
+        PointHeadAt(f, "refs/heads/main", viaAlias: true);
+        Assert.Equal(Reminder, new BranchSigner(f.Git).FormatReminder());
+    }
+
+    [Fact]
+    public void TheReminderIsntGiven_WhenHeadIsDetached()
+    {
+        using var f = new Fixture();
+        SetBase(f);
+        f.Global("commit.gpgsign", "true");
+        var unsigned = f.Commit("a", "1", "A <a@x.io>", "2026-01-01T00:00:00Z", "one");
+        Assert.Equal("1 unsigned commit; review, then run pen sign", new BranchSigner(f.Git).FormatReminder());
+
+        f.Git.ReadOutput("update-ref", "--no-deref", "HEAD", unsigned);
+        Assert.Null(new BranchSigner(f.Git).FormatReminder());
+    }
+
     [Fact]
     public void TheWholeRangeIsRead_KeepingValidCommitsBelowAForgedOne()
     {

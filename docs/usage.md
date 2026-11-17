@@ -251,7 +251,7 @@ pen sign
 git push
 ```
 
-Pen uses your normal host signing setup and keeps trees, authors and messages. Commit hashes change. The base defaults to the upstream branch, then `origin/HEAD`. Pen refuses to rewrite pushed commits or commits with headers it can't safely re-create. It also refuses to sign while a session is open in the same directory; wait for sessions in other worktrees too.
+Pen uses your normal host signing setup and keeps trees, authors and messages. Commit hashes change. The base defaults to the upstream branch, then `origin/HEAD`. Pen refuses to rewrite pushed commits or commits with headers it can't safely re-create, and signs only a checked-out branch: it refuses when HEAD is detached or on a ref that isn't a branch. It also refuses to sign while a session is open in the same directory; wait for sessions in other worktrees too.
 
 For SSH signing, set `gpg.ssh.allowedSignersFile` in your global git config to a file outside the repo (an absolute path or `~/…`). Otherwise Pen can't verify the signatures it creates and re-signs the commits on every run, changing their hashes again. Pen explains how to fix this when it happens.
 
