@@ -211,7 +211,7 @@ internal static class ProtectedFiles
     private sealed record OlderSessions(
         Dictionary<string, List<SavedCopy>> Files,
         HashSet<string> Adopted,
-        List<List<string>> ReadOnlyDirs,
+        List<IReadOnlyList<string>> ReadOnlyDirs,
         bool Unrecorded);
 
     /// <summary>An open session's saved file.</summary>
@@ -222,7 +222,7 @@ internal static class ProtectedFiles
     {
         var files = new Dictionary<string, List<SavedCopy>>(StringComparer.Ordinal);
         var adopted = new HashSet<string>(StringComparer.Ordinal);
-        var readOnly = new List<List<string>>();
+        var readOnly = new List<IReadOnlyList<string>>();
         var unrecorded = false;
         foreach (var session in open.OrderBy(session => session.ReadStarted() ?? DateTime.MaxValue))
         {

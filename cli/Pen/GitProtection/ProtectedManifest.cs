@@ -7,7 +7,7 @@ namespace Pen.GitProtection;
 /// <param name="ReadOnlyDirs">
 /// The directories mounted read-only as a whole, whose contents the sandbox can't change or add to.
 /// </param>
-internal sealed record ProtectedManifest(List<ProtectedFile> Files, List<string> ReadOnlyDirs)
+internal sealed record ProtectedManifest(IReadOnlyList<ProtectedFile> Files, IReadOnlyList<string> ReadOnlyDirs)
 {
     /// <summary>Tells whether this session vouches for a config.worktree found at its end.</summary>
     /// <returns>

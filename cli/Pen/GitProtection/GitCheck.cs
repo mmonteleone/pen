@@ -145,8 +145,8 @@ internal sealed class GitCheck
         }
         return Summarize(stopped) with
         {
-            ModeChanges = _changes.ModeChanges,
-            Restored = _changes.Restored,
+            ModeChanges = [.. _changes.ModeChanges],
+            Restored = [.. _changes.Restored],
             RestoreIncomplete = !_restoreDone,
             RestoreBlocked = [.. _changes.Blocked.Distinct(StringComparer.Ordinal)],
         };
@@ -174,7 +174,7 @@ internal sealed class GitCheck
         if (_changes.Moved.Any(quarantined => quarantined is Quarantined.Failed))
             failures.Add("a file named above couldn't be moved out of git's way, removed or restored");
         var failure = failures.Count == 0 ? null : string.Join("; ", failures);
-        return new() { Moved = _changes.Moved, Failure = failure, Paused = _paused };
+        return new() { Moved = [.. _changes.Moved], Failure = failure, Paused = [.. _paused] };
     }
 
     /// <summary>Words the failure for the directories it couldn't list, naming the first few.</summary>

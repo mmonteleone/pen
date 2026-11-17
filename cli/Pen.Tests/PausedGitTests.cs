@@ -27,7 +27,7 @@ public class PausedGitTests
         return PausedGit.Warning(repo, check.Paused);
     }
 
-    private static List<PausedOp> Paused(string repo) => GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Paused;
+    private static IReadOnlyList<PausedOp> Paused(string repo) => GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Paused;
 
     private static void MkFifo(string path)
     {

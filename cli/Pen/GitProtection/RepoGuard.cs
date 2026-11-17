@@ -163,7 +163,7 @@ internal static class RepoGuard
     /// <param name="dir">The project dir.</param>
     /// <param name="git">The project's .git, which decides the message's wording.</param>
     /// <param name="nested">The repos found inside the project.</param>
-    private static void RequireNoNestedRepos(string dir, string git, List<NestedRepo> nested)
+    private static void RequireNoNestedRepos(string dir, string git, IReadOnlyList<NestedRepo> nested)
     {
         if (nested.Count == 0)
             return;
@@ -208,7 +208,7 @@ internal static class RepoGuard
     /// Only the repos listed are looked at for the advice: one in refs/ or logs/ is made by ref names, which
     /// renaming fixes, and a worktree entry may be a stale one, which git can tidy.
     /// </remarks>
-    private static void RequireNoGitDirRepos(string dir, string common, List<NestedRepo> found)
+    private static void RequireNoGitDirRepos(string dir, string common, IReadOnlyList<NestedRepo> found)
     {
         if (found.Count == 0)
             return;
@@ -257,7 +257,7 @@ internal static class RepoGuard
     /// <param name="links">The symlinks that lead into the git dir.</param>
     /// <param name="untraced">The symlinks Pen can't trace.</param>
     /// <remarks>Git run through one starts in the git dir, where the sandbox could put a repo for it to use.</remarks>
-    private static void RequireNoGitDirLinks(string dir, List<string> links, List<string> untraced)
+    private static void RequireNoGitDirLinks(string dir, IReadOnlyList<string> links, IReadOnlyList<string> untraced)
     {
         if (links.Count == 0 && untraced.Count == 0)
             return;

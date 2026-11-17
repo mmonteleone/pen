@@ -285,7 +285,7 @@ internal static class RepoScan
     /// repos nested in a quarantined one are no submodule's. Reads directories only; never runs git.
     /// </para>
     /// </remarks>
-    internal static List<string> FindModuleRepos(string gitDir) => ScanModules(gitDir).Repos;
+    internal static IReadOnlyList<string> FindModuleRepos(string gitDir) => ScanModules(gitDir).Repos;
 
     /// <summary>Walks <paramref name="gitDir"/>'s submodule repos as <see cref="FindModuleRepos"/> does.</summary>
     /// <returns>
@@ -459,7 +459,7 @@ internal static class RepoScan
             badNames.Sort((a, b) => string.CompareOrdinal(a.DisplayPath, b.DisplayPath));
             _gitDirLinks.Sort(StringComparer.Ordinal);
             _untracedLinks.Sort(StringComparer.Ordinal);
-            return new(repos, unlistable, badNames, _gitDirLinks, _untracedLinks);
+            return new(repos, unlistable, badNames, [.. _gitDirLinks], [.. _untracedLinks]);
         }
 
         /// <summary>Notes the repos in one directory and queues its subdirectories.</summary>
@@ -679,7 +679,7 @@ internal static class RepoScan
         public ModuleScan Run(string gitDir)
         {
             AddModuleRepos(gitDir);
-            return new(_repos, _unreadable, _badNames);
+            return new([.. _repos], [.. _unreadable], [.. _badNames]);
         }
 
         /// <summary>
@@ -817,11 +817,11 @@ internal static class RepoScan
 /// ordinal order; none in a walk of the git dir.
 /// </param>
 internal sealed record NestedScan(
-    List<NestedRepo> Repos,
-    List<string> UnlistableDirs,
-    List<BadName> BadNames,
-    List<string> GitDirLinks,
-    List<string> UntracedLinks);
+    IReadOnlyList<NestedRepo> Repos,
+    IReadOnlyList<string> UnlistableDirs,
+    IReadOnlyList<BadName> BadNames,
+    IReadOnlyList<string> GitDirLinks,
+    IReadOnlyList<string> UntracedLinks);
 
 /// <summary>A repo below the root of a walk: the project dir, or its git dir.</summary>
 /// <param name="Path">The entry that makes it one: the .git, or a bare repo's HEAD.</param>
@@ -869,7 +869,10 @@ internal enum GitDirPlace
 /// <param name="Repos">The module repos, parents before their nested repos.</param>
 /// <param name="UnreadableDirs">The directories it couldn't read, so what's in them is unknown.</param>
 /// <param name="BadNames">The entries whose names aren't valid UTF-8, of any type.</param>
-internal sealed record ModuleScan(List<string> Repos, List<string> UnreadableDirs, List<BadName> BadNames);
+internal sealed record ModuleScan(
+    IReadOnlyList<string> Repos,
+    IReadOnlyList<string> UnreadableDirs,
+    IReadOnlyList<BadName> BadNames);
 
 /// <summary>An entry a scan can't look inside, since its name isn't valid UTF-8.</summary>
 /// <param name="DisplayPath">

@@ -54,7 +54,7 @@ internal static class PausedGit
     /// <returns>
     /// What it found, in order; if it couldn't finish, last an entry for the git dir that says so. Never throws.
     /// </returns>
-    public static List<PausedOp> Find(string gitDir) => new PausedOpSearch(gitDir).Run();
+    public static IReadOnlyList<PausedOp> Find(string gitDir) => new PausedOpSearch(gitDir).Run();
 
     /// <summary>
     /// Tells whether a state file holds git's msgnum, end, next or last: a decimal number and a newline.
@@ -300,7 +300,7 @@ internal static class PausedGit
 
         /// <summary>Searches the git dir, its worktree entries, its module repos and theirs. Call it once.</summary>
         /// <returns>What it found; if it stopped, what it found before, then an entry that says so.</returns>
-        public List<PausedOp> Run()
+        public IReadOnlyList<PausedOp> Run()
         {
             try
             {
@@ -311,7 +311,7 @@ internal static class PausedGit
                 _found.Add(new(gitDir, "a git dir pen couldn't finish looking through",
                     [new($"it may hold more paused state: {Out.Describe(exception)}", [])]));
             }
-            return _found;
+            return [.. _found];
         }
 
         private void AddUnreachable(string path) =>
@@ -359,10 +359,10 @@ internal static class PausedGit
 /// <param name="Text">The heading.</param>
 /// <param name="Lines">The lines under it, already safe to print.</param>
 /// <param name="More">How many more lines there were than are listed.</param>
-internal sealed record PausedNote(string Text, List<string> Lines, int More = 0);
+internal sealed record PausedNote(string Text, IReadOnlyList<string> Lines, int More = 0);
 
 /// <summary>State for a paused operation in a git dir, as found.</summary>
 /// <param name="Path">The state directory.</param>
 /// <param name="Kind">What kind of operation it is, as words.</param>
 /// <param name="Notes">What in it is worth a look.</param>
-internal sealed record PausedOp(string Path, string Kind, List<PausedNote> Notes);
+internal sealed record PausedOp(string Path, string Kind, IReadOnlyList<PausedNote> Notes);
