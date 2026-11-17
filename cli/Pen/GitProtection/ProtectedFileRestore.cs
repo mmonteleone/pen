@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Win32.SafeHandles;
 using Pen.Platform;
 using Pen.Sessions;
@@ -146,6 +147,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
     /// <param name="original">Its contents at the start.</param>
     /// <param name="current">What's there now, or null if it couldn't be read.</param>
     /// <returns>Whether it was written back; false if it isn't a regular file it can open for writing.</returns>
+    [SuppressMessage("Reliability", "CA2000", Justification = "The using block disposes it once it isn't null")]
     private static bool TryWriteInPlace(ProtectedFile file, byte[] original, RegularFile? current)
     {
         if (current is null)

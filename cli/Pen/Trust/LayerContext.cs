@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Pen.Platform;
 using Pen.Projects;
 using Pen.Sessions;
@@ -85,6 +86,7 @@ internal sealed class LayerContext : IDisposable
     }
 
     /// <summary>Takes the exclusive lock at <paramref name="path"/>, saying so if it has to wait.</summary>
+    [SuppressMessage("Reliability", "CA2000", Justification = "The lock is returned to the caller, which disposes it")]
     private static FileLock WaitForLock(string path)
     {
         var heldLock = FileLock.TryTake(path, exclusive: true);

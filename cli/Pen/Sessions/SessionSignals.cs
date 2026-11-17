@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using Pen.Platform;
 
@@ -43,6 +44,7 @@ internal sealed class SessionSignals : IDisposable
     internal TimeSpan Grace { get; init; } = TimeSpan.FromSeconds(5);
 
     /// <summary>Starts handling the signals.</summary>
+    [SuppressMessage("Reliability", "CA2000", Justification = "Kept in a field that Dispose disposes")]
     public SessionSignals()
     {
         _registrations =

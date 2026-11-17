@@ -170,3 +170,7 @@ dotnet_diagnostic.IDE0002.severity = warning
 dotnet_diagnostic.IDE0003.severity = warning
 dotnet_diagnostic.IDE0009.severity = warning
 dotnet_diagnostic.IDE0049.severity = warning
+
+# Undisposed IDisposables; everything here is internal, so check all of it
+dotnet_code_quality.api_surface = all
+dotnet_diagnostic.CA2000.severity = warning

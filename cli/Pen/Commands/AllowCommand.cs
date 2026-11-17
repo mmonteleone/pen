@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text;
 using Pen.CommandLine;
@@ -370,6 +371,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     /// Takes <paramref name="session"/>'s acl.lock exclusive, waiting while another pen allow or pen deny holds it.
     /// </summary>
     /// <exception cref="PenException">It's still held after <see cref="AclLockWait"/>.</exception>
+    [SuppressMessage("Reliability", "CA2000", Justification = "The lock is returned to the caller, which disposes it")]
     private static FileLock TakeAclLock(SessionDir session)
     {
         var held = FileLock.TryTake(session.AclLockFile, exclusive: true);
