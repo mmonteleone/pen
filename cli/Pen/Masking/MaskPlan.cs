@@ -50,10 +50,10 @@ internal sealed record MaskPlan(
             ThrowIfChanged(replacement.Target, "replaces", isDirectory: false);
     }
 
-    /// <summary>Refuses to start if <paramref name="masked"/> isn't what it was when the plan was made.</summary>
-    /// <param name="masked">The path.</param>
-    /// <param name="verb">"hides" or "replaces", for the message.</param>
-    /// <param name="isDirectory">Whether it was a directory; otherwise it was a regular file.</param>
+    /// <summary>
+    /// Refuses to start if <paramref name="masked"/>, a directory or else a regular file, isn't what it was when the
+    /// plan was made. <paramref name="verb"/> is "hides" or "replaces", for the message.
+    /// </summary>
     private static void ThrowIfChanged(MaskedPath masked, string verb, bool isDirectory)
     {
         var kind = isDirectory ? "directory" : "file";
@@ -94,7 +94,8 @@ internal sealed record MaskPlan(
 internal sealed record MaskedPath(string Path, string RelativePath, ulong Device, ulong Inode);
 
 /// <summary>A file in the project that the agent sees with another file's contents.</summary>
-/// <param name="Target">The file covered.</param>
-/// <param name="Bytes">The source's contents, as read when the plan was made.</param>
-/// <param name="Mode">The source's read and execute bits: no write, setuid, setgid or sticky bit.</param>
+/// <remarks>
+/// Bytes are the source's contents as read when the plan was made, and Mode is the source's read and execute bits
+/// only: no write, setuid, setgid or sticky bit.
+/// </remarks>
 internal sealed record Replacement(MaskedPath Target, byte[] Bytes, UnixFileMode Mode);

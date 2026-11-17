@@ -144,8 +144,10 @@ internal sealed class MaskPlanner
         return new MaskPlan(ToMasked(files), ToMasked(dirs), replacements, warnings);
     }
 
-    /// <summary>Gives a warning, once, keeping the first <see cref="MaxWarnings"/> and counting the rest.</summary>
-    /// <param name="warning">The warning, already safe to print.</param>
+    /// <summary>
+    /// Gives a warning, which must already be safe to print, once, keeping the first <see cref="MaxWarnings"/> and
+    /// counting the rest.
+    /// </summary>
     /// <remarks>A tree the agent writes can hold any number of names to warn about.</remarks>
     private void Warn(string warning)
     {
@@ -168,9 +170,10 @@ internal sealed class MaskPlanner
             planned.Remove(path);
     }
 
-    /// <summary>Tells whether a planned path isn't its own real path any more, warning if so.</summary>
-    /// <param name="path">The planned path.</param>
-    /// <param name="verb">"hide" or "replace", for the warning.</param>
+    /// <summary>
+    /// Tells whether a planned path isn't its own real path any more, warning if so. <paramref name="verb"/> is "hide"
+    /// or "replace", for the warning.
+    /// </summary>
     private bool WarnIfChanged(string path, string verb)
     {
         if (Native.RealPath(path) == path)
@@ -330,9 +333,10 @@ internal sealed class MaskPlanner
         return null;
     }
 
-    /// <summary>Takes a directory to look in, with its device and inode as lstat finds them now.</summary>
-    /// <param name="path">The directory.</param>
-    /// <param name="relative">Its path in the project ("" for the project dir).</param>
+    /// <summary>
+    /// Takes a directory to look in, with its device and inode as lstat finds them now. <paramref name="relative"/> is
+    /// its path in the project ("" for the project dir).
+    /// </summary>
     /// <returns>The place, or null, with a warning, if lstat can't look at it or it isn't a directory now.</returns>
     private SeenDir? Enter(string path, string relative)
     {
@@ -414,15 +418,17 @@ internal sealed class MaskPlanner
     }
 
     /// <summary>Hides the matched entry at <paramref name="path"/>, or what it leads to if it's a symlink.</summary>
-    /// <param name="path">The entry.</param>
-    /// <param name="relative">The entry's path in the project, for messages.</param>
-    /// <param name="fileMatch">The pattern that matched it as listed, or null if only a directory would match.</param>
-    /// <param name="dirMatch">The pattern that matched it, taken as a directory.</param>
     /// <remarks>
-    /// A symlink hides what it leads to, if that's in the project; what's outside the project isn't in the sandbox.
-    /// The type comes from lstat, not the listing, in case it changed since. A FIFO, socket or device is left
-    /// alone, as is a symlink that leads nowhere, out of the project or somewhere off limits. What lstat can't look
-    /// at (a path too long, a real path that isn't valid UTF-8) is warned about.
+    /// <para>
+    /// <paramref name="fileMatch"/> is the pattern that matched it as listed, or null if only a directory would
+    /// match, and <paramref name="dirMatch"/> the pattern that matched it taken as a directory.
+    /// </para>
+    /// <para>
+    /// A matched symlink hides what it leads to, if that's in the project; what's outside the project isn't in the
+    /// sandbox. The type comes from lstat, not the listing, in case it changed since. A FIFO, socket or device is left
+    /// alone, as is a symlink that leads nowhere, out of the project or somewhere off limits. What lstat can't look at
+    /// (a path too long, a real path that isn't valid UTF-8) is warned about.
+    /// </para>
     /// </remarks>
     private void Hide(string path, string relative, HidePattern? fileMatch, HidePattern dirMatch)
     {
@@ -561,14 +567,15 @@ internal sealed class MaskPlanner
     }
 
     /// <summary>Gets the hidden directory that <paramref name="path"/> is inside, if any.</summary>
-    /// <returns>The directory, or null.</returns>
     private string? FindHiddenDir(string path) =>
         Paths.EnumerateAncestors(path)
             .TakeWhile(parent => parent.Length > _projectDir.Length)
             .FirstOrDefault(_dirs.ContainsKey);
 
-    /// <summary>Checks each [replace] entry and reads its source.</summary>
-    /// <param name="files">The files to hide; a replaced one is taken out, since its replacement covers it.</param>
+    /// <summary>
+    /// Checks each [replace] entry and reads its source, taking a replaced file out of the files to hide, since its
+    /// replacement covers it.
+    /// </summary>
     /// <returns>The replacements, in [replace]'s order.</returns>
     private List<Replacement> PlanReplacements(Dictionary<string, Found> files)
     {
@@ -666,10 +673,10 @@ internal sealed class MaskPlanner
     private static PenException OutsideProject(string target) =>
         new($"replace: target \"{Out.Field(target)}\" must be a file in the project, outside .git and .pen");
 
-    /// <summary>Reads a [replace] source, never through a symlink, refusing one that hide hides.</summary>
-    /// <param name="target">The entry's target, for messages.</param>
-    /// <param name="source">The source, as written in [replace].</param>
-    /// <param name="hidden">What hide found, by device and inode (<see cref="FindHiddenIdentities"/>).</param>
+    /// <summary>
+    /// Reads a [replace] source, as written, never through a symlink, refusing one that hide hides: a match for a
+    /// pattern, or in <paramref name="hidden"/> (<see cref="FindHiddenIdentities"/>).
+    /// </summary>
     /// <exception cref="PenException">It can't be read, or it's hidden, naming the entry.</exception>
     /// <remarks>
     /// [replace] can be in .pen/, which the agent can write, so a hidden source would let it show itself what a
@@ -730,10 +737,10 @@ internal sealed class MaskPlanner
         return file;
     }
 
-    /// <summary>Refuses a [replace] source that hide hides.</summary>
-    /// <param name="target">The entry's target.</param>
-    /// <param name="source">The entry's source.</param>
-    /// <param name="why">How it's hidden, already safe to print.</param>
+    /// <summary>
+    /// Refuses a [replace] source that hide hides, saying how in <paramref name="why"/>, which must already be safe to
+    /// print.
+    /// </summary>
     private static PenException HiddenSource(string target, string source, string why) =>
         new($"replace: source \"{Out.Field(source)}\" (for \"{Out.Field(target)}\") is hidden: {why}, and " +
             "[replace] can't show the agent what hide keeps from it");

@@ -29,10 +29,9 @@ internal static class MaskFiles
         | UnixFileMode.OtherExecute;
 
     /// <summary>
-    /// Writes <paramref name="plan"/>'s files to <paramref name="dir"/> and lists the mounts over the project.
+    /// Writes <paramref name="plan"/>'s files to <paramref name="dir"/>, the session's masks directory, which mustn't
+    /// exist yet, and lists the mounts over the project.
     /// </summary>
-    /// <param name="dir">The session's masks directory, which mustn't exist yet.</param>
-    /// <param name="plan">What the session hides and replaces.</param>
     /// <returns>
     /// One read-only mount per hidden file, hidden directory and replacement, in that order; none, and nothing
     /// written, for an empty plan.

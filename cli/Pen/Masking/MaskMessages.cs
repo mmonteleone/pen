@@ -28,7 +28,6 @@ internal static class MaskMessages
         "the agent can use the privileged Docker daemon to undo their mounts";
 
     /// <summary>Formats the line saying what the agent doesn't see and what it sees replaced.</summary>
-    /// <param name="plan">What the session hides and replaces.</param>
     /// <returns>
     /// The line, e.g. "hidden from the agent: .env, secrets/ and 3 more; replaced: .env", or null for an empty plan.
     /// </returns>
@@ -54,14 +53,11 @@ internal static class MaskMessages
         return parts.Count == 0 ? null : string.Join("; ", parts);
     }
 
-    /// <summary>Lists the warnings about what a session hides and replaces.</summary>
-    /// <param name="plan">What the session hides and replaces.</param>
-    /// <param name="penDir">The project's .pen dir, where the case probe goes.</param>
-    /// <param name="docker">Whether it's a docker session.</param>
-    /// <param name="isMacOS">Whether the host is macOS: <see cref="OperatingSystem.IsMacOS"/> in production.</param>
-    /// <param name="probe">
-    /// Whether a directory may fold case: <see cref="PathChecks.MayFoldCase(string)"/> in production.
-    /// </param>
+    /// <summary>
+    /// Lists the warnings about what a session hides and replaces. <paramref name="isMacOS"/> is
+    /// <see cref="OperatingSystem.IsMacOS"/> and <paramref name="probe"/> is
+    /// <see cref="PathChecks.MayFoldCase(string)"/> in production; the probe goes in <paramref name="penDir"/>.
+    /// </summary>
     /// <returns>
     /// <see cref="CaseWarning"/> if a file is hidden or replaced and <paramref name="penDir"/> may fold case, or else
     /// <see cref="UnicodeWarning"/> on macOS for a non-ASCII name, then the plan's own warnings, then

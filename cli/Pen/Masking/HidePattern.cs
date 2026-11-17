@@ -58,17 +58,15 @@ internal sealed class HidePattern
     /// </remarks>
     public string? LiteralPath { get; }
 
-    /// <summary>Formats the pattern as written.</summary>
     public override string ToString() => Text;
 
     /// <summary>The longest pattern accepted: normalizing a long decomposed name is quadratic.</summary>
     internal const int MaxLength = 1024;
 
-    /// <summary>Parses <paramref name="text"/> into <paramref name="pattern"/>.</summary>
-    /// <param name="text">The pattern as written.</param>
-    /// <param name="pattern">The pattern when it parsed; otherwise null.</param>
-    /// <param name="error">What's wrong with the pattern when it didn't parse; otherwise null.</param>
-    /// <returns>Whether <paramref name="text"/> parsed.</returns>
+    /// <summary>
+    /// Parses <paramref name="text"/> into <paramref name="pattern"/>, or says in <paramref name="error"/> what's wrong
+    /// with it.
+    /// </summary>
     public static bool TryParse(
         string text,
         [NotNullWhen(true)] out HidePattern? pattern,
@@ -122,8 +120,7 @@ internal sealed class HidePattern
         return FindProblem(parts);
     }
 
-    /// <summary>Tells whether the pattern refuses its segments.</summary>
-    /// <returns>What's wrong, or null.</returns>
+    /// <summary>Says what's wrong with the pattern's segments, or gives null if they're accepted.</summary>
     private static string? FindProblem(string[] parts)
     {
         if (parts.Any(part => part.Length == 0))
