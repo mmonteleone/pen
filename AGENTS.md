@@ -51,3 +51,104 @@ cd cli && dotnet run --project Pen.SmokeTests -- --filter-class "*CliDispatchTes
 - Keep architecture comments tied to current invariants or documentation, rather than the removed historical architecture plan.
 - Naming: the project is "Pen" in prose, docs and comments; the command stays `pen` (also `pen sign`, `pen:latest`, `.pen/`, `PEN_*`).
 - Markdown: don't hard-wrap prose. Each paragraph and list item is one line, left to the editor's soft wrap; line breaks only where they change the rendering (code blocks, tables, list items, headings).
+
+# C# Engineering Guidelines
+
+## Core Philosophy
+
+Write modern, idiomatic C# that prioritizes correctness, clarity, maintainability, and simplicity.
+
+- Prefer straightforward, expressive code over clever or overly abstract solutions.
+- Write code that is easy to read, reason about, debug, and modify.
+- Favor established .NET conventions and standard library capabilities.
+- Avoid unnecessary complexity, dependencies, indirection, and boilerplate.
+- Use abstractions to solve actual problems, not hypothetical future requirements.
+- Optimize for maintainability first, performance where it matters.
+- Follow existing project conventions unless there is a compelling reason to improve them.
+
+## Modern C# and Language Features
+
+- Use the latest stable C# features supported by the project's target framework and language version.
+- Prefer modern language constructs when they meaningfully improve readability or correctness.
+- Use file-scoped namespaces.
+- Use collection expressions, pattern matching, switch expressions, target-typed `new`, and other modern syntax where appropriate.
+- Prefer `var` when the type is obvious from context; use explicit types when they improve clarity.
+- Use records for data with value semantics, not indiscriminately for all classes.
+- Use primary constructors when they simplify a type without obscuring its behavior.
+- Prefer immutable data where practical, without introducing unnecessary copying or complexity.
+- Enable and respect nullable reference types.
+- Avoid null-forgiving operators (`!`) unless the invariant is genuinely established.
+- Avoid introducing new syntax solely for the sake of appearing modern.
+
+## Code Structure and Design
+
+- Keep classes and methods focused on clear responsibilities.
+- Prefer composition over inheritance.
+- Avoid unnecessary interfaces, base classes, factories, wrappers, and generic abstractions.
+- Don't create an interface merely because a class exists.
+- Prefer simple constructor injection where dependency injection is useful.
+- Keep dependencies explicit.
+- Avoid excessive layering, indirection, and speculative extensibility.
+- Avoid unnecessary design patterns and architectural ceremony.
+- Prefer cohesive code over artificially fragmented methods and types.
+- Keep public APIs intentional and minimize unnecessary surface area.
+
+## Idiomatic .NET
+
+- Prefer standard .NET APIs and conventions over custom implementations.
+- Use LINQ for clear collection transformations, but prefer ordinary loops when they are more readable or efficient.
+- Avoid unnecessary allocations and repeated enumeration.
+- Use async/await for asynchronous I/O and propagate asynchronous operations naturally.
+- Never block on asynchronous work using `.Result` or `.Wait()`.
+- Support and propagate `CancellationToken` where cancellation is meaningful.
+- Prefer `Task` over `ValueTask` unless there is a demonstrated reason to use the latter.
+- Use `IDisposable` and `IAsyncDisposable` appropriately for owned resources.
+- Prefer `DateTimeOffset` for timestamps representing actual instants.
+- Use `TimeProvider` when time-dependent behavior needs to be testable.
+- Handle exceptions intentionally. Don't catch exceptions merely to log and rethrow or suppress errors.
+- Don't use exceptions for ordinary control flow.
+
+## Readability and Naming
+
+- Use descriptive, concise names that communicate intent.
+- Follow conventional C# naming and formatting rules.
+- Prefer guard clauses to deeply nested conditionals.
+- Keep control flow easy to follow.
+- Use expression-bodied members when they improve readability.
+- Avoid dense expressions, excessive method chaining, and nested ternaries.
+- Prefer code that explains itself over comments describing implementation mechanics.
+- Write comments to explain intent, constraints, or non-obvious decisions.
+- Avoid unnecessary regions, decorative comments, and redundant documentation.
+
+## Performance
+
+- Avoid obvious inefficiencies without prematurely optimizing.
+- Consider allocation patterns, algorithmic complexity, and I/O behavior.
+- Avoid materializing collections unnecessarily.
+- Avoid repeated database queries, accidental N+1 operations, and excessive enumeration.
+- Use spans, pooling, low-level APIs, and specialized collections only when justified.
+- Don't sacrifice clarity for speculative micro-optimizations.
+- Measure performance-sensitive behavior before introducing significant complexity.
+
+## Testing and Correctness
+
+- Design code to be testable without distorting production architecture.
+- Test observable behavior rather than implementation details.
+- Prefer focused tests with clear inputs and expected outcomes.
+- Avoid excessive mocking and brittle interaction-based tests.
+- Cover important edge cases, failure modes, and boundary conditions.
+- Preserve existing behavior unless a change is explicitly required.
+- Never introduce silent error handling or misleading fallback behavior.
+
+## Agent Behavior
+
+- Inspect the surrounding code, project configuration, and existing conventions before making changes.
+- Respect `.editorconfig`, analyzers, nullable settings, and project-specific standards.
+- Prefer the smallest coherent change that fully solves the problem.
+- Don't introduce packages, frameworks, or architectural patterns without clear justification.
+- Don't create abstractions for one-off implementations without a concrete benefit.
+- Don't refactor unrelated code or introduce formatting-only changes outside the task.
+- Avoid compatibility shims and legacy patterns unless actually required.
+- Verify compilation and run relevant tests when tooling is available.
+- Explain meaningful tradeoffs and non-obvious design decisions.
+- When multiple approaches are reasonable, prefer the simplest solution that satisfies the actual requirements.
