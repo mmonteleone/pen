@@ -7,7 +7,8 @@ namespace Pen.Commands;
 
 /// <summary>Runs pen ps: lists every project's running sessions.</summary>
 /// <param name="host">The host user's environment.</param>
-internal sealed partial class PsCommand(HostEnv host)
+/// <param name="clock">The clock sessions' ages are shown by.</param>
+internal sealed partial class PsCommand(HostEnv host, TimeProvider clock)
 {
     private const int MaxCommand = 80;
 
@@ -21,7 +22,7 @@ internal sealed partial class PsCommand(HostEnv host)
             Out.WriteLine("no sessions running");
             return 0;
         }
-        Out.WriteStdout(Render(host, sessions, DateTime.UtcNow));
+        Out.WriteStdout(Render(host, sessions, clock.GetUtcNow().UtcDateTime));
         return 0;
     }
 

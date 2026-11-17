@@ -446,7 +446,7 @@ public class MaskSessionTests
         File.SetLastWriteTimeUtc(session.ProxyLog, old);
         Directory.SetLastWriteTimeUtc(session.Path, old);
 
-        Assert.True(Session.FinishDeadSessions(session.ProjectKey, Path.Combine(t.Path, "runtime")));
+        Assert.True(Session.FinishDeadSessions(session.ProjectKey, Path.Combine(t.Path, "runtime"), TimeProvider.System));
 
         Assert.False(Directory.Exists(session.Path));
     }

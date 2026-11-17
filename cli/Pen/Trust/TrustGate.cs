@@ -11,12 +11,13 @@ namespace Pen.Trust;
 /// <param name="context">The project and both configs.</param>
 /// <param name="answers">Where the user's approval comes from.</param>
 /// <param name="catalog">The recipes that say which domains a tool brings.</param>
+/// <param name="clock">The clock that says when an abandoned review copy is old enough to delete.</param>
 /// <remarks>
 /// Settings from .pen/ reach the token lookup, the allowlist and docker build only once approved in the
 /// <see cref="TrustStore"/>, since the agent can write a .pen/ (in a worktree inside the project) for the
 /// next session to run with, and can keep changing it while the user looks.
 /// </remarks>
-internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeCatalog catalog)
+internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeCatalog catalog, TimeProvider clock)
 {
     /// <summary>The heading above the list of what .pen/ asks for.</summary>
     internal const string UnapprovedHeading = ".pen/ asks for things you haven't approved:";
@@ -192,7 +193,9 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
                 "a terminal to ask on: review them with pen trust, or approve them with pen trust --yes"));
         }
 
-        using var review = request.Layer is not null ? LayerContext.Review(context.Host, context.Project) : null;
+        using var review = request.Layer is not null
+            ? LayerContext.Review(context.Host, context.Project, clock)
+            : null;
         if (review is not null)
             request = WithReviewedLayer(request, review, store, showCopy: true);
         if (request.IsEmpty)

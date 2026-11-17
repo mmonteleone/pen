@@ -422,8 +422,8 @@ public class WorktreeTests
         var (_, wt, _) = RepoWithWorktree(t);
         var host = t.Host();
         // Past the repo checks and the locks, to the base: there's no upstream here.
-        Assert.Contains("has no upstream", Assert.Throws<PenException>(() => new SignCommand(host, Project.Resolve(wt, host)).Run(null)).Message);
-        Assert.Contains("isn't a git repo", Assert.Throws<PenException>(() => new SignCommand(host, Project.Resolve(t.Sub("plain"), host)).Run(null)).Message);
+        Assert.Contains("has no upstream", Assert.Throws<PenException>(() => new SignCommand(host, Project.Resolve(wt, host), TimeProvider.System).Run(null)).Message);
+        Assert.Contains("isn't a git repo", Assert.Throws<PenException>(() => new SignCommand(host, Project.Resolve(t.Sub("plain"), host), TimeProvider.System).Run(null)).Message);
     }
 
     // --- B4: running in a linked worktree ------------------------------------------

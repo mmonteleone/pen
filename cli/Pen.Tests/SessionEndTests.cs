@@ -89,7 +89,7 @@ public class SessionEndTests
         // rm also fails for already-absent containers. A successful ps with
         // no match establishes absence, allowing recovery after a crash.
         File.WriteAllText(Path.Combine(t.Path, "absent"), "");
-        Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime"));
+        Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System);
         Assert.False(session.IsOpen);
         Assert.False(File.Exists(session.EnvFile));
         Assert.False(File.Exists(commondir));
@@ -316,11 +316,11 @@ public class SessionEndTests
             Assert.Contains("good copies", output);
             Assert.True(session.IsOpen);
             Assert.True(File.Exists(session.ProtectedManifest));
-            Assert.False(Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime")));
+            Assert.False(Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System));
         }
         finally { File.SetUnixFileMode(git, (UnixFileMode)0b111_101_101); }
 
-        Assert.True(Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime")));
+        Assert.True(Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System));
         Assert.False(session.IsOpen);
         Assert.Equal(original, File.ReadAllText(config));
     }
@@ -362,7 +362,7 @@ public class SessionEndTests
         File.SetUnixFileMode(pen, (UnixFileMode)0b111_101_101);
         var sh = Process.RunAndCaptureText(new ProcessStartInfo("sh", ["-c", command]) { WorkingDirectory = repo, RedirectStandardOutput = true, RedirectStandardError = true });
         Assert.Equal(0, sh.ExitStatus.ExitCode);
-        Assert.True(Session.FinishDeadSessions("pen-test-12345678", runtime));
+        Assert.True(Session.FinishDeadSessions("pen-test-12345678", runtime, TimeProvider.System));
 
         Assert.False(session.IsOpen);
         Assert.Equal(original, File.ReadAllText(config));
@@ -438,7 +438,7 @@ public class SessionEndTests
         var ranIn = File.ReadAllText(where).TrimEnd('\n');
         Assert.Equal(repo, ranIn);
         Assert.Equal(key, Project.Resolve(ranIn, host).Key);
-        Assert.True(Session.FinishDeadSessions(key, runtime));
+        Assert.True(Session.FinishDeadSessions(key, runtime, TimeProvider.System));
         Assert.Equal(original, File.ReadAllText(gitFile));
         Assert.False(session.IsOpen);
     }
@@ -578,7 +578,7 @@ public class SessionEndTests
         using var _ = docker;
 
         var ok = true;
-        var output = CapturingStderr(() => ok = Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime")));
+        var output = CapturingStderr(() => ok = Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System));
 
         Assert.False(ok);
         Assert.Contains("git wasn't checked", output);
@@ -597,7 +597,7 @@ public class SessionEndTests
         var (docker, gitCalls) = FakeHost(t);
         using var _ = docker;
 
-        Assert.True(Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime")));
+        Assert.True(Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System));
 
         Assert.Equal(2, RepoGitCalls(gitCalls).Count);
         Assert.False(first.IsOpen);
@@ -659,7 +659,7 @@ public class SessionEndTests
         var runtime = Path.Combine(t.Path, "runtime");
 
         var ok = true;
-        var output = CapturingStderr(() => ok = Session.FinishDeadSessions("pen-test-12345678", runtime));
+        var output = CapturingStderr(() => ok = Session.FinishDeadSessions("pen-test-12345678", runtime, TimeProvider.System));
 
         Assert.False(ok);
         Assert.Contains("git wasn't checked", output);
@@ -668,7 +668,7 @@ public class SessionEndTests
 
         // Nothing is left to retry, so the next command gets through.
         var calls = File.ReadAllText(Path.Combine(t.Path, "calls"));
-        Assert.True(Session.FinishDeadSessions("pen-test-12345678", runtime));
+        Assert.True(Session.FinishDeadSessions("pen-test-12345678", runtime, TimeProvider.System));
         Assert.Equal(calls, File.ReadAllText(Path.Combine(t.Path, "calls")));
     }
 
@@ -689,7 +689,7 @@ public class SessionEndTests
         Directory.CreateDirectory(Path.GetDirectoryName(moved)!);
         Directory.Move(session.Path, moved);
 
-        var error = Assert.Throws<PenException>(() => new SignCommand(host, project).Run(null));
+        var error = Assert.Throws<PenException>(() => new SignCommand(host, project, TimeProvider.System).Run(null));
 
         Assert.Contains("not signing: deal with the warning", error.Message);
         Assert.False(File.Exists(gitCalls));
@@ -711,7 +711,7 @@ public class SessionEndTests
         try
         {
             PenException? error = null;
-            var output = CapturingStderr(() => error = Assert.Throws<PenException>(() => new SignCommand(host, project).Run(null)));
+            var output = CapturingStderr(() => error = Assert.Throws<PenException>(() => new SignCommand(host, project, TimeProvider.System).Run(null)));
             Assert.Contains("not signing: deal with the files", error!.Message);
             Assert.Contains("git wasn't checked", output);
             Assert.Contains("sub", output);
@@ -769,7 +769,7 @@ public class SessionEndTests
         var sessions = Path.Combine(host.GetRuntimeDir(project.Key), "sessions");
         Directory.CreateDirectory(sessions);
         Directory.Move(session.Path, Path.Combine(sessions, "12345678"));
-        var run = new Session(new ProjectContext(host, project, Config.Empty, Config.Empty), Answers.FromProcess(), RecipeCatalog.Embedded);
+        var run = new Session(new ProjectContext(host, project, Config.Empty, Config.Empty), Answers.FromProcess(), RecipeCatalog.Embedded, TimeProvider.System);
 
         var error = Assert.Throws<PenException>(() => run.Run(new(["true"])));
 

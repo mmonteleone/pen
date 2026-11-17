@@ -1031,7 +1031,7 @@ public class PausedGitTests
         var host = t.Host();
         var project = Project.Resolve(repo, host);
         File.SetUnixFileMode(git, ReadOnlyDir);
-        var error = Assert.Throws<PenException>(() => CapturingStderr(() => new SignCommand(host, project).Run(null)));
+        var error = Assert.Throws<PenException>(() => CapturingStderr(() => new SignCommand(host, project, TimeProvider.System).Run(null)));
         Assert.Contains("not signing", error.Message);
     }
 
@@ -1086,7 +1086,7 @@ public class PausedGitTests
         var project = Project.Resolve(repo, host);
 
         PenException? error = null;
-        var output = CapturingStderr(() => error = Assert.Throws<PenException>(() => new SignCommand(host, project).Run(null)));
+        var output = CapturingStderr(() => error = Assert.Throws<PenException>(() => new SignCommand(host, project, TimeProvider.System).Run(null)));
 
         Assert.Contains("not signing", error!.Message);
         Assert.Contains("msgnum.pen-quarantine", output);
@@ -1250,7 +1250,7 @@ public class PausedGitTests
         var project = Project.Resolve(repo, host);
 
         PenException? error = null;
-        var output = CapturingStderr(() => error = Assert.Throws<PenException>(() => new SignCommand(host, project).Run(null)));
+        var output = CapturingStderr(() => error = Assert.Throws<PenException>(() => new SignCommand(host, project, TimeProvider.System).Run(null)));
 
         Assert.Contains("exec evil", output);
         Assert.Contains("git rebase --continue", output);

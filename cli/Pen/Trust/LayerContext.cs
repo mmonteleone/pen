@@ -19,6 +19,7 @@ internal sealed class LayerContext : IDisposable
     private const UnixFileMode PrivateDirMode = UnixFileMode.UserRead | UnixFileMode.UserWrite
         | UnixFileMode.UserExecute;
     private static readonly TimeSpan KeepAbandonedReviews = TimeSpan.FromDays(1);
+    private static readonly TimeSpan LockPoll = TimeSpan.FromMilliseconds(200);
     private readonly FileLock? _lock;
     private readonly string _parent;
 
@@ -38,12 +39,12 @@ internal sealed class LayerContext : IDisposable
 
     /// <summary>Takes the copy of <paramref name="project"/>'s .pen/ to build from, after any other build.</summary>
     /// <returns>The copy, which holds the directory's build lock until disposed.</returns>
-    public static LayerContext Take(HostEnv host, Project project)
+    public static LayerContext Take(HostEnv host, Project project, TimeProvider clock)
     {
         Session.EnsureRuntimeDir(host, project);
         var runtimeDir = host.GetRuntimeDir(project.Key);
         var parent = Path.Combine(runtimeDir, Prefix + Project.HashPath(project.Dir));
-        var heldLock = WaitForLock(parent + ".lock");
+        var heldLock = WaitForLock(parent + ".lock", clock);
         try
         {
             Remove(parent);
@@ -64,14 +65,14 @@ internal sealed class LayerContext : IDisposable
     /// It isn't locked, since a prompt can wait for hours, and has a path of its own. One abandoned by a
     /// killed Pen goes when the next review finds it old, or by pen clean --stale.
     /// </remarks>
-    public static LayerContext Review(HostEnv host, Project project)
+    public static LayerContext Review(HostEnv host, Project project, TimeProvider clock)
     {
         Session.EnsureRuntimeDir(host, project);
         var runtimeDir = host.GetRuntimeDir(project.Key);
         var prefix = $"{Prefix}{Project.HashPath(project.Dir)}-review-";
         foreach (var old in Directory.GetDirectories(runtimeDir, prefix + "*"))
         {
-            if (DateTime.UtcNow - Directory.GetLastWriteTimeUtc(old) < KeepAbandonedReviews)
+            if (clock.GetUtcNow().UtcDateTime - Directory.GetLastWriteTimeUtc(old) < KeepAbandonedReviews)
                 continue;
             try
             {
@@ -87,15 +88,14 @@ internal sealed class LayerContext : IDisposable
 
     /// <summary>Takes the exclusive lock at <paramref name="path"/>, saying so if it has to wait.</summary>
     [SuppressMessage("Reliability", "CA2000", Justification = "The lock is returned to the caller, which disposes it")]
-    private static FileLock WaitForLock(string path)
+    private static FileLock WaitForLock(string path, TimeProvider clock)
     {
         var heldLock = FileLock.TryTake(path, exclusive: true);
         if (heldLock is not null)
             return heldLock;
         Out.WriteLine("waiting for another pen building this directory's project layer");
-        while ((heldLock = FileLock.TryTake(path, exclusive: true)) is null)
-            Thread.Sleep(200);
-        return heldLock;
+        return Retry.Poll(() => FileLock.TryTake(path, exclusive: true), LockPoll, TimeSpan.MaxValue, clock)
+            ?? throw new InvalidOperationException("a wait without a limit ended");
     }
 
     /// <summary>Removes the copy and releases the lock, if it holds one.</summary>

@@ -10,11 +10,12 @@ namespace Pen.Commands;
 /// <param name="context">The project and both configs.</param>
 /// <param name="answers">Where the user's approval comes from.</param>
 /// <param name="catalog">The recipes that say which domains a tool brings.</param>
-internal sealed class TrustCommand(ProjectContext context, Answers answers, RecipeCatalog catalog)
+/// <param name="clock">The clock that says when an abandoned review copy is old enough to delete.</param>
+internal sealed class TrustCommand(ProjectContext context, Answers answers, RecipeCatalog catalog, TimeProvider clock)
 {
     private const string NothingNew = "nothing new to approve in .pen/";
 
-    private readonly TrustGate _gate = new(context, answers, catalog);
+    private readonly TrustGate _gate = new(context, answers, catalog, clock);
 
     /// <summary>Lists (<paramref name="list"/>) or approves what .pen/ asks for.</summary>
     /// <param name="yes">Approve without asking (--yes).</param>
@@ -42,7 +43,7 @@ internal sealed class TrustCommand(ProjectContext context, Answers answers, Reci
     private int ListAll(TrustRequest request, TrustStore store)
     {
         using var look = request.Layer is { Hash: not null }
-            ? LayerContext.Review(context.Host, context.Project)
+            ? LayerContext.Review(context.Host, context.Project, clock)
             : null;
         if (look is not null)
             request = TrustGate.WithReviewedLayer(request, look, store, showCopy: false);
@@ -66,7 +67,9 @@ internal sealed class TrustCommand(ProjectContext context, Answers answers, Reci
                 "terminal to ask on: use pen trust --yes to approve them"));
         }
 
-        using var review = request.Layer is not null ? LayerContext.Review(context.Host, context.Project) : null;
+        using var review = request.Layer is not null
+            ? LayerContext.Review(context.Host, context.Project, clock)
+            : null;
         if (review is not null)
             request = TrustGate.WithReviewedLayer(request, review, store, showCopy: !yes);
         if (request.IsEmpty)

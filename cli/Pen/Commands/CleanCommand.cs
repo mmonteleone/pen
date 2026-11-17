@@ -8,11 +8,12 @@ namespace Pen.Commands;
 /// <param name="host">The host user's environment.</param>
 /// <param name="project">The project whose volumes go.</param>
 /// <param name="input">Where the confirmation is read from.</param>
+/// <param name="clock">The clock that says when an ended session's files are old enough to delete.</param>
 /// <remarks>
 /// It holds project.lock exclusive throughout, so it refuses while any session or pen sign runs in the project,
 /// and none starts until it's done.
 /// </remarks>
-internal sealed class CleanCommand(HostEnv host, Project project, TextReader input)
+internal sealed class CleanCommand(HostEnv host, Project project, TextReader input, TimeProvider clock)
 {
     /// <summary>What a project's volume names end in, after its key and an underscore.</summary>
     public static readonly string[] VolumeSuffixes = ["home", "nuget", "dind"];
@@ -23,7 +24,7 @@ internal sealed class CleanCommand(HostEnv host, Project project, TextReader inp
     {
         Session.EnsureRuntimeDir(host, project);
         using var projectLock = SessionRegistry.TakeForClean(host, project);
-        Session.FinishDeadSessions(project.Key, host.GetRuntimeDir(project.Key));
+        Session.FinishDeadSessions(project.Key, host.GetRuntimeDir(project.Key), clock);
 
         var volumes = FindVolumes();
         if (volumes.Count == 0)

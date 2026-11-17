@@ -75,6 +75,7 @@ internal static class Image
     /// </summary>
     /// <param name="host">The host user's environment.</param>
     /// <param name="project">The project whose .pen/ to build.</param>
+    /// <param name="clock">The clock the wait for another build of the same directory is timed by.</param>
     /// <param name="noCache">Whether to build without the cache (--no-cache).</param>
     /// <param name="baseImage">The image that stands in for pen:latest in the Dockerfile, which stays as it is.</param>
     /// <returns>The image to run, or null when the project has no layer.</returns>
@@ -95,13 +96,14 @@ internal static class Image
     public static string? EnsureProjectLayer(
         HostEnv host,
         Project project,
+        TimeProvider clock,
         string baseImage,
         bool noCache = false)
     {
         var dockerfile = Path.Combine(project.PenDir, "Dockerfile");
         if (!File.Exists(dockerfile))
             return null;
-        using var context = LayerContext.Take(host, project);
+        using var context = LayerContext.Take(host, project, clock);
         RequireApproved(context, host, project);
 
         var name = GetProjectLayerName(project, baseImage);

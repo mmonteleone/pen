@@ -17,7 +17,8 @@ namespace Pen.Sessions;
 /// <param name="context">The project and both configs.</param>
 /// <param name="answers">Where approvals of .pen/ come from.</param>
 /// <param name="catalog">The recipes tools come from.</param>
-internal sealed class Session(ProjectContext context, Answers answers, RecipeCatalog catalog)
+/// <param name="clock">The clock for the start time, waits and how long ended sessions' files are kept.</param>
+internal sealed class Session(ProjectContext context, Answers answers, RecipeCatalog catalog, TimeProvider clock)
 {
     /// <summary>How long an ended session's directory (and so its proxy.log) is kept after its last activity.</summary>
     internal static readonly TimeSpan KeepEndedSessions = TimeSpan.FromDays(7);
@@ -48,7 +49,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         // A check that didn't finish vouches for nothing: starting now would take
         // the module repos there as this session's baseline, and its end would
         // run git in the directory just warned about.
-        if (!FinishDeadSessions(Project.Key, RuntimeDir))
+        if (!FinishDeadSessions(Project.Key, RuntimeDir, clock))
             throw new PenException("not starting: deal with the warning above first");
 
         var prepared = Prepare(request);
@@ -158,7 +159,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         // Tools that can't go together stop the session, whatever's approved.
         var tools = ToolSpec.Merge(catalog, context.User.Tools, context.ProjectConfig.Tools, flagTools);
         // Before anything below uses a setting from .pen/.
-        var trust = new TrustGate(context, answers, catalog).RequireForSession(flagTools);
+        var trust = new TrustGate(context, answers, catalog, clock).RequireForSession(flagTools);
         var mounts = RepoGuard.PrepareMounts(Project.Dir, context.Host.Home);
         // A hide or [replace] that can't be used stops the session here, before anything is made for it.
         var masks = new MaskPlanner(Project.Dir, Project.CommonGitDir, [.. mounts.Select(mount => mount.Path)],
@@ -289,7 +290,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     {
         Image.EnsureCurrent();
         var toolsImage = ToolsImage.Ensure(tools, catalog);
-        return Image.EnsureProjectLayer(context.Host, Project, baseImage: toolsImage) ?? toolsImage;
+        return Image.EnsureProjectLayer(context.Host, Project, clock, baseImage: toolsImage) ?? toolsImage;
     }
 
     /// <summary>Takes the project's dind lock, for a docker session.</summary>
@@ -468,7 +469,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         session.WritePorts(forwarded);
         session.WriteTools(prepared.Tools, prepared.ToolDomains);
         session.WriteCommand(request.Command);
-        session.WriteStarted(DateTime.UtcNow);
+        session.WriteStarted(clock.GetUtcNow().UtcDateTime);
     }
 
     /// <summary>
@@ -769,7 +770,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     /// A dead session still has a compose.yaml, but nobody holds its lock. These sessions may share a repo, so
     /// their reminders wait until every check has finished.
     /// </remarks>
-    internal static bool FinishDeadSessions(string projectKey, string runtimeDir)
+    internal static bool FinishDeadSessions(string projectKey, string runtimeDir, TimeProvider clock)
     {
         var sessions = Path.Combine(runtimeDir, "sessions");
         if (!Directory.Exists(sessions))
@@ -783,7 +784,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
                 if (TryEndDead(session) is { } result)
                     ended.Add(result);
             }
-            else if (DateTime.UtcNow - ReadLastActivity(path) > KeepEndedSessions)
+            else if (clock.GetUtcNow().UtcDateTime - ReadLastActivity(path) > KeepEndedSessions)
             {
                 DeleteEnded(path);
             }

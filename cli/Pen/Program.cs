@@ -67,6 +67,7 @@ internal static class Program
     private static int Run(string[] args)
     {
         var catalog = RecipeCatalog.Embedded;
+        var clock = TimeProvider.System;
         var command = CommandParser.Parse(args, StartDir.TryGet, catalog);
         switch (command.Kind)
         {
@@ -86,7 +87,7 @@ internal static class Program
         switch (command.Kind)
         {
             case CommandKind.Ps:
-                return new PsCommand(host).Run();
+                return new PsCommand(host, clock).Run();
             case CommandKind.Clean when command.Stale:
                 return new CleanStaleCommand(host, Console.In).Run();
         }
@@ -96,23 +97,23 @@ internal static class Program
         switch (command.Kind)
         {
             case CommandKind.Upgrade:
-                return new UpgradeCommand(host, user, catalog).Run(command.NoCache);
+                return new UpgradeCommand(host, user, catalog, clock).Run(command.NoCache);
             case CommandKind.Allow when command.Args.Count > 0:
-                return new AllowCommand(host, catalog).Run(command.Args, command.Global);
+                return new AllowCommand(host, catalog, clock).Run(command.Args, command.Global);
             case CommandKind.Deny when command.Args.Count > 0:
-                return new DenyCommand(host, catalog).Run(command.Args, command.Global);
+                return new DenyCommand(host, catalog, clock).Run(command.Args, command.Global);
         }
 
         var project = Project.Resolve(StartDir.Get(), host);
         return command.Kind switch
         {
-            CommandKind.Run => RunSession(ProjectContext.Load(host, project, user, catalog), command, catalog),
-            CommandKind.Allow => ListBlocked(ProjectContext.Load(host, project, user, catalog), catalog),
-            CommandKind.Deny => ListDenied(ProjectContext.Load(host, project, user, catalog), catalog),
-            CommandKind.Trust => RunTrust(ProjectContext.Load(host, project, user, catalog), command, catalog),
+            CommandKind.Run => RunSession(ProjectContext.Load(host, project, user, catalog), command, catalog, clock),
+            CommandKind.Allow => ListBlocked(ProjectContext.Load(host, project, user, catalog), catalog, clock),
+            CommandKind.Deny => ListDenied(ProjectContext.Load(host, project, user, catalog), catalog, clock),
+            CommandKind.Trust => RunTrust(ProjectContext.Load(host, project, user, catalog), command, catalog, clock),
             CommandKind.Init => new InitCommand(host, project, catalog).Run(),
-            CommandKind.Sign => RunSign(host, project, command),
-            CommandKind.Clean => new CleanCommand(host, project, Console.In).Run(),
+            CommandKind.Sign => RunSign(host, project, command, clock),
+            CommandKind.Clean => new CleanCommand(host, project, Console.In, clock).Run(),
             _ => throw new InvalidOperationException($"unhandled command {command.Kind}"),
         };
     }
@@ -124,7 +125,7 @@ internal static class Program
     /// --port adds to ports in .pen/config.toml.
     /// --tool adds to tools in both config files.
     /// </remarks>
-    private static int RunSession(ProjectContext context, Command command, RecipeCatalog catalog)
+    private static int RunSession(ProjectContext context, Command command, RecipeCatalog catalog, TimeProvider clock)
     {
         var request = new SessionRequest(command.Args)
         {
@@ -132,22 +133,22 @@ internal static class Program
             Ports = Port.Merge(context.ProjectConfig.Ports, command.Ports),
             FlagTools = command.Tools,
         };
-        return new Session(context, Answers.FromProcess(), catalog).Run(request);
+        return new Session(context, Answers.FromProcess(), catalog, clock).Run(request);
     }
 
     /// <summary>Runs pen allow without domains: lists the recently blocked ones.</summary>
-    private static int ListBlocked(ProjectContext context, RecipeCatalog catalog) =>
-        new AllowCommand(context.Host, catalog).ListBlocked(context);
+    private static int ListBlocked(ProjectContext context, RecipeCatalog catalog, TimeProvider clock) =>
+        new AllowCommand(context.Host, catalog, clock).ListBlocked(context);
 
     /// <summary>Runs pen deny without domains: lists what's denied.</summary>
-    private static int ListDenied(ProjectContext context, RecipeCatalog catalog) =>
-        new DenyCommand(context.Host, catalog).List(context);
+    private static int ListDenied(ProjectContext context, RecipeCatalog catalog, TimeProvider clock) =>
+        new DenyCommand(context.Host, catalog, clock).List(context);
 
     /// <summary>Runs pen trust.</summary>
-    private static int RunTrust(ProjectContext context, Command command, RecipeCatalog catalog) =>
-        new TrustCommand(context, Answers.FromProcess(), catalog).Run(command.Yes, command.List);
+    private static int RunTrust(ProjectContext context, Command command, RecipeCatalog catalog, TimeProvider clock) =>
+        new TrustCommand(context, Answers.FromProcess(), catalog, clock).Run(command.Yes, command.List);
 
     /// <summary>Runs pen sign, against the base given or the default one.</summary>
-    private static int RunSign(HostEnv host, Project project, Command command) =>
-        new SignCommand(host, project).Run(command.Args.Count > 0 ? command.Args[0] : null);
+    private static int RunSign(HostEnv host, Project project, Command command, TimeProvider clock) =>
+        new SignCommand(host, project, clock).Run(command.Args.Count > 0 ? command.Args[0] : null);
 }

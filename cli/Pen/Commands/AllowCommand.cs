@@ -20,7 +20,8 @@ namespace Pen.Commands;
 /// </summary>
 /// <param name="host">The host user's environment.</param>
 /// <param name="catalog">The recipes that say which domains a tool brings.</param>
-internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
+/// <param name="clock">The clock waits for another pen allow or pen deny are timed by.</param>
+internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog, TimeProvider clock)
 {
     /// <summary>Adds <paramref name="domains"/> to allow and applies them to running sessions.</summary>
     /// <param name="domains">The domains to allow (lowercased), or <see cref="Allowlist.AnyDomain"/>.</param>
@@ -31,19 +32,19 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     /// <returns>0, or 1 when applying to a running session failed; a failure to add throws.</returns>
     public int Run(IReadOnlyList<string> domains, bool global)
     {
-        var project = PrepareProject(host, global);
+        var project = PrepareProject(host, global, clock);
         var addition = AddAllowed(host, project, global, domains, catalog);
         WriteAdded(addition, domains);
         WriteGlobHint("allow", addition);
         WarnIfDenied(project, domains);
 
-        return ApplyToRunning(host, project, global, catalog) ? 0 : 1;
+        return ApplyToRunning(host, project, global, catalog, clock) ? 0 : 1;
     }
 
     /// <summary>Resolves the project in the start directory, and finishes its sessions whose Pen died.</summary>
     /// <returns>The project, or null with <paramref name="global"/> when there isn't one to resolve there.</returns>
     /// <remarks>--global works from anywhere; without it, a failure to resolve throws.</remarks>
-    internal static Project? PrepareProject(HostEnv host, bool global)
+    internal static Project? PrepareProject(HostEnv host, bool global, TimeProvider clock)
     {
         Project? project;
         try
@@ -56,7 +57,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
         }
 
         Session.EnsureRuntimeDir(host, project);
-        Session.FinishDeadSessions(project.Key, host.GetRuntimeDir(project.Key));
+        Session.FinishDeadSessions(project.Key, host.GetRuntimeDir(project.Key), clock);
         return project;
     }
 
@@ -202,13 +203,18 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
 
     /// <summary>Applies the config files to the running sessions a change in them is for.</summary>
     /// <returns>Whether every one of them took it; each failure is reported, naming the session.</returns>
-    internal static bool ApplyToRunning(HostEnv host, Project? project, bool global, RecipeCatalog catalog)
+    internal static bool ApplyToRunning(
+        HostEnv host,
+        Project? project,
+        bool global,
+        RecipeCatalog catalog,
+        TimeProvider clock)
     {
         var applied = 0;
         var failed = 0;
         foreach (var session in FindTargets(host, project, global))
         {
-            if (Apply(host, session, catalog))
+            if (Apply(host, session, catalog, clock))
                 applied++;
             else
                 failed++;
@@ -314,6 +320,9 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     /// <summary>How long to wait for another pen allow or pen deny applying to the same session.</summary>
     private static readonly TimeSpan AclLockWait = TimeSpan.FromSeconds(60);
 
+    /// <summary>How long to wait between tries to take a session's acl.lock.</summary>
+    private static readonly TimeSpan AclLockPoll = TimeSpan.FromMilliseconds(200);
+
     /// <summary>Where the proxy's ACL files are mounted, in its container.</summary>
     private const string ProxyAclDir = "/etc/squid/";
 
@@ -336,7 +345,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     /// last. Only these take it, one session at a time, so it can't deadlock with a session, pen sign or pen clean.
     /// </para>
     /// </remarks>
-    internal static bool Apply(HostEnv host, SessionDir session, RecipeCatalog catalog)
+    internal static bool Apply(HostEnv host, SessionDir session, RecipeCatalog catalog, TimeProvider clock)
     {
         try
         {
@@ -344,7 +353,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
             if (!env.TryGetValue("PROJECT_DIR", out var projectDir))
                 throw new PenException("its session.env is missing");
 
-            using var aclLock = TakeAclLock(session);
+            using var aclLock = TakeAclLock(session, clock);
             var written = WriteAclFiles(session, MergeEgress(host, session, projectDir, catalog));
             AwaitProxyView(session, env, written.Files);
             var result = RunInProxy(session, env, "squid", "-k", "reconfigure");
@@ -372,21 +381,16 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     /// </summary>
     /// <exception cref="PenException">It's still held after <see cref="AclLockWait"/>.</exception>
     [SuppressMessage("Reliability", "CA2000", Justification = "The lock is returned to the caller, which disposes it")]
-    private static FileLock TakeAclLock(SessionDir session)
+    private static FileLock TakeAclLock(SessionDir session, TimeProvider clock)
     {
         var held = FileLock.TryTake(session.AclLockFile, exclusive: true);
         if (held is not null)
             return held;
         Out.WriteLine(
             $"waiting for another pen allow or pen deny applying to the running session {session.ComposeProject}");
-        var waited = Stopwatch.StartNew();
-        while ((held = FileLock.TryTake(session.AclLockFile, exclusive: true)) is null)
-        {
-            if (waited.Elapsed > AclLockWait)
-                throw new PenException("another pen allow or pen deny is still applying to it; run this again");
-            Thread.Sleep(200);
-        }
-        return held;
+        return Retry.Poll(
+                () => FileLock.TryTake(session.AclLockFile, exclusive: true), AclLockPoll, AclLockWait, clock)
+            ?? throw new PenException("another pen allow or pen deny is still applying to it; run this again");
     }
 
     /// <summary>
@@ -413,7 +417,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     {
         var paths = files.Select(file => ProxyAclDir + file.Name).ToList();
         var expected = FormatProxyView(files);
-        for (var attempt = 1; ; attempt++)
+        var seen = Retry.Repeat(ProxyReadAttempts, ProxyReadDelay, () =>
         {
             var result = RunInProxy(session, env, ["sh", "-c", PrintAclsScript, "sh", .. paths]);
             if (result.ExitStatus.ExitCode != 0)
@@ -422,14 +426,12 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
                     "couldn't read its proxy's ACL files, so Squid wasn't reloaded; run this again: " +
                     (result.StandardError + result.StandardOutput).Trim());
             }
-            if (result.StandardOutput == expected)
-                return;
-            if (attempt == ProxyReadAttempts)
-            {
-                throw new PenException("its proxy still sees other ACL files than were written, so Squid wasn't " +
-                    "reloaded; run this again");
-            }
-            Thread.Sleep(ProxyReadDelay);
+            return result.StandardOutput == expected;
+        });
+        if (!seen)
+        {
+            throw new PenException("its proxy still sees other ACL files than were written, so Squid wasn't " +
+                "reloaded; run this again");
         }
     }
 
@@ -592,7 +594,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
         var project = context.Project;
         var runtimeDir = host.GetRuntimeDir(project.Key);
         Session.EnsureRuntimeDir(host, project);
-        Session.FinishDeadSessions(project.Key, runtimeDir);
+        Session.FinishDeadSessions(project.Key, runtimeDir, clock);
 
         var logs = Directory.EnumerateDirectories(Path.Combine(runtimeDir, "sessions"))
             .Select(dir => new SessionDir(project.Key, dir).ReadProxyLogLines());

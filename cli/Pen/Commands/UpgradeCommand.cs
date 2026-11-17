@@ -13,19 +13,20 @@ namespace Pen.Commands;
 /// <param name="host">The host user's environment.</param>
 /// <param name="user">The user's ~/.config/pen/config.toml.</param>
 /// <param name="catalog">The recipes tools come from.</param>
+/// <param name="clock">The clock PEN_REFRESH and the wait for another project layer build are taken from.</param>
 /// <remarks>
 /// The base always gets a new ID (PEN_REFRESH sets its last layer), so every tools image, the agents'
 /// included, rebuilds on it: the ones from config here now, any other on its next use. pen upgrade never
 /// asks for approval, so it builds only what's already approved from .pen/.
 /// </remarks>
-internal sealed class UpgradeCommand(HostEnv host, Config user, RecipeCatalog catalog)
+internal sealed class UpgradeCommand(HostEnv host, Config user, RecipeCatalog catalog, TimeProvider clock)
 {
     /// <summary>Upgrades the images, without the build cache when <paramref name="noCache"/> (--no-cache).</summary>
     /// <returns>0; a failure throws.</returns>
     public int Run(bool noCache)
     {
         Out.WriteLine($"upgrading {Image.Name}{(noCache ? " from scratch (--no-cache)" : "")}");
-        var refresh = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+        var refresh = clock.GetUtcNow().ToUnixTimeSeconds().ToString();
         Image.Build(Embedded.ComputeImageHash(), refresh: refresh, pull: true, noCache: noCache);
 
         // The project layer too, when run in a project that has one.
@@ -107,7 +108,7 @@ internal sealed class UpgradeCommand(HostEnv host, Config user, RecipeCatalog ca
             return;
         }
         Out.WriteLine($"rebuilding the project layer {Image.GetProjectLayerName(project, baseImage)}");
-        Image.EnsureProjectLayer(host, project, noCache: noCache, baseImage: baseImage);
+        Image.EnsureProjectLayer(host, project, clock, baseImage: baseImage, noCache: noCache);
     }
 
     /// <summary>Pulls newer proxy and dind images for the embedded compose.yaml.</summary>

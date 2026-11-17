@@ -81,14 +81,49 @@ internal readonly record struct Port(int Number, bool FromFlag)
         }
         catch (SocketException) { }
 
+        return CanConnect(endpoint, TimeSpan.FromMilliseconds(500));
+    }
+
+    /// <summary>
+    /// Tells whether a TCP connection to <paramref name="endpoint"/> succeeds within <paramref name="timeout"/>.
+    /// </summary>
+    private static bool CanConnect(IPEndPoint endpoint, TimeSpan timeout)
+    {
         try
         {
             using var client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            return client.ConnectAsync(endpoint).Wait(TimeSpan.FromMilliseconds(500)) && client.Connected;
+            return Connect(client, endpoint, timeout);
         }
-        catch (AggregateException)
+        catch (SocketException)
         {
             return false;
+        }
+    }
+
+    private static bool Connect(Socket client, IPEndPoint endpoint, TimeSpan timeout)
+    {
+        try
+        {
+            client.Blocking = false;
+            client.Connect(endpoint);
+            return true;
+        }
+        catch (SocketException error)
+            when (error.SocketErrorCode is SocketError.WouldBlock or SocketError.InProgress)
+        {
+            // Pending: decided below.
+        }
+        catch (SocketException)
+        {
+            return false;
+        }
+
+        try
+        {
+            // Writable means the connect finished, but it's writable after a refusal too, so the socket's
+            // error says which.
+            return client.Poll(timeout, SelectMode.SelectWrite)
+                && client.GetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Error) is 0;
         }
         catch (SocketException)
         {

@@ -129,7 +129,7 @@ public class UnreadablePathTests
         using var fake = new FakeDocker(t, """case "$1" in rm|compose) exit 0 ;; *) exit 99 ;; esac""" + "\n");
         using var _ = new Chmod(foo);
 
-        Session.FinishDeadSessions(session.Id, Path.Combine(t.Path, "runtime"));
+        Session.FinishDeadSessions(session.Id, Path.Combine(t.Path, "runtime"), TimeProvider.System);
 
         Assert.False(session.IsOpen);
         Assert.False(Path.Exists(foo));

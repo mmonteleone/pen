@@ -13,8 +13,9 @@ namespace Pen.Commands;
 /// </summary>
 /// <param name="host">The host user's environment.</param>
 /// <param name="catalog">The recipes, whose domains the listing says a deny takes.</param>
+/// <param name="clock">The clock waits for another pen allow or pen deny are timed by.</param>
 /// <remarks>Deny can only take egress away, so a project's needs no approval, unlike pen allow's.</remarks>
-internal sealed class DenyCommand(HostEnv host, RecipeCatalog catalog)
+internal sealed class DenyCommand(HostEnv host, RecipeCatalog catalog, TimeProvider clock)
 {
     /// <summary>Adds <paramref name="domains"/> to deny and applies them to running sessions.</summary>
     /// <param name="domains">The domains to deny (lowercased).</param>
@@ -25,11 +26,11 @@ internal sealed class DenyCommand(HostEnv host, RecipeCatalog catalog)
     /// <returns>0, or 1 when applying to a running session failed; a failure to add throws.</returns>
     public int Run(IReadOnlyList<string> domains, bool global)
     {
-        var project = AllowCommand.PrepareProject(host, global);
+        var project = AllowCommand.PrepareProject(host, global, clock);
         var addition = AllowCommand.AddToConfig(host, project, global, ConfigEdit.DenyKey, domains, catalog);
         AllowCommand.WriteAdded(addition, domains);
         AllowCommand.WriteGlobHint("deny", addition);
-        return AllowCommand.ApplyToRunning(host, project, global, catalog) ? 0 : 1;
+        return AllowCommand.ApplyToRunning(host, project, global, catalog, clock) ? 0 : 1;
     }
 
     /// <summary>Runs pen deny without domains: lists what both config files deny.</summary>

@@ -122,7 +122,7 @@ public class LockAndProcessTests
         Directory.SetLastWriteTimeUtc(oldEnded, old);
 
         using (FileLock.TryTake(Path.Combine(live, "session.lock"), exclusive: true))
-            Session.FinishDeadSessions("pen-x-00000000", runtime);
+            Session.FinishDeadSessions("pen-x-00000000", runtime, TimeProvider.System);
 
         Assert.False(Directory.Exists(oldEnded));
         Assert.True(Directory.Exists(recentEnded));

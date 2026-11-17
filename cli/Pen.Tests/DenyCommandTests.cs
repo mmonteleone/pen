@@ -40,7 +40,7 @@ public class DenyCommandTests
         using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
 
         var where = host.Display(host.UserConfigPath);
-        var err = CapturingStderr(() => Assert.Equal(0, new DenyCommand(host, Catalog).Run(["gist.github.com"], global: true)));
+        var err = CapturingStderr(() => Assert.Equal(0, new DenyCommand(host, Catalog, TimeProvider.System).Run(["gist.github.com"], global: true)));
         Assert.Contains($"pen: added to {where}: gist.github.com\n", err);
         Assert.Contains("pen: applied to 1 running session\n", err);
         Assert.Equal("gist.github.com\n", File.ReadAllText(s.DenylistFile));
@@ -49,7 +49,7 @@ public class DenyCommandTests
         Assert.Equal(["typed.example"], user.Allow);
         Assert.Equal(["gist.github.com"], user.Deny);
 
-        var again = CapturingStderr(() => Assert.Equal(0, new DenyCommand(host, Catalog).Run(["gist.github.com"], global: true)));
+        var again = CapturingStderr(() => Assert.Equal(0, new DenyCommand(host, Catalog, TimeProvider.System).Run(["gist.github.com"], global: true)));
         Assert.Contains($"pen: already in {where}: gist.github.com\n", again);
         Assert.DoesNotContain("added to", again);
     }

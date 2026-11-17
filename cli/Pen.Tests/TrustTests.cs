@@ -26,7 +26,7 @@ public class TrustTests
         public TrustStore Store => TrustStore.For(Host, Project);
 
         public TrustRequest Requested(string projectToml, string userToml = "") =>
-            new TrustGate(new ProjectContext(Host, Project, Config.Parse(userToml, "u", ConfigKind.User, RecipeCatalog.Embedded), Config.Parse(projectToml, "p", ConfigKind.Project, RecipeCatalog.Embedded)), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded).FindUnapproved(Store, []);
+            new TrustGate(new ProjectContext(Host, Project, Config.Parse(userToml, "u", ConfigKind.User, RecipeCatalog.Embedded), Config.Parse(projectToml, "p", ConfigKind.Project, RecipeCatalog.Embedded)), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System).FindUnapproved(Store, []);
 
         public void Dockerfile(string text = "FROM pen:latest\n")
         {
@@ -137,7 +137,7 @@ public class TrustTests
         var project = Config.Parse("allow = [\"*\", \"internal.example\", \"a.corp.example\", \"api.github.com\", \"approved.example\"]\n", "p", ConfigKind.Project, RecipeCatalog.Embedded);
         Assert.Equal(expected, TrustGate.SelectAllowedDomains(user, project, f.Store));
         // What it leaves out is what the gate asks for.
-        var asked = new TrustGate(new ProjectContext(f.Host, f.Project, user, project), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded).FindUnapproved(f.Store, []).Domains;
+        var asked = new TrustGate(new ProjectContext(f.Host, f.Project, user, project), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System).FindUnapproved(f.Store, []).Domains;
         Assert.Equal(project.Allow.Except(expected), asked);
     }
 
@@ -591,11 +591,11 @@ public class TrustTests
         using var f = new Fixture();
         var toml = Config.Parse("allow = [" + string.Join(',', ManyDomains(30_000).Select(d => $"\"{d}\"")) + "]\n", "p", ConfigKind.Project, RecipeCatalog.Embedded);
         var watch = System.Diagnostics.Stopwatch.StartNew();
-        var request = new TrustGate(new ProjectContext(f.Host, f.Project, Config.Empty, toml), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded).FindUnapproved(f.Store, []);
+        var request = new TrustGate(new ProjectContext(f.Host, f.Project, Config.Empty, toml), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System).FindUnapproved(f.Store, []);
         Assert.Equal(30_000, request.Domains.Count);
         f.Store.Approve(request);
         var store = f.Store;
-        Assert.True(new TrustGate(new ProjectContext(f.Host, f.Project, Config.Empty, toml), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded).FindUnapproved(store, []).IsEmpty);
+        Assert.True(new TrustGate(new ProjectContext(f.Host, f.Project, Config.Empty, toml), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System).FindUnapproved(store, []).IsEmpty);
         Assert.Equal(30_000, TrustGate.SelectAllowedDomains(Config.Empty, toml, store).Count);
         Assert.Equal(30_000 + 1, Allowlist.Merge(toml.Allow, [".wild.example"]).Count);
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(8), $"took {watch.Elapsed}");
@@ -644,7 +644,7 @@ public class TrustTests
         Assert.True(f.Requested(toml, toml).IsEmpty);
         Assert.True(f.Requested("", toml).IsEmpty);
         var project = Config.Parse(toml, "p", ConfigKind.Project, RecipeCatalog.Embedded);
-        Assert.True(new TrustGate(new ProjectContext(f.Host, f.Project, Config.Empty, project), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded).FindUnapproved(f.Store, [Tool1]).IsEmpty);
+        Assert.True(new TrustGate(new ProjectContext(f.Host, f.Project, Config.Empty, project), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System).FindUnapproved(f.Store, [Tool1]).IsEmpty);
 
         Assert.False(f.Store.CoversTool(Tool1));
         Assert.Equal(Tool1, Assert.Single(f.Requested(toml).Tools).Tool);
@@ -716,7 +716,7 @@ public class TrustTests
     });
 
     private TrustRequest RequestedWith(Fixture f, string projectToml, RecipeCatalog catalog) =>
-        new TrustGate(new ProjectContext(f.Host, f.Project, Config.Empty, Config.Parse(projectToml, "p", ConfigKind.Project, RecipeCatalog.Embedded)), new Answers(TextReader.Null, IsTerminal: false), catalog).FindUnapproved(f.Store, []);
+        new TrustGate(new ProjectContext(f.Host, f.Project, Config.Empty, Config.Parse(projectToml, "p", ConfigKind.Project, RecipeCatalog.Embedded)), new Answers(TextReader.Null, IsTerminal: false), catalog, TimeProvider.System).FindUnapproved(f.Store, []);
 
     private const string ToolToml = "tools = [\"pen-test:1\"]\n";
 

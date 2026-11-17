@@ -17,11 +17,11 @@ public class AllowCommandTests
         File.WriteAllText(s.GetPath("allowlist.txt"), "");
         using var sessionLock = FileLock.TryTake(s.LockFile, exclusive: true);
         using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "if [ ! -f retry ]; then exit 1; fi\n");
-        Assert.Equal(1, new AllowCommand(host, RecipeCatalog.Embedded).Run(["retry.example"], global: true));
+        Assert.Equal(1, new AllowCommand(host, RecipeCatalog.Embedded, TimeProvider.System).Run(["retry.example"], global: true));
         var config = File.ReadAllText(host.UserConfigPath);
         var written = File.GetLastWriteTimeUtc(host.UserConfigPath);
         File.WriteAllText(Path.Combine(t.Path, "retry"), "");
-        Assert.Equal(0, new AllowCommand(host, RecipeCatalog.Embedded).Run(["retry.example"], global: true));
+        Assert.Equal(0, new AllowCommand(host, RecipeCatalog.Embedded, TimeProvider.System).Run(["retry.example"], global: true));
         Assert.Equal(config, File.ReadAllText(host.UserConfigPath));
         Assert.Equal(written, File.GetLastWriteTimeUtc(host.UserConfigPath));
         Assert.Contains("retry.example", File.ReadAllText(s.GetPath("allowlist.txt")));
@@ -284,7 +284,7 @@ public class AllowCommandTests
         var (s, l) = Running(t, host, project, old: false);
         using var _ = l;
         using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
-        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s, RecipeCatalog.Embedded)));
+        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s, RecipeCatalog.Embedded, TimeProvider.System)));
         Assert.Equal("", err);
         var calls = File.ReadAllLines(Path.Combine(t.Path, "calls"));
         Assert.Equal(2, calls.Length);
@@ -312,7 +312,7 @@ public class AllowCommandTests
         var (s, l) = Running(t, host, project, old: true);
         using var _ = l;
         using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
-        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s, RecipeCatalog.Embedded)));
+        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s, RecipeCatalog.Embedded, TimeProvider.System)));
         // Its proxy has only the allowlist to check.
         var calls = File.ReadAllLines(Path.Combine(t.Path, "calls"));
         Assert.Equal(2, calls.Length);
@@ -354,7 +354,7 @@ public class AllowCommandTests
             exit 0
 
             """);
-        var err = CapturingStderr(() => Assert.False(AllowCommand.Apply(host, s, RecipeCatalog.Embedded)));
+        var err = CapturingStderr(() => Assert.False(AllowCommand.Apply(host, s, RecipeCatalog.Embedded, TimeProvider.System)));
         Assert.Contains($"couldn't apply it to the running session {s.ComposeProject}: its proxy still sees other ACL files than were written, so Squid wasn't reloaded; run this again", err);
         Assert.Equal((5, 0), CountProxyCalls(t));
         Assert.Equal("pastebin.com\n", File.ReadAllText(s.DenylistFile));
@@ -379,7 +379,7 @@ public class AllowCommandTests
             esac
 
             """ + FakeDocker.ServingAclFiles + "exit 0\n");
-        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s, RecipeCatalog.Embedded)));
+        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s, RecipeCatalog.Embedded, TimeProvider.System)));
         Assert.Equal("", err);
         Assert.Equal((3, 1), CountProxyCalls(t));
         Assert.EndsWith(" squid -k reconfigure", File.ReadAllLines(Path.Combine(t.Path, "calls"))[^1]);
@@ -399,7 +399,7 @@ public class AllowCommandTests
             exit 0
 
             """);
-        var err = CapturingStderr(() => Assert.False(AllowCommand.Apply(host, s, RecipeCatalog.Embedded)));
+        var err = CapturingStderr(() => Assert.False(AllowCommand.Apply(host, s, RecipeCatalog.Embedded, TimeProvider.System)));
         Assert.Contains($"couldn't apply it to the running session {s.ComposeProject}: couldn't read its proxy's ACL files, so Squid wasn't reloaded; run this again: cat: /etc/squid/allowlist.txt: Permission denied", err);
         Assert.Equal((1, 0), CountProxyCalls(t));
     }
@@ -416,7 +416,7 @@ public class AllowCommandTests
         using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
         var other = FileLock.TryTake(s.AclLockFile, exclusive: true)!;
         using var release = new Timer(_ => other.Dispose(), null, 500, Timeout.Infinite);
-        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s, RecipeCatalog.Embedded)));
+        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s, RecipeCatalog.Embedded, TimeProvider.System)));
         Assert.Contains($"waiting for another pen allow or pen deny applying to the running session {s.ComposeProject}", err);
         Assert.Equal((1, 1), CountProxyCalls(t));
         // Not one of the files whose presence says what the session is.
@@ -437,7 +437,7 @@ public class AllowCommandTests
         using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
         var other = FileLock.TryTake(s.AclLockFile, exclusive: true)!;
         bool applied = false;
-        var apply = new Thread(() => CapturingStderr(() => applied = AllowCommand.Apply(host, s, RecipeCatalog.Embedded)));
+        var apply = new Thread(() => CapturingStderr(() => applied = AllowCommand.Apply(host, s, RecipeCatalog.Embedded, TimeProvider.System)));
         apply.Start();
         Thread.Sleep(500);
         File.WriteAllText(host.UserConfigPath, "deny = [\"pastebin.com\"]\n");
@@ -466,7 +466,7 @@ public class AllowCommandTests
         var stdout = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
-        try { new AllowCommand(host, RecipeCatalog.Embedded).ListBlocked(new ProjectContext(host, project, user, projectConfig)); }
+        try { new AllowCommand(host, RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, user, projectConfig)); }
         finally { Console.SetOut(stdout); }
         var lines = captured.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
         // example.com resolved privately, say, or was blocked before egress opened: "*" covers it, but it's listed.
@@ -495,7 +495,7 @@ public class AllowCommandTests
         var stdout = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
-        try { new AllowCommand(host, RecipeCatalog.Embedded).ListBlocked(new ProjectContext(host, project, user, new Config())); }
+        try { new AllowCommand(host, RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, user, new Config())); }
         finally { Console.SetOut(stdout); }
         Assert.Equal(
             "blocked in this project's sessions, newest first:\n" +
@@ -522,7 +522,7 @@ public class AllowCommandTests
         var stdout = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
-        try { new AllowCommand(host, RecipeCatalog.Embedded).ListBlocked(new ProjectContext(host, project, user, new Config())); }
+        try { new AllowCommand(host, RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, user, new Config())); }
         finally { Console.SetOut(stdout); }
         var text = captured.ToString();
         Assert.Contains("pen allow example.com   (add --global for all projects)\n", text);
@@ -545,7 +545,7 @@ public class AllowCommandTests
         var stdout = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
-        try { new AllowCommand(host, RecipeCatalog.Embedded).ListBlocked(new ProjectContext(host, project, user, new Config())); }
+        try { new AllowCommand(host, RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, user, new Config())); }
         finally { Console.SetOut(stdout); }
         var lines = captured.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal("denied by config, blocked in this project's sessions, newest first:", lines[0]);
@@ -623,7 +623,7 @@ public class AllowCommandTests
         var host = t.Host();
         Directory.CreateDirectory(host.ConfigDir);
         File.WriteAllText(host.UserConfigPath, "deny = [\".pastebin.com\"]\n");
-        var err = CapturingStderr(() => Assert.Equal(0, new AllowCommand(host, RecipeCatalog.Embedded).Run(["api.pastebin.com", "ok.example"], global: true)));
+        var err = CapturingStderr(() => Assert.Equal(0, new AllowCommand(host, RecipeCatalog.Embedded, TimeProvider.System).Run(["api.pastebin.com", "ok.example"], global: true)));
         Assert.Contains($"pen: api.pastebin.com is also denied by {host.Display(host.UserConfigPath)}; deny wins\n", err);
         Assert.DoesNotContain("ok.example is also", err);
         Assert.Equal(["api.pastebin.com", "ok.example"], Config.Load(host.ConfigDir, "x", ConfigKind.User, RecipeCatalog.Embedded).Allow);
