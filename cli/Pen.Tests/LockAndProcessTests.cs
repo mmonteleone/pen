@@ -95,6 +95,16 @@ public class LockAndProcessTests
         Assert.Contains("pen-no-such-binary", e.Message);
     }
 
+    // Signals numbered the same on macOS and Linux. KILL is the trap: PosixSignal.SIGKILL is -11, not 9.
+    [Theory]
+    [InlineData("HUP", 1)]
+    [InlineData("INT", 2)]
+    [InlineData("KILL", 9)]
+    [InlineData("ALRM", 14)]
+    [InlineData("TERM", 15)]
+    public void ExitCodes_ChildEndedBySignal_Is128PlusItsNumber(string signal, int number) =>
+        Assert.Equal(128 + number, Proc.Run("sh", ["-c", $"kill -s {signal} $$"]));
+
     [Fact]
     public void DeadSessionScan_PrunesOldEndedSessions_SkipsLiveOnes()
     {

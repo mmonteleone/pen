@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 
 namespace Pen.Platform;
 
@@ -119,7 +118,7 @@ internal static class Proc
             else if (!process.TryWaitForExitStatus(Remaining(started, timeout), out status))
                 return Kill(process, CaptureEnd.TimedOut);
             // ExitCode is already 128 plus the raw signal number when a signal ended the child, as Process.ExitCode
-            // gives it. ToExitCode works from the PosixSignal instead, which names SIGKILL without its number.
+            // gives it, and is the same value ToExitCode returns.
             return new CapturedBytes(CaptureEnd.Exited, status.ExitCode, stdout.Result.Bytes, stderr.Result.Bytes);
         }
         catch
@@ -145,17 +144,11 @@ internal static class Proc
 
     /// <summary>Converts a child's exit status to an exit code.</summary>
     /// <returns>Its exit code, or 128 plus the signal's number when a signal ended it, as a shell reports it.</returns>
-    public static int ToExitCode(ProcessExitStatus status) =>
-        status.Signal is { } signal ? 128 + GetSignalNumber(signal) : status.ExitCode;
-
-    private static int GetSignalNumber(PosixSignal signal) => signal switch
-    {
-        PosixSignal.SIGHUP => 1,
-        PosixSignal.SIGINT => 2,
-        PosixSignal.SIGQUIT => 3,
-        PosixSignal.SIGTERM => 15,
-        _ => (int)signal > 0 ? (int)signal : 1,
-    };
+    /// <remarks>
+    /// ExitCode already holds 128 plus the raw signal number for a signalled child. Signal can't give that
+    /// number: PosixSignal gives the signals it names negative values that aren't their numbers (SIGKILL is -11).
+    /// </remarks>
+    public static int ToExitCode(ProcessExitStatus status) => status.ExitCode;
 
     /// <summary>Reads <paramref name="stream"/> to its end, or until it passes <paramref name="limit"/>.</summary>
     /// <returns>The bytes, or none and OverLimit once there would be more than the limit.</returns>
