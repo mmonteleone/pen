@@ -27,9 +27,12 @@ internal sealed class BranchSigner(HostGit git)
 
     /// <summary>Re-signs the branch's commits after the base, once the repo has passed its checks.</summary>
     /// <param name="baseArg">The base named on the command line, or null for the upstream or origin/HEAD.</param>
-    /// <returns>0 once signed or when there's nothing to sign; failures throw.</returns>
+    /// <returns>What it did: nothing, as the range is empty or all verifies, or which commits it re-created.</returns>
     /// <exception cref="PenException">There's no branch or base, a commit is on a remote, or a step fails.</exception>
-    public int Sign(string? baseArg)
+    /// <remarks>
+    /// It lists what it will re-sign before signing; saying how it went is the caller's, from the result.
+    /// </remarks>
+    public SignOutcome Sign(string? baseArg)
     {
         var branchRef = git.TryReadOutput("symbolic-ref", "-q", "HEAD")
             ?? throw new PenException("HEAD is detached: check out the branch to sign");
@@ -40,26 +43,19 @@ internal sealed class BranchSigner(HostGit git)
 
         var range = ListRange(resolved.Commit, head);
         if (range.Count == 0)
-        {
-            Out.WriteLine($"nothing to sign: no commits in {Out.Field(resolved.Name)}..HEAD");
-            return 0;
-        }
+            return new SignOutcome.NoCommits(resolved.Name);
         RefusePushed(resolved.Commit, head, range);
 
         var objects = new CommitReader(git).Read(range);
         var verified = new SignatureVerifier(git).FindVerified(range);
         if (verified.Count == range.Count)
-        {
-            Out.WriteLine($"nothing to sign: all {range.Count} commits in {Out.Field(resolved.Name)}..HEAD are signed");
-            return 0;
-        }
+            return new SignOutcome.AllSigned(resolved.Name, range.Count);
 
         Out.WriteLine($"re-signing {range.Count} commit{(range.Count == 1 ? "" : "s")} " +
             $"in {Out.Field(resolved.Name)}..HEAD (same trees and authors; hashes change):");
         foreach (var sha in range)
             Out.WriteRaw(FormatListing(sha, objects[sha], verified.Contains(sha)));
-        SignRange(branchRef, head, range, verified);
-        return 0;
+        return SignRange(branchRef, head, range, verified);
     }
 
     /// <summary>Resolves the base: <paramref name="arg"/>, else the upstream, else origin/HEAD.</summary>
@@ -153,20 +149,43 @@ internal sealed class BranchSigner(HostGit git)
         }
     }
 
-    /// <summary>Re-creates the commits that need it signed, moves the branch, and says how it went.</summary>
-    private void SignRange(string branchRef, string head, IReadOnlyList<string> range, IReadOnlySet<string> verified)
+    /// <summary>Re-creates the commits that need it signed, and moves the branch.</summary>
+    private SignOutcome.Signed SignRange(
+        string branchRef, string head, IReadOnlyList<string> range, IReadOnlySet<string> verified)
     {
         var signing = git.WithConfig(SignatureConfig.BuildForSigning(git));
         var map = new CommitRewriter(signing).Rewrite(range, verified);
         var newHead = map[head];
         if (newHead != head)
             UpdateBranch(branchRef, newHead, head);
-        Out.WriteLine($"signed: {Out.Field(branchRef["refs/heads/".Length..])} is now " +
-            $"{newHead[..12]} (was {head[..12]}; the old commits stay in the reflog)");
         var created = range.Where(commit => map[commit] != commit).Select(commit => map[commit]).ToList();
-        if (new SignatureVerifier(git).FormatHint(created) is { } hint)
-            Out.WriteLine(hint);
+        return new SignOutcome.Signed(branchRef, head, newHead, created);
     }
+}
+
+/// <summary>What <see cref="BranchSigner.Sign"/> did, when it didn't refuse.</summary>
+internal abstract record SignOutcome
+{
+    private SignOutcome()
+    {
+    }
+
+    /// <summary>There are no commits after the base, so nothing was signed.</summary>
+    /// <param name="BaseName">The base, as <see cref="ResolvedBase.Name"/> gives it.</param>
+    internal sealed record NoCommits(string BaseName) : SignOutcome;
+
+    /// <summary>Every commit after the base already verifies, so nothing was signed.</summary>
+    /// <param name="BaseName">The base, as <see cref="ResolvedBase.Name"/> gives it.</param>
+    /// <param name="Count">How many commits there are after the base.</param>
+    internal sealed record AllSigned(string BaseName, int Count) : SignOutcome;
+
+    /// <summary>The commits that needed it were re-created signed, and the branch moved to the new head.</summary>
+    /// <param name="BranchRef">The branch's full ref, such as refs/heads/main.</param>
+    /// <param name="OldHead">The branch's head before signing.</param>
+    /// <param name="NewHead">The branch's head now.</param>
+    /// <param name="Created">The commits it created, parents before children.</param>
+    internal sealed record Signed(string BranchRef, string OldHead, string NewHead, IReadOnlyList<string> Created)
+        : SignOutcome;
 }
 
 /// <summary>The base that pen sign signs the commits after.</summary>

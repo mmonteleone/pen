@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Pen.GitProtection;
 using Pen.Platform;
 using Pen.Projects;
@@ -17,7 +18,7 @@ namespace Pen.Commands;
 /// </remarks>
 internal sealed class SignCommand(HostEnv host, Project project, TimeProvider clock)
 {
-    /// <summary>Checks the repo, then signs the checked-out branch's commits after the base.</summary>
+    /// <summary>Checks the repo, signs the checked-out branch's commits after the base, and says how it went.</summary>
     /// <param name="baseArg">The base named on the command line, or null for the upstream or origin/HEAD.</param>
     /// <returns>0 once signed or when there's nothing to sign; failures throw.</returns>
     /// <exception cref="PenException">
@@ -34,7 +35,32 @@ internal sealed class SignCommand(HostEnv host, Project project, TimeProvider cl
         if (!Session.FinishDeadSessions(project.Key, host.GetRuntimeDir(project.Key), clock))
             throw new PenException("not signing: deal with the warning above first");
         CheckGitDir();
-        return new BranchSigner(new HostGit(project.Dir)).Sign(baseArg);
+        var git = new HostGit(project.Dir);
+        Report(new BranchSigner(git).Sign(baseArg), git);
+        return 0;
+    }
+
+    /// <summary>Says what signing did, and how to fix the user's setup if what it just signed doesn't verify.</summary>
+    private static void Report(SignOutcome outcome, HostGit git)
+    {
+        switch (outcome)
+        {
+            case SignOutcome.NoCommits none:
+                Out.WriteLine($"nothing to sign: no commits in {Out.Field(none.BaseName)}..HEAD");
+                break;
+            case SignOutcome.AllSigned all:
+                Out.WriteLine(
+                    $"nothing to sign: all {all.Count} commits in {Out.Field(all.BaseName)}..HEAD are signed");
+                break;
+            case SignOutcome.Signed signed:
+                Out.WriteLine($"signed: {Out.Field(signed.BranchRef["refs/heads/".Length..])} is now " +
+                    $"{signed.NewHead[..12]} (was {signed.OldHead[..12]}; the old commits stay in the reflog)");
+                if (new SignatureVerifier(git).FormatHint(signed.Created) is { } hint)
+                    Out.WriteLine(hint);
+                break;
+            default:
+                throw new UnreachableException();
+        }
     }
 
     /// <summary>Runs the session-end check of <c>.git</c> before any host git, and reports what it found.</summary>
