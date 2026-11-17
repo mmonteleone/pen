@@ -10,7 +10,7 @@
 
 # --- Tools -------------------------------------------------------------------------
 # Toolchains for this project's sandbox, as name or name:version (dotnet:10,
-# go:1.27); `pen --tool list` shows them. Each brings the domains it needs. They
+# go:1.27); `pen tools` shows them. Each brings the domains it needs. They
 # add to your user config's tools and --tool.
 # Node (with npm) and Python (with pip and uv) are in the base image already.
 # Agents are tools too: `pen claude` brings Claude Code on its own, for that command

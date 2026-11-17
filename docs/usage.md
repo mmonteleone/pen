@@ -23,7 +23,7 @@ pen run uv sync             # run uv
 
 Pen installs the agent you name. A plain `pen` opens your shell when your host `$SHELL` is bash, zsh or fish, and bash otherwise. Put the shell's config in the [home seed](#agent-config-the-home-seed) (`.config/fish/config.fish`, `.zshrc`). Node, Python and C build tools are preinstalled; a plain `pen` shell has no agents or other toolchains unless you [add them](#tools). Agents run with permission prompts off; the container is the boundary.
 
-Put Pen's options before the command. Everything after the command name goes to that command: `pen --tool go claude --help` passes `--help` to Claude. `pen run <command>` also lets you run a command whose name matches a Pen subcommand, such as `pen run clean`.
+Put Pen's options before the command. Everything after the command name goes to that command: `pen --tool go claude --help` passes `--help` to Claude. The options also work right after `run` (`pen run --docker claude`), and `pen run -- --docker` runs a program named `--docker`. Options have short forms: `-d` (`--docker`), `-p` (`--port`), `-t` (`--tool`), `-g` (`--global`) and `-y` (`--yes`). Short forms don't bundle (`-dp 3000` is an error), and `--port=3000` or `-p:3000` work as `--port 3000` does. An unknown option before the command is an error, even with `--help`; `pen --docker --help` shows help. `tools` and `ls` are Pen subcommands, so a sandbox command with either name, or with any other subcommand's name such as `clean`, needs `pen run`: `pen run clean`, `pen run tools`.
 
 Log in inside the sandbox when prompted; see [logins and API keys](#logins-and-api-keys). Your project files are mounted directly, so edits appear on the host immediately. Logins, sandbox settings and caches persist per project; linked worktrees share them.
 
@@ -36,7 +36,7 @@ Run `pen ps` in another terminal to see running sessions, their ports and tools 
 Add the tools your project needs with `--tool`:
 
 ```sh
-pen --tool list                              # list available agents and tools
+pen tools                                    # list available agents and tools
 pen --tool go claude                         # Go
 pen --tool rust codex                        # Rust, with clippy and rustfmt
 pen --tool dotnet:8 --tool dotnet:10 claude  # two .NET SDKs
@@ -554,28 +554,28 @@ pen clean --stale  # remove what moved or deleted projects and old upgrades left
 ```
 pen [--docker] [--port <n>]… [--tool <spec>]… [<cmd…>]
                                 shell or command in the sandbox
-pen [--docker] [--port <n>]… [--tool <spec>]… run <cmd…>
+pen [--docker] [--port <n>]… [--tool <spec>]… run [<options>] [--] <cmd…>
                                 same, for a command that clashes with a subcommand name
-pen --tool list                 list the agents and tools pen can install
+pen tools                       list the agents and tools pen can install
 pen init                        write a starting .pen/config.toml for this project
 pen allow <domain…> [--global]  allow domains for this project (or all projects)
 pen allow                       list recently blocked domains
 pen allow --defaults            list the domains pen allows out of the box
 pen deny <domain…> [--global]   deny domains over every allow, for this project (or all projects)
 pen deny                        list denied domains
-pen trust [--yes | --list]       review and approve what this project's .pen/ asks for
-pen ps                          list running sessions, ports and tools across projects
+pen trust [--yes | --list]      review and approve what this project's .pen/ asks for
+pen ps, pen ls                  list running sessions, ports and tools across projects
 pen sign [<base>]               re-sign your unpushed commits with your own key
 pen upgrade [--no-cache]        rebuild the base image, agents and tools
 pen clean                       start this project's sandbox fresh (logins, caches)
 pen clean --stale               remove moved/deleted projects' state and old tool images
 ```
 
-Options go before the agent: `pen --docker --port 5173 claude`. Run `pen --help` for an overview or `pen <subcommand> --help` for details.
+Options go before the agent: `pen --docker --port 5173 claude` (or `pen -d -p 5173 claude`). Run `pen --help` for an overview or `pen <subcommand> --help` for details.
 
 ## Agents
 
-`pen claude`, `pen codex`, `pen opencode` and `pen pi` install the named agent at its default version. No config is needed. `pen --tool list` lists the available agents and tools.
+`pen claude`, `pen codex`, `pen opencode` and `pen pi` install the named agent at its default version. No config is needed. `pen tools` lists the available agents and tools.
 
 To pin a release or include an agent in a shell, select it with `--tool`:
 

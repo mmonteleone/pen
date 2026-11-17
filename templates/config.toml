@@ -18,7 +18,7 @@ allow = [
 
 # --- Tools -------------------------------------------------------------------------
 # Toolchains and agents for every project's sandbox, as name or name:version
-# (go:1.27). `pen --tool list` shows them; a project's tools and --tool add to
+# (go:1.27). `pen tools` shows them; a project's tools and --tool add to
 # these.
 # `pen claude` brings Claude Code on its own, for that command only. Agents listed
 # here are in every session, whatever the command, including a shell (`pen`).

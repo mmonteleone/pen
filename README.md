@@ -83,7 +83,7 @@ pen run npm ci               # ...such as npm, with Node preinstalled
 pen init                     # write a starting .pen/config.toml for this project
 pen allow                    # show recently blocked domains
 pen allow example.com        # allow a domain, including in running sessions
-pen --tool list              # list the agents and tools Pen can install
+pen tools                    # list the agents and tools Pen can install
 pen --tool dotnet:10 claude  # add a toolchain for this session
 pen --port 5173 claude       # reach a sandbox dev server at localhost:5173
 pen --docker claude          # give the session its own Docker daemon
