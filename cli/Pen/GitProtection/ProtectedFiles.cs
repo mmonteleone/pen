@@ -328,7 +328,7 @@ internal static class ProtectedFiles
     {
         try
         {
-            _ = new UTF8Encoding(false, throwOnInvalidBytes: true).GetByteCount(path);
+            _ = StrictUtf8.Encoding.GetByteCount(path);
         }
         catch (ArgumentException)
         {

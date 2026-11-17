@@ -1,4 +1,3 @@
-using System.Text;
 using Pen.Platform;
 
 namespace Pen.GitProtection;
@@ -38,9 +37,6 @@ internal sealed class GitDirLinkCheck
 
     /// <summary>How many directories up from a target are looked at before Pen can't tell.</summary>
     private const int MaxDepth = 512;
-
-    private static readonly UTF8Encoding StrictUtf8 =
-        new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     /// <summary>The git dirs, each by <see cref="Identify"/>.</summary>
     private readonly HashSet<string> _gitDirs;
@@ -266,13 +262,6 @@ internal sealed class GitDirLinkCheck
         }
         if (Native.ReadLink(link) is not { Length: > 0 } bytes)
             return null;
-        try
-        {
-            return StrictUtf8.GetString(bytes);
-        }
-        catch (DecoderFallbackException)
-        {
-            return null;
-        }
+        return StrictUtf8.DecodeOrNull(bytes);
     }
 }

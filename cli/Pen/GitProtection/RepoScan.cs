@@ -1,5 +1,4 @@
 using System.IO.Enumeration;
-using System.Text;
 using Pen.Platform;
 
 namespace Pen.GitProtection;
@@ -11,10 +10,6 @@ namespace Pen.GitProtection;
 /// </remarks>
 internal static class RepoScan
 {
-    /// <summary>UTF-8 that throws on bytes it can't decode.</summary>
-    private static readonly UTF8Encoding StrictUtf8 =
-        new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
-
     private static readonly EnumerationOptions Options = new()
     {
         AttributesToSkip = 0, // dot files are "hidden" on Unix, and .git is one
@@ -437,14 +432,7 @@ internal static class RepoScan
     {
         if (Native.ReadProtected(path) is not { } file)
             return null;
-        try
-        {
-            return StrictUtf8.GetString(file.Bytes);
-        }
-        catch (DecoderFallbackException)
-        {
-            return null;
-        }
+        return StrictUtf8.DecodeOrNull(file.Bytes);
     }
 
     /// <summary>One walk of a project's tree, or of its git dir, collecting what it finds.</summary>

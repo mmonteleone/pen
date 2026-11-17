@@ -154,7 +154,7 @@ internal static class GitCheck
         try
         {
             var target = Native.RemoveSymlink(root, path);
-            return DescribeTarget(target) is { } text
+            return StrictUtf8.DecodeOrNull(target) is { } text
                 ? new(path, "", why, LinkTarget: text)
                 : new(path, "", why, LinkTarget: EscapeTarget(target), LinkTargetEscaped: true);
         }
@@ -165,23 +165,6 @@ internal static class GitCheck
                 : exception.Message;
             return new(path, "", $"{why}. COULD NOT REMOVE IT ({reason}): " +
                 "don't run git here until you've dealt with it");
-        }
-    }
-
-    private static readonly UTF8Encoding StrictUtf8 =
-        new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
-
-    /// <summary>Reads a symlink's target as text.</summary>
-    /// <returns>The text, or null if it isn't valid UTF-8, so no text names it exactly.</returns>
-    private static string? DescribeTarget(byte[] target)
-    {
-        try
-        {
-            return StrictUtf8.GetString(target);
-        }
-        catch (DecoderFallbackException)
-        {
-            return null;
         }
     }
 

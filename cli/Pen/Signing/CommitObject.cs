@@ -1,4 +1,4 @@
-using System.Text;
+using Pen.Platform;
 
 namespace Pen.Signing;
 
@@ -168,15 +168,8 @@ internal sealed record CommitObject
     /// <remarks>It has to be valid UTF-8 to arrive unchanged: .NET can't pass other bytes.</remarks>
     private static string DecodeUtf8(string latin1, string what)
     {
-        try
-        {
-            return new UTF8Encoding(false, throwOnInvalidBytes: true)
-                .GetString(System.Text.Encoding.Latin1.GetBytes(latin1));
-        }
-        catch (DecoderFallbackException)
-        {
-            throw new NotUtf8Exception(what);
-        }
+        return StrictUtf8.DecodeOrNull(System.Text.Encoding.Latin1.GetBytes(latin1))
+            ?? throw new NotUtf8Exception(what);
     }
 
     /// <summary>The header lines of a commit, taken in order.</summary>
