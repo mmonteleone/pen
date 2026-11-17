@@ -26,9 +26,6 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// <summary>The mounts so far, in the order they're planned; a path can be in it more than once.</summary>
     private readonly List<Mount> _mounts = [];
 
-    /// <summary>The config files the current walk of includes has met, keyed by path as written.</summary>
-    private readonly HashSet<string> _visited = new(StringComparer.Ordinal);
-
     /// <summary>Plans the project's mounts. Call it once per planner.</summary>
     /// <returns>
     /// The mounts in the order first planned, one per path. A path planned more than once keeps its first mount,
@@ -265,14 +262,16 @@ internal sealed class MountPlanner(string dir, string hostHome)
     private bool AddIncludes(string common, string configFile)
     {
         // Each walk starts afresh: a file seen in another walk is followed again in this one.
-        _visited.Clear();
-        _visited.Add(configFile);
-        return FollowIncludes(common, configFile);
+        var visited = new HashSet<string>(StringComparer.Ordinal) { configFile };
+        return FollowIncludes(common, configFile, visited);
     }
 
-    /// <summary>Follows <paramref name="configFile"/>'s includes, within the current walk.</summary>
+    /// <summary>Follows <paramref name="configFile"/>'s includes, within one walk.</summary>
+    /// <param name="common">The project's git dir.</param>
+    /// <param name="configFile">The config file whose includes to follow.</param>
+    /// <param name="visited">The config files the walk has met, keyed by path as written.</param>
     /// <returns>Whether it or any file it leads to sets extensions.worktreeConfig.</returns>
-    private bool FollowIncludes(string common, string configFile)
+    private bool FollowIncludes(string common, string configFile, HashSet<string> visited)
     {
         var worktreeConfig = false;
         foreach (var entry in GitConfigFile.ParseFile(configFile))
@@ -282,9 +281,9 @@ internal sealed class MountPlanner(string dir, string hostHome)
             if (entry.Section is not ("include" or "includeif") || entry.Key != "path" || entry.Value.Length == 0)
                 continue;
             var include = ResolveInclude(configFile, entry.Value);
-            if (!_visited.Add(include.Path))
+            if (!visited.Add(include.Path))
                 continue;
-            if (_visited.Count > RepoGuard.MaxIncludeFiles)
+            if (visited.Count > RepoGuard.MaxIncludeFiles)
             {
                 throw new PenException($"{FormatPath(configFile)} takes git config includes past " +
                     $"{RepoGuard.MaxIncludeFiles} files, more than pen will follow: remove it or the includes in it, " +
@@ -304,7 +303,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
             // Even host-only includes can enable worktreeConfig or include
             // another file that the sandbox can write. Conditional includes
             // are followed conservatively for every worktree and branch.
-            worktreeConfig |= FollowIncludes(common, include.Path);
+            worktreeConfig |= FollowIncludes(common, include.Path, visited);
         }
         return worktreeConfig;
     }
