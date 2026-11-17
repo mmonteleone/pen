@@ -55,15 +55,7 @@ internal static class Image
         var startInfo = Proc.CreateStartInfo("docker", args);
         startInfo.RedirectStandardInput = true;
         using var process = Proc.Start(startInfo);
-        try
-        {
-            using (var stdin = process.StandardInput.BaseStream)
-                Embedded.WriteImageContext(stdin);
-        }
-        catch (IOException)
-        {
-            // docker exited before reading the whole context; its exit code says why.
-        }
+        WriteContext(process, Embedded.WriteImageContext);
         process.WaitForExit();
         if (process.ExitCode != 0)
             throw new PenException($"building {Name} failed (docker build exited {process.ExitCode})");
