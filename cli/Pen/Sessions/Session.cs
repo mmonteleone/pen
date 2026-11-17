@@ -655,7 +655,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         if (env.TryGetValue("PROJECT_DIR", out var projectDir))
         {
             var check = GitCheck.RunAtSessionEnd(projectDir, session);
-            GitCheckReport.Report(projectDir, check);
+            GitCheckReport.Print(projectDir, check);
             var isClean = check.Failure is null && check.Moved.Count == 0 && check.Restored.Count == 0;
             var result = new SessionEndResult(check.Failure is null, isClean ? projectDir : null);
             if (check.RestoreIncomplete)

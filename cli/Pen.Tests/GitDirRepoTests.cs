@@ -406,7 +406,7 @@ public class GitDirRepoTests
         Directory.CreateSymbolicLink(docs, Path.Combine(git, "foo", "bar"));
         AssertFires(docs, marker);
 
-        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
+        var check = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
 
         Assert.Null(check.Failure);
         Assert.Contains(check.Moved, q => q.From == plant);
@@ -590,7 +590,7 @@ public class GitDirRepoTests
         File.SetUnixFileMode(shut, UnixFileMode.UserRead | UnixFileMode.UserExecute);
         try
         {
-            var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
+            var check = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
 
             var failed = Assert.Single(check.Moved);
             Assert.True(failed.Failed);
@@ -700,7 +700,7 @@ public class GitDirRepoTests
         {
             Assert.Equal([shut], RepoScan.ScanGitDir(git, RepoScan.FindModuleRepos(git), tryMakeListable: null).UnlistableDirs);
             Assert.Contains(".git/foo", Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(repo)).Message);
-            var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
+            var check = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
             Assert.Contains("pen can't list these directories", check.Failure);
             Assert.Contains(".git/foo", check.Failure);
         }
@@ -1182,7 +1182,7 @@ public class GitDirRepoTests
         var end = GitCheck.RunAtSessionEnd(dir, s);
         Assert.Null(end.Failure);
         Assert.Empty(end.Moved);
-        var sign = GitCheck.RunWithoutOpening(dir, startedWithGit: true, common, modulesAtStart: null);
+        var sign = GitCheck.RunWithoutSession(dir, startedWithGit: true, common, modulesAtStart: null);
         Assert.Null(sign.Failure);
         Assert.Empty(sign.Moved);
         RepoGuard.CheckAtStart(dir);
@@ -1479,7 +1479,7 @@ public class GitDirRepoTests
         Git.Run(super, [.. AllowFile, "submodule", "add", "-q", mid, "libs/mid"]);
         Git.Run(super, "commit", "-q", "-m", "mid");
         Git.Run(super, [.. AllowFile, "submodule", "update", "-q", "--init", "--recursive"]);
-        var first = GitCheck.RunWithoutOpening(super, startedWithGit: true, commonGitDir: null, modulesAtStart: []);
+        var first = GitCheck.RunWithoutSession(super, startedWithGit: true, commonGitDir: null, modulesAtStart: []);
         Assert.Contains(first.Moved, q => q.To.EndsWith("modules/libs/mid.pen-quarantine", StringComparison.Ordinal));
 
         AssertStays(t, super);

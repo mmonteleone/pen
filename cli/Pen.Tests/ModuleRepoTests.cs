@@ -421,14 +421,14 @@ public class ModuleRepoTests
         Sub(super, "add", "-q", other, "libs/new");
         Sub(Path.Combine(super, "libs", "mid"), "add", "-q", other, "deps/new");
 
-        var moved = GitCheck.RunWithoutOpening(super, startedWithGit: true, commonGitDir: null, modulesAtStart: atStart).Moved;
+        var moved = GitCheck.RunWithoutSession(super, startedWithGit: true, commonGitDir: null, modulesAtStart: atStart).Moved;
         Assert.Equal(
             [".git/modules/libs/mid/modules/deps/new", ".git/modules/libs/new", "libs/mid/deps/new/.git", "libs/new/.git"],
             moved.Select(q => PathChecks.FormatPath(super, q.From)).Order(StringComparer.Ordinal));
         Assert.All(moved, q => Assert.NotEqual("", q.To));
         Assert.Equal(atStart, RepoScan.FindModuleRepos(Path.Combine(super, ".git")));
         Assert.True(File.Exists(Path.Combine(super, "libs", "mid", ".git")));
-        Assert.Empty(GitCheck.RunWithoutOpening(super, startedWithGit: true, commonGitDir: null, modulesAtStart: atStart).Moved);
+        Assert.Empty(GitCheck.RunWithoutSession(super, startedWithGit: true, commonGitDir: null, modulesAtStart: atStart).Moved);
     }
 
     [Fact]
@@ -437,7 +437,7 @@ public class ModuleRepoTests
         using var t = new TempDir();
         var super = Super(t);
         var mid = Path.Combine(super, ".git", "modules", "libs", "mid");
-        var moved = GitCheck.RunWithoutOpening(super, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved;
+        var moved = GitCheck.RunWithoutSession(super, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved;
         // mid goes, and leaf with it, as a submodule repo; then both checkouts. Moved aside, leaf is still a git
         // dir by its layout, which git run there (through a symlink) would use, so the walk of the git dir breaks
         // that where it now is, and only that.
@@ -447,7 +447,7 @@ public class ModuleRepoTests
                 "libs/mid/.git", "libs/mid/deps/leaf/.git",
             ],
             moved.Select(q => PathChecks.FormatPath(super, q.From)).Order(StringComparer.Ordinal));
-        Assert.Empty(GitCheck.RunWithoutOpening(super, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved);
+        Assert.Empty(GitCheck.RunWithoutSession(super, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved);
         Assert.False(Directory.Exists(mid));
         Assert.Empty(RepoScan.FindModuleRepos(Path.Combine(super, ".git")));
     }
@@ -463,7 +463,7 @@ public class ModuleRepoTests
         var other = Git.Repo(t.Sub("other"));
         Directory.CreateSymbolicLink(Path.Combine(git, "modules", "evil"), Path.Combine(other, ".git"));
 
-        var moved = GitCheck.RunWithoutOpening(super, startedWithGit: true, commonGitDir: null, modulesAtStart: atStart).Moved;
+        var moved = GitCheck.RunWithoutSession(super, startedWithGit: true, commonGitDir: null, modulesAtStart: atStart).Moved;
         Assert.Equal([".git/modules/evil", ".git/modules/libs/mid/commondir"],
             moved.Select(q => PathChecks.FormatPath(super, q.From)).Order(StringComparer.Ordinal));
         // With the commondir gone, mid's checkout is still the project's own.
@@ -475,7 +475,7 @@ public class ModuleRepoTests
     {
         using var t = new TempDir();
         var super = Super(t);
-        Assert.Empty(GitCheck.RunWithoutOpening(super, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved);
+        Assert.Empty(GitCheck.RunWithoutSession(super, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved);
     }
 
     [Fact]

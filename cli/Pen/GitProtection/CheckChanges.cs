@@ -5,7 +5,7 @@ namespace Pen.GitProtection;
 /// still has what was done before it stopped.
 /// </summary>
 /// <remarks>
-/// One <see cref="GitCheckRun"/> owns it and passes it to its <see cref="ProtectedFileRestore"/>, which runs first:
+/// One <see cref="GitCheck"/> owns it and passes it to its <see cref="ProtectedFileRestore"/>, which runs first:
 /// each list holds the protected files' entries first, in the order they were made.
 /// </remarks>
 internal sealed class CheckChanges

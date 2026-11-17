@@ -583,7 +583,7 @@ public class WorktreeTests
         var common = Path.Combine(repo, ".git");
         Git.Run(wt, "commit", "-q", "--allow-empty", "-m", "in wt");
         Git.Run(repo, "worktree", "add", "-q", Path.Combine(wt, ".claude", "worktrees", "y"));
-        Assert.Empty(GitCheck.RunWithoutOpening(wt, startedWithGit: true, common, modulesAtStart: null).Moved);
+        Assert.Empty(GitCheck.RunWithoutSession(wt, startedWithGit: true, common, modulesAtStart: null).Moved);
         Assert.True(File.Exists(Path.Combine(wt, ".git")));
         // Without the common dir, the inner worktree would look foreign.
         Assert.Single(NestedScans.Find(wt));
@@ -599,7 +599,7 @@ public class WorktreeTests
         var m = Directory.CreateDirectory(Path.Combine(common, "modules", "m")).FullName;
         Git.Run(m, "init", "-q", "--bare");
         Git.Run(wt, "init", "-q", "sub");
-        var moved = GitCheck.RunWithoutOpening(wt, startedWithGit: true, common, modulesAtStart: []).Moved.Select(q => q.From).ToList();
+        var moved = GitCheck.RunWithoutSession(wt, startedWithGit: true, common, modulesAtStart: []).Moved.Select(q => q.From).ToList();
         Assert.Equal([Path.Combine(common, "commondir"), Path.Combine(common, "modules", "m"), Path.Combine(wt, "sub", ".git")], moved);
         Assert.True(File.Exists(Path.Combine(wt, ".git")));
     }

@@ -145,7 +145,7 @@ public class OutputSanitizingTests
         Assert.False(n.Contains(Esc, StringComparison.Ordinal));
         Assert.DoesNotContain("\npen: all clear", n, StringComparison.Ordinal);
 
-        var (err, _) = Capture(() => GitCheckReport.Report("/p", new() { Moved = [], Failure = null, ModeChanges = [new(evil, UnixFileMode.None, UnixFileMode.UserRead)] }));
+        var (err, _) = Capture(() => GitCheckReport.Print("/p", new() { Moved = [], Failure = null, ModeChanges = [new(evil, UnixFileMode.None, UnixFileMode.UserRead)] }));
         Assert.False(err.Contains(Esc, StringComparison.Ordinal));
         Assert.DoesNotContain("\npen: all clear", err, StringComparison.Ordinal);
         Assert.Contains("changed x\\x1b", err);
@@ -352,7 +352,7 @@ public class RestoreCommandTests
             var repo = Git.Repo(t.Sub("repo"));
             var nested = t.Sub("repo", name);
             Git.Run(nested, "init", "-q");
-            var moved = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved;
+            var moved = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved;
             var q = Assert.Single(moved);
             Assert.Equal(Path.Combine(nested, ".git"), q.From);
             Assert.False(Directory.Exists(q.From));
@@ -408,7 +408,7 @@ public class RestoreCommandTests
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
         Git.Run(repo, "init", "-q", "--bare", ".git/modules/x\n");
-        var moved = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved;
+        var moved = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved;
         var w = GitCheckWording.Warning(repo, moved);
         Assert.Contains("pen can't write a command for", w);
         Assert.Contains("x\\n, since the name ends in a newline", w);

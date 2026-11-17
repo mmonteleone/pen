@@ -11,7 +11,7 @@ internal static class GitCheckReport
     /// </summary>
     /// <param name="dir">The directory checked; paths are shown relative to it.</param>
     /// <param name="check">The check's result.</param>
-    public static void Report(string dir, CheckResult check)
+    public static void Print(string dir, CheckResult check)
     {
         if (check.Moved.Count > 0)
             Out.WriteRaw(GitCheckWording.Warning(dir, check.Moved));

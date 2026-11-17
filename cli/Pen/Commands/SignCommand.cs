@@ -41,14 +41,14 @@ internal sealed class SignCommand(HostEnv host, Project project, TimeProvider cl
     /// <exception cref="PenException">It moved anything aside or couldn't finish.</exception>
     private void CheckGitDir()
     {
-        var check = GitCheck.RunWithoutOpening(project.Dir, startedWithGit: true, project.CommonGitDir,
+        var check = GitCheck.RunWithoutSession(project.Dir, startedWithGit: true, project.CommonGitDir,
             modulesAtStart: null);
         if (check.Moved.Count > 0 || check.Failure is not null)
         {
-            GitCheckReport.Report(project.Dir, check);
+            GitCheckReport.Print(project.Dir, check);
             throw new PenException("not signing: deal with the files above first");
         }
         // Paused operations it reports aren't a reason to refuse: signing doesn't continue them.
-        GitCheckReport.Report(project.Dir, check);
+        GitCheckReport.Print(project.Dir, check);
     }
 }

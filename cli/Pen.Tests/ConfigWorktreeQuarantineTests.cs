@@ -824,7 +824,7 @@ public class ConfigWorktreeQuarantineTests
         File.WriteAllText(file, "[user]\n\tname = mine\n");
         var (_, forged) = ForgeWorktree(repo, git, "forged", "[user]\n\tname = mine\n");
 
-        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, git, modulesAtStart: null);
+        var check = GitCheck.RunWithoutSession(repo, startedWithGit: true, git, modulesAtStart: null);
 
         Assert.Null(check.Failure);
         Assert.Empty(check.Moved);

@@ -91,7 +91,7 @@ public class ScanFailClosedTests
         var stderr = Console.Error;
         var captured = new StringWriter();
         Console.SetError(captured);
-        try { GitCheckReport.Report("/p", new CheckResult { Moved = [], Failure = null, ModeChanges = opened }); }
+        try { GitCheckReport.Print("/p", new CheckResult { Moved = [], Failure = null, ModeChanges = opened }); }
         finally { Console.SetError(stderr); }
         Assert.Contains("changed sub from mode 311 to 711", captured.ToString());
     }
@@ -113,7 +113,7 @@ public class ScanFailClosedTests
         using var t = new TempDir();
         var repo = RepoWithHiddenRepo(t, out var sub);
         using var _ = new Chmod(sub, Mode311);
-        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
+        var check = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
         Assert.Contains("can't list", check.Failure);
         Assert.Contains("sub", check.Failure);
         Assert.Equal(Mode311, File.GetUnixFileMode(sub));
@@ -352,7 +352,7 @@ public class ScanFailClosedTests
         File.WriteAllText(file, string.Concat(Enumerable.Repeat(Inc("config.worktree"), 64)));
 
         Assert.True(ReadOnly(Mounts(t, repo), file));
-        Assert.Empty(Within10s(() => GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved));
+        Assert.Empty(Within10s(() => GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved));
         Assert.Null(Within10s(() => GitCheck.RunAtSessionEnd(repo, Session(t, Path.Combine(repo, ".git")))).Failure);
     }
 
@@ -451,7 +451,7 @@ public class ScanFailClosedTests
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
         var dirs = Enumerable.Range(0, RepoGuard.MaxListed + 2).Select(i => new Chmod(t.Sub("repo", $"d{i}"), Mode311)).ToList();
-        try { Assert.Contains("and 2 more", GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Failure); }
+        try { Assert.Contains("and 2 more", GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Failure); }
         finally { dirs.ForEach(d => d.Dispose()); }
     }
 
@@ -470,9 +470,9 @@ public class ScanFailClosedTests
         var foo = Path.Combine(t.Sub("repo", ".git", "modules"), "foo");
         File.CreateSymbolicLink(foo, t.Sub("elsewhere"));
 
-        Assert.Equal(foo + GitQuarantine.Suffix, Assert.Single(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved).To);
+        Assert.Equal(foo + GitQuarantine.Suffix, Assert.Single(GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved).To);
 
-        Assert.Empty(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved);
+        Assert.Empty(GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved);
         Assert.Empty(RepoScan.FindModuleRepos(Path.Combine(repo, ".git")));
         Assert.True(PathChecks.IsLink(foo + GitQuarantine.Suffix));
     }
