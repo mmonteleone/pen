@@ -27,7 +27,7 @@ internal sealed record UndecodableEntry(byte[] Name, bool CouldHoldRepo)
         get
         {
             var builder = new StringBuilder();
-            for (int i = 0; i < Name.Length; i++)
+            for (var i = 0; i < Name.Length; i++)
             {
                 var value = Name[i];
                 if (char.IsAsciiLetterOrDigit((char)value) || value is (byte)'.' or (byte)'_' or (byte)' '

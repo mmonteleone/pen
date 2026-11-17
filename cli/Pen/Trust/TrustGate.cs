@@ -77,7 +77,7 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     {
         var defaults = Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt"));
         var named = Allowlist.MergeNamed(defaults, user.Allow).ToHashSet(StringComparer.Ordinal);
-        bool userOpen = Allowlist.Merge(user.Allow).Contains(Allowlist.AnyDomain);
+        var userOpen = Allowlist.Merge(user.Allow).Contains(Allowlist.AnyDomain);
         return domain =>
             (domain == Allowlist.AnyDomain ? userOpen : Allowlist.IsAllowed(named, domain))
             || store.CoversDomain(domain);

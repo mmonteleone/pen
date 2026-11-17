@@ -121,7 +121,7 @@ internal sealed class BranchSigner(HostGit git)
             if (resolved == null)
                 return null;
             var range = ListRange(resolved.Commit, head);
-            int unsignedCount = new SignatureVerifier(git).CountUnsigned(range);
+            var unsignedCount = new SignatureVerifier(git).CountUnsigned(range);
             if (unsignedCount == 0)
                 return null;
             return $"{unsignedCount} unsigned commit{(unsignedCount == 1 ? "" : "s")}; review, then run pen sign";

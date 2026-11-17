@@ -84,10 +84,10 @@ internal sealed class ProxyLogTrimmer : IDisposable
             return false;
 
         // The tail starts mid-file, so its first line is most likely cut: dropped.
-        int start = 0;
+        var start = 0;
         if (tail.Length >= Keep)
         {
-            int newline = Array.IndexOf(tail, (byte)'\n');
+            var newline = Array.IndexOf(tail, (byte)'\n');
             start = newline < 0 ? tail.Length : newline + 1;
         }
         // Written aside and renamed, so a reader or a Pen that dies mid-write
@@ -115,7 +115,7 @@ internal sealed class ProxyLogTrimmer : IDisposable
         using var process = Proc.Start(startInfo);
         _ = process.StandardError.ReadToEndAsync();
         var read = Task.Run(() => ReadCapped(process.StandardOutput.BaseStream, 4 * Keep));
-        bool exited = process.WaitForExit(ExecTimeout);
+        var exited = process.WaitForExit(ExecTimeout);
         if (!exited || read.Wait(ExecTimeout) is false || read.Result == null)
         {
             try

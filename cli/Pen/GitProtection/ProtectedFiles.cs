@@ -223,7 +223,7 @@ internal static class ProtectedFiles
         var files = new Dictionary<string, List<SavedCopy>>(StringComparer.Ordinal);
         var adopted = new HashSet<string>(StringComparer.Ordinal);
         var readOnly = new List<List<string>>();
-        bool unrecorded = false;
+        var unrecorded = false;
         foreach (var session in open.OrderBy(session => session.ReadStarted() ?? DateTime.MaxValue))
         {
             var manifest = ReadRecord(session);

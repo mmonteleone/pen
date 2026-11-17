@@ -102,7 +102,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
         RepoGuard.EnsureDirectory(dir, hooks);
         _mounts.Add(new(hooks, ReadOnly: true));
 
-        bool worktreeConfig = AddIncludes(common, config);
+        var worktreeConfig = AddIncludes(common, config);
         // With extensions.worktreeConfig, git also reads config.worktree
         // files, which the agent could otherwise create.
         // Any true value is enough: includeIf conditions may differ in a
@@ -283,7 +283,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// <returns>Whether it or any file it leads to sets extensions.worktreeConfig.</returns>
     private bool FollowIncludes(string common, string configFile)
     {
-        bool worktreeConfig = false;
+        var worktreeConfig = false;
         foreach (var entry in GitConfigFile.ParseFile(configFile))
         {
             if (entry.Section == "extensions" && entry.Key == "worktreeconfig" && GitConfigFile.IsTrue(entry.Value))
@@ -371,7 +371,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// <param name="real">The included file's real path.</param>
     private void ProtectIncludedFile(string common, string configFile, string real)
     {
-        bool writable = RepoGuard.IsInside(dir, real) || RepoGuard.IsInside(common, real);
+        var writable = RepoGuard.IsInside(dir, real) || RepoGuard.IsInside(common, real);
         if (!writable)
             return;
         if (!File.Exists(real))

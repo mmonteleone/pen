@@ -120,7 +120,7 @@ internal static class GitConfigFile
     /// <returns>The value, or null if no entry matches.</returns>
     public static string? FindLast(List<Entry> entries, string section, string key, string? subsection = null)
     {
-        for (int i = entries.Count - 1; i >= 0; i--)
+        for (var i = entries.Count - 1; i >= 0; i--)
         {
             var entry = entries[i];
             if (entry.Section == section && entry.Subsection == subsection && entry.Key == key)
@@ -200,10 +200,10 @@ internal static class GitConfigFile
         {
             if (bytes.AsSpan().StartsWith(Bom))
                 _pos = Bom.Length;
-            bool comment = false;
+            var comment = false;
             while (true)
             {
-                int character = ReadChar();
+                var character = ReadChar();
                 if (character == Newline)
                 {
                     if (_eof)
@@ -266,7 +266,7 @@ internal static class GitConfigFile
         {
             while (true)
             {
-                int character = ReadChar();
+                var character = ReadChar();
                 if (_eof)
                     return "a section header that isn't closed";
                 if (IsSpace(character))
@@ -334,7 +334,7 @@ internal static class GitConfigFile
             while (character is ' ' or '\t')
                 character = ReadChar();
 
-            bool hasValue = character != Newline;
+            var hasValue = character != Newline;
             if (hasValue)
             {
                 if (character != '=')
@@ -355,12 +355,12 @@ internal static class GitConfigFile
         private string? ReadValue()
         {
             _value.Clear();
-            bool quoted = false;
-            bool comment = false;
-            int trimTo = 0;
+            var quoted = false;
+            var comment = false;
+            var trimTo = 0;
             while (true)
             {
-                int character = ReadChar();
+                var character = ReadChar();
                 if (character == Newline)
                     return EndValue(quoted, trimTo);
                 if (comment)
@@ -444,10 +444,10 @@ internal static class GitConfigFile
         private void AddEntry(bool hasValue)
         {
             var full = _name.ToArray().AsSpan();
-            int first = full.IndexOf((byte)'.');
-            int last = full.LastIndexOf((byte)'.');
-            string section = first < 0 ? "" : Encoding.UTF8.GetString(full[..first]);
-            string? subsection = first == last ? null : Encoding.UTF8.GetString(full[(first + 1)..last]);
+            var first = full.IndexOf((byte)'.');
+            var last = full.LastIndexOf((byte)'.');
+            var section = first < 0 ? "" : Encoding.UTF8.GetString(full[..first]);
+            var subsection = first == last ? null : Encoding.UTF8.GetString(full[(first + 1)..last]);
             var value = hasValue ? Encoding.UTF8.GetString(_value.ToArray()) : "true";
             Entries.Add(new(section, subsection, Encoding.UTF8.GetString(full[(last + 1)..]), value));
         }

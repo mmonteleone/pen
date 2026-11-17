@@ -198,8 +198,8 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     /// <returns>Whether every one of them took it; each failure is reported, naming the session.</returns>
     internal static bool ApplyToRunning(HostEnv host, Project? project, bool global)
     {
-        int applied = 0;
-        int failed = 0;
+        var applied = 0;
+        var failed = 0;
         foreach (var session in FindTargets(host, project, global))
         {
             if (Apply(host, session))
@@ -230,7 +230,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     public static IReadOnlyList<string> Append(ConfigTarget target, string key, IReadOnlyList<string> domains)
     {
         var existing = Config.ReadText(target.Path, target.DisplayPath);
-        bool exists = existing != null;
+        var exists = existing != null;
         var edit = ConfigEdit.AddToList(existing ?? target.Stub, target.DisplayPath, target.Kind, key, domains);
         if (edit.Added.Count == 0)
             return edit.Added;
@@ -400,7 +400,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     {
         var paths = files.Select(file => ProxyAclDir + file.Name).ToList();
         var expected = FormatProxyView(files);
-        for (int attempt = 1; ; attempt++)
+        for (var attempt = 1; ; attempt++)
         {
             var result = RunInProxy(session, env, ["sh", "-c", PrintAclsScript, "sh", .. paths]);
             if (result.ExitStatus.ExitCode != 0)
@@ -492,7 +492,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
         if (!session.HasDenyAndOpen)
         {
             var allowlist = Overwrite(session.AllowlistFile, Allowlist.Render(egress.NamedAllow));
-            bool open = egress.Allow.Contains(Allowlist.AnyDomain);
+            var open = egress.Allow.Contains(Allowlist.AnyDomain);
             var pending = (egress.Deny.Count > 0, open) switch
             {
                 (true, true) => "deny and allow = [\"*\"] apply",
@@ -529,7 +529,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     internal static string FormatDefaults()
     {
         var lines = Embedded.ReadText("proxy/allowlist.txt").Split('\n');
-        int first = Array.FindIndex(lines, line => line.StartsWith("# ---", StringComparison.Ordinal));
+        var first = Array.FindIndex(lines, line => line.StartsWith("# ---", StringComparison.Ordinal));
         return string.Join('\n', lines[Math.Max(first, 0)..]).TrimEnd('\n') + "\n";
     }
 
@@ -629,7 +629,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
         IEnumerable<string>[] sources = [Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")),
             context.User.Allow, approved, toolDomains];
         var named = Allowlist.MergeNamed(sources).ToHashSet(StringComparer.Ordinal);
-        bool open = Allowlist.Merge(sources).Contains(Allowlist.AnyDomain);
+        var open = Allowlist.Merge(sources).Contains(Allowlist.AnyDomain);
         var denied = Allowlist.MergeDeny(context.User, context.ProjectConfig).ToHashSet(StringComparer.Ordinal);
         return (named, open, denied);
     }

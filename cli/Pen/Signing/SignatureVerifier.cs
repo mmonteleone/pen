@@ -28,7 +28,7 @@ internal sealed class SignatureVerifier(HostGit git)
         var lines = ReadSignatureLines(verifying, commits);
 
         // %G? leaves gpg.minTrustLevel to verify-commit, so it's applied here.
-        int minTrust = RankTrust(SignatureConfig.ReadMinTrust(git));
+        var minTrust = RankTrust(SignatureConfig.ReadMinTrust(git));
         var wanted = commits.ToHashSet(StringComparer.Ordinal);
         foreach (var line in lines)
         {

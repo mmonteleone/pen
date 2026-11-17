@@ -20,13 +20,13 @@ internal sealed class CommitReader(HostGit git)
         if (!batch.Ok)
             throw new PenException($"git cat-file failed: {batch.Stderr.Trim()}");
         var bytes = batch.Stdout;
-        int position = 0;
+        var position = 0;
         foreach (var sha in commits)
         {
-            int newline = Array.IndexOf(bytes, (byte)'\n', position);
+            var newline = Array.IndexOf(bytes, (byte)'\n', position);
             if (newline < 0)
                 throw new PenException("git cat-file --batch: truncated output");
-            int size = ReadCommitSize(sha, Encoding.ASCII.GetString(bytes, position, newline - position));
+            var size = ReadCommitSize(sha, Encoding.ASCII.GetString(bytes, position, newline - position));
             result[sha] = Parse(sha, bytes[(newline + 1)..(newline + 1 + size)]);
             position = newline + 1 + size + 1; // content, then a newline
         }

@@ -139,7 +139,7 @@ internal static class HooksPath
         Walk walk)
     {
         var workTree = project.IsWorktree ? null : FindLastWorkTree(commonEntries);
-        bool known = commonEntries != null;
+        var known = commonEntries != null;
         var extension = commonEntries == null
             ? null
             : GitConfigFile.FindLast(commonEntries, "extensions", "worktreeconfig");
@@ -176,9 +176,9 @@ internal static class HooksPath
     /// </summary>
     private static void ReadEnvironmentConfig(Func<string, string?> env, Walk walk)
     {
-        if (!int.TryParse(env("GIT_CONFIG_COUNT"), System.Globalization.CultureInfo.InvariantCulture, out int count))
+        if (!int.TryParse(env("GIT_CONFIG_COUNT"), System.Globalization.CultureInfo.InvariantCulture, out var count))
             return;
-        for (int i = 0; i < count && i < MaxEnvironmentConfigs; i++)
+        for (var i = 0; i < count && i < MaxEnvironmentConfigs; i++)
         {
             var key = env($"GIT_CONFIG_KEY_{i}") ?? "";
             var source = $"GIT_CONFIG_KEY_{i}";
@@ -302,7 +302,7 @@ internal static class HooksPath
     /// <summary>Finds where an absolute path leads: anywhere on its walk in reach makes it writable.</summary>
     private static Place LocatePath(string path, Project project)
     {
-        var real = WalkRealPath(path, p => CanBeReplaced(p, project), out bool replaceable);
+        var real = WalkRealPath(path, p => CanBeReplaced(p, project), out var replaceable);
         if (replaceable)
             return Place.Writable;
         if (real == null)
@@ -379,7 +379,7 @@ internal static class HooksPath
     {
         var pending = new Stack<string>(path.Split('/').Reverse());
         var current = "/";
-        int links = 0;
+        var links = 0;
         while (pending.TryPop(out var name))
         {
             if (name is "" or ".")

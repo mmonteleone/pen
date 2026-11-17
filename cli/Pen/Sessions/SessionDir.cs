@@ -303,7 +303,7 @@ internal sealed class SessionDir(string projectKey, string path)
             return env;
         foreach (var line in File.ReadAllLines(EnvFile))
         {
-            int equals = line.IndexOf('=');
+            var equals = line.IndexOf('=');
             if (equals > 0)
                 env[line[..equals]] = line[(equals + 1)..];
         }

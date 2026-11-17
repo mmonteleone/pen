@@ -303,7 +303,7 @@ internal sealed partial record ProjectDetection
         /// </remarks>
         private static string? AnchorKeyPattern(FoundFile file, string extension)
         {
-            string[] segments = file.Directory.Length == 0 ? [] : file.Directory.Split('/');
+            var segments = file.Directory.Length == 0 ? [] : file.Directory.Split('/');
             var directories = string.Concat(
                 segments.Select(segment => "/" + (IsLiteralSegment(segment) ? segment : "*")));
             var pattern = $"{directories}/*{extension}";
@@ -414,7 +414,7 @@ internal sealed partial record ProjectDetection
 
         private static FoundFile? FindVersionFile(string directory, Dictionary<string, FoundFile>[] versionFiles)
         {
-            for (string? dir = directory; dir != null; dir = GetParent(dir))
+            for (var dir = directory; dir != null; dir = GetParent(dir))
             {
                 foreach (var files in versionFiles)
                 {

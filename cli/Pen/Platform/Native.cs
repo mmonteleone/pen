@@ -189,7 +189,7 @@ internal static partial class Native
         using var reader = new StreamReader(new FileStream(handle, FileAccess.Read));
         // One spare char: filling it means the file grew past what was checked.
         var chars = new char[length + 1];
-        int read = reader.ReadBlock(chars, 0, chars.Length);
+        var read = reader.ReadBlock(chars, 0, chars.Length);
         return read > length ? null : new string(chars, 0, read);
     }
 
@@ -211,10 +211,10 @@ internal static partial class Native
     /// <exception cref="FileNotFoundException">Nothing is at the path.</exception>
     private static SafeFileHandle? OpenRegular(string path, int flags)
     {
-        int fd = OpenNative(path, flags);
+        var fd = OpenNative(path, flags);
         if (fd < 0)
         {
-            int errno = Marshal.GetLastPInvokeError();
+            var errno = Marshal.GetLastPInvokeError();
             if (errno is EACCES or EPERM)
                 throw new UnauthorizedAccessException($"Access to the path '{path}' is denied.");
             if (errno is ENOENT or ENOTDIR)
@@ -251,10 +251,10 @@ internal static partial class Native
             return null;
         // One spare byte: filling it means the file grew past what was checked.
         var bytes = new byte[length + 1];
-        int total = 0;
+        var total = 0;
         while (total < bytes.Length)
         {
-            int read = RandomAccess.Read(handle, bytes.AsSpan(total), total);
+            var read = RandomAccess.Read(handle, bytes.AsSpan(total), total);
             if (read == 0)
                 break;
             total += read;
@@ -495,7 +495,7 @@ internal static partial class Native
             throw new IOException($"it isn't below {root}");
         }
         var parts = relative.Split('/');
-        int fd = OpenNative(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        var fd = OpenNative(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
         if (fd < 0)
             throw ErrnoException(root);
         try
@@ -504,7 +504,7 @@ internal static partial class Native
             foreach (var part in parts[..^1])
             {
                 at = Path.Combine(at, part);
-                int next = OpenAtNative(fd, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+                var next = OpenAtNative(fd, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
                 if (next < 0)
                     throw ErrnoException(at);
                 CloseNative(fd);
@@ -560,7 +560,7 @@ internal static partial class Native
         var parts = relative.Split('/');
         if (Path.IsPathRooted(relative) || relative.Contains('\0') || parts.Any(part => part is "" or "." or ".."))
             throw new IOException($"{relative} isn't a path below {root}");
-        int fd = OpenNative(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        var fd = OpenNative(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
         if (fd < 0)
             throw ReadInsideException(root, "isn't a directory");
         try
@@ -570,7 +570,7 @@ internal static partial class Native
             foreach (var part in parts[..^1])
             {
                 at = Path.Combine(at, part);
-                int next = OpenAtNative(fd, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+                var next = OpenAtNative(fd, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
                 if (next < 0)
                     throw ReadInsideException(at, "isn't a directory (a symlink, say)");
                 CloseNative(fd);
@@ -578,7 +578,7 @@ internal static partial class Native
                 steps.Add(StatOpen(fd) ?? throw new IOException($"{at} can't be stat'ed"));
             }
             var path = Path.Combine(root, relative);
-            int file = OpenAtNative(fd, parts[^1], O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+            var file = OpenAtNative(fd, parts[^1], O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
             if (file < 0)
                 throw ReadInsideException(path, "is a symlink");
             using var handle = new SafeFileHandle(file, ownsHandle: true);
@@ -600,7 +600,7 @@ internal static partial class Native
     /// <param name="refused">What's wrong with <paramref name="path"/> if O_NOFOLLOW or O_DIRECTORY refused it.</param>
     private static Exception ReadInsideException(string path, string refused)
     {
-        int errno = Marshal.GetLastPInvokeError();
+        var errno = Marshal.GetLastPInvokeError();
         if (errno is EACCES or EPERM)
             return new UnauthorizedAccessException($"Access to the path '{path}' is denied.");
         if (errno == ENOENT)
@@ -616,7 +616,7 @@ internal static partial class Native
     /// <summary>Turns the last call's errno into the exception for <paramref name="path"/>.</summary>
     private static Exception ErrnoException(string path)
     {
-        int errno = Marshal.GetLastPInvokeError();
+        var errno = Marshal.GetLastPInvokeError();
         if (errno is EACCES or EPERM)
             return new UnauthorizedAccessException($"Access to the path '{path}' is denied.");
         // ELOOP or ENOTDIR: O_NOFOLLOW met a symlink, or O_DIRECTORY something else.
@@ -633,11 +633,11 @@ internal static partial class Native
     /// <remarks>Not through .NET's file APIs: their own advisory locking would interfere with flock below.</remarks>
     public static SafeFileHandle OpenLockFile(string path)
     {
-        int fd = OpenNative(path, O_RDWR | O_CLOEXEC);
+        var fd = OpenNative(path, O_RDWR | O_CLOEXEC);
         if (fd < 0 && Marshal.GetLastPInvokeError() == ENOENT)
         {
             // Truncating a lock file is harmless, and racing creators both succeed.
-            int created = CreatNative(path, 0b110_000_000);
+            var created = CreatNative(path, 0b110_000_000);
             if (created >= 0)
                 CloseNative(created);
             fd = OpenNative(path, O_RDWR | O_CLOEXEC);
@@ -652,13 +652,13 @@ internal static partial class Native
     /// <exception cref="IOException">flock(2) failed for another reason.</exception>
     public static bool Flock(SafeFileHandle handle, int operation)
     {
-        bool added = false;
+        var added = false;
         handle.DangerousAddRef(ref added);
         try
         {
             if (FlockNative((int)handle.DangerousGetHandle(), operation) == 0)
                 return true;
-            int errno = Marshal.GetLastPInvokeError();
+            var errno = Marshal.GetLastPInvokeError();
             // EWOULDBLOCK is 35 on macOS and 11 on Linux.
             if (errno == (OperatingSystem.IsMacOS() ? 35 : 11))
                 return false;

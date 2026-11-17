@@ -169,14 +169,14 @@ internal static class RepoGuard
         if (nested.Count == 0)
             return;
         var message = new StringBuilder(FormatNestedHeading(dir, git));
-        bool anySubmodule = false;
-        bool anyOther = false;
+        var anySubmodule = false;
+        var anyOther = false;
         // Only the repos listed are looked at for the advice; any not listed may be other repos.
-        bool anyQuarantined = false;
+        var anyQuarantined = false;
         var listed = ListFirst(nested, MaxListed, repo =>
         {
-            bool submodule = repo.Kind == NestedKind.GitDir && IsSubmodulePath(dir, repo.RepoDir);
-            bool quarantined = IsInQuarantine(dir, repo.RepoDir);
+            var submodule = repo.Kind == NestedKind.GitDir && IsSubmodulePath(dir, repo.RepoDir);
+            var quarantined = IsInQuarantine(dir, repo.RepoDir);
             anySubmodule |= submodule;
             anyQuarantined |= quarantined;
             anyOther |= !submodule && !quarantined;
@@ -211,9 +211,9 @@ internal static class RepoGuard
     {
         if (found.Count == 0)
             return;
-        bool anyRefs = false;
-        bool anyEntry = false;
-        bool anyQuarantined = false;
+        var anyRefs = false;
+        var anyEntry = false;
+        var anyQuarantined = false;
         var listed = ListFirst(found, MaxListed, repo =>
         {
             var refs = repo is { Place: GitDirPlace.Refs, Kind: NestedKind.Bare };

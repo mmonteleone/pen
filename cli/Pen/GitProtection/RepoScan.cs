@@ -649,10 +649,10 @@ internal static class RepoScan
         /// </returns>
         private bool ScanEntries(string dir, List<Entry> entries, HashSet<string> undecodable)
         {
-            bool head = false;
-            bool objects = false;
-            bool refs = false;
-            bool commondir = false;
+            var head = false;
+            var objects = false;
+            var refs = false;
+            var commondir = false;
             foreach (var entry in entries)
             {
                 var path = Path.Combine(dir, entry.Name);

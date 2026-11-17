@@ -218,7 +218,7 @@ internal static class GitCheck
     internal static string FreeName(string path)
     {
         var to = path + Suffix;
-        for (int i = 2; RepoGuard.Exists(to); i++)
+        for (var i = 2; RepoGuard.Exists(to); i++)
             to = $"{path}{Suffix}-{i}";
         return to;
     }

@@ -164,7 +164,7 @@ internal static class SessionRegistry
         /// <summary>Releases the locks, the last taken first.</summary>
         public void Dispose()
         {
-            for (int i = _held.Count - 1; i >= 0; i--)
+            for (var i = _held.Count - 1; i >= 0; i--)
                 _held[i].Dispose();
             _held.Clear();
         }

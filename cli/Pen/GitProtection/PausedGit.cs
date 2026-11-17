@@ -234,7 +234,7 @@ internal static class PausedGit
     private static bool MentionsStrategy(string line)
     {
         const string word = "strategy";
-        for (int at = line.IndexOf(word, StringComparison.OrdinalIgnoreCase);
+        for (var at = line.IndexOf(word, StringComparison.OrdinalIgnoreCase);
             at >= 0;
             at = line.IndexOf(word, at + 1, StringComparison.OrdinalIgnoreCase))
         {

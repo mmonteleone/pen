@@ -147,10 +147,10 @@ internal static class ConfigEdit
         var first = document.Tables.FirstOrDefault();
         if (first == null)
             return text.Length;
-        int at = LineStart(text, first.OpenBracket!.Span.Start.Offset);
+        var at = LineStart(text, first.OpenBracket!.Span.Start.Offset);
         while (at > 0)
         {
-            int previous = LineStart(text, at - 1);
+            var previous = LineStart(text, at - 1);
             if (!text[previous..at].TrimStart().StartsWith('#'))
                 break;
             at = previous;
@@ -165,8 +165,8 @@ internal static class ConfigEdit
     {
         var existing = array.Items.Select(i => i.Value!.ToString()!.Trim());
         var body = string.Concat(existing.Concat(added.Select(Quote)).Select(v => "  " + v + "," + newline));
-        int start = array.OpenBracket!.Span.Start.Offset;
-        int end = array.CloseBracket!.Span.End.Offset + 1;
+        var start = array.OpenBracket!.Span.Start.Offset;
+        var end = array.CloseBracket!.Span.End.Offset + 1;
         return text[..start] + "[" + newline + body + "]" + text[end..];
     }
 
@@ -176,15 +176,15 @@ internal static class ConfigEdit
     private static string InsertBeforeClose(string text, ArraySyntax array, List<string> added, string newline)
     {
         var items = array.Items.ToList();
-        int close = array.CloseBracket!.Span.Start.Offset;
+        var close = array.CloseBracket!.Span.Start.Offset;
         var indent = items.Count > 0 ? LeadingSpace(text, items[0].Value!.Span.Start.Offset) : null;
         if (string.IsNullOrEmpty(indent))
             indent = CommentIndent(text, array, close);
 
         var builder = new StringBuilder(text);
-        int lineStart = LineStart(text, close);
-        bool closeAlone = text[lineStart..close].Trim().Length == 0;
-        string lines = string.Concat(added.Select(d => indent + Quote(d) + "," + newline));
+        var lineStart = LineStart(text, close);
+        var closeAlone = text[lineStart..close].Trim().Length == 0;
+        var lines = string.Concat(added.Select(d => indent + Quote(d) + "," + newline));
         if (closeAlone)
             builder.Insert(lineStart, lines);
         else
@@ -215,7 +215,7 @@ internal static class ConfigEdit
     /// <returns>That whitespace, or "" if anything else comes before it on the line.</returns>
     private static string LeadingSpace(string text, int offset)
     {
-        int start = LineStart(text, offset);
+        var start = LineStart(text, offset);
         var before = text[start..offset];
         return before.Trim().Length == 0 ? before : "";
     }

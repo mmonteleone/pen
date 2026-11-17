@@ -32,7 +32,7 @@ internal sealed record CommitObject
         get
         {
             var text = System.Text.Encoding.UTF8.GetString(Message);
-            int newline = text.IndexOf('\n');
+            var newline = text.IndexOf('\n');
             return (newline >= 0 ? text[..newline] : text).Trim();
         }
     }
@@ -50,7 +50,7 @@ internal sealed record CommitObject
     /// </remarks>
     public static CommitObject Parse(byte[] raw)
     {
-        int split = raw.AsSpan().IndexOf("\n\n"u8);
+        var split = raw.AsSpan().IndexOf("\n\n"u8);
         if (split < 0)
             throw new PenException("no blank line after its headers");
         var headers = new HeaderLines(DecodeHeaders(raw.AsSpan(0, split)));
@@ -121,7 +121,7 @@ internal sealed record CommitObject
                     throw new PenException("a header continuation line where none belongs");
                 continue;
             }
-            int space = line.IndexOf(' ');
+            var space = line.IndexOf(' ');
             if (space <= 0)
                 throw new PenException("a malformed header");
             current = line[..space];
@@ -144,8 +144,8 @@ internal sealed record CommitObject
     /// <param name="key">The header's name, for messages.</param>
     private static (string Name, string Email, string Date) ParseIdent(string value, string key)
     {
-        int open = value.IndexOf('<');
-        int close = value.IndexOf('>');
+        var open = value.IndexOf('<');
+        var close = value.IndexOf('>');
         if (open < 0 || close < open || value.LastIndexOf('<') != open || value.LastIndexOf('>') != close)
             throw new PenException($"a malformed {key} header");
         var date = value[(close + 1)..].Trim();

@@ -40,7 +40,7 @@ internal static partial class Allowlist
         text.Split('\n')
             .Select(line =>
             {
-                int hash = line.IndexOf('#');
+                var hash = line.IndexOf('#');
                 return (hash >= 0 ? line[..hash] : line).Trim().ToLowerInvariant();
             })
             .Where(domain => domain.Length > 0);
@@ -86,7 +86,7 @@ internal static partial class Allowlist
     private static IEnumerable<string> ListWildcardsOver(string domain)
     {
         var bare = domain.TrimStart('.');
-        for (int at = 0; ; at = bare.IndexOf('.', at) + 1)
+        for (var at = 0; ; at = bare.IndexOf('.', at) + 1)
         {
             yield return "." + bare[at..];
             if (bare.IndexOf('.', at) < 0)
@@ -202,21 +202,21 @@ internal static partial class Allowlist
     /// <returns>The host, lowercased unless it's in brackets; empty when there's none.</returns>
     internal static string ParseHost(string url)
     {
-        int scheme = url.IndexOf("://", StringComparison.Ordinal);
+        var scheme = url.IndexOf("://", StringComparison.Ordinal);
         if (scheme >= 0)
             url = url[(scheme + 3)..];
-        int slash = url.IndexOf('/');
+        var slash = url.IndexOf('/');
         if (slash >= 0)
             url = url[..slash];
-        int at = url.LastIndexOf('@');
+        var at = url.LastIndexOf('@');
         if (at >= 0)
             url = url[(at + 1)..];
         if (url.StartsWith('['))
         {
-            int close = url.IndexOf(']');
+            var close = url.IndexOf(']');
             return close > 0 ? url[1..close] : url;
         }
-        int colon = url.LastIndexOf(':');
+        var colon = url.LastIndexOf(':');
         if (colon >= 0)
             url = url[..colon];
         return url.ToLowerInvariant();
@@ -270,7 +270,7 @@ internal static partial class Allowlist
         HashSet<string> allow,
         HashSet<string> deny)
     {
-        bool open = allow.Contains(AnyDomain);
+        var open = allow.Contains(AnyDomain);
         if (deny.Count == 0 && !open)
             return FormatBlockedLine(hosts.Where(host => !IsAllowed(allow, host)).ToList()) is { } only ? [only] : [];
 
