@@ -153,7 +153,7 @@ internal static class RepoGuard
         var unlistable = inGitDir.UnlistableDirs.Concat(scan.UnlistableDirs).ToList();
         if (unlistable.Count == 0)
             return;
-        var listed = ListFirst(unlistable, MaxListed, u => FormatPath(dir, u));
+        var listed = CappedList.FormatLines(unlistable, MaxListed, u => FormatPath(dir, u));
         throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't list these directories, " +
             "though git on this machine can still enter them, so it can't see a repo inside one:\n"
             + string.Join('\n', listed.Select(line => "  " + line))
@@ -173,7 +173,7 @@ internal static class RepoGuard
         var anyOther = false;
         // Only the repos listed are looked at for the advice; any not listed may be other repos.
         var anyQuarantined = false;
-        var listed = ListFirst(nested, MaxListed, repo =>
+        var listed = CappedList.FormatLines(nested, MaxListed, repo =>
         {
             var submodule = repo.Kind == NestedKind.GitDir && IsSubmodulePath(dir, repo.RepoDir);
             var quarantined = IsInQuarantine(dir, repo.RepoDir);
@@ -214,7 +214,7 @@ internal static class RepoGuard
         var anyRefs = false;
         var anyEntry = false;
         var anyQuarantined = false;
-        var listed = ListFirst(found, MaxListed, repo =>
+        var listed = CappedList.FormatLines(found, MaxListed, repo =>
         {
             var refs = repo is { Place: GitDirPlace.Refs, Kind: NestedKind.Bare };
             anyRefs |= refs;
@@ -265,7 +265,7 @@ internal static class RepoGuard
         {
             message.Append("these symlinks lead into its git dir (or would, once a directory they name is made), so " +
                 "git run through one would use any repo the sandbox puts there:");
-            foreach (var line in ListFirst(links, MaxListed, link => FormatPath(dir, link)))
+            foreach (var line in CappedList.FormatLines(links, MaxListed, link => FormatPath(dir, link)))
                 message.Append("\n  ").Append(line);
         }
         if (untraced.Count > 0)
@@ -275,7 +275,7 @@ internal static class RepoGuard
             message.Append(" (a directory on the way can't be searched, or a target can't be read or isn't valid " +
                 "UTF-8), so they may lead into its git dir, where git run through one would use any repo the " +
                 "sandbox puts there:");
-            foreach (var line in ListFirst(untraced, MaxListed, link => FormatPath(dir, link)))
+            foreach (var line in CappedList.FormatLines(untraced, MaxListed, link => FormatPath(dir, link)))
                 message.Append("\n  ").Append(line);
         }
         message.Append("\nremove them, then rerun");
@@ -311,21 +311,8 @@ internal static class RepoGuard
     /// <summary>Formats the first few of <paramref name="names"/> for a message, and how many more there are.</summary>
     /// <returns>One line per name listed, without indent, then "… and N more" if any weren't.</returns>
     internal static List<string> FormatBadNames(string dir, IReadOnlyList<BadName> names) =>
-        ListFirst(names, MaxListed, n => FormatPath(dir, n.DisplayPath) + (n.EndsInNewline ? " " +
+        CappedList.FormatLines(names, MaxListed, n => FormatPath(dir, n.DisplayPath) + (n.EndsInNewline ? " " +
             "(it ends in a newline, so no command can name it here: rename it by hand)" : ""));
-
-    /// <summary>
-    /// Formats the first <paramref name="max"/> of <paramref name="items"/>, then how many more there are.
-    /// </summary>
-    /// <returns>One line per item listed, without indent, then "… and N more" if any weren't.</returns>
-    /// <remarks>Formats only the items listed, each once and in order, before returning.</remarks>
-    internal static List<string> ListFirst<T>(IReadOnlyCollection<T> items, int max, Func<T, string> format)
-    {
-        var lines = items.Take(max).Select(format).ToList();
-        if (items.Count > max)
-            lines.Add($"… and {items.Count - max} more");
-        return lines;
-    }
 
     /// <summary>
     /// Whether <paramref name="repoDir"/> is a submodule's checkout by the .gitmodules of the project or of a

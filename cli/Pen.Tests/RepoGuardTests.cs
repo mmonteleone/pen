@@ -389,7 +389,7 @@ public class RepoGuardTests
     public void ListFirst_ListsUpToMax_ThenHowManyMore(int count, string expected)
     {
         var formatted = new List<int>();
-        var lines = RepoGuard.ListFirst(Enumerable.Range(0, count).ToList(), 3, i =>
+        var lines = CappedList.FormatLines(Enumerable.Range(0, count).ToList(), 3, i =>
         {
             formatted.Add(i);
             return $"i{i}";

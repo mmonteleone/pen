@@ -45,11 +45,11 @@ internal static class MaskMessages
             .Select(path => path.Name)
             .ToList();
         if (hidden.Count > 0)
-            parts.Add("hidden from the agent: " + JoinCapped(hidden));
+            parts.Add("hidden from the agent: " + CappedList.Join(hidden, MaxNamed));
         if (plan.Replacements.Count > 0)
         {
             var replaced = plan.Replacements.Select(replacement => Out.Field(replacement.Target.RelativePath));
-            parts.Add("replaced: " + JoinCapped([.. replaced]));
+            parts.Add("replaced: " + CappedList.Join([.. replaced], MaxNamed));
         }
         return parts.Count == 0 ? null : string.Join("; ", parts);
     }
@@ -91,13 +91,5 @@ internal static class MaskMessages
         if (docker && !plan.IsEmpty)
             warnings.Add(DockerWarning);
         return warnings;
-    }
-
-    /// <summary>Joins up to <see cref="MaxNamed"/> names with commas, then "and N more" for the rest.</summary>
-    private static string JoinCapped(IReadOnlyList<string> names)
-    {
-        if (names.Count <= MaxNamed)
-            return string.Join(", ", names);
-        return string.Join(", ", names.Take(MaxNamed)) + $" and {names.Count - MaxNamed} more";
     }
 }

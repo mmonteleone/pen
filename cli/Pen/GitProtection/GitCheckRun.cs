@@ -151,11 +151,8 @@ internal sealed class GitCheckRun
     {
         // The walk of the git dir and the prompt-hazard scan can both meet a worktrees dir, or an entry in one.
         var unlistable = _unlistable.Distinct(StringComparer.Ordinal).ToList();
-        var named = unlistable.Take(RepoGuard.MaxListed).Select(path => RepoGuard.FormatPath(_dir, path));
-        var text = "pen can't list these directories, so it can't see a repo inside one: " + string.Join(", ", named);
-        if (unlistable.Count > RepoGuard.MaxListed)
-            text += $" and {unlistable.Count - RepoGuard.MaxListed} more";
-        return text;
+        return "pen can't list these directories, so it can't see a repo inside one: " +
+            CappedList.Join(unlistable, RepoGuard.MaxListed, path => RepoGuard.FormatPath(_dir, path));
     }
 
     /// <summary>
