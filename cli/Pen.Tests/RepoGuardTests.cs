@@ -398,6 +398,19 @@ public class RepoGuardTests
         Assert.Equal(Enumerable.Range(0, Math.Min(count, 3)), formatted); // only those listed, once each, in order
     }
 
+    [Theory]
+    [InlineData(0, "")]
+    [InlineData(1, "i0")]
+    [InlineData(3, "i0, i1, i2")]
+    [InlineData(4, "i0, i1, i2 and 1 more")]
+    [InlineData(5, "i0, i1, i2 and 2 more")]
+    public void CappedListJoin_ListsUpToMax_ThenHowManyMore(int count, string expected)
+    {
+        var items = Enumerable.Range(0, count).Select(i => $"i{i}").ToList();
+        Assert.Equal(expected, CappedList.Join(items, 3));
+        Assert.Equal(expected, CappedList.Join(items, 3, item => item));
+    }
+
     [Fact]
     public void A_SymlinkedCommondirIsRefusedInAnyEntry()
     {

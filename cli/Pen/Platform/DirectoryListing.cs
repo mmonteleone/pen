@@ -14,6 +14,10 @@ internal static class DirectoryListing
     };
 
     /// <summary>Lists <paramref name="dir"/>'s entries without following a symlink among them.</summary>
+    /// <remarks>
+    /// Only the entries are left unfollowed: <paramref name="dir"/> itself is opened as named, so a symlink there is
+    /// followed. A caller that needs it not to be a link checks that itself, as <c>MaskPlanner.List</c> does.
+    /// </remarks>
     /// <returns>The entries, or null if the directory can't be listed.</returns>
     public static List<ListedEntry>? ReadOrNull(string dir)
     {

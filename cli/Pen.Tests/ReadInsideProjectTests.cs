@@ -7,6 +7,7 @@ namespace Pen.Tests;
 /// Native.ReadInsideProject reads a regular file below a root without following a symlink anywhere on the way, and
 /// refuses anything else, a FIFO included, without blocking.
 /// </summary>
+[Collection(nameof(LockAndProcessTests))] // counts this process's descriptors, so nothing else may open any
 public class ReadInsideProjectTests
 {
     private static void Run(string command, params string[] args)
@@ -21,6 +22,30 @@ public class ReadInsideProjectTests
         var task = Task.Factory.StartNew(() => Record.Exception(action), TaskCreationOptions.LongRunning);
         Assert.True(task.Wait(TimeSpan.FromSeconds(10)), "blocked: a FIFO was opened");
         return task.Result;
+    }
+
+    [Fact]
+    public void LeavesNoDescriptorOpenWhateverStepFails()
+    {
+        using var t = new TempDir();
+        t.Sub("real");
+        File.CreateSymbolicLink(Path.Combine(t.Path, "link"), Path.Combine(t.Path, "real"));
+        File.WriteAllText(Path.Combine(t.Path, "file"), "x");
+        File.WriteAllText(Path.Combine(t.Path, "real", "f"), "x");
+        string[] failing =
+        [
+            "missing/dir/f", "link/f", "real/link/f", "file/f", "real/f/g", "real/missing", "real", "a/b/c/d/e",
+        ];
+
+        static int Open() => Directory.GetFileSystemEntries("/dev/fd").Length;
+        foreach (var path in failing) // once first, so lazy initialisation isn't counted
+            Assert.ThrowsAny<IOException>(() => Native.ReadInsideProject(t.Path, path));
+        var before = Open();
+        for (var i = 0; i < 200; i++)
+            foreach (var path in failing)
+                Assert.ThrowsAny<IOException>(() => Native.ReadInsideProject(t.Path, path));
+
+        Assert.Equal(before, Open());
     }
 
     [Fact]
