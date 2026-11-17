@@ -327,13 +327,12 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// </exception>
     private Include ResolveInclude(string configFile, string value)
     {
-        var expanded = GitConfigFile.ExpandPath(value, hostHome);
-        var path = expanded.Refusal switch
+        var path = GitConfigFile.ExpandPath(value, hostHome) switch
         {
-            GitConfigFile.PathRefusal.None => expanded.Path!,
-            GitConfigFile.PathRefusal.NotUtf8 => throw new PenException($"{FormatPath(configFile)} includes a " +
-                "path that isn't valid UTF-8, so pen can't tell which file git would read: remove the include or " +
-                "rename the file, then rerun"),
+            GitConfigFile.ExpandedPath.Expanded expanded => expanded.Path,
+            GitConfigFile.ExpandedPath.Refused { Refusal: GitConfigFile.PathRefusal.NotUtf8 } =>
+                throw new PenException($"{FormatPath(configFile)} includes a path that isn't valid UTF-8, so " +
+                    "pen can't tell which file git would read: remove the include or rename the file, then rerun"),
             _ => throw new PenException($"{FormatPath(configFile)} includes {Out.Field(value)}, and " +
                 "pen can't resolve that form of path, so it can't tell which file git " +
                 "would read: write the path out in full or remove the include, then rerun"),

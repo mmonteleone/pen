@@ -22,9 +22,6 @@ internal static class GitConfigFile
     /// <summary>Why <see cref="ExpandPath"/> can't give the path a value names.</summary>
     internal enum PathRefusal
     {
-        /// <summary>Nothing: the path was expanded.</summary>
-        None,
-
         /// <summary>
         /// The value wasn't valid UTF-8: decoded, it has U+FFFD where git has other bytes, so it would name a
         /// different file from the one git reads.
@@ -35,10 +32,24 @@ internal static class GitConfigFile
         UnknownForm,
     }
 
-    /// <summary>A path value as git would expand it, or why Pen can't tell.</summary>
-    /// <param name="Path">The expanded path, or null with a <paramref name="Refusal"/>.</param>
-    /// <param name="Refusal">Why it can't be expanded, or <see cref="PathRefusal.None"/>.</param>
-    internal readonly record struct ExpandedPath(string? Path, PathRefusal Refusal);
+    /// <summary>
+    /// A path value as git would expand it (<see cref="Expanded"/>), or why Pen can't tell (<see cref="Refused"/>),
+    /// which are all there are.
+    /// </summary>
+    internal abstract record ExpandedPath
+    {
+        private ExpandedPath()
+        {
+        }
+
+        /// <summary>The path expanded.</summary>
+        /// <param name="Path">The expanded path.</param>
+        internal sealed record Expanded(string Path) : ExpandedPath;
+
+        /// <summary>A path Pen can't expand as git would.</summary>
+        /// <param name="Refusal">Why it can't be expanded.</param>
+        internal sealed record Refused(PathRefusal Refusal) : ExpandedPath;
+    }
 
     /// <summary>Parses the entries in <paramref name="text"/>.</summary>
     /// <returns>The entries, in file order.</returns>
@@ -141,13 +152,13 @@ internal static class GitConfigFile
     public static ExpandedPath ExpandPath(string value, string home)
     {
         if (value.Contains('\ufffd'))
-            return new(null, PathRefusal.NotUtf8);
+            return new ExpandedPath.Refused(PathRefusal.NotUtf8);
         if (value == "~" || value.StartsWith("~/", StringComparison.Ordinal))
-            return new(home + value[1..], PathRefusal.None);
+            return new ExpandedPath.Expanded(home + value[1..]);
         // ~user needs another user's home looked up; %(prefix) depends on how git was built.
         if (value.StartsWith('~') || value.StartsWith("%(prefix)/", StringComparison.Ordinal))
-            return new(null, PathRefusal.UnknownForm);
-        return new(value, PathRefusal.None);
+            return new ExpandedPath.Refused(PathRefusal.UnknownForm);
+        return new ExpandedPath.Expanded(value);
     }
 
     /// <summary>Whether <paramref name="value"/> is true as a git boolean.</summary>

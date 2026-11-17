@@ -147,7 +147,7 @@ public class GitConfigFileTests
     [InlineData("%(prefix)x", "%(prefix)x")]
     public void ExpandPath_ExpandsTheHome_AndLeavesOtherValuesAsTheyAre(string value, string expected) =>
         Assert.Equal(
-            new GitConfigFile.ExpandedPath(expected, GitConfigFile.PathRefusal.None),
+            new GitConfigFile.ExpandedPath.Expanded(expected),
             GitConfigFile.ExpandPath(value, "/home/u"));
 
     [Theory]
@@ -158,7 +158,7 @@ public class GitConfigFileTests
     [InlineData("%(prefix)/")]
     public void ExpandPath_RefusesAnotherUsersHomeAndThePrefix(string value) =>
         Assert.Equal(
-            new GitConfigFile.ExpandedPath(null, GitConfigFile.PathRefusal.UnknownForm),
+            new GitConfigFile.ExpandedPath.Refused(GitConfigFile.PathRefusal.UnknownForm),
             GitConfigFile.ExpandPath(value, "/home/u"));
 
     [Theory]
@@ -170,6 +170,6 @@ public class GitConfigFileTests
     [InlineData("\uFFFD")]
     public void ExpandPath_RefusesInvalidUtf8_BeforeAnythingElse(string value) =>
         Assert.Equal(
-            new GitConfigFile.ExpandedPath(null, GitConfigFile.PathRefusal.NotUtf8),
+            new GitConfigFile.ExpandedPath.Refused(GitConfigFile.PathRefusal.NotUtf8),
             GitConfigFile.ExpandPath(value, "/home/u"));
 }

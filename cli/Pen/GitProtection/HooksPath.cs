@@ -272,7 +272,7 @@ internal static class HooksPath
         var written = raw.StartsWith(Optional, StringComparison.Ordinal) ? raw[Optional.Length..] : raw;
         // HostEnv.Home is always absolute (HostEnv.FromProcess refuses anything else), so the rooted check
         // takes the expanded path as written.
-        if (GitConfigFile.ExpandPath(written, home).Path is not { } value)
+        if (GitConfigFile.ExpandPath(written, home) is not GitConfigFile.ExpandedPath.Expanded { Path: var value })
             return Place.Unknown;
         if (value.Length == 0)
             return LocatePath("/", project); // git looks for /pre-commit
@@ -491,7 +491,7 @@ internal static class HooksPath
         {
             // HostEnv.Home is always absolute (HostEnv.FromProcess refuses anything else), so the rooted check
             // takes the expanded path as written.
-            if (GitConfigFile.ExpandPath(value, home).Path is not { } path)
+            if (GitConfigFile.ExpandPath(value, home) is not GitConfigFile.ExpandedPath.Expanded { Path: var path })
                 return null;
             return Path.IsPathRooted(path) ? path : Path.Combine(Paths.GetParent(from), path);
         }
