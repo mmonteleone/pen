@@ -688,7 +688,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
             session.BuildComposeArgs("down", "-t", "1", "--remove-orphans"), env);
         startInfo.RedirectStandardOutput = startInfo.RedirectStandardError = true;
         ScrubComposeEnv(startInfo);
-        var down = Process.RunAndCaptureText(startInfo);
+        var down = Proc.CaptureText(startInfo);
         if (down.ExitStatus.ExitCode != 0)
         {
             Out.WriteLine($"stopping session {session.Id}'s stack failed: " +

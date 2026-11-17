@@ -452,7 +452,7 @@ internal sealed class AllowCommand(HostEnv host, StartDir startDir, RecipeCatalo
             session.BuildComposeArgs(["exec", "-T", "proxy", .. command]), env);
         startInfo.RedirectStandardOutput = startInfo.RedirectStandardError = true;
         Session.ScrubComposeEnv(startInfo);
-        return Process.RunAndCaptureText(startInfo);
+        return Proc.CaptureText(startInfo);
     }
 
     /// <summary>What a running session gets now, merged from the config files.</summary>
