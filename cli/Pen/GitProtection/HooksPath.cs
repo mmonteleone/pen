@@ -68,7 +68,7 @@ internal static class HooksPath
     /// </remarks>
     internal static string? FindWarning(Project project, HostEnv host, Func<string, string?> env)
     {
-        var walk = new Walk(host.Home);
+        var walk = new Walk(new GitConfigIncludes(host.Home));
         ReadUserConfig(project, host.Home, env, walk);
 
         // A plain directory has no hooks of its own to run, so a relative value says nothing here, but one that
@@ -81,7 +81,7 @@ internal static class HooksPath
 
         var config = Path.Combine(common, "config");
         walk.Read(config, conditional: false);
-        var commonEntries = GitConfigFile.TryParseFile(config, out var parsed, out _) ? parsed : null;
+        var commonEntries = walk.ReadEntries(config);
         var gitDir = project.IsWorktree ? RepoScan.ReadWorktreeEntry(project.GitDir) : common;
         if (gitDir is null)
         {
@@ -113,7 +113,7 @@ internal static class HooksPath
     private static WorkTreeSetting ReadWorkTree(
         Project project,
         string gitDir,
-        List<GitConfigFile.Entry>? commonEntries,
+        IReadOnlyList<GitConfigFile.Entry>? commonEntries,
         Walk walk)
     {
         var workTree = project.IsWorktree ? null : FindLastWorkTree(commonEntries);
@@ -125,7 +125,7 @@ internal static class HooksPath
         {
             var worktreeFile = Path.Combine(gitDir, "config.worktree");
             walk.Read(worktreeFile, conditional: false);
-            var own = GitConfigFile.TryParseFile(worktreeFile, out var parsed, out _) ? parsed : null;
+            var own = walk.ReadEntries(worktreeFile);
             known &= own is not null;
             workTree = FindLastWorkTree(own) ?? workTree;
         }
@@ -203,7 +203,7 @@ internal static class HooksPath
         value.Length == 0 || value == "/dev/null" ? null : Path.Combine(project.Dir, value);
 
     /// <summary>Finds the last core.worktree in a file's own entries, not its includes.</summary>
-    private static string? FindLastWorkTree(List<GitConfigFile.Entry>? entries) =>
+    private static string? FindLastWorkTree(IReadOnlyList<GitConfigFile.Entry>? entries) =>
         entries is null ? null : GitConfigFile.FindLast(entries, "core", "worktree");
 
     /// <summary>
@@ -403,7 +403,7 @@ internal static class HooksPath
     /// What can't be decided here counts as a maybe, such as a conditional include that may apply to another branch
     /// or worktree. A definite value replaces the values before it, and a maybe joins them.
     /// </remarks>
-    private sealed class Walk(string home)
+    private sealed class Walk(GitConfigIncludes includes)
     {
         private int _files;
 
@@ -425,6 +425,10 @@ internal static class HooksPath
         /// </summary>
         public void Read(string? file, bool conditional) => Read(file, conditional, 0);
 
+        /// <summary>Gives a config file's own entries, not its includes', or null if it can't be read.</summary>
+        public IReadOnlyList<GitConfigFile.Entry>? ReadEntries(string file) =>
+            includes.TryRead(file, out var lines, out _) ? [.. lines.Select(line => line.Entry)] : null;
+
         /// <summary>Reads a config file at <paramref name="depth"/> includes down, and the files it includes.</summary>
         private void Read(string? file, bool conditional, int depth)
         {
@@ -432,27 +436,28 @@ internal static class HooksPath
                 return;
             // Each read counts, since a file included twice applies twice: without a limit, includes could fan out
             // exponentially in the depth.
-            if (depth > MaxIncludeDepth || ++_files > RepoGuard.MaxIncludeFiles)
+            if (depth > MaxIncludeDepth || ++_files > GitConfigIncludes.MaxFiles)
             {
                 Found.Add(new(null, file, "its config includes go too deep or too wide to follow"));
                 return;
             }
 
-            if (!GitConfigFile.TryParseFile(file, out var entries, out _))
+            if (!includes.TryRead(file, out var lines, out _))
             {
                 Found.Add(new(null, file, $"it can't read the config file {Out.Field(file)}"));
                 return;
             }
 
-            ReadEntries(file, entries, conditional, depth);
+            ReadLines(file, lines, conditional, depth);
         }
 
         /// <summary>
-        /// Takes in a config file's entries: its hooksPath values and the files it includes, in order.
+        /// Takes in a config file's entries: its hooksPath values and the files it includes, in order. The include
+        /// forms git ignores (<see cref="IncludeReading.Never"/>) are ignored here too.
         /// </summary>
-        private void ReadEntries(string file, List<GitConfigFile.Entry> entries, bool conditional, int depth)
+        private void ReadLines(string file, IReadOnlyList<ConfigLine> lines, bool conditional, int depth)
         {
-            foreach (var entry in entries)
+            foreach (var (entry, include) in lines)
             {
                 if (entry.Section == "core" && entry.Subsection is null && entry.Key == "hookspath")
                 {
@@ -460,33 +465,19 @@ internal static class HooksPath
                         Found.Clear();
                     Found.Add(new(entry.Value, file));
                 }
-                else if (entry.Key == "path" && entry.Value.Length > 0
-                    && ((entry.Section == "include" && entry.Subsection is null)
-                        || (entry.Section == "includeif" && entry.Subsection is not null)))
+                else if (include is { Reading: not IncludeReading.Never })
                 {
-                    var included = ResolveInclude(entry.Value, file);
-                    if (included is null)
+                    if (include.Target is GitConfigFile.ExpandedPath.Expanded { Path: var included })
                     {
-                        Found.Add(new(null, file, "it can't resolve the include " +
-                            $"{PausedGit.FormatLine(entry.Value)} in {Out.Field(file)}"));
+                        Read(included, conditional || include.Reading == IncludeReading.Maybe, depth + 1);
                     }
                     else
                     {
-                        Read(included, conditional || entry.Section == "includeif", depth + 1);
+                        Found.Add(new(null, file, "it can't resolve the include " +
+                            $"{PausedGit.FormatLine(include.Value)} in {Out.Field(file)}"));
                     }
                 }
             }
-        }
-
-        /// <summary>Resolves the file an include names.</summary>
-        /// <returns>The file, or null if Pen can't tell.</returns>
-        private string? ResolveInclude(string value, string from)
-        {
-            // HostEnv.Home is always absolute (HostEnv.FromProcess refuses anything else), so the rooted check
-            // takes the expanded path as written.
-            if (GitConfigFile.ExpandPath(value, home) is not GitConfigFile.ExpandedPath.Expanded { Path: var path })
-                return null;
-            return Path.IsPathRooted(path) ? path : Path.Combine(Paths.GetParent(from), path);
         }
     }
 }

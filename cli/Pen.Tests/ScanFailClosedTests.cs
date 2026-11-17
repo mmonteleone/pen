@@ -410,7 +410,7 @@ public class ScanFailClosedTests
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
         var file = Path.Combine(repo, ".git", "config.worktree");
-        File.WriteAllText(file, Inc(Enumerable.Range(0, RepoGuard.MaxIncludeFiles + 1).Select(i => $"f{i}.inc").ToArray()));
+        File.WriteAllText(file, Inc(Enumerable.Range(0, GitConfigIncludes.MaxFiles + 1).Select(i => $"f{i}.inc").ToArray()));
         var e = Within10s(() => Assert.Throws<PenException>(() => RepoGuard.EnsureMountTargetsAndPlan(repo, t.Path)));
         Assert.Contains(".git/config.worktree", e.Message);
         Assert.Contains("remove it", e.Message);

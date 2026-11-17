@@ -26,6 +26,9 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// <summary>The mounts so far, in the order they're planned; a path can be in it more than once.</summary>
     private readonly List<Mount> _mounts = [];
 
+    /// <summary>The config files this run reads, each once however many walks reach it.</summary>
+    private readonly GitConfigIncludes _includes = new(hostHome);
+
     /// <summary>
     /// Creates what must exist to be mounted, if it's missing, and plans the project's mounts. Call it once per
     /// planner.
@@ -244,10 +247,10 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// </para>
     /// <para>
     /// The agent can write some of these files, so each is walked only once, and a walk over
-    /// <see cref="RepoGuard.MaxIncludeFiles"/> files is refused: cycles and fan-outs would otherwise take time
-    /// exponential in git's depth limit of 10. Depth itself isn't limited, since a file first met deep down mustn't
-    /// lose what it includes when it's met again higher up. Files are keyed by path as written, not real path: a
-    /// relative include resolves from there. A ~user or %(prefix) path is refused: Pen can't tell where it leads.
+    /// <see cref="GitConfigIncludes.MaxFiles"/> files is refused. Depth itself isn't limited, since a file first met
+    /// deep down mustn't lose what it includes when it's met again higher up. Files are keyed by path as written, not
+    /// real path (<see cref="IncludeLocation.Path"/>): a relative include resolves from there. A ~user or %(prefix)
+    /// path is refused: Pen can't tell where it leads.
     /// </para>
     /// </remarks>
     private bool AddIncludes(string common, string configFile)
@@ -262,80 +265,71 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// <paramref name="visited"/>.
     /// </summary>
     /// <returns>Whether it or any file it leads to sets extensions.worktreeConfig.</returns>
+    /// <remarks>
+    /// Every include is followed, whatever its <see cref="IncludeReading"/>: conditional includes for every worktree
+    /// and branch, and the forms git ignores too, conservatively.
+    /// </remarks>
     private bool FollowIncludes(string common, string configFile, HashSet<string> visited)
     {
+        if (!_includes.TryRead(configFile, out var lines, out var error))
+            throw new PenException(error);
         var worktreeConfig = false;
-        foreach (var entry in GitConfigFile.ParseFile(configFile))
+        foreach (var (entry, include) in lines)
         {
             if (entry.Section == "extensions" && entry.Key == "worktreeconfig" && GitConfigFile.IsTrue(entry.Value))
                 worktreeConfig = true;
-            if (entry.Section is not ("include" or "includeif") || entry.Key != "path" || entry.Value.Length == 0)
+            if (include is null)
                 continue;
-            var include = ResolveInclude(configFile, entry.Value);
-            if (!visited.Add(include.Path))
+            var location = Locate(configFile, include);
+            if (!visited.Add(location.Path))
                 continue;
-            if (visited.Count > RepoGuard.MaxIncludeFiles)
+            if (visited.Count > GitConfigIncludes.MaxFiles)
             {
                 throw new PenException($"{FormatPath(configFile)} takes git config includes past " +
-                    $"{RepoGuard.MaxIncludeFiles} files, more than pen will follow: remove it or the includes in it, " +
-                    "then rerun");
+                    $"{GitConfigIncludes.MaxFiles} files, more than pen will follow: remove it or the includes in " +
+                    "it, then rerun");
             }
 
-            if (include.Written != include.Real
-                && (PathChecks.IsInside(dir, include.Written) || PathChecks.IsInside(common, include.Written)))
+            if (location.Written != location.Real
+                && (PathChecks.IsInside(dir, location.Written) || PathChecks.IsInside(common, location.Written)))
             {
-                throw new PenException($"{FormatPath(configFile)} includes {FormatPath(include.Written)} through " +
+                throw new PenException($"{FormatPath(configFile)} includes {FormatPath(location.Written)} through " +
                     "a symlink, which pen doesn't support: the agent could redirect the include");
             }
 
-            if (Directory.Exists(include.Real))
+            if (Directory.Exists(location.Real))
                 continue; // git ignores a directory
-            ProtectIncludedFile(common, configFile, include.Real);
+            ProtectIncludedFile(common, configFile, location.Real);
             // Even host-only includes can enable worktreeConfig or include another file that the sandbox can write.
-            // Conditional includes are followed conservatively, for every worktree and branch.
-            worktreeConfig |= FollowIncludes(common, include.Path, visited);
+            worktreeConfig |= FollowIncludes(common, location.Path, visited);
         }
         return worktreeConfig;
     }
 
-    /// <summary>A file an include names.</summary>
-    /// <param name="Path">
-    /// The path git reads it by, absolute: as written, or normalized when no symlink makes the two differ. It keys the
-    /// walk, and a relative include in it resolves from there.
-    /// </param>
-    /// <param name="Written">The full path as written, with "." and ".." taken lexically.</param>
-    /// <param name="Real">The real path, as the OS walks it.</param>
-    private sealed record Include(string Path, string Written, string Real);
-
-    /// <summary>Resolves the file an include in <paramref name="configFile"/> names.</summary>
+    /// <summary>Finds the file an include in <paramref name="configFile"/> names.</summary>
     /// <exception cref="PenException">
     /// The path isn't valid UTF-8, is a form Pen can't resolve, or can't be followed.
     /// </exception>
-    private Include ResolveInclude(string configFile, string value)
+    private IncludeLocation Locate(string configFile, Include include)
     {
-        var path = GitConfigFile.ExpandPath(value, hostHome) switch
+        var opened = include.Target switch
         {
             GitConfigFile.ExpandedPath.Expanded expanded => expanded.Path,
             GitConfigFile.ExpandedPath.Refused { Refusal: GitConfigFile.PathRefusal.NotUtf8 } =>
                 throw new PenException($"{FormatPath(configFile)} includes a path that isn't valid UTF-8, so " +
                     "pen can't tell which file git would read: remove the include or rename the file, then rerun"),
-            _ => throw new PenException($"{FormatPath(configFile)} includes {Out.Field(value)}, and " +
+            _ => throw new PenException($"{FormatPath(configFile)} includes {Out.Field(include.Value)}, and " +
                 "pen can't resolve that form of path, so it can't tell which file git " +
                 "would read: write the path out in full or remove the include, then rerun"),
         };
 
-        if (!Path.IsPathRooted(path))
-            path = Path.Combine(Paths.GetParent(configFile), path);
-
-        // As the OS walks it: ".." after a symlink is the parent of where that leads.
-        var written = Path.GetFullPath(path);
-        var real = HooksPath.WalkRealPath(path)
-            ?? throw new PenException($"{FormatPath(configFile)} includes " +
-                $"{FormatPath(written)}, and pen can't follow that path to the file git " +
+        if (!GitConfigIncludes.TryLocate(opened, out var location))
+        {
+            throw new PenException($"{FormatPath(configFile)} includes " +
+                $"{FormatPath(Path.GetFullPath(opened))}, and pen can't follow that path to the file git " +
                 "would read: fix its permissions or remove the include, then rerun");
-        if (real == written)
-            path = written; // no symlink to tell them apart, and a cycle then repeats one name
-        return new(path, written, real);
+        }
+        return location;
     }
 
     /// <summary>

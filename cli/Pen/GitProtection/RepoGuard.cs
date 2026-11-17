@@ -14,9 +14,6 @@ internal static class RepoGuard
     /// <summary>How many paths a message lists before "… and N more".</summary>
     internal const int MaxListed = 10;
 
-    /// <summary>How many config files one walk of includes follows before it's refused.</summary>
-    internal const int MaxIncludeFiles = 100;
-
     /// <summary>The warning that the repo's git dir may fold case.</summary>
     internal const string CaseWarning = "warning: this repo's git dir isn't known to be case-sensitive, " +
         "so read-only protection of single files in it may not hold: the agent could change .git/config " +

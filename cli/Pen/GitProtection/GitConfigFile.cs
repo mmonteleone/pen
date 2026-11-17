@@ -135,7 +135,7 @@ internal static class GitConfigFile
     /// <param name="key">The key, lowercased as <see cref="Entry.Key"/> holds it.</param>
     /// <param name="subsection">The subsection, matched exactly; null matches only entries outside one.</param>
     /// <returns>The value, or null if no entry matches.</returns>
-    public static string? FindLast(List<Entry> entries, string section, string key, string? subsection = null)
+    public static string? FindLast(IReadOnlyList<Entry> entries, string section, string key, string? subsection = null)
     {
         for (var i = entries.Count - 1; i >= 0; i--)
         {
