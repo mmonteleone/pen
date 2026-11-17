@@ -5,7 +5,6 @@ using Pen.Platform;
 using Pen.Projects;
 using Pen.Sessions;
 using Pen.Tools;
-using Pen.Trust;
 
 // Pen drives Docker on macOS and Linux only.
 [assembly: System.Runtime.Versioning.UnsupportedOSPlatform("windows")]

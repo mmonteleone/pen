@@ -1,4 +1,4 @@
-namespace Pen.Trust;
+namespace Pen.Platform;
 
 /// <summary>Where a yes or no comes from, and whether a person can be there to give it.</summary>
 /// <param name="Input">Where the answer is read from.</param>

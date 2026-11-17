@@ -1,7 +1,6 @@
 using Pen.Platform;
 using Pen.Projects;
 using Pen.Sessions;
-using Pen.Trust;
 
 namespace Pen.Commands;
 
