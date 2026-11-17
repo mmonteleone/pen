@@ -246,8 +246,9 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// The project and the project's git dir are what the sandbox can write, whichever repo in the git dir the
     /// including file belongs to. The agent could write a file there and host git would read it as config, so each is
     /// mounted read-only too. A missing one inside the git dir is created empty; a missing one in the working tree is
-    /// refused, since creating it would add a file to the project. A path that wasn't valid UTF-8 is refused: decoded,
-    /// it has U+FFFD where git has other bytes, so Pen would protect a different file from the one git reads.
+    /// refused, since creating it would add a file to the project. A directory there is refused: it isn't mounted, so
+    /// the agent could replace it with a file. A path that wasn't valid UTF-8 is refused: decoded, it has U+FFFD where
+    /// git has other bytes, so Pen would protect a different file from the one git reads.
     /// </para>
     /// <para>
     /// The agent can write some of these files, so each is walked only once, and a walk over
@@ -294,15 +295,26 @@ internal sealed class MountPlanner(string dir, string hostHome)
                     "it, then rerun");
             }
 
-            if (location.Written != location.Real
-                && (PathChecks.IsInside(dir, location.Written) || PathChecks.IsInside(common, location.Written)))
+            if (location.Written != location.Real && IsWritable(common, location.Written))
             {
                 throw new PenException($"{FormatPath(configFile)} includes {FormatPath(location.Written)} through " +
                     "a symlink, which pen doesn't support: the agent could redirect the include");
             }
 
             if (Directory.Exists(location.Real))
-                continue; // git ignores a directory
+            {
+                // Git fails on a directory when it reaches the include, so one outside the sandbox is left alone. One
+                // the sandbox can write isn't mounted, so the agent could replace it with a file git would read: for a
+                // conditional include, once the agent makes the condition hold (by switching branch, say).
+                if (IsWritable(common, location.Real))
+                {
+                    throw new PenException($"{FormatPath(configFile)} includes {FormatPath(location.Real)}, " +
+                        "which is a directory: git can't read it as config, and the agent could replace it with a " +
+                        "file that git on this machine would read. Point the include at a file or remove it, then " +
+                        "rerun");
+                }
+                continue;
+            }
             ProtectIncludedFile(common, configFile, location.Real);
             // Even host-only includes can enable worktreeConfig or include another file that the sandbox can write.
             worktreeConfig |= FollowIncludes(common, location.Path, visited);
@@ -375,14 +387,20 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// </summary>
     private void ProtectIncludedFile(string common, string configFile, string real)
     {
-        var writable = PathChecks.IsInside(dir, real) || PathChecks.IsInside(common, real);
-        if (!writable)
+        if (!IsWritable(common, real))
             return;
         if (!File.Exists(real))
             CreateIncludedFile(common, configFile, real);
         RequireNotLink(dir, real);
         _mounts.Add(new(real, ReadOnly: true, Verify: true));
     }
+
+    /// <summary>
+    /// Whether the sandbox can write <paramref name="path"/>: it's in the project or <paramref name="common"/>, the
+    /// project's git dir.
+    /// </summary>
+    private bool IsWritable(string common, string path) =>
+        PathChecks.IsInside(dir, path) || PathChecks.IsInside(common, path);
 
     /// <summary>Creates a missing included file in the git dir empty, so that it can be mounted.</summary>
     /// <exception cref="PenException">

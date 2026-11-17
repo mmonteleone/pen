@@ -620,6 +620,90 @@ public class RepoGuardTests
         Assert.Contains("through a symlink", Assert.Throws<PenException>(() => Mounts(repo)).Message);
     }
 
+    // Git fails on a directory, but a conditional include doesn't reach it until the condition holds. Inside the
+    // sandbox it isn't mounted, so the agent could replace it with a config file and make the condition hold.
+    [Theory]
+    [InlineData(".git/incdir", "[include]\n\tpath = incdir\n", ".git/incdir")]
+    [InlineData(".git/incdir", "[includeIf \"onbranch:feature\"]\n\tpath = incdir\n", ".git/incdir")]
+    [InlineData("incdir", "[include]\n\tpath = ../incdir\n", "incdir")]
+    [InlineData("incdir", "[includeIf \"onbranch:feature\"]\n\tpath = ../incdir\n", "incdir")]
+    [InlineData(".git/incdir", "[include \"x\"]\n\tpath = incdir\n", ".git/incdir")]
+    [InlineData("incdir", "[includeIf]\n\tpath = ../incdir\n", "incdir")]
+    [InlineData(".git/hooks", "[include]\n\tpath = hooks\n", ".git/hooks")]
+    [InlineData(".git", "[include]\n\tpath = .\n", ".git")]
+    public void AnIncludeOfADirectoryTheSandboxCanWrite_IsRefused(string made, string text, string shown)
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Directory.CreateDirectory(Path.Combine(repo, made));
+        File.AppendAllText(Path.Combine(repo, ".git", "config"), text);
+        var msg = Assert.Throws<PenException>(() => Mounts(repo)).Message;
+        Assert.Equal($".git/config includes {shown}, which is a directory: git can't read it as config, and the " +
+            "agent could replace it with a file that git on this machine would read. Point the include at a file or " +
+            "remove it, then rerun", msg);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnIncludedFilesIncludeOfADirectory_IsRefused(bool worktreeConfig)
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Directory.CreateDirectory(Path.Combine(repo, "incdir"));
+        File.WriteAllText(Path.Combine(repo, ".git", "first.inc"), "[includeIf \"onbranch:feature\"]\n\tpath = ../incdir\n");
+        File.WriteAllText(Path.Combine(repo, ".git", worktreeConfig ? "config.worktree" : "config"),
+            "[include]\n\tpath = first.inc\n");
+        Assert.Contains(".git/first.inc includes incdir, which is a directory",
+            Assert.Throws<PenException>(() => Mounts(repo)).Message);
+    }
+
+    [Fact]
+    public void ALinkedWorktreesIncludeOfADirectoryInTheCommonDir_IsRefused()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        var wt = Path.Combine(t.Path, "wt");
+        Git.Run(repo, "worktree", "add", "-q", wt);
+        Directory.CreateDirectory(Path.Combine(repo, ".git", "incdir"));
+        Git.Run(repo, "config", "includeIf.onbranch:feature.path", "incdir");
+        var msg = Assert.Throws<PenException>(() => Mounts(wt)).Message;
+        Assert.Contains($"includes {Path.Combine(repo, ".git", "incdir")}, which is a directory", msg);
+    }
+
+    [Fact]
+    public void AnIncludeOfAWritableDirectoryThroughASymlinkOutside_IsRefusedByWhereItLeads()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Directory.CreateDirectory(Path.Combine(repo, "incdir"));
+        var link = Path.Combine(t.Sub("outside"), "link");
+        Directory.CreateSymbolicLink(link, Path.Combine(repo, "incdir"));
+        Git.Run(repo, "config", "includeIf.onbranch:feature.path", link);
+        Assert.Contains("includes incdir, which is a directory", Assert.Throws<PenException>(() => Mounts(repo)).Message);
+    }
+
+    // The sandbox can't write there, so nothing can replace it: git fails on it whenever it reaches the include, as
+    // it would without Pen.
+    [Fact]
+    public void AnIncludeOfADirectoryOutsideTheSandbox_IsLeftAlone()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        var outside = t.Sub("outside", "incdir");
+        Git.Run(repo, "config", "includeIf.onbranch:feature.path", outside);
+        var wt = Path.Combine(t.Path, "wt");
+        Git.Run(repo, "worktree", "add", "-q", wt);
+        // A linked worktree's sandbox doesn't hold the main checkout's working tree.
+        var mainTree = Path.Combine(repo, "incdir");
+        Directory.CreateDirectory(mainTree);
+        Git.Run(repo, "config", "--add", "includeIf.onbranch:other.path", mainTree);
+        var m = Mounts(wt);
+        Assert.DoesNotContain(m, x => x.Item1.Contains("incdir"));
+        Assert.True(Directory.Exists(outside));
+        Assert.True(Directory.Exists(mainTree));
+    }
+
     [Fact]
     public void ComposeOverrideQuotesPathsAndEscapesDollars()
     {
