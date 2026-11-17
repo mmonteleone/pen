@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using Pen.Platform;
 using Pen.Sessions;
@@ -37,6 +38,10 @@ internal static class GitCheckWording
                 case Quarantined.Moved renamed:
                     text.Append(" → ").Append(PathChecks.FormatPath(dir, renamed.To));
                     break;
+                case Quarantined.Failed:
+                    break;
+                default:
+                    throw new UnreachableException();
             }
             text.AppendLine().Append("      ").AppendLine(quarantined.Why);
         }
@@ -55,6 +60,10 @@ internal static class GitCheckWording
                     case Quarantined.Moved renamed:
                         AppendMoveBackCommand(text, renamed);
                         break;
+                    case Quarantined.Failed:
+                        break;
+                    default:
+                        throw new UnreachableException();
                 }
             }
         }

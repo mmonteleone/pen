@@ -509,7 +509,7 @@ public class ScanFailClosedTests
         var check = GitCheck.RunAtSessionEnd(repo, session);
 
         Assert.NotNull(check.Failure);
-        Assert.Contains(check.Moved, q => q.From == foo && q is not Quarantined.Moved);
+        Assert.Contains(check.Moved, q => q.From == foo && q is Quarantined.Failed);
         Assert.Contains(check.Moved, q => q.From == Path.Combine(repo, "co", ".git") && q is Quarantined.Moved);
     }
 }

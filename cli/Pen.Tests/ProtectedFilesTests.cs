@@ -635,7 +635,7 @@ public class ProtectedFilesTests
         {
             var check = End(repo, s);
             Assert.NotNull(check.Failure);
-            Assert.Contains(check.Moved, q => q is not Quarantined.Moved && q.Why.Contains("COULD NOT RESTORE", StringComparison.Ordinal));
+            Assert.Contains(check.Moved, q => q is Quarantined.Failed && q.Why.Contains("COULD NOT RESTORE", StringComparison.Ordinal));
         }
         finally { File.SetUnixFileMode(sub, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
     }
@@ -655,7 +655,7 @@ public class ProtectedFilesTests
         var check = End(repo, s);
 
         Assert.NotNull(check.Failure);
-        Assert.Contains(check.Moved, q => q.From == config && q is not Quarantined.Moved);
+        Assert.Contains(check.Moved, q => q.From == config && q is Quarantined.Failed);
         Assert.True(File.Exists(Path.Combine(git, "commondir" + GitQuarantine.Suffix)));
     }
 

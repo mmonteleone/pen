@@ -1023,7 +1023,7 @@ public class PausedGitTests
         var check = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
 
         Assert.NotNull(check.Failure); // pen sign can't change modes while other sessions run, so it stops here
-        Assert.Contains(check.Moved, q => q is not Quarantined.Moved);
+        Assert.Contains(check.Moved, q => q is Quarantined.Failed);
         var warning = CapturingStderr(() => GitCheckReport.Print(repo, check));
         Assert.Contains("COULD NOT MOVE IT", warning);
         Assert.Contains("git wasn't checked: don't run git here", warning);
