@@ -27,9 +27,6 @@ internal static class CappedList
         return items.Count > max ? $"{listed} and {items.Count - max} more" : listed;
     }
 
-    /// <summary>
-    /// Joins the first <paramref name="max"/> of <paramref name="items"/> with commas, then " and N more" if any
-    /// weren't.
-    /// </summary>
+    /// <summary>Joins strings as <see cref="Join{T}"/> does, each as it is.</summary>
     public static string Join(IReadOnlyCollection<string> items, int max) => Join(items, max, item => item);
 }

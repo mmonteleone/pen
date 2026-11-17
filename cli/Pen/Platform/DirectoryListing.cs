@@ -36,7 +36,7 @@ internal static class DirectoryListing
 }
 
 /// <summary>One name in a directory listing, as the listing reports it (no symlink followed).</summary>
-/// <param name="Name">The name, with U+FFFD in place of bytes that aren't valid UTF-8.</param>
-/// <param name="IsDirectory">Whether it's a directory, or a symlink to one.</param>
-/// <param name="IsLink">Whether it's a symlink.</param>
+/// <remarks>
+/// Name has U+FFFD in place of bytes that aren't valid UTF-8. IsDirectory is set for a symlink to a directory too.
+/// </remarks>
 internal readonly record struct ListedEntry(string Name, bool IsDirectory, bool IsLink);

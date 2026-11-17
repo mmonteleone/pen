@@ -13,8 +13,10 @@ internal static class StrictUtf8
     public static readonly UTF8Encoding Encoding =
         new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
-    /// <summary>Decodes <paramref name="bytes"/> as UTF-8.</summary>
-    /// <returns>The text, or null if the bytes aren't valid UTF-8, so no text names them exactly.</returns>
+    /// <summary>
+    /// Decodes <paramref name="bytes"/> as UTF-8, giving null if they aren't valid UTF-8, so no text names them
+    /// exactly.
+    /// </summary>
     public static string? DecodeOrNull(ReadOnlySpan<byte> bytes)
     {
         try
