@@ -31,10 +31,10 @@ internal enum IncludeReading
 /// directory of the including file's path as it was named, so the OS resolves ".." physically after a symlink; or why
 /// Pen can't tell.
 /// </param>
-internal sealed record Include(IncludeReading Reading, string Value, GitConfigFile.ExpandedPath Target);
+internal sealed record ConfigInclude(IncludeReading Reading, string Value, GitConfigFile.ExpandedPath Target);
 
 /// <summary>One entry of a config file, in file order, with the include it makes if it's an include entry.</summary>
-internal readonly record struct ConfigLine(GitConfigFile.Entry Entry, Include? Include);
+internal readonly record struct ConfigLine(GitConfigFile.Entry Entry, ConfigInclude? Include);
 
 /// <summary>
 /// The git config files reachable through include.path and includeIf.*.path, read directly (never by running git,
@@ -49,6 +49,12 @@ internal readonly record struct ConfigLine(GitConfigFile.Entry Entry, Include? I
 /// <para>
 /// The agent can write some of these files, so a walk is capped at <see cref="MaxFiles"/> files: cycles and fan-outs
 /// would otherwise take time exponential in git's depth limit of 10.
+/// </para>
+/// <para>
+/// The cache never sees a file change, so an instance must not outlive one mount planning run or one hooksPath check:
+/// the files can change between sessions. Within a run, every walk shares what the first one read. That holds because
+/// Pen only ever creates a config file empty, where it was missing (an included file, config.worktree, the config
+/// itself), and a missing file and an empty one parse the same (no lines).
 /// </para>
 /// </remarks>
 internal sealed class GitConfigIncludes(string home)
@@ -90,7 +96,7 @@ internal sealed class GitConfigIncludes(string home)
     /// always absolute (HostEnv.FromProcess refuses anything else), so the rooted check takes the expanded path as
     /// written.
     /// </remarks>
-    private Include? Match(string from, GitConfigFile.Entry entry)
+    private ConfigInclude? Match(string from, GitConfigFile.Entry entry)
     {
         if (entry.Section is not ("include" or "includeif") || entry.Key != "path" || entry.Value.Length == 0)
             return null;

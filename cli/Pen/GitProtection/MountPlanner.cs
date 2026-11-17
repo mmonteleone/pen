@@ -27,7 +27,10 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// <summary>The mounts so far, in the order they're planned; a path can be in it more than once.</summary>
     private readonly List<Mount> _mounts = [];
 
-    /// <summary>The config files this run reads, each once however many walks reach it.</summary>
+    /// <summary>
+    /// The config files this run reads, each once however many walks reach it. It lives only as long as the planner,
+    /// which plans once, since the files can change before the next session.
+    /// </summary>
     private readonly GitConfigIncludes _includes = new(hostHome);
 
     /// <summary>
@@ -311,7 +314,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// <exception cref="PenException">
     /// The path isn't valid UTF-8, is a form Pen can't resolve, or can't be followed.
     /// </exception>
-    private IncludeLocation Locate(string configFile, Include include)
+    private IncludeLocation Locate(string configFile, ConfigInclude include)
     {
         var opened = include.Target switch
         {

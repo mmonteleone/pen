@@ -497,6 +497,42 @@ public class RepoGuardTests
         Assert.Contains("includes shared.gitconfig, which doesn't exist", msg);
     }
 
+    // Git ignores these forms, but they're followed anyway, conservatively.
+    [Theory]
+    [InlineData("[include \"x\"]\n\tpath = inc\n")]
+    [InlineData("[include.x]\n\tpath = inc\n")]
+    [InlineData("[includeIf]\n\tpath = inc\n")]
+    public void AnIncludeFormGitIgnores_IsStillMountedReadOnlyAndVerified(string text)
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        File.AppendAllText(Path.Combine(repo, ".git", "config"), text);
+        var mounts = RepoGuard.EnsureMountTargetsAndPlan(repo, "/nonexistent-home");
+        Assert.Contains(mounts, m => m.Path == Path.Combine(repo, ".git", "inc") && m.ReadOnly && m.Verify);
+        Assert.True(File.Exists(Path.Combine(repo, ".git", "inc")));
+    }
+
+    [Fact]
+    public void AMissingIncludeInAFormGitIgnores_IsRefused()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        File.AppendAllText(Path.Combine(repo, ".git", "config"), "[includeIf]\n\tpath = ../missing.inc\n");
+        var msg = Assert.Throws<PenException>(() => Mounts(repo)).Message;
+        Assert.Contains("includes missing.inc, which doesn't exist", msg);
+    }
+
+    [Fact]
+    public void AnIncludeFormGitIgnores_CanEnableWorktreeConfig()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        File.WriteAllText(Path.Combine(repo, ".git", "inc"), "[extensions]\n\tworktreeConfig = true\n");
+        File.AppendAllText(Path.Combine(repo, ".git", "config"), "[include \"x\"]\n\tpath = inc\n");
+        Assert.Contains((".git/config.worktree", true), Mounts(repo));
+        Assert.True(File.Exists(Path.Combine(repo, ".git", "config.worktree")));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
