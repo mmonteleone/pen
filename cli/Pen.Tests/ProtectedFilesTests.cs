@@ -413,10 +413,10 @@ public class ProtectedFilesTests
         Assert.Equal(mode, File.GetUnixFileMode(config));
         var q = Assert.Single(check.Moved);
         Assert.Equal(config, q.From);
-        Assert.Equal(config + GitCheck.Suffix, q.To);
+        Assert.Equal(config + GitQuarantine.Suffix, q.To);
         Assert.Equal(Binary, File.ReadAllBytes(q.To));
         Assert.Equal(Rw, File.GetUnixFileMode(q.To));
-        Assert.Contains("mv ", GitCheck.Warning(repo, check.Moved));
+        Assert.Contains("mv ", GitCheckWording.Warning(repo, check.Moved));
     }
 
     [Theory]
@@ -472,7 +472,7 @@ public class ProtectedFilesTests
         Assert.Null(check.Failure);
         Assert.False(PathChecks.IsLink(config));
         Assert.Equal(original, File.ReadAllBytes(config));
-        Assert.True(PathChecks.IsLink(config + GitCheck.Suffix));
+        Assert.True(PathChecks.IsLink(config + GitQuarantine.Suffix));
         if (dangling) Assert.False(File.Exists(target));
         else Assert.Equal("the agent's target", File.ReadAllText(target));
     }
@@ -506,7 +506,7 @@ public class ProtectedFilesTests
         var check = End(repo, s);
         Assert.Null(check.Failure);
         Assert.Equal(original, File.ReadAllBytes(config));
-        Assert.True(Directory.Exists(Path.Combine(config + GitCheck.Suffix, "inside")));
+        Assert.True(Directory.Exists(Path.Combine(config + GitQuarantine.Suffix, "inside")));
     }
 
     [Fact]
@@ -523,7 +523,7 @@ public class ProtectedFilesTests
         AssertIn10s(() => check = End(repo, s));
         Assert.Null(check!.Failure);
         Assert.Equal(original, File.ReadAllBytes(config));
-        Assert.True(File.Exists(config + GitCheck.Suffix));
+        Assert.True(File.Exists(config + GitQuarantine.Suffix));
     }
 
     [Fact]
@@ -539,7 +539,7 @@ public class ProtectedFilesTests
         AssertIn10s(() => check = End(repo, s));
         Assert.Null(check!.Failure);
         Assert.Equal(original, File.ReadAllBytes(config));
-        Assert.Equal(1L << 40, new FileInfo(config + GitCheck.Suffix).Length);
+        Assert.Equal(1L << 40, new FileInfo(config + GitQuarantine.Suffix).Length);
     }
 
     [Theory]
@@ -556,7 +556,7 @@ public class ProtectedFilesTests
         File.AppendAllText(config, "[core]\n fsmonitor = /evil\n");
         File.SetUnixFileMode(config, (UnixFileMode)mode);
         var check = End(repo, s);
-        File.SetUnixFileMode(config + GitCheck.Suffix, Rw); // for clean-up
+        File.SetUnixFileMode(config + GitQuarantine.Suffix, Rw); // for clean-up
         Assert.Null(check.Failure);
         Assert.Equal(original, File.ReadAllBytes(config));
         Assert.Equal(was, File.GetUnixFileMode(config));
@@ -601,7 +601,7 @@ public class ProtectedFilesTests
         Assert.Equal("the user's keys", File.ReadAllText(victim));
         Assert.False(File.Exists(sub));
         Assert.Equal(sub, Assert.Single(check.Moved, q => q.From == sub).From);
-        Assert.True(PathChecks.IsLink(sub + GitCheck.Suffix));
+        Assert.True(PathChecks.IsLink(sub + GitQuarantine.Suffix));
     }
 
     [Fact]
@@ -656,7 +656,7 @@ public class ProtectedFilesTests
 
         Assert.NotNull(check.Failure);
         Assert.Contains(check.Moved, q => q.From == config && q.To.Length == 0);
-        Assert.True(File.Exists(Path.Combine(git, "commondir" + GitCheck.Suffix)));
+        Assert.True(File.Exists(Path.Combine(git, "commondir" + GitQuarantine.Suffix)));
     }
 
     [Theory]
@@ -673,7 +673,7 @@ public class ProtectedFilesTests
         File.WriteAllText(Path.Combine(git, "commondir"), "planted\n");
         var check = End(repo, s);
         Assert.NotNull(check.Failure);
-        Assert.True(File.Exists(Path.Combine(git, "commondir" + GitCheck.Suffix)));
+        Assert.True(File.Exists(Path.Combine(git, "commondir" + GitQuarantine.Suffix)));
     }
 
     [Fact]
@@ -746,8 +746,8 @@ public class ProtectedFilesTests
             Assert.Equal(original, File.ReadAllBytes(config));
             // The restore's entry first, then the sweep's; the rest of the check didn't run.
             Assert.Equal([config, msgnum], check.Moved.Select(q => q.From));
-            Assert.Equal(config + GitCheck.Suffix, check.Moved[0].To);
-            Assert.Equal(msgnum + GitCheck.Suffix, check.Moved[1].To);
+            Assert.Equal(config + GitQuarantine.Suffix, check.Moved[0].To);
+            Assert.Equal(msgnum + GitQuarantine.Suffix, check.Moved[1].To);
             Assert.Equal(git, Assert.Single(check.Opened).Path);
             Assert.Empty(check.Restored);
             Assert.Empty(check.RestoreBlocked);
@@ -1130,7 +1130,7 @@ public class ProtectedFilesTests
     public void TheWarningAndReport_NameWhatWasRestored()
     {
         var evil = "/p/.git/\u001b[2Jconfig";
-        var w = GitCheck.Warning("/p", [new(evil, evil + GitCheck.Suffix, "it changed")]);
+        var w = GitCheckWording.Warning("/p", [new(evil, evil + GitQuarantine.Suffix, "it changed")]);
         Assert.Contains("moved out of git's way", w);
         Assert.DoesNotContain('\u001b', w);
     }

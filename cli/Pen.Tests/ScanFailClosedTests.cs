@@ -91,7 +91,7 @@ public class ScanFailClosedTests
         var stderr = Console.Error;
         var captured = new StringWriter();
         Console.SetError(captured);
-        try { GitCheck.Report("/p", new CheckResult { Moved = [], Failure = null, Opened = opened }); }
+        try { GitCheckReport.Report("/p", new CheckResult { Moved = [], Failure = null, Opened = opened }); }
         finally { Console.SetError(stderr); }
         Assert.Contains("changed sub from mode 311 to 711", captured.ToString());
     }
@@ -306,11 +306,11 @@ public class ScanFailClosedTests
         var link = Path.Combine(t.Path, "link");
         File.CreateSymbolicLink(link, target);
         using var _ = new Chmod(target, Mode311);
-        Assert.False(GitCheck.TryOpen(link, write: false, out var opened));
+        Assert.False(FileModes.TryOpen(link, write: false, out var opened));
 
         Assert.Null(opened);
         Assert.Equal(Mode311, File.GetUnixFileMode(target));
-        Assert.True(GitCheck.TryOpen(target, write: false, out var reopened)); // the check above is what stopped it
+        Assert.True(FileModes.TryOpen(target, write: false, out var reopened)); // the check above is what stopped it
     }
 
     [Fact]
@@ -441,7 +441,7 @@ public class ScanFailClosedTests
     public void AnOpenDirectoryWithTheBitsAlreadySetRecordsNoChange()
     {
         using var t = new TempDir();
-        Assert.False(GitCheck.TryOpen(t.Sub("d"), write: false, out var opened));
+        Assert.False(FileModes.TryOpen(t.Sub("d"), write: false, out var opened));
         Assert.Null(opened);
     }
 
@@ -470,11 +470,11 @@ public class ScanFailClosedTests
         var foo = Path.Combine(t.Sub("repo", ".git", "modules"), "foo");
         File.CreateSymbolicLink(foo, t.Sub("elsewhere"));
 
-        Assert.Equal(foo + GitCheck.Suffix, Assert.Single(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved).To);
+        Assert.Equal(foo + GitQuarantine.Suffix, Assert.Single(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved).To);
 
         Assert.Empty(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved);
         Assert.Empty(RepoScan.FindModuleRepos(Path.Combine(repo, ".git")));
-        Assert.True(PathChecks.IsLink(foo + GitCheck.Suffix));
+        Assert.True(PathChecks.IsLink(foo + GitQuarantine.Suffix));
     }
 
     [Fact]

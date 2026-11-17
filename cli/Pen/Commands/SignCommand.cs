@@ -45,10 +45,10 @@ internal sealed class SignCommand(HostEnv host, Project project, TimeProvider cl
             modulesAtStart: null);
         if (check.Moved.Count > 0 || check.Failure is not null)
         {
-            GitCheck.Report(project.Dir, check);
+            GitCheckReport.Report(project.Dir, check);
             throw new PenException("not signing: deal with the files above first");
         }
         // Paused operations it reports aren't a reason to refuse: signing doesn't continue them.
-        GitCheck.Report(project.Dir, check);
+        GitCheckReport.Report(project.Dir, check);
     }
 }

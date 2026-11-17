@@ -22,11 +22,11 @@ internal sealed class CheckChanges
     /// <summary>Gets the directories whose modes kept protected files from being put back, in order.</summary>
     public List<string> Blocked { get; } = [];
 
-    /// <summary>Opens a directory with <see cref="GitCheck.TryOpen"/> and records the mode change in Opened.</summary>
+    /// <summary>Opens a directory with <see cref="FileModes.TryOpen"/> and records the mode change in Opened.</summary>
     /// <returns>Whether it changed the mode.</returns>
     public bool TryOpenRecording(string path, bool write)
     {
-        if (!GitCheck.TryOpen(path, write, out var change))
+        if (!FileModes.TryOpen(path, write, out var change))
             return false;
         Opened.Add(change);
         return true;

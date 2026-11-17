@@ -45,7 +45,7 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
         if (!Native.CanList(dir))
         {
             throw new PenException($"pen can't read {Out.Field(dir)}: fix its " +
-                $"permissions (chmod u+rwx {GitCheck.Quote(dir)}), then rerun");
+                $"permissions (chmod u+rwx {Shell.Quote(dir)}), then rerun");
         }
 
         CheckAllowed(dir, host);

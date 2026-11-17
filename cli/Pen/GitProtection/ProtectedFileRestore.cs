@@ -177,7 +177,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
     private void ReplaceAside(ProtectedFile file, byte[] original)
     {
         OpenParent(file.Path);
-        var quarantined = GitCheck.Move(file.Path, "it's no longer the regular file it was at the " +
+        var quarantined = GitQuarantine.Move(file.Path, "it's no longer the regular file it was at the " +
             "start of the session (a symlink, a directory, or too big or unreadable " +
             "to compare), so it was moved aside and the original put back", breakLayout: false);
         _changes.Moved.Add(quarantined);
@@ -189,7 +189,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
     private void KeepChangedVersion(ProtectedFile file, byte[] changed)
     {
         OpenParent(file.Path);
-        var to = GitCheck.FreeName(file.Path);
+        var to = GitQuarantine.FreeName(file.Path);
         try
         {
             ProtectedFiles.WriteNew(to, changed, ProtectedFiles.File600);
@@ -235,7 +235,8 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
         {
             if (root is not null && directory != root && PathChecks.IsLink(directory))
             {
-                _changes.Moved.Add(GitCheck.Move(directory, "a symlink in place of a directory holding the protected " +
+                _changes.Moved.Add(GitQuarantine.Move(directory,
+                    "a symlink in place of a directory holding the protected " +
                     $"file {Out.Field(file.Path)}: it points git at a file somewhere else", breakLayout: false));
                 return false;
             }
@@ -295,6 +296,6 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
             ?? throw new PenException("it can't be opened");
         File.SetUnixFileMode(handle, file.Mode);
         _changes.Restored.Add(new(file.Path, "its mode was changed during the session to " +
-            $"{GitCheck.Octal(was)}, and is back to {GitCheck.Octal(file.Mode)}"));
+            $"{FileModes.Octal(was)}, and is back to {FileModes.Octal(file.Mode)}"));
     }
 }

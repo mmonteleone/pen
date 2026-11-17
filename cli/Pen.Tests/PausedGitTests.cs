@@ -326,7 +326,7 @@ public class PausedGitTests
         var repo = PausedRebase(t);
         var state = RebaseDir(repo);
         File.SetUnixFileMode(state, UnixFileMode.None);
-        var quarantined = state + GitCheck.Suffix;
+        var quarantined = state + GitQuarantine.Suffix;
         try
         {
             var moved = Assert.Single(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved);
@@ -390,7 +390,7 @@ public class PausedGitTests
         foreach (var path in paths)
         {
             Assert.False(File.Exists(path));
-            Assert.Equal(Planted, File.ReadAllText(path + GitCheck.Suffix));
+            Assert.Equal(Planted, File.ReadAllText(path + GitQuarantine.Suffix));
         }
         Assert.Null(check.Failure);
     }
@@ -1005,7 +1005,7 @@ public class PausedGitTests
         Assert.Null(check.Failure);
         Assert.Equal(state, Assert.Single(check.Moved).From);
         Assert.False(PathChecks.Exists(state));
-        Assert.Equal(ReadOnlyDir, File.GetUnixFileMode(state + GitCheck.Suffix)); // no mode changed
+        Assert.Equal(ReadOnlyDir, File.GetUnixFileMode(state + GitQuarantine.Suffix)); // no mode changed
     }
 
     [Theory]
@@ -1024,7 +1024,7 @@ public class PausedGitTests
 
         Assert.NotNull(check.Failure); // pen sign can't change modes while other sessions run, so it stops here
         Assert.Contains(check.Moved, q => q.To.Length == 0);
-        var warning = CapturingStderr(() => GitCheck.Report(repo, check));
+        var warning = CapturingStderr(() => GitCheckReport.Report(repo, check));
         Assert.Contains("COULD NOT MOVE IT", warning);
         Assert.Contains("git wasn't checked: don't run git here", warning);
 
@@ -1055,7 +1055,7 @@ public class PausedGitTests
         {
             var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
             Assert.NotNull(check.Failure);
-            var warning = CapturingStderr(() => GitCheck.Report(repo, check));
+            var warning = CapturingStderr(() => GitCheckReport.Report(repo, check));
             Assert.Contains("don't run git", warning);
             foreach (var name in new[] { "rebase-merge", "rebase-apply", "sequencer" })
                 Assert.Contains(name, warning);
@@ -1230,7 +1230,7 @@ public class PausedGitTests
     {
         var moved = new List<Quarantined> { new("/p/.git/commondir", "/p/.git/commondir.pen-quarantine", "why") };
         var paused = new List<PausedOp> { new("/p/.git/rebase-merge", "a paused rebase", []) };
-        var output = CapturingStderr(() => GitCheck.Report("/p", new CheckResult { Moved = moved, Failure = "reason", Paused = paused }));
+        var output = CapturingStderr(() => GitCheckReport.Report("/p", new CheckResult { Moved = moved, Failure = "reason", Paused = paused }));
         var at = output.IndexOf("a paused rebase", StringComparison.Ordinal);
         Assert.True(output.IndexOf("mv '", StringComparison.Ordinal) < at);
         Assert.True(at < output.IndexOf("wasn't checked", StringComparison.Ordinal));
@@ -1238,7 +1238,7 @@ public class PausedGitTests
 
     [Fact]
     public void ACleanCheckReportsNothing() =>
-        Assert.Empty(CapturingStderr(() => GitCheck.Report("/p", new CheckResult { Moved = [], Failure = null, Paused = [] })));
+        Assert.Empty(CapturingStderr(() => GitCheckReport.Report("/p", new CheckResult { Moved = [], Failure = null, Paused = [] })));
 
     [Fact]
     public void PenSignPrintsItAndStillGoesOn()

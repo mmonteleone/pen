@@ -328,7 +328,7 @@ internal sealed class GitCheckRun
             foreach (var repo in scan.Repos)
             {
                 var isDir = repo.Kind == NestedKind.GitDir;
-                var moved = GitCheck.Move(repo.Path, describe(repo), breakLayout: isDir);
+                var moved = GitQuarantine.Move(repo.Path, describe(repo), breakLayout: isDir);
                 _changes.Moved.Add(moved);
                 if (isDir && !moved.Failed)
                     movedAside.Add(moved.To);
@@ -357,9 +357,9 @@ internal sealed class GitCheckRun
     /// </summary>
     private void RemoveLink(string link, string why)
     {
-        var attempt = GitCheck.RemoveLink(_dir, link, why);
+        var attempt = GitQuarantine.RemoveLink(_dir, link, why);
         if (attempt.Failed && _mayOpen && _changes.TryOpenRecording(Paths.GetParent(link), write: true))
-            attempt = GitCheck.RemoveLink(_dir, link, why);
+            attempt = GitQuarantine.RemoveLink(_dir, link, why);
         _changes.Moved.Add(attempt);
     }
 
@@ -526,9 +526,9 @@ internal sealed class GitCheckRun
     /// <returns>Whether it moved; if not, nothing is recorded, so the caller can try something else.</returns>
     private bool TryRenameWithOpening(string path, string why, bool breakLayout)
     {
-        var attempt = GitCheck.Move(path, why, breakLayout);
+        var attempt = GitQuarantine.Move(path, why, breakLayout);
         if (attempt.Failed && _mayOpen && _changes.TryOpenRecording(Paths.GetParent(path), write: true))
-            attempt = GitCheck.Move(path, why, breakLayout);
+            attempt = GitQuarantine.Move(path, why, breakLayout);
         if (attempt.Failed)
             return false;
         _changes.Moved.Add(attempt);
@@ -537,7 +537,7 @@ internal sealed class GitCheckRun
 
     /// <summary>Renames <paramref name="path"/> aside and records it, or records that it couldn't.</summary>
     private void Quarantine(string path, string why, bool breakLayout) =>
-        _changes.Moved.Add(GitCheck.Move(path, why, breakLayout));
+        _changes.Moved.Add(GitQuarantine.Move(path, why, breakLayout));
 
     private bool TryOpenToRead(string path) => _changes.TryOpenRecording(path, write: false);
 }

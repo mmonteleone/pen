@@ -655,19 +655,19 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         if (env.TryGetValue("PROJECT_DIR", out var projectDir))
         {
             var check = GitCheck.RunAtSessionEnd(projectDir, session);
-            GitCheck.Report(projectDir, check);
+            GitCheckReport.Report(projectDir, check);
             var isClean = check.Failure is null && check.Moved.Count == 0 && check.Restored.Count == 0;
             var result = new SessionEndResult(check.Failure is null, isClean ? projectDir : null);
             if (check.RestoreIncomplete)
-                Out.WriteRaw(GitCheck.KeptCopiesAdvice(session, check.RestoreBlocked));
+                Out.WriteRaw(GitCheckWording.KeptCopiesAdvice(session, check.RestoreBlocked));
             return new(result, check.RestoreIncomplete);
         }
 
         if (File.Exists(session.ProtectedManifest))
         {
-            Out.WriteRaw(GitCheck.NotCheckedWarning(session.Path, "the session's record " +
+            Out.WriteRaw(GitCheckWording.NotCheckedWarning(session.Path, "the session's record " +
                 "of its project is damaged, so its protected files weren't compared"));
-            Out.WriteRaw(GitCheck.KeptCopiesAdvice(session, null));
+            Out.WriteRaw(GitCheckWording.KeptCopiesAdvice(session, null));
             return new(new(false, null), KeepFiles: true);
         }
         return new(new(true, null), KeepFiles: false);

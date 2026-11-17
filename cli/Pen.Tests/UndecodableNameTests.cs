@@ -53,7 +53,7 @@ public class UndecodableNameTests
 
         var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
         AssertCouldNotCheck(check);
-        Assert.Contains("don't run git here", GitCheck.NotCheckedWarning(repo, check.Failure!));
+        Assert.Contains("don't run git here", GitCheckWording.NotCheckedWarning(repo, check.Failure!));
     }
 
     [Fact]

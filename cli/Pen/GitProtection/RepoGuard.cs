@@ -284,18 +284,19 @@ internal static class RepoGuard
     }
 
     /// <summary>The advice for a repo found in something Pen quarantined (<see cref="IsInQuarantine"/>).</summary>
-    private const string QuarantineHint = "\nthose under a name holding " + GitCheck.Suffix + " are inside what " +
-        "pen put aside at the end of an earlier session (a repo in it was left intact): inspect them and remove them";
+    private const string QuarantineHint = "\nthose under a name holding " + GitQuarantine.Suffix +
+        " are inside what pen put aside at the end of an earlier session (a repo in it was left intact): " +
+        "inspect them and remove them";
 
     /// <summary>
     /// Whether <paramref name="repoDir"/> is inside something Pen quarantined: a component of its path below
-    /// <paramref name="dir"/> holds <see cref="GitCheck.Suffix"/>, which Pen adds when it moves a thing aside (with
-    /// -2, -3, … after it when the name is taken).
+    /// <paramref name="dir"/> holds <see cref="GitQuarantine.Suffix"/>, which Pen adds when it moves a thing aside
+    /// (with -2, -3, … after it when the name is taken).
     /// </summary>
     /// <remarks>Components above <paramref name="dir"/>, should the repo be outside it, don't count.</remarks>
     private static bool IsInQuarantine(string dir, string repoDir) =>
         Path.GetRelativePath(dir, repoDir).Split('/').SkipWhile(part => part == "..")
-            .Any(part => part.Contains(GitCheck.Suffix, StringComparison.Ordinal));
+            .Any(part => part.Contains(GitQuarantine.Suffix, StringComparison.Ordinal));
 
     /// <summary>Formats the first line of the nested-repo refusal, worded for a repo or a plain directory.</summary>
     private static string FormatNestedHeading(string dir, string git)

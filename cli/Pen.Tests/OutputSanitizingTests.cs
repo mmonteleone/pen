@@ -136,16 +136,16 @@ public class OutputSanitizingTests
     public void WarningsShowHostileNamesAsFields()
     {
         const string evil = "/p/x\x1b[2J\npen: all clear";
-        var w = GitCheck.Warning("/p", [new(evil + "/.git", evil + "/.git.pen-quarantine", "why")]);
+        var w = GitCheckWording.Warning("/p", [new(evil + "/.git", evil + "/.git.pen-quarantine", "why")]);
         Assert.Contains("  x\\x1b[2J\\npen: all clear/.git → x\\x1b[2J\\npen: all clear/.git.pen-quarantine", w);
         Assert.DoesNotContain("\npen: all clear", w, StringComparison.Ordinal);
         Assert.Equal(w, Out.StripControls(w));
 
-        var n = GitCheck.NotCheckedWarning(evil, "why");
+        var n = GitCheckWording.NotCheckedWarning(evil, "why");
         Assert.False(n.Contains(Esc, StringComparison.Ordinal));
         Assert.DoesNotContain("\npen: all clear", n, StringComparison.Ordinal);
 
-        var (err, _) = Capture(() => GitCheck.Report("/p", new() { Moved = [], Failure = null, Opened = [new(evil, UnixFileMode.None, UnixFileMode.UserRead)] }));
+        var (err, _) = Capture(() => GitCheckReport.Report("/p", new() { Moved = [], Failure = null, Opened = [new(evil, UnixFileMode.None, UnixFileMode.UserRead)] }));
         Assert.False(err.Contains(Esc, StringComparison.Ordinal));
         Assert.DoesNotContain("\npen: all clear", err, StringComparison.Ordinal);
         Assert.Contains("changed x\\x1b", err);
@@ -357,7 +357,7 @@ public class RestoreCommandTests
             Assert.Equal(Path.Combine(nested, ".git"), q.From);
             Assert.False(Directory.Exists(q.From));
 
-            var warning = GitCheck.Warning(repo, moved);
+            var warning = GitCheckWording.Warning(repo, moved);
             Assert.Equal(warning, Out.StripControls(warning)); // nothing left for a terminal to act on
             var command = warning.Split('\n').Single(l => l.StartsWith("  mv ", StringComparison.Ordinal)).Trim();
 
@@ -380,8 +380,8 @@ public class RestoreCommandTests
             using var t = new TempDir();
             var work = t.Sub("work");
             File.WriteAllText(Path.Combine(work, "from"), "");
-            RunInShell(file, args, work, $"mv from {GitCheck.Quote(name)}");
-            Assert.True(File.Exists(Path.Combine(work, name)), $"{file} {string.Join(' ', args)}: {GitCheck.Quote(name)}");
+            RunInShell(file, args, work, $"mv from {Shell.Quote(name)}");
+            Assert.True(File.Exists(Path.Combine(work, name)), $"{file} {string.Join(' ', args)}: {Shell.Quote(name)}");
             AssertNothingInjected(t.Path);
         }
     }
@@ -392,14 +392,14 @@ public class RestoreCommandTests
     [InlineData("/p/it's", "'/p/it'\\''s'")]
     [InlineData("/p/é", "'/p/é'")]
     public void WithoutControlCharactersItKeepsTheReadableForm(string path, string quoted) =>
-        Assert.Equal(quoted, GitCheck.Quote(path));
+        Assert.Equal(quoted, Shell.Quote(path));
 
     [Fact]
     public void WithThemItUsesPrintf_WithEveryAwkwardCharacterInOctal()
     {
-        Assert.Equal("\"$(printf '/p/\\033\\047\\044\\140\\045\\134\\041\\012')\"", GitCheck.Quote("/p/\x1b'$`%\\!\n"));
-        Assert.Equal("\"$(printf './-rf\\001')\"", GitCheck.Quote("-rf\x01"));
-        Assert.Equal("\"$(printf '\\342\\200\\256')\"", GitCheck.Quote("\u202e"));
+        Assert.Equal("\"$(printf '/p/\\033\\047\\044\\140\\045\\134\\041\\012')\"", Shell.Quote("/p/\x1b'$`%\\!\n"));
+        Assert.Equal("\"$(printf './-rf\\001')\"", Shell.Quote("-rf\x01"));
+        Assert.Equal("\"$(printf '\\342\\200\\256')\"", Shell.Quote("\u202e"));
     }
 
     [Fact]
@@ -409,7 +409,7 @@ public class RestoreCommandTests
         var repo = Git.Repo(t.Sub("repo"));
         Git.Run(repo, "init", "-q", "--bare", ".git/modules/x\n");
         var moved = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved;
-        var w = GitCheck.Warning(repo, moved);
+        var w = GitCheckWording.Warning(repo, moved);
         Assert.Contains("pen can't write a command for", w);
         Assert.Contains("x\\n, since the name ends in a newline", w);
         Assert.DoesNotContain("  mv ", w);

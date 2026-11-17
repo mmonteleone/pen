@@ -101,7 +101,7 @@ internal static class RepoScan
     /// arrives later (committed on a branch, it comes with a checkout), or one that leads nowhere until a commit
     /// makes the directory it names. That includes the object stores, objects/, lfs/objects/ and annex/objects/, so
     /// a git dir with many Git LFS or git-annex objects takes longer to walk (a little over a second for 50,000
-    /// directories), and what Pen put aside (named …<see cref="GitCheck.Suffix"/>…): its layout was broken when it
+    /// directories), and what Pen put aside (named …<see cref="GitQuarantine.Suffix"/>…): its layout was broken when it
     /// was moved, so only a repo still inside one is reported. Symlinks in the git dir aren't followed: what they
     /// lead to in it is walked anyway.
     /// </para>
@@ -281,7 +281,7 @@ internal static class RepoScan
     /// </para>
     /// <para>
     /// Any symlink met along the way is listed as is and not followed: git would follow it to a repo elsewhere, so
-    /// callers refuse it too. A directory Pen quarantined (named …<see cref="GitCheck.Suffix"/>…) isn't walked:
+    /// callers refuse it too. A directory Pen quarantined (named …<see cref="GitQuarantine.Suffix"/>…) isn't walked:
     /// repos nested in a quarantined one are no submodule's. Reads directories only; never runs git.
     /// </para>
     /// </remarks>
@@ -735,7 +735,7 @@ internal static class RepoScan
         private bool WalkModuleEntry(string dir, string entry)
         {
             // Before the symlink test, so a quarantined symlink isn't flagged and renamed again.
-            if (Path.GetFileName(entry).Contains(GitCheck.Suffix, StringComparison.Ordinal))
+            if (Path.GetFileName(entry).Contains(GitQuarantine.Suffix, StringComparison.Ordinal))
                 return true;
             if (PathChecks.IsLink(entry))
             {

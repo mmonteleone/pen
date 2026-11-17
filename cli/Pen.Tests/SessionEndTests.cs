@@ -415,7 +415,7 @@ public class SessionEndTests
         var marked = "as one line: ";
         var line = output.Split('\n').Single(l => l.Contains(marked, StringComparison.Ordinal));
         var command = line[(line.IndexOf(marked, StringComparison.Ordinal) + marked.Length)..];
-        Assert.EndsWith(" && " + GitCheck.RetryCommand, command);
+        Assert.EndsWith(" && " + GitCheckWording.RetryCommand, command);
         Assert.True(output.IndexOf(marked, StringComparison.Ordinal) < output.IndexOf("rm -r", StringComparison.Ordinal));
         Assert.Contains("discards them", output);
         Assert.Contains(session.ProtectedDir, output);
@@ -548,12 +548,12 @@ public class SessionEndTests
     [Fact]
     public void TheWayOut_QuotesAndSanitizesPaths()
     {
-        var advice = GitCheck.KeptCopiesAdvice(new SessionDir("k", "/s/x\u001b[2Jy"), ["/p/a b'\n\u001b[2J"]);
+        var advice = GitCheckWording.KeptCopiesAdvice(new SessionDir("k", "/s/x\u001b[2Jy"), ["/p/a b'\n\u001b[2J"]);
         Assert.DoesNotContain('\u001b', advice);
         Assert.Contains("printf", advice);
-        var plain = GitCheck.KeptCopiesAdvice(new SessionDir("k", "/s/1"), ["/p/a b"]);
+        var plain = GitCheckWording.KeptCopiesAdvice(new SessionDir("k", "/s/1"), ["/p/a b"]);
         Assert.Contains("chmod u+rwx '/p/a b' && pen true", plain);
-        Assert.Contains("deal with what's named above", GitCheck.KeptCopiesAdvice(new SessionDir("k", "/s/1"), []));
+        Assert.Contains("deal with what's named above", GitCheckWording.KeptCopiesAdvice(new SessionDir("k", "/s/1"), []));
     }
 
     [Fact]
@@ -812,7 +812,7 @@ public class SessionEndTests
         // No known file-system state stops the walk midway, so this covers only
         // the printing: both warnings, what moved first.
         var moved = new List<Quarantined> { new("/p/.git/commondir", "/p/.git/commondir.pen-quarantine", "why") };
-        var output = CapturingStderr(() => GitCheck.Report("/p", new CheckResult { Moved = moved, Failure = "reason" }));
+        var output = CapturingStderr(() => GitCheckReport.Report("/p", new CheckResult { Moved = moved, Failure = "reason" }));
         Assert.Contains("mv '/p/.git/commondir.pen-quarantine' '/p/.git/commondir'", output);
         Assert.Contains("git wasn't checked: don't run git here (/p)", output);
         Assert.Contains("reason", output);

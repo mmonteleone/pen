@@ -137,7 +137,7 @@ public class GitCheckTests
         var repo = Git.Repo(t.Sub("repo"));
         File.WriteAllText(Path.Combine(repo, ".git", "commondir"), "x");
         Git.Run(repo, "init", "-q", "it's");
-        var w = GitCheck.Warning(repo, GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved);
+        var w = GitCheckWording.Warning(repo, GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved);
         Assert.Contains("pen: WARNING", w);
         Assert.Contains("  .git/commondir → .git/commondir.pen-quarantine", w);
         Assert.Contains($"  mv '{repo}/.git/commondir.pen-quarantine' '{repo}/.git/commondir'", w);

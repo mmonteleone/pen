@@ -226,7 +226,7 @@ public class GitDirRepoTests
         Assert.Null(check.Failure);
         Assert.Contains(check.Moved, q => q.From == plant && q.To != "");
         AssertDoesntFire(dir, marker);
-        Assert.Contains("inside the git dir", GitCheck.Warning(repo, check.Moved));
+        Assert.Contains("inside the git dir", GitCheckWording.Warning(repo, check.Moved));
         RepoGuard.CheckAtStart(repo);
     }
 
@@ -241,9 +241,9 @@ public class GitDirRepoTests
         Assert.Contains("a symlink into the git dir", removed.Why);
         Assert.False(PathChecks.Exists(link));
         Assert.Empty(Directory.GetFileSystemEntries(Path.GetDirectoryName(link)!, Path.GetFileName(link) + "*"));
-        var warning = GitCheck.Warning(dir, check.Moved);
+        var warning = GitCheckWording.Warning(dir, check.Moved);
         Assert.Contains($"{PathChecks.FormatPath(dir, link)} (a symlink to {target}) removed", warning);
-        Assert.Contains($"  ln -s {GitCheck.Quote(target)} {GitCheck.Quote(link)}\n", warning + "\n");
+        Assert.Contains($"  ln -s {Shell.Quote(target)} {Shell.Quote(link)}\n", warning + "\n");
         return removed;
     }
 
@@ -429,16 +429,16 @@ public class GitDirRepoTests
         Layout(Path.Combine(outer, "x", ".git"), PlantConfig(hook, t.Sub("plant-worktree")));
         Layout(Path.Combine(outer, "y", "z"), PlantConfig(hook, t.Sub("plant-worktree")));
         var docs = Path.Combine(repo, "docs");
-        Directory.CreateSymbolicLink(docs, Path.Combine(outer + GitCheck.Suffix, "x")); // leads nowhere yet
-        Directory.CreateDirectory(outer + GitCheck.Suffix);
+        Directory.CreateSymbolicLink(docs, Path.Combine(outer + GitQuarantine.Suffix, "x")); // leads nowhere yet
+        Directory.CreateDirectory(outer + GitQuarantine.Suffix);
         AssertFires(Path.Combine(outer, "x"), marker);
         AssertFires(Path.Combine(outer, "y", "z"), marker);
-        Directory.Delete(outer + GitCheck.Suffix);
+        Directory.Delete(outer + GitQuarantine.Suffix);
 
         var check = GitCheck.RunAtSessionEnd(repo, s);
 
         Assert.Null(check.Failure);
-        var aside = outer + GitCheck.Suffix;
+        var aside = outer + GitQuarantine.Suffix;
         Assert.Contains(check.Moved, q => q.From == outer && q.To == aside);
         Assert.Contains(check.Moved, q => q.From == Path.Combine(aside, "x", ".git"));
         Assert.Contains(check.Moved, q => q.From == Path.Combine(aside, "y", "z", "HEAD"));
@@ -496,9 +496,9 @@ public class GitDirRepoTests
         Directory.CreateDirectory(Path.Combine(git, "modules", "x.pen-quarantine", "modules", "y", ".git"));
         Layout(Path.Combine(git, "foo", ".git.pen-quarantine", "modules", "z"), "");
         var broken = Layout(Path.Combine(git, "foo", ".git.pen-quarantine"), "");
-        File.Move(Path.Combine(broken, "HEAD"), Path.Combine(broken, "HEAD" + GitCheck.Suffix));
+        File.Move(Path.Combine(broken, "HEAD"), Path.Combine(broken, "HEAD" + GitQuarantine.Suffix));
         var brokenBare = Layout(Path.Combine(git, "bar"), "");
-        File.Move(Path.Combine(brokenBare, "HEAD"), Path.Combine(brokenBare, "HEAD" + GitCheck.Suffix));
+        File.Move(Path.Combine(brokenBare, "HEAD"), Path.Combine(brokenBare, "HEAD" + GitQuarantine.Suffix));
 
         Assert.Equal(["foo/.git.pen-quarantine/modules/z/HEAD", "modules/x.pen-quarantine/modules/y/.git"],
             Found(git).Order(StringComparer.Ordinal));
@@ -545,7 +545,7 @@ public class GitDirRepoTests
 
         foreach (var path in new[] { dir, Path.Combine(t.Path, "p", "file") })
         {
-            var attempt = GitCheck.RemoveLink(Path.Combine(t.Path, "p"), path, "why");
+            var attempt = GitQuarantine.RemoveLink(Path.Combine(t.Path, "p"), path, "why");
 
             Assert.True(attempt.Failed);
             Assert.Contains("COULD NOT REMOVE IT (it isn't a symlink any more)", attempt.Why);
@@ -571,7 +571,7 @@ public class GitDirRepoTests
         Directory.Move(Path.Combine(project, "a"), Path.Combine(project, "a-moved"));
         Directory.CreateSymbolicLink(Path.Combine(project, "a"), Path.Combine(t.Path, "elsewhere"));
 
-        var attempt = GitCheck.RemoveLink(project, link, "why");
+        var attempt = GitQuarantine.RemoveLink(project, link, "why");
 
         Assert.True(attempt.Failed);
         Assert.Contains("isn't a directory any more", attempt.Why);
@@ -612,13 +612,13 @@ public class GitDirRepoTests
         var link = Path.Combine(project, "docs");
         Sh(project, "ln -s \"$(printf '.git/objects/\\377x')\" docs");
 
-        var removed = GitCheck.RemoveLink(project, link, "why");
+        var removed = GitQuarantine.RemoveLink(project, link, "why");
 
         Assert.True(removed.Removed);
         Assert.True(removed.LinkTargetEscaped);
         Assert.Equal(@".git/objects/\377x", removed.LinkTarget);
         Assert.False(PathChecks.Exists(link));
-        var warning = GitCheck.Warning(project, [removed]);
+        var warning = GitCheckWording.Warning(project, [removed]);
         Assert.Contains("pen: They've been moved out of git's way, or removed:", warning);
         Assert.Contains(@"docs (a symlink to .git/objects/\377x) removed", warning);
         Assert.Contains("since what it held isn't valid UTF-8 (shown above with octal escapes): make it again by hand",
@@ -1136,7 +1136,7 @@ public class GitDirRepoTests
         var check = GitCheck.RunAtSessionEnd(repo, s);
 
         Assert.Null(check.Failure);
-        var aside = Path.Combine(sub, ".git" + GitCheck.Suffix);
+        var aside = Path.Combine(sub, ".git" + GitQuarantine.Suffix);
         Assert.Contains(check.Moved, q => q.From == Path.Combine(sub, ".git") && q.To == aside);
         Assert.Contains(check.Moved, q => q.From == plant && q.To != "");
         AssertRemoved(repo, check, Path.Combine(aside, "docs"), Path.Combine(git, "objects", "zz"));
@@ -1157,7 +1157,7 @@ public class GitDirRepoTests
         var s = Started(t, repo, git);
         var sub = Git.Repo(t.Sub("repo", "sub"));
         var inner = Layout(Path.Combine(sub, ".git", "modules", "x"), PlantConfig(hook, t.Sub("plant-worktree")));
-        var aside = Path.Combine(sub, ".git" + GitCheck.Suffix);
+        var aside = Path.Combine(sub, ".git" + GitQuarantine.Suffix);
         var docs = Path.Combine(repo, "docs");
         Directory.CreateSymbolicLink(docs, Path.Combine(aside, "modules", "x"));
         AssertFires(inner, marker);

@@ -22,7 +22,7 @@ public class UnreadablePathTests
 
         public void Dispose()
         {
-            foreach (var p in new[] { _path, _path + GitCheck.Suffix })
+            foreach (var p in new[] { _path, _path + GitQuarantine.Suffix })
                 if (Path.Exists(p)) File.SetUnixFileMode(p, Rwx);
         }
     }
@@ -48,7 +48,7 @@ public class UnreadablePathTests
 
         var q = Assert.Single(moved);
         Assert.Equal(foo, q.From);
-        Assert.Equal(foo + GitCheck.Suffix, q.To);
+        Assert.Equal(foo + GitQuarantine.Suffix, q.To);
         Assert.Contains("can't be read", q.Why);
         Assert.False(Path.Exists(foo));
         Assert.Empty(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved);
@@ -133,7 +133,7 @@ public class UnreadablePathTests
 
         Assert.False(session.IsOpen);
         Assert.False(Path.Exists(foo));
-        Assert.True(Directory.Exists(foo + GitCheck.Suffix));
+        Assert.True(Directory.Exists(foo + GitQuarantine.Suffix));
         RepoGuard.CheckAtStart(repo);
     }
 

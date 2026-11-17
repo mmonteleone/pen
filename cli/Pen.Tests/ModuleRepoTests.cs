@@ -362,7 +362,7 @@ public class ModuleRepoTests
         using var t3 = new TempDir();
         var super3 = Super(t3);
         var mid3 = Path.Combine(super3, ".git", "modules", "libs", "mid");
-        Directory.Move(mid3, mid3 + GitCheck.Suffix);
+        Directory.Move(mid3, mid3 + GitQuarantine.Suffix);
         Assert.Empty(Found(super3));
     }
 

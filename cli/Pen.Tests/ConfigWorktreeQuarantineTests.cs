@@ -102,7 +102,7 @@ public class ConfigWorktreeQuarantineTests
         Assert.Equal(Fsmonitor(hook), File.ReadAllText(q.To));
         Assert.False(File.Exists(file));
         AssertDoesntFire(checkout, marker);
-        Assert.Contains("mv ", GitCheck.Warning(repo, check.Moved));
+        Assert.Contains("mv ", GitCheckWording.Warning(repo, check.Moved));
         Assert.True(File.Exists(Path.Combine(checkout, ".git")), "the worktree itself stays");
     }
 
