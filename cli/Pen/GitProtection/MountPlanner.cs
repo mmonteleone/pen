@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Pen.Platform;
 
 namespace Pen.GitProtection;
@@ -323,7 +324,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
                 "would read: write the path out in full or remove the include, then rerun"),
         };
 
-        if (!GitConfigIncludes.TryLocate(opened, out var location))
+        if (!TryLocate(opened, out var location))
         {
             throw new PenException($"{FormatPath(configFile)} includes " +
                 $"{FormatPath(Path.GetFullPath(opened))}, and pen can't follow that path to the file git " +
@@ -331,6 +332,39 @@ internal sealed class MountPlanner(string dir, string hostHome)
         }
         return location;
     }
+
+    /// <summary>
+    /// Finds where the file <paramref name="opened"/> names is on disk, walking it as the OS does.
+    /// </summary>
+    /// <returns>Whether the path could be walked (<see cref="HooksPath.WalkRealPath(string)"/>).</returns>
+    /// <remarks>
+    /// The written and real paths are taken on paper where a name is missing, so "missing/../x" is the x beside it,
+    /// though the OS can't open that path until missing exists.
+    /// </remarks>
+    private static bool TryLocate(string opened, [NotNullWhen(true)] out IncludeLocation? location)
+    {
+        // As the OS walks it: ".." after a symlink is the parent of where that leads.
+        var written = Path.GetFullPath(opened);
+        if (HooksPath.WalkRealPath(opened) is not { } real)
+        {
+            location = null;
+            return false;
+        }
+        // No symlink to tell them apart, and a cycle then repeats one name.
+        location = new(real == written ? written : opened, written, real);
+        return true;
+    }
+
+    /// <summary>
+    /// Where an included file is on disk, for a caller that visits each file once.
+    /// </summary>
+    /// <param name="Path">
+    /// The path git reads it by, absolute: as opened, or normalized when no symlink makes the two differ. It keys the
+    /// walk, and a relative include in it resolves from there.
+    /// </param>
+    /// <param name="Written">The full path as written, with "." and ".." taken lexically.</param>
+    /// <param name="Real">The real path, as the OS walks it.</param>
+    private sealed record IncludeLocation(string Path, string Written, string Real);
 
     /// <summary>
     /// Plans a verified read-only mount over an included file, by its real path, if the sandbox could write it,

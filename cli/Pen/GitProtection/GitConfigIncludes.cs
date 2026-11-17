@@ -37,17 +37,6 @@ internal sealed record Include(IncludeReading Reading, string Value, GitConfigFi
 internal readonly record struct ConfigLine(GitConfigFile.Entry Entry, Include? Include);
 
 /// <summary>
-/// Where an included file is on disk, for a caller that visits each file once.
-/// </summary>
-/// <param name="Path">
-/// The path git reads it by, absolute: as opened, or normalized when no symlink makes the two differ. It keys the
-/// walk, and a relative include in it resolves from there.
-/// </param>
-/// <param name="Written">The full path as written, with "." and ".." taken lexically.</param>
-/// <param name="Real">The real path, as the OS walks it.</param>
-internal sealed record IncludeLocation(string Path, string Written, string Real);
-
-/// <summary>
 /// The git config files reachable through include.path and includeIf.*.path, read directly (never by running git,
 /// which could run whatever a file names), each file read and parsed at most once.
 /// </summary>
@@ -92,28 +81,6 @@ internal sealed class GitConfigIncludes(string home)
         lines = read.Lines;
         error = read.Error;
         return lines is not null;
-    }
-
-    /// <summary>
-    /// Finds where the file <paramref name="opened"/> names is on disk, walking it as the OS does.
-    /// </summary>
-    /// <returns>Whether the path could be walked (<see cref="HooksPath.WalkRealPath(string)"/>).</returns>
-    /// <remarks>
-    /// The written and real paths are taken on paper where a name is missing, so "missing/../x" is the x beside it,
-    /// though the OS can't open that path until missing exists.
-    /// </remarks>
-    public static bool TryLocate(string opened, [NotNullWhen(true)] out IncludeLocation? location)
-    {
-        // As the OS walks it: ".." after a symlink is the parent of where that leads.
-        var written = Path.GetFullPath(opened);
-        if (HooksPath.WalkRealPath(opened) is not { } real)
-        {
-            location = null;
-            return false;
-        }
-        // No symlink to tell them apart, and a cycle then repeats one name.
-        location = new(real == written ? written : opened, written, real);
-        return true;
     }
 
     /// <summary>Matches an include entry of the file at <paramref name="from"/>, resolving the file it names.</summary>
