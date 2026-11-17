@@ -47,7 +47,6 @@ internal sealed class SignatureVerifier(HostGit git)
     public int CountUnsigned(IReadOnlyList<string> commits) => commits.Count - FindVerified(commits).Count;
 
     /// <summary>Formats advice on fixing the user's setup when commits Pen just signed don't verify.</summary>
-    /// <param name="created">The commits just signed.</param>
     /// <returns>The warning and how to fix it, or null when they all verify or checking them fails.</returns>
     /// <remarks>
     /// Until it's fixed, each pen sign re-signs them. It never throws: the signing is done by now, and this is
@@ -67,9 +66,10 @@ internal sealed class SignatureVerifier(HostGit git)
         }
     }
 
-    /// <summary>Reads each commit's %H %G? %GT line with the verification settings.</summary>
-    /// <param name="verifying">The repo's git with the verification settings added.</param>
-    /// <param name="commits">The commits to read.</param>
+    /// <summary>
+    /// Reads each commit's %H %G? %GT line with <paramref name="verifying"/>, the repo's git with the verification
+    /// settings added.
+    /// </summary>
     /// <returns>The lines git gave, for the commits it could read.</returns>
     /// <exception cref="PenException">A commit can't be read even without its signature.</exception>
     private List<string> ReadSignatureLines(HostGit verifying, IReadOnlyList<string> commits)

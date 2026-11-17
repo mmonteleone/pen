@@ -5,7 +5,6 @@ namespace Pen.Signing;
 /// <summary>A commit object as stored, parsed just enough to re-create it.</summary>
 internal sealed record CommitObject
 {
-    /// <summary>The tree's hash.</summary>
     public required string Tree { get; init; }
 
     /// <summary>The parents' hashes, in header order.</summary>
@@ -40,7 +39,6 @@ internal sealed record CommitObject
     /// <summary>
     /// Parses the raw bytes of <c>git cat-file commit</c>, refusing any header shape git doesn't write.
     /// </summary>
-    /// <returns>The parsed commit.</returns>
     /// <exception cref="CommitShapeException">A header shape git doesn't write.</exception>
     /// <exception cref="NotUtf8Exception">A header field that must go to git as a string isn't valid UTF-8.</exception>
     /// <remarks>
@@ -141,8 +139,6 @@ internal sealed record CommitObject
     private static bool IsHash(string value) => value.Length is 40 or 64 && value.All(char.IsAsciiHexDigitLower);
 
     /// <summary>Splits <c>Name &lt;email&gt; 1700000000 +0000</c>, the only form git writes, into its parts.</summary>
-    /// <param name="value">The header's value.</param>
-    /// <param name="key">The header's name, for messages.</param>
     private static (string Name, string Email, string Date) ParseIdent(string value, string key)
     {
         var open = value.IndexOf('<');
@@ -162,10 +158,10 @@ internal sealed record CommitObject
         return (name, email, date);
     }
 
-    /// <summary>Decodes header text that goes to git as a string (in the environment or an argument).</summary>
-    /// <param name="latin1">The text as decoded from the header bytes as Latin-1.</param>
-    /// <param name="what">The field, for the exception.</param>
-    /// <returns>The text decoded as UTF-8.</returns>
+    /// <summary>
+    /// Decodes header text that goes to git as a string (in the environment or an argument) as UTF-8, from what the
+    /// header bytes decoded to as Latin-1.
+    /// </summary>
     /// <remarks>It has to be valid UTF-8 to arrive unchanged: .NET can't pass other bytes.</remarks>
     private static string DecodeUtf8(string latin1, string what)
     {
@@ -174,7 +170,6 @@ internal sealed record CommitObject
     }
 
     /// <summary>The header lines of a commit, taken in order.</summary>
-    /// <param name="lines">All the header lines.</param>
     private sealed class HeaderLines(string[] lines)
     {
         private int _next;
@@ -194,7 +189,6 @@ internal sealed record CommitObject
 }
 
 /// <summary>The exception thrown when a commit object has a header shape git doesn't write.</summary>
-/// <param name="shape">What the commit has, such as "a NUL in its headers".</param>
 /// <remarks>A laxer reading could re-create such a commit differently from how git reads it.</remarks>
 internal sealed class CommitShapeException(string shape) : Exception(shape)
 {
@@ -206,7 +200,6 @@ internal sealed class CommitShapeException(string shape) : Exception(shape)
 }
 
 /// <summary>The exception thrown when a commit header field isn't valid UTF-8.</summary>
-/// <param name="what">The field, such as "author name".</param>
 /// <remarks>Such a field can't be passed to git unchanged, so the commit can't be re-created exactly.</remarks>
 internal sealed class NotUtf8Exception(string what) : Exception(what)
 {

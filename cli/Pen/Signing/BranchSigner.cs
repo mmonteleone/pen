@@ -194,16 +194,16 @@ internal abstract record SignOutcome
     /// <param name="Count">How many commits there are after the base.</param>
     internal sealed record AllSigned(string BaseName, int Count) : SignOutcome;
 
-    /// <summary>The commits that needed it were re-created signed, and the branch moved to the new head.</summary>
-    /// <param name="BranchRef">The branch's full ref, such as refs/heads/main.</param>
-    /// <param name="OldHead">The branch's head before signing.</param>
-    /// <param name="NewHead">The branch's head now.</param>
-    /// <param name="Created">The commits it created, parents before children.</param>
+    /// <summary>
+    /// The commits that needed it were re-created signed, and the branch (its full ref, such as refs/heads/main)
+    /// moved from OldHead to NewHead. Created lists the commits it created, parents before children.
+    /// </summary>
     internal sealed record Signed(string BranchRef, string OldHead, string NewHead, IReadOnlyList<string> Created)
         : SignOutcome;
 }
 
-/// <summary>The base that pen sign signs the commits after.</summary>
-/// <param name="Name">The base as named on the command line, the upstream's short name, or origin/HEAD's ref.</param>
-/// <param name="Commit">The commit it resolves to.</param>
+/// <summary>
+/// The base that pen sign signs the commits after, and the commit it resolves to. Name is the base as named on the
+/// command line, the upstream's short name, or origin/HEAD's ref.
+/// </summary>
 internal sealed record ResolvedBase(string Name, string Commit);

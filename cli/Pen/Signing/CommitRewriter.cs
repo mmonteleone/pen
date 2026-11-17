@@ -33,11 +33,10 @@ internal sealed class CommitRewriter(HostGit signing)
         return map;
     }
 
-    /// <summary>Creates a signed copy of <paramref name="commit"/> with <paramref name="parents"/>.</summary>
-    /// <param name="sha">The commit's hash, for messages.</param>
-    /// <param name="commit">The commit to copy.</param>
-    /// <param name="parents">The new commit's parents.</param>
-    /// <returns>The new commit's hash.</returns>
+    /// <summary>
+    /// Creates a signed copy of <paramref name="commit"/> with <paramref name="parents"/>, returning the new commit's
+    /// hash.
+    /// </summary>
     /// <exception cref="PenException">Its tree is missing, or git couldn't create or sign it.</exception>
     private string CreateSigned(string sha, CommitObject commit, List<string> parents)
     {

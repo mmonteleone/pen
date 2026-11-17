@@ -42,7 +42,6 @@ internal sealed class HostGit(string? dir, IReadOnlyList<string> config, IReadOn
     private readonly IReadOnlyDictionary<string, string>? _env = env;
 
     /// <summary>Creates a HostGit for <paramref name="dir"/> with no extra settings or environment.</summary>
-    /// <param name="dir">The repo to run in, or null for a call that reads only global config.</param>
     public HostGit(string? dir)
         : this(dir, [], null)
     {
@@ -91,8 +90,7 @@ internal sealed class HostGit(string? dir, IReadOnlyList<string> config, IReadOn
     /// <returns>git's exit code and output, whether it succeeded or not.</returns>
     public GitResult Run(params string[] args) => Run((IEnumerable<string>)args);
 
-    /// <summary>Runs git and reads its stdout.</summary>
-    /// <returns>The trimmed stdout.</returns>
+    /// <summary>Runs git and reads its stdout, trimmed.</summary>
     /// <exception cref="PenException">git failed; the message has its error.</exception>
     public string ReadOutput(params string[] args)
     {
@@ -102,8 +100,7 @@ internal sealed class HostGit(string? dir, IReadOnlyList<string> config, IReadOn
         return result.Text.Trim();
     }
 
-    /// <summary>Runs git and reads the lines of its stdout.</summary>
-    /// <returns>The non-empty lines of stdout.</returns>
+    /// <summary>Runs git and reads the non-empty lines of its stdout.</summary>
     /// <exception cref="PenException">git failed; the message names its subcommand and has its error.</exception>
     public IEnumerable<string> ReadLines(params string[] args)
     {
@@ -170,9 +167,6 @@ internal sealed class HostGit(string? dir, IReadOnlyList<string> config, IReadOn
 }
 
 /// <summary>The result of a git call: exit code, raw stdout, and stderr text.</summary>
-/// <param name="ExitCode">git's exit code.</param>
-/// <param name="Stdout">What git wrote to stdout, as bytes.</param>
-/// <param name="Stderr">What git wrote to stderr.</param>
 internal sealed record GitResult(int ExitCode, byte[] Stdout, string Stderr)
 {
     /// <summary>Whether git exited with 0.</summary>

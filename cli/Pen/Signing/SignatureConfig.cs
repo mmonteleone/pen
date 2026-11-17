@@ -71,9 +71,10 @@ internal static class SignatureConfig
             : null;
     }
 
-    /// <summary>Builds the settings for the format and every program git could run for it.</summary>
-    /// <param name="git">The git whose global config is read.</param>
-    /// <param name="format">The global gpg.format, or "openpgp" if it isn't set.</param>
+    /// <summary>
+    /// Builds the settings for <paramref name="format"/> (the global gpg.format, or "openpgp" if it isn't set) and
+    /// every program git could run for it, from the global config.
+    /// </summary>
     /// <returns>The settings as "-c key=value" pairs, already split.</returns>
     /// <remarks>
     /// All of them, whatever the format: to verify, git picks the program by the type of the signature, which the
