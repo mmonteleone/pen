@@ -104,19 +104,19 @@ internal static class PausedGit
     /// <returns>The note, or null if the file isn't there or has none.</returns>
     private static PausedNote? ReadExecNote(string dir, string file, string heading)
     {
-        var (text, problem) = ReadText(Path.Combine(dir, file));
-        if (problem is not null)
+        var read = ReadText(Path.Combine(dir, file));
+        if (read is FileText.Unreadable { Problem: var problem })
             return new($"couldn't read {file}, so pen can't say what it would run: {problem}", []);
-        return text is null ? null : CreateLinesNote(heading, ExecLines(text));
+        return read is FileText.Read { Text: var text } ? CreateLinesNote(heading, ExecLines(text)) : null;
     }
 
     /// <summary>Reads rebase-merge/strategy into a note if it names a strategy other than git's own.</summary>
     private static PausedNote? ReadStrategyFileNote(string dir)
     {
-        var (text, problem) = ReadText(Path.Combine(dir, "strategy"));
-        if (problem is not null)
+        var read = ReadText(Path.Combine(dir, "strategy"));
+        if (read is FileText.Unreadable { Problem: var problem })
             return new($"couldn't read strategy, which can name a program for git to run: {problem}", []);
-        var value = text?.TrimEnd('\n', '\r');
+        var value = read is FileText.Read { Text: var text } ? text.TrimEnd('\n', '\r') : null;
         if (string.IsNullOrEmpty(value) || StockStrategies.Contains(value))
             return null;
         return CreateLinesNote(FormatStrategyHeading("strategy"), [value]);
@@ -125,10 +125,12 @@ internal static class PausedGit
     /// <summary>Reads the lines of sequencer/opts that could set a strategy other than git's own into a note.</summary>
     private static PausedNote? ReadOptsNote(string dir)
     {
-        var (text, problem) = ReadText(Path.Combine(dir, "opts"));
-        if (problem is not null)
+        var read = ReadText(Path.Combine(dir, "opts"));
+        if (read is FileText.Unreadable { Problem: var problem })
             return new($"couldn't read opts, which can name a program for git to run: {problem}", []);
-        return text is null ? null : CreateLinesNote(FormatStrategyHeading("opts"), StrategyLines(text));
+        return read is FileText.Read { Text: var text }
+            ? CreateLinesNote(FormatStrategyHeading("opts"), StrategyLines(text))
+            : null;
     }
 
     private static string FormatStrategyHeading(string file) => $"a merge strategy in {file} that isn't " +
@@ -137,10 +139,10 @@ internal static class PausedGit
     /// <summary>Reads rebase-apply/apply-opt into a note if it holds options.</summary>
     private static PausedNote? ReadApplyOptNote(string dir)
     {
-        var (text, problem) = ReadText(Path.Combine(dir, "apply-opt"));
-        if (problem is not null)
+        var read = ReadText(Path.Combine(dir, "apply-opt"));
+        if (read is FileText.Unreadable { Problem: var problem })
             return new($"couldn't read apply-opt, which holds options for git apply: {problem}", []);
-        var value = text?.Trim();
+        var value = read is FileText.Read { Text: var text } ? text.Trim() : null;
         if (string.IsNullOrEmpty(value))
             return null;
         return CreateLinesNote("options for git apply in apply-opt, one of " +
@@ -160,34 +162,57 @@ internal static class PausedGit
 
     /// <summary>Reads a file's text.</summary>
     /// <returns>
-    /// The text; (null, null) if it isn't there; or a problem if it can't be read.
+    /// The text; <see cref="FileText.Missing"/> if it isn't there; or why it can't be read.
     /// </returns>
     /// <remarks>
     /// As bytes, since a byte-order mark must not change how the lines are seen, and git splits and parses bytes too.
     /// </remarks>
-    private static (string? Text, string? Problem) ReadText(string path)
+    private static FileText ReadText(string path)
     {
         try
         {
             if (PathChecks.IsLink(path))
-                return (null, "it's a symlink");
+                return new FileText.Unreadable("it's a symlink");
             var bytes = Native.ReadProtected(path)?.Bytes;
             return bytes is null
-                ? (null, "it isn't a regular file of a reasonable size")
-                : (Encoding.UTF8.GetString(bytes), null);
+                ? new FileText.Unreadable("it isn't a regular file of a reasonable size")
+                : new FileText.Read(Encoding.UTF8.GetString(bytes));
         }
         catch (FileNotFoundException)
         {
-            return (null, null);
+            return new FileText.Missing();
         }
         catch (DirectoryNotFoundException)
         {
-            return (null, null);
+            return new FileText.Missing();
         }
         catch (Exception exception)
         {
-            return (null, exception is UnauthorizedAccessException ? "permission denied" : Out.Describe(exception));
+            return new FileText.Unreadable(
+                exception is UnauthorizedAccessException ? "permission denied" : Out.Describe(exception));
         }
+    }
+
+    /// <summary>
+    /// What <see cref="ReadText"/> found: the file's text, that it isn't there, or why it can't be read, which are
+    /// all there are.
+    /// </summary>
+    private abstract record FileText
+    {
+        private FileText()
+        {
+        }
+
+        /// <summary>The file isn't there.</summary>
+        public sealed record Missing : FileText;
+
+        /// <summary>The file's text.</summary>
+        /// <param name="Text">Its bytes, decoded as UTF-8.</param>
+        public sealed record Read(string Text) : FileText;
+
+        /// <summary>The file is there but can't be read as a regular file.</summary>
+        /// <param name="Problem">Why.</param>
+        public sealed record Unreadable(string Problem) : FileText;
     }
 
     /// <summary>Finds the lines git parses as exec, without their leading blanks.</summary>
