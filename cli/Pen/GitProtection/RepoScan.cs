@@ -176,13 +176,13 @@ internal static class RepoScan
             if (RepoGuard.IsLink(gitFile))
                 return null;
             var entry = ReadGitFileTarget(gitFile, requireReal: true);
-            if (entry == null)
+            if (entry is null)
                 return null;
             var worktrees = Path.GetDirectoryName(entry);
-            if (worktrees == null || Path.GetFileName(worktrees) != "worktrees")
+            if (worktrees is null || Path.GetFileName(worktrees) != "worktrees")
                 return null;
             var common = Path.GetDirectoryName(worktrees);
-            if (common == null || common == "/")
+            if (common is null || common == "/")
                 return null;
             if (ReadPathFile(Path.Combine(entry, "commondir"), "") != "../..")
                 return null;
@@ -198,12 +198,12 @@ internal static class RepoScan
     private static bool PointsBackTo(string entry, string gitFile)
     {
         var back = ReadPathFile(Path.Combine(entry, "gitdir"), "");
-        if (back == null)
+        if (back is null)
             return false;
         if (!Path.IsPathRooted(back))
             back = Path.Combine(entry, back);
         var backReal = Native.RealPath(back);
-        return backReal != null && backReal == Native.RealPath(gitFile);
+        return backReal is not null && backReal == Native.RealPath(gitFile);
     }
 
     /// <summary>
@@ -221,7 +221,7 @@ internal static class RepoScan
         try
         {
             var gitdir = ReadPathFile(Path.Combine(entry, "gitdir"), "");
-            if (gitdir == null)
+            if (gitdir is null)
                 return false;
             if (!Path.IsPathRooted(gitdir))
                 gitdir = Path.Combine(entry, gitdir);
@@ -272,7 +272,7 @@ internal static class RepoScan
             if (moduleRepos.Count == 0 || RepoGuard.IsLink(gitFile))
                 return null;
             var repo = ReadGitFileTarget(gitFile, requireReal: true);
-            if (repo == null || !moduleRepos.Contains(repo))
+            if (repo is null || !moduleRepos.Contains(repo))
                 return null;
             return HasWorktreeAt(repo, Path.GetDirectoryName(gitFile)!) ? repo : null;
         }
@@ -301,7 +301,7 @@ internal static class RepoScan
             worktree = Path.Combine(repo, worktree); // git resolves it from the git dir
         // git chdirs into the git dir and resolves the value physically, so ".." after a symlink leaves its target.
         var worktreeReal = Native.RealPath(worktree);
-        return worktreeReal != null && worktreeReal == Native.RealPath(checkout);
+        return worktreeReal is not null && worktreeReal == Native.RealPath(checkout);
     }
 
     /// <summary>Finds the submodule repos git keeps in <paramref name="gitDir"/>.</summary>
@@ -384,7 +384,7 @@ internal static class RepoScan
     private static string? ReadGitFileTarget(string gitFile, bool requireReal)
     {
         var gitdir = ReadPathFile(gitFile, "gitdir: ");
-        if (gitdir == null)
+        if (gitdir is null)
             return null;
         if (!Path.IsPathRooted(gitdir))
             gitdir = Path.Combine(Path.GetDirectoryName(gitFile)!, gitdir);
@@ -419,7 +419,7 @@ internal static class RepoScan
         if (!File.Exists(path) || RepoGuard.IsLink(path))
             return null;
         var text = ReadPathText(path);
-        if (text == null || text.StartsWith('\uFEFF') || !text.StartsWith(prefix, StringComparison.Ordinal))
+        if (text is null || text.StartsWith('\uFEFF') || !text.StartsWith(prefix, StringComparison.Ordinal))
             return null;
         var value = text[prefix.Length..].TrimEnd('\n', '\r');
         return value.Length == 0 || value.Contains('\n') || value.Contains('\0') ? null : value;
@@ -507,10 +507,10 @@ internal static class RepoScan
         private void ScanDirectory(string dir)
         {
             var entries = ListOrOpen(dir);
-            if (entries == null)
+            if (entries is null)
                 return;
             var undecodable = FindUndecodable(dir, entries);
-            if (undecodable == null)
+            if (undecodable is null)
                 return;
             if (ScanEntries(dir, entries, undecodable) && !(_insideGitDir && IsOwnGitDir(dir)))
             {
@@ -528,14 +528,16 @@ internal static class RepoScan
         /// <summary>Where <paramref name="dir"/>, in the git dir, is, for the advice about a repo there.</summary>
         private GitDirPlace FindPlace(string dir)
         {
-            for (var at = dir; at != null && at != root && RepoGuard.IsInside(root, at); at = Path.GetDirectoryName(at))
+            for (var at = dir;
+                 at is not null && at != root && RepoGuard.IsInside(root, at);
+                 at = Path.GetDirectoryName(at))
             {
                 var parent = Path.GetDirectoryName(at);
-                if (parent != null && Path.GetFileName(at) is "refs" or "logs" && IsOwnGitDir(parent))
+                if (parent is not null && Path.GetFileName(at) is "refs" or "logs" && IsOwnGitDir(parent))
                     return GitDirPlace.Refs;
             }
             var worktrees = Path.GetDirectoryName(dir);
-            if (worktrees != null && Path.GetFileName(worktrees) == "worktrees"
+            if (worktrees is not null && Path.GetFileName(worktrees) == "worktrees"
                 && Path.GetDirectoryName(worktrees) is { } owner && IsOwnRepo(owner))
             {
                 return GitDirPlace.WorktreeEntry;
@@ -559,16 +561,16 @@ internal static class RepoScan
             if (IsOwnRepo(dir))
                 return true;
             var worktrees = Path.GetDirectoryName(dir);
-            if (worktrees == null || Path.GetFileName(worktrees) != "worktrees")
+            if (worktrees is null || Path.GetFileName(worktrees) != "worktrees")
                 return false;
             var owner = Path.GetDirectoryName(worktrees);
-            if (owner == null || !IsOwnRepo(owner))
+            if (owner is null || !IsOwnRepo(owner))
                 return false;
             var common = ReadPathFile(Path.Combine(dir, "commondir"), "");
-            if (common == null)
+            if (common is null)
                 return false;
             var real = Native.RealPath(Path.IsPathRooted(common) ? common : Path.Combine(dir, common));
-            return real != null && real == Native.RealPath(owner);
+            return real is not null && real == Native.RealPath(owner);
         }
 
         /// <summary>Whether <paramref name="dir"/> is the git dir or a module repo kept in it.</summary>
@@ -601,14 +603,14 @@ internal static class RepoScan
         private List<Entry>? ListOrOpen(string dir)
         {
             var entries = ListEntries(dir);
-            if (entries != null)
+            if (entries is not null)
                 return entries;
             // Gone, or shut: nothing host git could reach.
             if (Native.IsShutOrGone(dir))
                 return null;
-            if (tryOpen != null && tryOpen(dir))
+            if (tryOpen is not null && tryOpen(dir))
                 entries = ListEntries(dir);
-            if (entries == null)
+            if (entries is null)
                 _unlistable.Add(dir);
             return entries;
         }
@@ -626,7 +628,7 @@ internal static class RepoScan
             if (!entries.Any(e => HasReplacement(e.Name)))
                 return undecodable;
             var raw = Native.ListUndecodable(dir);
-            if (raw == null)
+            if (raw is null)
             {
                 _unlistable.Add(dir);
                 return null;
@@ -699,7 +701,7 @@ internal static class RepoScan
             {
                 AddRepo(dir, path, NestedKind.GitDir);
             }
-            else if (ResolveWorktree(path) != commonGitDir && ResolveModuleCheckout(path, moduleRepos) == null)
+            else if (ResolveWorktree(path) != commonGitDir && ResolveModuleCheckout(path, moduleRepos) is null)
             {
                 AddRepo(dir, path, NestedKind.GitFile);
             }
@@ -730,10 +732,10 @@ internal static class RepoScan
             if (RepoGuard.IsLink(worktrees) || !Directory.Exists(worktrees))
                 return; // a symlinked worktrees/ is refused by the mounts
             var entries = ListOrNote(worktrees);
-            if (entries == null)
+            if (entries is null)
                 return;
             var undecodable = NoteBadNames(worktrees, entries);
-            if (undecodable == null)
+            if (undecodable is null)
                 return;
             foreach (var worktree in entries)
             {
@@ -755,10 +757,10 @@ internal static class RepoScan
             if (!Directory.Exists(dir))
                 return;
             var entries = ListOrNote(dir);
-            if (entries == null)
+            if (entries is null)
                 return;
             var undecodable = NoteBadNames(dir, entries);
-            if (undecodable == null)
+            if (undecodable is null)
                 return;
             foreach (var entry in entries)
             {
@@ -812,7 +814,7 @@ internal static class RepoScan
             if (!entries.Any(e => HasReplacement(Path.GetFileName(e))))
                 return [];
             var raw = Native.ListUndecodable(dir);
-            if (raw == null)
+            if (raw is null)
             {
                 _unreadable.Add(dir);
                 return null;

@@ -26,9 +26,9 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
     /// <summary>The dir's own .git path, which may not exist.</summary>
     public string GitDir => Path.Combine(Dir, ".git");
     /// <summary>Whether the dir is a git repo (a checkout or a linked worktree).</summary>
-    public bool IsRepo => CommonGitDir != null;
+    public bool IsRepo => CommonGitDir is not null;
     /// <summary>Whether the dir is a linked worktree: its .git is a file naming another repo's git dir.</summary>
-    public bool IsWorktree => CommonGitDir != null && CommonGitDir != GitDir;
+    public bool IsWorktree => CommonGitDir is not null && CommonGitDir != GitDir;
     /// <summary>The dir's .pen/ path.</summary>
     public string PenDir => Path.Combine(Dir, ".pen");
     /// <summary>The dir's .pen/config.toml path.</summary>
@@ -69,7 +69,7 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
         if (!File.Exists(git))
             return (null, dir);
         var common = RepoScan.ResolveWorktree(git);
-        if (common == null)
+        if (common is null)
             return (null, dir);
         // A bare repo's worktree has no main checkout; the dir stands in for it.
         return (common, RepoGuard.IsMainCheckoutGitDir(common) ? Path.GetDirectoryName(common)! : dir);
@@ -137,7 +137,7 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
 
         if (!Path.Exists(Path.Combine(dir, ".git")))
         {
-            for (var parent = Path.GetDirectoryName(dir); parent != null; parent = Path.GetDirectoryName(parent))
+            for (var parent = Path.GetDirectoryName(dir); parent is not null; parent = Path.GetDirectoryName(parent))
             {
                 if (Path.Exists(Path.Combine(parent, ".git")))
                 {

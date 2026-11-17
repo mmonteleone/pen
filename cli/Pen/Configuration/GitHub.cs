@@ -41,14 +41,14 @@ internal static partial class GitHub
     /// <returns>The owner, or null if there's no repo, no GitHub origin or no readable git config.</returns>
     public static string? ReadOriginOwner(Project project)
     {
-        if (project.CommonGitDir == null)
+        if (project.CommonGitDir is null)
             return null;
         var gitConfig = Path.Combine(project.CommonGitDir, "config");
         if (!File.Exists(gitConfig))
             return null;
         var text = Native.ReadRegularFile(gitConfig);
-        var url = text == null ? null : FindOriginUrl(text);
-        return url == null ? null : ParseOwner(url);
+        var url = text is null ? null : FindOriginUrl(text);
+        return url is null ? null : ParseOwner(url);
     }
 
     /// <summary>Selects the user's token for <paramref name="owner"/>, noticing once when there's none.</summary>
@@ -59,7 +59,7 @@ internal static partial class GitHub
     /// </remarks>
     public static string? SelectToken(string? owner, Config userConfig, string runtimeDir, HostEnv host)
     {
-        if (owner == null)
+        if (owner is null)
             return null;
         var marker = Path.Combine(runtimeDir, "token-notice");
         if (userConfig.GitHubTokens.TryGetValue(owner.ToLowerInvariant(), out var token))

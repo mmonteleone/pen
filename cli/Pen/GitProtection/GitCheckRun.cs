@@ -102,7 +102,7 @@ internal sealed class GitCheckRun
         Func<IReadOnlyCollection<string>?> readModules)
     {
         // Decides RestoreIncomplete if the run stops before the restore does.
-        _restoreDone = session == null || !File.Exists(session.ProtectedManifest);
+        _restoreDone = session is null || !File.Exists(session.ProtectedManifest);
         string? stopped = null;
         try
         {
@@ -127,7 +127,7 @@ internal sealed class GitCheckRun
     private CheckResult Summarize(string? stopped)
     {
         var failures = new List<string>();
-        if (stopped != null)
+        if (stopped is not null)
             failures.Add(stopped);
         if (_unlistable.Count > 0)
             failures.Add(DescribeUnlistable());
@@ -168,11 +168,11 @@ internal sealed class GitCheckRun
         Func<IReadOnlyCollection<string>?> readModules)
     {
         var (startedWithGit, commonGitDir) = readGit();
-        var atStart = session == null ? null : ProtectedFiles.AtStart(session);
+        var atStart = session is null ? null : ProtectedFiles.AtStart(session);
         var swept = FindSweptGitDir(startedWithGit, commonGitDir);
         try
         {
-            if (session != null)
+            if (session is not null)
             {
                 RestoreProtectedFiles(session, commonGitDir);
                 if (!Directory.Exists(_dir))
@@ -416,7 +416,7 @@ internal sealed class GitCheckRun
     /// </remarks>
     private HashSet<string> CheckModuleRepos(string gitDir, IReadOnlyCollection<string>? modulesAtStart)
     {
-        var listed = modulesAtStart == null ? null : new HashSet<string>(modulesAtStart, StringComparer.Ordinal);
+        var listed = modulesAtStart is null ? null : new HashSet<string>(modulesAtStart, StringComparer.Ordinal);
         var known = new HashSet<string>(StringComparer.Ordinal);
         var gone = new List<string>();
         var scan = ScanModules(gitDir);
@@ -473,7 +473,7 @@ internal sealed class GitCheckRun
                 "it points git at config and hooks in another directory", breakLayout: false);
             return true;
         }
-        if (listed != null && !listed.Contains(repo))
+        if (listed is not null && !listed.Contains(repo))
         {
             Quarantine(repo, "a submodule repo that wasn't there at the session's start, or that another " +
                 "session could have made: its config and hooks were writable from the sandbox", breakLayout: true);
@@ -527,7 +527,7 @@ internal sealed class GitCheckRun
     /// </remarks>
     private void SweepHazardsAfterStop(string? git, ProtectedManifest? atStart)
     {
-        if (git == null)
+        if (git is null)
             return;
         try
         {
@@ -554,7 +554,7 @@ internal sealed class GitCheckRun
             return;
         if (TryRenameWithOpening(hazard.Path, hazard.Why, breakLayout: false))
             return;
-        if (hazard.StateDir != null && TryRenameWithOpening(hazard.StateDir, hazard.Why, breakLayout: false))
+        if (hazard.StateDir is not null && TryRenameWithOpening(hazard.StateDir, hazard.Why, breakLayout: false))
             return;
         Quarantine(hazard.StateDir ?? hazard.Path, hazard.Why, breakLayout: false);
     }

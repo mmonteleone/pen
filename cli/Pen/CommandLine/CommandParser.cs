@@ -210,7 +210,7 @@ internal static class CommandParser
         // Before the subcommand, every option is the root's, and help and version have been handled.
         var first = result.Tokens.TakeWhile(token => token.Type != TokenType.Command)
             .FirstOrDefault(token => token.Type == TokenType.Option);
-        if (first != null)
+        if (first is not null)
         {
             var option = FindOption(tree.RootOptions.All, first);
             throw CreateUsageError(

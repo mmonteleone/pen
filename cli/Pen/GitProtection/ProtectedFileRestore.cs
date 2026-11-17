@@ -78,7 +78,7 @@ internal sealed class ProtectedFileRestore
                 "don't run git here until you've checked them"));
             return false;
         }
-        if (manifest == null)
+        if (manifest is null)
             return true;
         foreach (var file in manifest.Files.Where(file => !file.Adopted))
             RestoreOrRecord(file);
@@ -128,7 +128,7 @@ internal sealed class ProtectedFileRestore
             current = null;
         }
 
-        if (current != null && current.Bytes.AsSpan().SequenceEqual(original))
+        if (current is not null && current.Bytes.AsSpan().SequenceEqual(original))
         {
             if (current.Mode != file.Mode)
                 RestoreMode(file, current.Mode);
@@ -157,7 +157,7 @@ internal sealed class ProtectedFileRestore
     /// <returns>Whether it was written back; false if it isn't a regular file it can open for writing.</returns>
     private static bool TryWriteInPlace(ProtectedFile file, byte[] original, RegularFile? current)
     {
-        if (current == null)
+        if (current is null)
             return false;
         SafeFileHandle? writable;
         // A file made read-only or unwritable can't be restored in place.
@@ -169,7 +169,7 @@ internal sealed class ProtectedFileRestore
         {
             return false;
         }
-        if (writable == null)
+        if (writable is null)
             return false;
         using (writable)
         {
@@ -240,7 +240,7 @@ internal sealed class ProtectedFileRestore
         var parent = Path.GetDirectoryName(file.Path)!;
         foreach (var directory in ListDirectoriesFromRoot(parent, root))
         {
-            if (root != null && directory != root && RepoGuard.IsLink(directory))
+            if (root is not null && directory != root && RepoGuard.IsLink(directory))
             {
                 _changes.Moved.Add(GitCheck.Move(directory, "a symlink in place of a directory holding the protected " +
                     $"file {Out.Field(file.Path)}: it points git at a file somewhere else", breakLayout: false));
@@ -268,7 +268,7 @@ internal sealed class ProtectedFileRestore
     {
         var directories = new Stack<string>();
         directories.Push(parent);
-        if (root == null || !RepoGuard.IsInside(root, parent))
+        if (root is null || !RepoGuard.IsInside(root, parent))
             return directories;
         var directory = parent;
         while (directory != root)
@@ -285,7 +285,7 @@ internal sealed class ProtectedFileRestore
     private static string FindTopmostShut(string path)
     {
         var chain = new Stack<string>();
-        for (var directory = path; directory != null; directory = Path.GetDirectoryName(directory))
+        for (var directory = path; directory is not null; directory = Path.GetDirectoryName(directory))
             chain.Push(directory);
         return chain.FirstOrDefault(directory => !Native.CanEnter(directory)) ?? path;
     }

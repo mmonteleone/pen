@@ -31,7 +31,7 @@ internal sealed class UpgradeCommand(HostEnv host, Config user, RecipeCatalog ca
         // The project layer too, when run in a project that has one.
         var project = TryResolveProject();
         var tools = ToolsImage.Ensure(SelectTools(project), catalog, noCache: noCache);
-        if (project != null)
+        if (project is not null)
             RebuildProjectLayer(project, noCache, tools);
 
         PullSidecarImages();
@@ -61,7 +61,7 @@ internal sealed class UpgradeCommand(HostEnv host, Config user, RecipeCatalog ca
     /// <remarks>pen upgrade doesn't ask, so unapproved tools from .pen/ are skipped rather than built.</remarks>
     internal IReadOnlyList<ToolSpec> SelectTools(Project? project)
     {
-        if (project == null)
+        if (project is null)
             return user.Tools;
         ProjectContext context;
         try
@@ -101,7 +101,7 @@ internal sealed class UpgradeCommand(HostEnv host, Config user, RecipeCatalog ca
     {
         if (!TrustGate.HasDockerfile(project))
             return;
-        if (TrustGate.FindUnapprovedLayer(project, TrustStore.For(host, project)) != null)
+        if (TrustGate.FindUnapprovedLayer(project, TrustStore.For(host, project)) is not null)
         {
             Out.WriteLine("skipping the project layer: .pen/ isn't approved (pen trust reviews it)");
             return;

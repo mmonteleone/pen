@@ -268,8 +268,8 @@ internal sealed class SessionDir(string projectKey, string path)
     public string? ReadRepoDir()
     {
         var sessions = System.IO.Path.GetDirectoryName(Path);
-        var runtime = sessions == null ? null : System.IO.Path.GetDirectoryName(sessions);
-        if (runtime == null)
+        var runtime = sessions is null ? null : System.IO.Path.GetDirectoryName(sessions);
+        if (runtime is null)
             return null;
         try
         {

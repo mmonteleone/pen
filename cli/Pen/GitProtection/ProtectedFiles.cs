@@ -227,7 +227,7 @@ internal static class ProtectedFiles
         foreach (var session in open.OrderBy(session => session.ReadStarted() ?? DateTime.MaxValue))
         {
             var manifest = ReadRecord(session);
-            if (manifest == null)
+            if (manifest is null)
             {
                 // Its record goes after its compose.yaml, so one that's still open with
                 // no record is from an older Pen or damaged: its agent could write.
@@ -282,7 +282,7 @@ internal static class ProtectedFiles
             try
             {
                 var copy = Native.ReadProtected(Path.Combine(older.Session.ProtectedDir, older.File.Copy));
-                if (copy != null)
+                if (copy is not null)
                     return new(copy.Bytes, older.File.Mode);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -312,7 +312,7 @@ internal static class ProtectedFiles
     private static string RequireRealPath(string dir, string path)
     {
         var real = Native.RealPath(path);
-        if (real == null || !string.Equals(real, path, StringComparison.OrdinalIgnoreCase))
+        if (real is null || !string.Equals(real, path, StringComparison.OrdinalIgnoreCase))
         {
             throw new PenException($"refusing to run in {Out.Field(dir)}: {RepoGuard.FormatPath(dir, path)} " +
                 "isn't where pen expected it (a symlink, or it's gone): inspect it, then rerun");

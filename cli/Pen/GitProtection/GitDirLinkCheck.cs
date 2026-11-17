@@ -142,10 +142,10 @@ internal sealed class GitDirLinkCheck
     private Lead MayLeadIn(string link)
     {
         var target = ReadTarget(link);
-        if (target == null)
+        if (target is null)
             return Lead.Unknown;
         var reached = target.StartsWith('/') ? "/" : Native.RealPath(Path.GetDirectoryName(link)!);
-        if (reached == null)
+        if (reached is null)
             return Lead.Unknown;
         var parts = new List<string>(Split(target));
 
@@ -220,7 +220,7 @@ internal sealed class GitDirLinkCheck
         var id = Identify(path);
         for (var depth = 0; depth < MaxDepth; depth++)
         {
-            if (id == null)
+            if (id is null)
                 return Lead.Unknown;
             if (_gitDirs.Contains(id))
                 return Lead.Inside;
@@ -228,7 +228,7 @@ internal sealed class GitDirLinkCheck
             var upId = Identify(up);
             if (upId == id)
                 return Lead.Elsewhere; // "/", whose ".." is itself
-            if (upId == null || Native.RealPath(up) is not { } real)
+            if (upId is null || Native.RealPath(up) is not { } real)
                 return Lead.Unknown;
             path = real;
             id = upId;
@@ -257,7 +257,7 @@ internal sealed class GitDirLinkCheck
             try
             {
                 var text = new FileInfo(link).LinkTarget;
-                return text == null || text.Contains('\uFFFD') ? null : text;
+                return text is null || text.Contains('\uFFFD') ? null : text;
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {

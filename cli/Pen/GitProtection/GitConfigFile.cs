@@ -219,7 +219,7 @@ internal static class GitConfigFile
                     continue;
                 }
                 var problem = character == '[' ? ReadSectionHeader() : ReadEntry(character);
-                if (problem != null)
+                if (problem is not null)
                     return problem;
             }
         }
@@ -414,7 +414,7 @@ internal static class GitConfigFile
         private string? AddEscaped()
         {
             var escaped = Unescape(ReadChar());
-            if (escaped == null)
+            if (escaped is null)
                 return "an escape git doesn't know";
             if (escaped != LineContinuation)
                 _value.Add((byte)escaped.Value);

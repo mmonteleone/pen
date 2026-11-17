@@ -22,7 +22,7 @@ internal static class Proc
             UseShellExecute = false,
             InheritedHandles = [],
         };
-        if (env != null)
+        if (env is not null)
         {
             foreach (var (name, value) in env)
                 startInfo.Environment[name] = value;

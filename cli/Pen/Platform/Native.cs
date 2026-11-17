@@ -181,7 +181,7 @@ internal static partial class Native
     public static string? ReadRegularFile(string path)
     {
         using var handle = OpenRegular(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-        if (handle == null)
+        if (handle is null)
             return null;
         var length = RandomAccess.GetLength(handle);
         if (length > MaxTextFile)
@@ -198,7 +198,7 @@ internal static partial class Native
     public static byte[]? ReadRegularBytes(string path)
     {
         using var handle = OpenRegular(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-        return handle == null ? null : ReadBounded(handle);
+        return handle is null ? null : ReadBounded(handle);
     }
 
     /// <summary>Opens the regular file at <paramref name="path"/> without blocking.</summary>
@@ -237,7 +237,7 @@ internal static partial class Native
     public static RegularFile? ReadProtected(string path)
     {
         using var handle = OpenRegular(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
-        if (handle == null)
+        if (handle is null)
             return null;
         return ReadBounded(handle) is { } bytes ? new(bytes, File.GetUnixFileMode(handle)) : null;
     }
@@ -364,7 +364,7 @@ internal static partial class Native
     {
         try
         {
-            return StatAt(AT_FDCWD, "/", follow: true) != null;
+            return StatAt(AT_FDCWD, "/", follow: true) is not null;
         }
         catch (Exception exception) when (exception is EntryPointNotFoundException or DllNotFoundException)
         {
@@ -426,7 +426,7 @@ internal static partial class Native
         {
             const uint STATX_TYPE = 0x1, STATX_NLINK = 0x4, STATX_INO = 0x100;
             const int AT_EMPTY_PATH = 0x1000;
-            if (path == null)
+            if (path is null)
                 flags |= AT_EMPTY_PATH;
             if (StatxNative(fd, path ?? "", flags, STATX_TYPE | STATX_NLINK | STATX_INO, buffer) != 0)
                 return null;

@@ -42,7 +42,7 @@ internal sealed class SignCommand(HostEnv host, Project project)
     {
         var check = GitCheck.RunWithoutOpening(project.Dir, startedWithGit: true, project.CommonGitDir,
             modulesAtStart: null);
-        if (check.Moved.Count > 0 || check.Failure != null)
+        if (check.Moved.Count > 0 || check.Failure is not null)
         {
             GitCheck.Report(project.Dir, check);
             throw new PenException("not signing: deal with the files above first");

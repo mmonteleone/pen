@@ -48,7 +48,7 @@ internal sealed record Quarantined(
     bool LinkTargetEscaped = false)
 {
     /// <summary>Whether it was a symlink that was removed.</summary>
-    public bool Removed => LinkTarget != null;
+    public bool Removed => LinkTarget is not null;
 
     /// <summary>
     /// Whether it couldn't be moved (or restored, or removed): <see cref="To"/> is empty and it wasn't removed.

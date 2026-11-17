@@ -69,7 +69,7 @@ internal sealed class HostGit
     public List<string> BuildArgs(IEnumerable<string> args)
     {
         var all = new List<string>();
-        if (_dir != null)
+        if (_dir is not null)
             all.AddRange(["-C", _dir]);
         all.AddRange(Overrides);
         all.AddRange(_config);
@@ -94,7 +94,7 @@ internal sealed class HostGit
         try
         {
             using var input = process.StandardInput.BaseStream;
-            if (stdin != null)
+            if (stdin is not null)
                 input.Write(stdin);
         }
         catch (IOException)
@@ -162,7 +162,7 @@ internal sealed class HostGit
         IReadOnlyDictionary<string, string>? env)
     {
         var startInfo = Proc.CreateStartInfo("git", BuildArgs(args), _env);
-        if (env != null)
+        if (env is not null)
         {
             foreach (var (name, value) in env)
                 startInfo.Environment[name] = value;
@@ -172,7 +172,7 @@ internal sealed class HostGit
             startInfo.Environment.Remove(name);
         foreach (var name in ForcedEnv)
             startInfo.Environment[name] = "1";
-        if (_dir == null)
+        if (_dir is null)
             startInfo.WorkingDirectory = "/";
         startInfo.RedirectStandardOutput = startInfo.RedirectStandardError = true;
         startInfo.RedirectStandardInput = true;

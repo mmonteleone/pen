@@ -301,7 +301,7 @@ internal static class GitCheck
     {
         // A linked worktree's key is its main checkout's, and only there is Pen sure to find this session.
         var repoDir = session.ReadRepoDir();
-        var retry = (repoDir == null ? "" : $"cd {Quote(repoDir)} && ") + RetryCommand;
+        var retry = (repoDir is null ? "" : $"cd {Quote(repoDir)} && ") + RetryCommand;
         var fix = blocked is { Count: > 0 }
             ? $"chmod u+rwx {string.Join(' ', blocked.Select(Quote))} && {retry}"
             : $"deal with what's named above, then: {retry}";
@@ -341,7 +341,7 @@ internal static class GitCheck
 
         if (check.Paused.Count > 0)
             Out.WriteRaw(PausedGit.Warning(dir, check.Paused));
-        if (check.Failure != null)
+        if (check.Failure is not null)
             Out.WriteRaw(NotCheckedWarning(dir, check.Failure));
     }
 

@@ -48,12 +48,12 @@ internal static class SessionCompose
                 "this session's mounts over the project mount and its services, written by pen");
             writer.WriteStartObject("services");
             WriteAgentService(writer, mounts, readOnlyRoot, dindContainer, ports);
-            if (dindContainer != null)
+            if (dindContainer is not null)
                 WriteDindService(writer, mounts, dindContainer);
-            if (ports != null)
+            if (ports is not null)
                 WritePortsService(writer, ports);
             writer.WriteEndObject();
-            if (ports != null)
+            if (ports is not null)
                 WritePortsNetwork(writer);
             writer.WriteEndObject();
         }
@@ -73,15 +73,15 @@ internal static class SessionCompose
         writer.WriteStartObject("agent");
         if (readOnlyRoot)
             writer.WriteBoolean("read_only", true);
-        if (dindContainer != null)
+        if (dindContainer is not null)
         {
             writer.WriteStartObject("environment");
             writer.WriteString("DOCKER_HOST", "tcp://dind:2375");
             writer.WriteString("PEN_DOCKER", "1");
             writer.WriteEndObject();
         }
-        if (dindContainer != null || ports != null)
-            WriteAgentDependencies(writer, hasDind: dindContainer != null, hasPorts: ports != null);
+        if (dindContainer is not null || ports is not null)
+            WriteAgentDependencies(writer, hasDind: dindContainer is not null, hasPorts: ports is not null);
         WriteMounts(writer, mounts);
         writer.WriteEndObject();
     }

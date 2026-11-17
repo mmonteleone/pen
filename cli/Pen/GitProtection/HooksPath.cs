@@ -111,7 +111,7 @@ internal static class HooksPath
         walk.Read(config, conditional: false);
         var commonEntries = GitConfigFile.TryParseFile(config);
         var gitDir = project.IsWorktree ? RepoScan.ReadWorktreeEntry(project.GitDir) : common;
-        if (gitDir == null)
+        if (gitDir is null)
         {
             walk.Add(new(null, project.GitDir, "it can't read this worktree's .git file"));
             return DecideWarning(walk.Found, project, host, null, relativeKnown: false);
@@ -120,7 +120,7 @@ internal static class HooksPath
         var workTree = ReadWorkTree(project, gitDir, commonEntries, walk);
         ReadEnvironmentConfig(env, walk);
         var top = FindWorkTreeTop(project, gitDir, workTree);
-        return DecideWarning(walk.Found, project, host, top, relativeKnown: top != null);
+        return DecideWarning(walk.Found, project, host, top, relativeKnown: top is not null);
     }
 
     /// <summary>
@@ -139,16 +139,16 @@ internal static class HooksPath
         Walk walk)
     {
         var workTree = project.IsWorktree ? null : FindLastWorkTree(commonEntries);
-        var known = commonEntries != null;
-        var extension = commonEntries == null
+        var known = commonEntries is not null;
+        var extension = commonEntries is null
             ? null
             : GitConfigFile.FindLast(commonEntries, "extensions", "worktreeconfig");
-        if (extension != null && GitConfigFile.IsTrue(extension))
+        if (extension is not null && GitConfigFile.IsTrue(extension))
         {
             var worktreeFile = Path.Combine(gitDir, "config.worktree");
             walk.Read(worktreeFile, conditional: false);
             var own = GitConfigFile.TryParseFile(worktreeFile);
-            known &= own != null;
+            known &= own is not null;
             workTree = FindLastWorkTree(own) ?? workTree;
         }
         return new(workTree, known);
@@ -162,7 +162,7 @@ internal static class HooksPath
     {
         if (!workTree.IsKnown)
             return null;
-        if (workTree.Value == null)
+        if (workTree.Value is null)
             return project.Dir;
         if (workTree.Value.Contains('\ufffd'))
             return null;
@@ -222,7 +222,7 @@ internal static class HooksPath
 
     /// <summary>Finds the last core.worktree in a file's own entries, not its includes.</summary>
     private static string? FindLastWorkTree(List<GitConfigFile.Entry>? entries) =>
-        entries == null ? null : GitConfigFile.FindLast(entries, "core", "worktree");
+        entries is null ? null : GitConfigFile.FindLast(entries, "core", "worktree");
 
     /// <summary>
     /// Decides the warning for the most decisive candidate: the last one in reach, otherwise the last that can't be
@@ -239,7 +239,7 @@ internal static class HooksPath
         Candidate? unknown = null;
         foreach (var candidate in Enumerable.Reverse(found))
         {
-            var place = candidate.Value == null
+            var place = candidate.Value is null
                 ? Place.Unknown
                 : Locate(candidate.Value, project, host.Home, top, relativeKnown);
             if (place == Place.Writable)
@@ -282,14 +282,14 @@ internal static class HooksPath
         Place fromTop;
         if (!relativeKnown)
             fromTop = Place.Unknown;
-        else if (top == null)
+        else if (top is null)
             fromTop = Place.Elsewhere;
         else
             fromTop = LocatePath(top + "/" + value, project);
         if (fromTop == Place.Writable || project.CommonGitDir is not { } common)
             return fromTop;
         // .git/hooks, as a work tree path: the read-only one is the one meant.
-        if (top != null && WalkRealPath(top + "/" + value) is { } real
+        if (top is not null && WalkRealPath(top + "/" + value) is { } real
             && RepoGuard.IsInside(Path.Combine(common, "hooks"), real))
         {
             return fromTop;
@@ -305,7 +305,7 @@ internal static class HooksPath
         var real = WalkRealPath(path, p => CanBeReplaced(p, project), out var replaceable);
         if (replaceable)
             return Place.Writable;
-        if (real == null)
+        if (real is null)
             return Place.Unknown;
         // As written. Differing only by case is a folding file system's same path, which the walk has seen.
         var written = Path.GetFullPath(path);
@@ -393,7 +393,7 @@ internal static class HooksPath
                 return null;
             var next = Path.Combine(current, name);
             var target = new FileInfo(next).LinkTarget;
-            if (target == null)
+            if (target is null)
             {
                 current = next;
                 replaceable |= canBeReplaced(RepoGuard.ResolveExisting(next));
@@ -435,7 +435,7 @@ internal static class HooksPath
         /// <summary>Reads a config file at <paramref name="depth"/> includes down, and the files it includes.</summary>
         private void Read(string? file, bool conditional, int depth)
         {
-            if (file == null)
+            if (file is null)
                 return;
             // Each read counts, as a file included twice applies twice: without a
             // limit, includes could fan out exponentially in the depth.
@@ -461,18 +461,18 @@ internal static class HooksPath
         {
             foreach (var entry in entries)
             {
-                if (entry.Section == "core" && entry.Subsection == null && entry.Key == "hookspath")
+                if (entry.Section == "core" && entry.Subsection is null && entry.Key == "hookspath")
                 {
                     if (!conditional)
                         Found.Clear();
                     Found.Add(new(entry.Value, file));
                 }
                 else if (entry.Key == "path" && entry.Value.Length > 0
-                    && ((entry.Section == "include" && entry.Subsection == null)
-                        || (entry.Section == "includeif" && entry.Subsection != null)))
+                    && ((entry.Section == "include" && entry.Subsection is null)
+                        || (entry.Section == "includeif" && entry.Subsection is not null)))
                 {
                     var included = ResolveInclude(entry.Value, file);
-                    if (included == null)
+                    if (included is null)
                     {
                         Found.Add(new(null, file, "it can't resolve the include " +
                             $"{PausedGit.FormatLine(entry.Value)} in {Out.Field(file)}"));

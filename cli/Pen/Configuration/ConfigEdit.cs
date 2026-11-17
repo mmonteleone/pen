@@ -69,7 +69,7 @@ internal static class ConfigEdit
         var newline = text.Contains("\r\n") ? "\r\n" : "\n";
         var document = SyntaxParser.Parse(text, displayPath, validate: true);
         var list = document.KeyValues.FirstOrDefault(kv => KeyName(kv) == key);
-        if (list == null)
+        if (list is null)
             return Insert(text, NewArrayOffset(text, document), Block(key, added, "  ", newline) + newline);
         if (list.Value is ArraySyntax array)
         {
@@ -145,7 +145,7 @@ internal static class ConfigEdit
     private static int NewArrayOffset(string text, DocumentSyntax document)
     {
         var first = document.Tables.FirstOrDefault();
-        if (first == null)
+        if (first is null)
             return text.Length;
         var at = LineStart(text, first.OpenBracket!.Span.Start.Offset);
         while (at > 0)
@@ -192,7 +192,7 @@ internal static class ConfigEdit
 
         // The last item needs a comma before anything follows it (inserted
         // last, at an earlier offset, so the offsets above stay valid).
-        if (items.Count > 0 && items[^1].Comma == null)
+        if (items.Count > 0 && items[^1].Comma is null)
             builder.Insert(items[^1].Value!.Span.End.Offset + 1, ",");
         return builder.ToString();
     }
@@ -207,7 +207,7 @@ internal static class ConfigEdit
             .Split('\n')
             .Skip(1)
             .FirstOrDefault(l => l.Trim().Length > 0);
-        var indent = inside != null ? inside[..(inside.Length - inside.TrimStart().Length)] : "  ";
+        var indent = inside is not null ? inside[..(inside.Length - inside.TrimStart().Length)] : "  ";
         return indent.Length == 0 ? "  " : indent;
     }
 

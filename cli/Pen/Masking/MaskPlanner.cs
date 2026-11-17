@@ -88,7 +88,7 @@ internal sealed class MaskPlanner
         IReadOnlyList<KeyValuePair<string, string>> replace)
     {
         _projectDir = projectDir;
-        _commonGitDir = commonGitDir == null ? null : Native.RealPath(commonGitDir) ?? commonGitDir;
+        _commonGitDir = commonGitDir is null ? null : Native.RealPath(commonGitDir) ?? commonGitDir;
         _protected = protectedPaths.Select(path => Native.RealPath(path) ?? path)
             .Where(path => path != projectDir && RepoGuard.IsInside(projectDir, path))
             .Distinct(StringComparer.Ordinal)
@@ -143,8 +143,8 @@ internal sealed class MaskPlanner
             Walk();
 
         // Whichever was found first, a path inside a hidden directory is hidden by its mount already.
-        var files = _files.Where(file => FindHiddenDir(file.Key) == null).ToDictionary(StringComparer.Ordinal);
-        var dirs = _dirs.Where(dir => FindHiddenDir(dir.Key) == null).ToDictionary(StringComparer.Ordinal);
+        var files = _files.Where(file => FindHiddenDir(file.Key) is null).ToDictionary(StringComparer.Ordinal);
+        var dirs = _dirs.Where(dir => FindHiddenDir(dir.Key) is null).ToDictionary(StringComparer.Ordinal);
         var replacements = PlanReplacements(files);
         DropChanged(files, "hide");
         DropChanged(dirs, "hide");
@@ -334,9 +334,9 @@ internal sealed class MaskPlanner
         var match = FindMatch(relative, isDirectory);
         // A directory-only pattern matches a symlink that leads to a directory in the project.
         var dirMatch = entry.IsLink ? match ?? FindMatch(relative, isDirectory: true) : match;
-        if (dirMatch == null)
+        if (dirMatch is null)
             return isDirectory ? Enter(path, relative) : null;
-        if (isDirectory && _commonGitDir != null && RepoGuard.IsInside(path, _commonGitDir))
+        if (isDirectory && _commonGitDir is not null && RepoGuard.IsInside(path, _commonGitDir))
         {
             // Hiding it would hide the git dir, so it's looked in instead, for what else matches.
             Warn($"couldn't hide {Out.Field(relative)}: the repo's git dir is in it, which pen doesn't hide");
@@ -412,7 +412,7 @@ internal sealed class MaskPlanner
     private void WarnUndecodable(Entry entry, string relative)
     {
         var isDirectory = entry.IsDirectory && !entry.IsLink;
-        if ((entry.IsLink ? FindMatch(relative, isDirectory: true) : FindMatch(relative, isDirectory)) != null)
+        if ((entry.IsLink ? FindMatch(relative, isDirectory: true) : FindMatch(relative, isDirectory)) is not null)
             Warn($"couldn't hide {Out.Field(relative)}: its name isn't valid UTF-8");
         else if (isDirectory)
             Warn($"couldn't look in {Out.Field(relative)} for files to hide: its name isn't valid UTF-8");
@@ -453,13 +453,13 @@ internal sealed class MaskPlanner
             var real = Native.RealPath(path);
             if (real == _projectDir)
                 Warn($"{Out.Field(relative)} leads to the project dir itself, which can't be hidden");
-            if (real != null && IsInGitDir(real))
+            if (real is not null && IsInGitDir(real))
             {
                 Warn($"couldn't hide {Out.Field(relative)}: it leads into the repo's git dir, which pen doesn't hide");
                 return;
             }
 
-            if (real == null || !IsHideable(real))
+            if (real is null || !IsHideable(real))
                 return;
             if (Native.Stat(real, follow: false) is not { } leadsTo)
             {
@@ -474,7 +474,7 @@ internal sealed class MaskPlanner
             return;
         if (found.IsDirectory)
             _dirs.TryAdd(path, new(dirMatch, 0, found.Device, found.Inode));
-        else if (found.IsRegularFile && fileMatch != null)
+        else if (found.IsRegularFile && fileMatch is not null)
             _files.TryAdd(path, new(fileMatch, found.Links, found.Device, found.Inode));
     }
 
@@ -483,7 +483,7 @@ internal sealed class MaskPlanner
     /// .git segment (any case).
     /// </summary>
     private bool IsInGitDir(string path) =>
-        (_commonGitDir != null && RepoGuard.IsInside(_commonGitDir, path))
+        (_commonGitDir is not null && RepoGuard.IsInside(_commonGitDir, path))
         || (path != _projectDir && RepoGuard.IsInside(_projectDir, path)
             && Relative(path).Split('/').Any(segment => segment.Equals(".git", StringComparison.OrdinalIgnoreCase)));
 
@@ -495,7 +495,7 @@ internal sealed class MaskPlanner
     {
         if (path == _projectDir || !RepoGuard.IsInside(_projectDir, path))
             return false;
-        if (_commonGitDir != null
+        if (_commonGitDir is not null
             && (RepoGuard.IsInside(_commonGitDir, path) || RepoGuard.IsInside(path, _commonGitDir)))
         {
             return false;
@@ -606,7 +606,7 @@ internal sealed class MaskPlanner
     private string? FindHiddenDir(string path)
     {
         for (var parent = Path.GetDirectoryName(path);
-             parent != null && parent.Length > _projectDir.Length;
+             parent is not null && parent.Length > _projectDir.Length;
              parent = Path.GetDirectoryName(parent))
         {
             if (_dirs.ContainsKey(parent))
@@ -693,7 +693,7 @@ internal sealed class MaskPlanner
         {
             path = Path.Join(path, part);
             status = Native.Stat(path, follow: false);
-            if (status == null)
+            if (status is null)
             {
                 throw new PenException($"replace: target \"{Out.Field(target)}\" doesn't exist: pen only replaces " +
                     "a file that's there (Docker would create an empty one in its place)");
@@ -795,7 +795,7 @@ internal sealed class MaskPlanner
     {
         var message = $"hide and [replace] need {count} mounts, and pen allows at most {MaxMounts}";
         var top = hidden.GroupBy(found => found.Pattern).MaxBy(group => group.Count());
-        if (top != null)
+        if (top is not null)
             message += $" (hide \"{Out.Field(top.Key.Text)}\" matches {top.Count()})";
         return message + ": hide the directory the files are in instead (secrets/ rather than secrets/*.env)";
     }

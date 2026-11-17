@@ -42,7 +42,7 @@ internal sealed class CommitRewriter(HostGit signing)
     private string CreateSigned(string sha, CommitObject commit, List<string> parents)
     {
         var args = new List<string>();
-        if (commit.Encoding != null)
+        if (commit.Encoding is not null)
             args.AddRange(["-c", $"i18n.commitEncoding={commit.Encoding}"]);
         args.AddRange(["commit-tree", commit.Tree]);
         foreach (var parent in parents)

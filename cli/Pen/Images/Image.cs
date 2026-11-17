@@ -30,7 +30,7 @@ internal static class Image
         var have = ReadCurrentHash();
         if (have == want)
             return;
-        Out.WriteLine(have == null
+        Out.WriteLine(have is null
             ? $"building {Name} (first run, this takes a few minutes)"
             : $"rebuilding {Name}: its image files changed");
         Build(want, refresh: null, pull: false, noCache: false);
@@ -48,7 +48,7 @@ internal static class Image
             args.Add("--pull");
         if (noCache)
             args.Add("--no-cache");
-        if (refresh != null)
+        if (refresh is not null)
             args.AddRange(["--build-arg", $"PEN_REFRESH={refresh}"]);
         args.Add("-");
 
@@ -122,7 +122,7 @@ internal static class Image
     /// <summary>Throws unless the private copy of .pen/ in <paramref name="context"/> is the approved one.</summary>
     private static void RequireApproved(LayerContext context, HostEnv host, Project project)
     {
-        if (context.Result.Hash == null)
+        if (context.Result.Hash is null)
             throw new PenException($"can't build from .pen/: {context.Result.Problem}");
         if (context.Result.Hash != TrustStore.For(host, project).LayerHash)
         {
@@ -145,7 +145,7 @@ internal static class Image
         var startInfo = Proc.CreateStartInfo("docker", args);
         startInfo.RedirectStandardOutput = true;
         startInfo.RedirectStandardError = true;
-        startInfo.RedirectStandardInput = context != null;
+        startInfo.RedirectStandardInput = context is not null;
 
         var output = new BuildOutput();
         using var process = Proc.Start(startInfo);
@@ -153,7 +153,7 @@ internal static class Image
         process.ErrorDataReceived += (_, e) => output.Add(e.Data);
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
-        if (context != null)
+        if (context is not null)
             WriteContext(process, context);
         if (!process.WaitForExit(TimeSpan.FromSeconds(1.5)))
             output.GoLive(announce);
@@ -204,7 +204,7 @@ internal static class Image
         /// <summary>Shows <paramref name="line"/>, or holds it back while the build isn't live.</summary>
         public void Add(string? line)
         {
-            if (line == null)
+            if (line is null)
                 return;
             lock (_gate)
             {

@@ -105,16 +105,16 @@ internal static class PausedGit
     private static PausedNote? ReadExecNote(string dir, string file, string heading)
     {
         var (text, problem) = ReadText(Path.Combine(dir, file));
-        if (problem != null)
+        if (problem is not null)
             return new($"couldn't read {file}, so pen can't say what it would run: {problem}", []);
-        return text == null ? null : CreateLinesNote(heading, ExecLines(text));
+        return text is null ? null : CreateLinesNote(heading, ExecLines(text));
     }
 
     /// <summary>Reads rebase-merge/strategy into a note if it names a strategy other than git's own.</summary>
     private static PausedNote? ReadStrategyFileNote(string dir)
     {
         var (text, problem) = ReadText(Path.Combine(dir, "strategy"));
-        if (problem != null)
+        if (problem is not null)
             return new($"couldn't read strategy, which can name a program for git to run: {problem}", []);
         var value = text?.TrimEnd('\n', '\r');
         if (string.IsNullOrEmpty(value) || StockStrategies.Contains(value))
@@ -126,9 +126,9 @@ internal static class PausedGit
     private static PausedNote? ReadOptsNote(string dir)
     {
         var (text, problem) = ReadText(Path.Combine(dir, "opts"));
-        if (problem != null)
+        if (problem is not null)
             return new($"couldn't read opts, which can name a program for git to run: {problem}", []);
-        return text == null ? null : CreateLinesNote(FormatStrategyHeading("opts"), StrategyLines(text));
+        return text is null ? null : CreateLinesNote(FormatStrategyHeading("opts"), StrategyLines(text));
     }
 
     private static string FormatStrategyHeading(string file) => $"a merge strategy in {file} that isn't " +
@@ -138,7 +138,7 @@ internal static class PausedGit
     private static PausedNote? ReadApplyOptNote(string dir)
     {
         var (text, problem) = ReadText(Path.Combine(dir, "apply-opt"));
-        if (problem != null)
+        if (problem is not null)
             return new($"couldn't read apply-opt, which holds options for git apply: {problem}", []);
         var value = text?.Trim();
         if (string.IsNullOrEmpty(value))
@@ -172,7 +172,7 @@ internal static class PausedGit
             if (RepoGuard.IsLink(path))
                 return (null, "it's a symlink");
             var bytes = Native.ReadProtected(path)?.Bytes;
-            return bytes == null
+            return bytes is null
                 ? (null, "it isn't a regular file of a reasonable size")
                 : (Encoding.UTF8.GetString(bytes), null);
         }

@@ -72,7 +72,7 @@ internal sealed class BranchSigner(HostGit git)
             var sha = git.TryReadOutput("rev-parse", "--verify", "-q", "--end-of-options", name + "^{commit}");
             if (!string.IsNullOrEmpty(sha))
                 return new ResolvedBase(FormatBaseName(name), sha);
-            if (arg != null)
+            if (arg is not null)
                 throw new PenException($"\"{Out.Field(arg)}\" isn't a commit");
         }
         return null;
@@ -118,7 +118,7 @@ internal sealed class BranchSigner(HostGit git)
             if (string.IsNullOrEmpty(head))
                 return null;
             var resolved = ResolveBase(null);
-            if (resolved == null)
+            if (resolved is null)
                 return null;
             var range = ListRange(resolved.Commit, head);
             var unsignedCount = new SignatureVerifier(git).CountUnsigned(range);
@@ -134,7 +134,7 @@ internal sealed class BranchSigner(HostGit git)
 
     /// <summary>Lists the bases to try: <paramref name="arg"/> if given, else the upstream and origin/HEAD.</summary>
     private static string[] ListBaseCandidates(string? arg) =>
-        arg != null ? [arg] : ["@{upstream}", "refs/remotes/origin/HEAD"];
+        arg is not null ? [arg] : ["@{upstream}", "refs/remotes/origin/HEAD"];
 
     /// <summary>Formats a base's name for messages: the upstream by its short name, anything else as given.</summary>
     private string FormatBaseName(string name) =>

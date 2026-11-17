@@ -88,10 +88,10 @@ internal sealed class LayerContext : IDisposable
     private static FileLock WaitForLock(string path)
     {
         var heldLock = FileLock.TryTake(path, exclusive: true);
-        if (heldLock != null)
+        if (heldLock is not null)
             return heldLock;
         Out.WriteLine("waiting for another pen building this directory's project layer");
-        while ((heldLock = FileLock.TryTake(path, exclusive: true)) == null)
+        while ((heldLock = FileLock.TryTake(path, exclusive: true)) is null)
             Thread.Sleep(200);
         return heldLock;
     }
@@ -135,7 +135,7 @@ internal sealed class LayerContext : IDisposable
         var options = new EnumerationOptions { AttributesToSkip = 0, IgnoreInaccessible = false };
         foreach (var child in dir.EnumerateDirectories("*", options))
         {
-            if (child.LinkTarget == null)
+            if (child.LinkTarget is null)
                 MakeRemovable(child);
         }
     }

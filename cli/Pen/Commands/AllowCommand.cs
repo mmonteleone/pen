@@ -127,7 +127,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
         {
             denies.Add((host.Display(host.UserConfigPath),
                 Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User).Deny));
-            if (project != null)
+            if (project is not null)
                 denies.Add((".pen/" + Config.FileName, Config.Load(project.PenDir, ".pen", ConfigKind.Project).Deny));
         }
         catch (PenException)
@@ -230,7 +230,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     public static IReadOnlyList<string> Append(ConfigTarget target, string key, IReadOnlyList<string> domains)
     {
         var existing = Config.ReadText(target.Path, target.DisplayPath);
-        var exists = existing != null;
+        var exists = existing is not null;
         var edit = ConfigEdit.AddToList(existing ?? target.Stub, target.DisplayPath, target.Kind, key, domains);
         if (edit.Added.Count == 0)
             return edit.Added;
@@ -341,7 +341,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
                 throw new PenException(
                     $"squid -k reconfigure failed: {(result.StandardError + result.StandardOutput).Trim()}");
             }
-            if (written.Pending != null)
+            if (written.Pending is not null)
             {
                 Out.WriteLine($"the running session {session.ComposeProject} was started by an older Pen: " +
                     $"{written.Pending} only to sessions started from now on");
@@ -362,12 +362,12 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     private static FileLock TakeAclLock(SessionDir session)
     {
         var held = FileLock.TryTake(session.AclLockFile, exclusive: true);
-        if (held != null)
+        if (held is not null)
             return held;
         Out.WriteLine(
             $"waiting for another pen allow or pen deny applying to the running session {session.ComposeProject}");
         var waited = Stopwatch.StartNew();
-        while ((held = FileLock.TryTake(session.AclLockFile, exclusive: true)) == null)
+        while ((held = FileLock.TryTake(session.AclLockFile, exclusive: true)) is null)
         {
             if (waited.Elapsed > AclLockWait)
                 throw new PenException("another pen allow or pen deny is still applying to it; run this again");

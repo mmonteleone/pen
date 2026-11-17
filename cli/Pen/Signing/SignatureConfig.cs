@@ -39,13 +39,13 @@ internal static class SignatureConfig
         var config = BuildPrograms(git, format);
         var key = git.ReadGlobalValue("user.signingkey");
         var keyCommand = git.ReadGlobalValue("gpg.ssh.defaultKeyCommand");
-        if (key != null)
+        if (key is not null)
             config.AddRange(FormatSetting("user.signingkey", key));
-        if (keyCommand != null)
+        if (keyCommand is not null)
             config.AddRange(FormatSetting("gpg.ssh.defaultKeyCommand", keyCommand));
         // With ssh and no key, git runs gpg.ssh.defaultKeyCommand, which a
         // repo could set: so one of the two has to come from global config.
-        if (format == "ssh" && key == null && keyCommand == null)
+        if (format == "ssh" && key is null && keyCommand is null)
         {
             throw new PenException("gpg.format is ssh but user.signingkey isn't set in your global " +
                 "git config: set it (git config --global user.signingkey ~/.ssh/id_ed25519.pub)");
@@ -63,7 +63,7 @@ internal static class SignatureConfig
     /// <remarks>The agent writes in the working tree, so it could list its own key in such a file.</remarks>
     public static string? KeepIfOutsideTheRepo(string? path)
     {
-        if (path == null)
+        if (path is null)
             return null;
         var name = path.StartsWith(":(optional)", StringComparison.Ordinal) ? path[":(optional)".Length..] : path;
         return name.StartsWith('/') || name.StartsWith('~') || name.StartsWith("%(prefix)/", StringComparison.Ordinal)

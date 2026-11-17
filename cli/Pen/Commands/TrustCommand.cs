@@ -44,7 +44,7 @@ internal sealed class TrustCommand(ProjectContext context, Answers answers, Reci
         using var look = request.Layer is { Hash: not null }
             ? LayerContext.Review(context.Host, context.Project)
             : null;
-        if (look != null)
+        if (look is not null)
             request = TrustGate.WithReviewedLayer(request, look, store, showCopy: false);
         foreach (var line in request.FormatAllLines())
             Out.WriteStdout(line + "\n");
@@ -66,8 +66,8 @@ internal sealed class TrustCommand(ProjectContext context, Answers answers, Reci
                 "terminal to ask on: use pen trust --yes to approve them"));
         }
 
-        using var review = request.Layer != null ? LayerContext.Review(context.Host, context.Project) : null;
-        if (review != null)
+        using var review = request.Layer is not null ? LayerContext.Review(context.Host, context.Project) : null;
+        if (review is not null)
             request = TrustGate.WithReviewedLayer(request, review, store, showCopy: !yes);
         if (request.IsEmpty)
         {

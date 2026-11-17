@@ -63,7 +63,7 @@ internal static class InitHint
     }
 
     /// <summary>Checks whether anything is at <paramref name="path"/>, without following a final symlink.</summary>
-    private static bool IsPresent(string path) => Path.Exists(path) || new FileInfo(path).LinkTarget != null;
+    private static bool IsPresent(string path) => Path.Exists(path) || new FileInfo(path).LinkTarget is not null;
 
     /// <summary>Checks whether anything is at <paramref name="path"/>, counting a failed check as yes.</summary>
     private static bool IsPresentOrUnknown(string path)

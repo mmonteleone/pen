@@ -523,7 +523,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         Dictionary<string, string> env)
     {
         var secrets = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (token != null)
+        if (token is not null)
             secrets["GH_TOKEN"] = token;
         foreach (var (name, value) in context.User.Env)
             secrets[name] = value;
@@ -655,8 +655,8 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         {
             var check = GitCheck.RunAtSessionEnd(projectDir, session);
             GitCheck.Report(projectDir, check);
-            var isClean = check.Failure == null && check.Moved.Count == 0 && check.Restored.Count == 0;
-            var result = new SessionEndResult(check.Failure == null, isClean ? projectDir : null);
+            var isClean = check.Failure is null && check.Moved.Count == 0 && check.Restored.Count == 0;
+            var result = new SessionEndResult(check.Failure is null, isClean ? projectDir : null);
             if (check.RestoreIncomplete)
                 Out.WriteRaw(GitCheck.KeptCopiesAdvice(session, check.RestoreBlocked));
             return new(result, check.RestoreIncomplete);
@@ -725,10 +725,10 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     /// <remarks>It runs Pen's own git call (the unsigned-commit count), so only once no check has failed.</remarks>
     private static void Remind(SessionEndResult result)
     {
-        if (result.ReminderDir == null)
+        if (result.ReminderDir is null)
             return;
         var reminder = BranchSigner.FormatReminderIn(result.ReminderDir);
-        if (reminder != null)
+        if (reminder is not null)
             Out.WriteLine(reminder);
     }
 
@@ -800,7 +800,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     private static SessionEndResult? TryEndDead(SessionDir session)
     {
         using var sessionLock = FileLock.TryTake(session.LockFile, exclusive: true);
-        if (sessionLock == null || !session.IsOpen)
+        if (sessionLock is null || !session.IsOpen)
             return null; // running, or ended while we looked
         Out.WriteLine($"ending session {session.Id}, whose pen exited without ending it");
         return End(session);

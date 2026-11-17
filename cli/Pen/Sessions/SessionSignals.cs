@@ -28,7 +28,7 @@ internal sealed class SessionSignals : IDisposable
         set
         {
             Interlocked.Exchange(ref _child, value);
-            if (value != null && Stopping)
+            if (value is not null && Stopping)
                 StopChild();
         }
     }
@@ -72,7 +72,7 @@ internal sealed class SessionSignals : IDisposable
     private void StopChild()
     {
         var child = Volatile.Read(ref _child);
-        if (child == null || Interlocked.Exchange(ref _stopIssued, 1) == 1)
+        if (child is null || Interlocked.Exchange(ref _stopIssued, 1) == 1)
             return;
         var container = _container;
         var grace = Grace;
@@ -83,7 +83,7 @@ internal sealed class SessionSignals : IDisposable
                 // With a TTY, compose forwards neither signal and keeps waiting
                 // on the container, so the container goes first (as in the end
                 // path), and compose then exits on its own.
-                if (container != null)
+                if (container is not null)
                     Proc.Capture("docker", ["rm", "-f", container]);
                 if (!child.WaitForExit(grace))
                 {

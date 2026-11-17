@@ -80,7 +80,7 @@ internal sealed class ProxyLogTrimmer : IDisposable
         if (!log.Exists || log.Length <= Limit)
             return false;
         var tail = _tailAndTruncate();
-        if (tail == null)
+        if (tail is null)
             return false;
 
         // The tail starts mid-file, so its first line is most likely cut: dropped.
@@ -116,7 +116,7 @@ internal sealed class ProxyLogTrimmer : IDisposable
         _ = process.StandardError.ReadToEndAsync();
         var read = Task.Run(() => ReadCapped(process.StandardOutput.BaseStream, 4 * Keep));
         var exited = process.WaitForExit(ExecTimeout);
-        if (!exited || read.Wait(ExecTimeout) is false || read.Result == null)
+        if (!exited || read.Wait(ExecTimeout) is false || read.Result is null)
         {
             try
             {

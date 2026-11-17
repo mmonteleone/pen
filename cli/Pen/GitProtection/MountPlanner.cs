@@ -225,7 +225,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
     {
         var between = new Stack<string>();
         for (var parent = Path.GetDirectoryName(repo);
-            parent != null && parent != common && RepoGuard.IsInside(common, parent);
+            parent is not null && parent != common && RepoGuard.IsInside(common, parent);
             parent = Path.GetDirectoryName(parent))
         {
             between.Push(parent);

@@ -31,7 +31,7 @@ internal sealed record TrustRequest(
     public IReadOnlyList<ToolRequest> Tools { get; init; } = [];
 
     /// <summary>Whether nothing needs approving.</summary>
-    public bool IsEmpty => Domains.Count == 0 && !Docker && GitHubOwner == null && Layer == null && Tools.Count == 0;
+    public bool IsEmpty => Domains.Count == 0 && !Docker && GitHubOwner is null && Layer is null && Tools.Count == 0;
 
     /// <summary>Whether <see cref="Allowlist.AnyDomain"/> needs approving: open egress.</summary>
     public bool AnyDomain => Domains.Contains(Allowlist.AnyDomain);
@@ -124,13 +124,13 @@ internal sealed record TrustRequest(
     {
         if (AnyDomain)
             yield return AnyDomainLine;
-        if (Layer != null)
+        if (Layer is not null)
             yield return DescribeLayer(Layer);
         if (Docker)
             yield return "  docker = true: sessions get their own Docker daemon, running privileged";
-        if (GitHubOwner != null)
+        if (GitHubOwner is not null)
         {
-            var origin = OriginOwner != null
+            var origin = OriginOwner is not null
                 ? $"origin's owner is {Out.Field(OriginOwner)})"
                 : "origin has no GitHub owner)";
             yield return $"  github_owner = {Out.Field(GitHubOwner)}: sessions get this owner's GitHub token ("
@@ -141,12 +141,12 @@ internal sealed record TrustRequest(
     /// <summary>Describes what approving <paramref name="layer"/> grants, with its Dockerfile if known.</summary>
     private static string DescribeLayer(LayerRequest layer)
     {
-        if (layer.Hash == null)
+        if (layer.Hash is null)
             return $"  .pen/Dockerfile can't be approved: {Out.Field(layer.Problem ?? "")}";
         var grant = "  .pen/Dockerfile (new or changed): sessions run in " +
             "the image it builds, and its build steps can use "
             + "everything in .pen/ except config.toml and reach the network directly, past the proxy.";
-        if (layer.Dockerfile == null)
+        if (layer.Dockerfile is null)
             return grant + " pen trust shows it.";
         return grant + "\n" + FormatLayerBody(layer);
     }
@@ -155,7 +155,7 @@ internal sealed record TrustRequest(
     /// <remarks>The live .pen/ may already say something else.</remarks>
     private static string FormatLayerBody(LayerRequest layer)
     {
-        if (layer.CopyDir == null)
+        if (layer.CopyDir is null)
             return layer.Dockerfile!;
         return $"    The rest of what's being approved is in {Out.Field(layer.CopyDir)} " +
             "until you answer, a copy made with this hash. "

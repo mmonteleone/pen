@@ -116,13 +116,13 @@ internal sealed class SignatureVerifier(HostGit git)
 
         var signers = git.ReadGlobalValue("gpg.ssh.allowedSignersFile");
         var addKey = $"echo \"{FormatEmailForHint()} {FormatPublicKeyForHint()}\" >> ";
-        if (SignatureConfig.KeepIfOutsideTheRepo(signers) != null)
+        if (SignatureConfig.KeepIfOutsideTheRepo(signers) is not null)
         {
             return warning + $"  Your key may not be listed in \"{Out.Field(signers!)}\". To add " +
                 $"it:\n    {addKey}\"$(git config --global --type=path gpg.ssh.allowedSignersFile)\"";
         }
 
-        var reason = signers == null
+        var reason = signers is null
             ? "gpg.ssh.allowedSignersFile isn't set in your global git config"
             : $"gpg.ssh.allowedSignersFile (\"{Out.Field(signers)}\") is a relative " +
                 "path, which pen ignores since the project could write to it";
@@ -135,7 +135,7 @@ internal sealed class SignatureVerifier(HostGit git)
 
     /// <summary>Formats shell text that gives the user's email in an allowed-signers line.</summary>
     private string FormatEmailForHint() =>
-        git.ReadGlobalValue("user.email") != null ? "$(git config --global user.email)" : "you@example.com";
+        git.ReadGlobalValue("user.email") is not null ? "$(git config --global user.email)" : "you@example.com";
 
     /// <summary>
     /// Formats shell text that gives the public key of the configured signing key, which can be given in several

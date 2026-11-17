@@ -76,13 +76,13 @@ internal static class ModuleBaseline
     {
         var open = SessionRegistry.FindOpen(session.ProjectKey, runtimeDir);
         var narrowed = chosen;
-        if (commonGitDir != null)
+        if (commonGitDir is not null)
         {
             var listed = Choose(chosen.Listed, ReadOpenLists(open, commonGitDir, dir));
             narrowed = new(listed, [.. chosen.Unlisted, .. chosen.Listed.Except(listed, StringComparer.Ordinal)]);
         }
         ProtectedFiles.Save(session, mounts, dir, open, narrowed.Unlisted);
-        if (commonGitDir != null)
+        if (commonGitDir is not null)
         {
             File.WriteAllText(session.StartedWithGit, commonGitDir + "\n");
             session.WriteModules(narrowed.Listed);

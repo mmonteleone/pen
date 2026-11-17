@@ -16,7 +16,7 @@ internal static class SessionRegistry
         foreach (var session in FindOpen(projectKey, runtimeDir))
         {
             using var probe = FileLock.TryTake(session.LockFile, exclusive: true);
-            if (probe == null)
+            if (probe is null)
                 running.Add(session);
         }
         return running;
@@ -108,7 +108,7 @@ internal static class SessionRegistry
                 ?? throw new PenException("refusing to sign: a pen clean " +
                     "is running in this project: try again once it's done"));
             var worktreeLock = FileLock.TryTake(GetWorktreeLockFile(runtimeDir, project.Dir), exclusive: true);
-            if (worktreeLock == null)
+            if (worktreeLock is null)
             {
                 var running = FindRunningIn(project.Key, runtimeDir, project.Dir);
                 throw new PenException(running.Count == 0
@@ -134,7 +134,7 @@ internal static class SessionRegistry
     {
         var runtimeDir = host.GetRuntimeDir(project.Key);
         var projectLock = FileLock.TryTake(GetProjectLockFile(runtimeDir), exclusive: true);
-        if (projectLock != null)
+        if (projectLock is not null)
             return projectLock;
 
         var running = FindRunning(project.Key, runtimeDir);

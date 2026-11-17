@@ -52,7 +52,7 @@ internal sealed class PromptHazardScan(string gitDir, Func<string, bool>? tryOpe
     {
         LookInState(Path.Combine(dir, "rebase-merge"), ["msgnum", "end"]);
         LookInState(Path.Combine(dir, "rebase-apply"), ["next", "last"]);
-        if (atStart == null)
+        if (atStart is null)
             return;
         var config = Path.Combine(dir, "config.worktree");
         if (RepoGuard.Exists(config) && !atStart.Vouches(config))
@@ -70,7 +70,7 @@ internal sealed class PromptHazardScan(string gitDir, Func<string, bool>? tryOpe
         {
             _unreachableDirs.Add(path); // git won't follow a symlink here to a project's worktree: a warning covers it
         }
-        else if (atStart != null)
+        else if (atStart is not null)
         {
             _hazards.Add(new(path, null, "a symlink where git keeps a worktree's " +
                 "files: it points git at a config.worktree in another directory"));
@@ -117,7 +117,7 @@ internal sealed class PromptHazardScan(string gitDir, Func<string, bool>? tryOpe
             if (RepoGuard.IsLink(path))
                 return false;
             var bytes = Native.ReadProtected(path)?.Bytes;
-            return bytes != null && isValid(bytes);
+            return bytes is not null && isValid(bytes);
         }
         catch (FileNotFoundException)
         {

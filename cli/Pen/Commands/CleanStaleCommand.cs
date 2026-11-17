@@ -149,7 +149,7 @@ internal sealed partial class CleanStaleCommand(HostEnv host, TextReader input)
         string? currentBase,
         Func<string, string?> readBaseId)
     {
-        if (currentBase == null)
+        if (currentBase is null)
             return [];
         return images
             .Where(image => ToolsTag().IsMatch(image))
@@ -211,7 +211,7 @@ internal sealed partial class CleanStaleCommand(HostEnv host, TextReader input)
         var runtimeDir = host.GetRuntimeDir(key);
         if (!Directory.Exists(runtimeDir))
             runtimeDir = null;
-        var recorded = runtimeDir == null ? null : ReadProjectDir(runtimeDir);
+        var recorded = runtimeDir is null ? null : ReadProjectDir(runtimeDir);
         var (status, current) = Classify(key, recorded);
         return new Entry
         {
@@ -235,12 +235,12 @@ internal sealed partial class CleanStaleCommand(HostEnv host, TextReader input)
     /// </returns>
     internal static (Status Status, string? CurrentKey) Classify(string key, string? recordedDir)
     {
-        if (recordedDir == null)
+        if (recordedDir is null)
             return (Status.Unknown, null);
         if (!Directory.Exists(recordedDir))
             return (Status.Missing, null);
         var real = Native.RealPath(recordedDir);
-        if (real == null)
+        if (real is null)
             return (Status.Missing, null);
         var current = Project.ComputeKey(Project.FindRepo(real).RepoDir);
         return current == key ? (Status.Live, null) : (Status.Moved, current);
@@ -329,7 +329,7 @@ internal sealed partial class CleanStaleCommand(HostEnv host, TextReader input)
             description += $"\n    docker volume rm {string.Join(' ', entry.Volumes)}";
         if (entry.Images.Count > 0)
             description += $"\n    docker image rm {string.Join(' ', entry.Images)}";
-        if (entry.RuntimeDir != null)
+        if (entry.RuntimeDir is not null)
             description += $"\n    rm -r {Quote(host.Display(entry.RuntimeDir))}";
         return description;
     }
@@ -362,7 +362,7 @@ internal sealed partial class CleanStaleCommand(HostEnv host, TextReader input)
     {
         var runtimeDir = entry.RuntimeDir ?? host.GetRuntimeDir(entry.Key);
         using var projectLock = FileLock.TryTake(SessionRegistry.GetProjectLockFile(runtimeDir), exclusive: true);
-        if (projectLock == null || SessionRegistry.FindRunning(entry.Key, runtimeDir).Count > 0)
+        if (projectLock is null || SessionRegistry.FindRunning(entry.Key, runtimeDir).Count > 0)
         {
             Out.WriteLine($"skipping {entry.Key}: a session (or pen sign or pen clean) is running in it");
             return false;

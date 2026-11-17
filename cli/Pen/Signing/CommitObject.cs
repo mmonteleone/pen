@@ -56,7 +56,7 @@ internal sealed record CommitObject
         var headers = new HeaderLines(DecodeHeaders(raw.AsSpan(0, split)));
 
         var tree = headers.Take("tree");
-        if (tree == null || !IsHash(tree))
+        if (tree is null || !IsHash(tree))
             throw new PenException("no valid tree as its first header");
         var parents = ReadParents(headers, tree);
         var author = ParseIdent(
@@ -117,7 +117,7 @@ internal sealed record CommitObject
             {
                 // A tag's message inside a mergetag is free text. Anywhere else, a
                 // continuation that reads as a core header has no honest purpose.
-                if (current == null || (current != "mergetag" && IsCoreHeader(line[1..].Split(' ')[0])))
+                if (current is null || (current != "mergetag" && IsCoreHeader(line[1..].Split(' ')[0])))
                     throw new PenException("a header continuation line where none belongs");
                 continue;
             }

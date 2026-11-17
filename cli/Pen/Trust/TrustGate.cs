@@ -144,7 +144,7 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
         if (!HasDockerfile(project))
             return null;
         var (hash, problem) = PenDirHash.Compute(project.PenDir);
-        if (hash == null)
+        if (hash is null)
             return new(null, problem);
         return hash == store.LayerHash ? null : new(hash, null);
     }
@@ -189,8 +189,8 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
                 "a terminal to ask on: review them with pen trust, or approve them with pen trust --yes"));
         }
 
-        using var review = request.Layer != null ? LayerContext.Review(context.Host, context.Project) : null;
-        if (review != null)
+        using var review = request.Layer is not null ? LayerContext.Review(context.Host, context.Project) : null;
+        if (review is not null)
             request = WithReviewedLayer(request, review, store, showCopy: true);
         if (request.IsEmpty)
             return store;
@@ -235,7 +235,7 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     private static LayerRequest? FindUnapprovedCopy(LayerContext review, TrustStore store, bool showCopy)
     {
         var (hash, problem) = review.Result;
-        if (hash == null)
+        if (hash is null)
             return new(null, problem);
         if (hash == store.LayerHash)
             return null;
@@ -253,7 +253,7 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
             text = Native.ReadRegularFile(path);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
-        if (text == null)
+        if (text is null)
             return "    (too large to show here)";
 
         var lines = text.TrimEnd('\n').Split('\n');

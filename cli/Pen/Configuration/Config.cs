@@ -159,7 +159,7 @@ internal sealed partial class Config
             ("replace", ConfigKind.User) => ProjectFile,
             _ => null,
         };
-        if (belongsIn != null)
+        if (belongsIn is not null)
             throw error($"\"{key}\" belongs in {belongsIn}");
     }
 
@@ -219,7 +219,7 @@ internal sealed partial class Config
             var domain = item is string text ? text.ToLowerInvariant() : null;
             if (!allowStar && domain == Allowlist.AnyDomain)
                 throw error($"{key} = [\"*\"] would block everything; remove the allow entries instead");
-            if (domain == null
+            if (domain is null
                 || !(allowStar ? Allowlist.IsValidAllowEntry(domain) : Allowlist.IsValidDomain(domain)))
             {
                 throw error($"{key}: {DescribeItem(item)} " +

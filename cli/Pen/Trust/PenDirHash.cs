@@ -75,7 +75,7 @@ internal sealed class PenDirHash : IDisposable
     public static PenDirHashResult Snapshot(string penDir, string copy)
     {
         var copied = Walk(penDir, copy);
-        return copied.Hash == null ? copied : Compute(copy);
+        return copied.Hash is null ? copied : Compute(copy);
     }
 
     /// <summary>Hashes <paramref name="penDir"/>, copying it to <paramref name="copy"/> unless that's null.</summary>
@@ -118,7 +118,7 @@ internal sealed class PenDirHash : IDisposable
         foreach (var entry in entries)
             HashEntry(relativePath.Length == 0 ? entry.Name : relativePath + "/" + entry.Name, entry, depth);
 
-        if (_copy != null)
+        if (_copy is not null)
         {
             Directory.SetLastWriteTimeUtc(GetCopyPath(relativePath), self.LastWriteTimeUtc);
             File.SetUnixFileMode(GetCopyPath(relativePath), self.UnixFileMode);
@@ -138,7 +138,7 @@ internal sealed class PenDirHash : IDisposable
                 $"{Describe(relativePath)} can't be listed, or has a name that isn't valid UTF-8");
         }
         // Writable until its entries are in; its real mode comes last.
-        if (_copy != null)
+        if (_copy is not null)
         {
             Directory.CreateDirectory(GetCopyPath(relativePath),
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -169,7 +169,7 @@ internal sealed class PenDirHash : IDisposable
             CheckLink(relativePath, target);
             AppendHead(LinkEntry, 0, relativePath);
             AppendFramed(Encoding.UTF8.GetBytes(target));
-            if (_copy != null)
+            if (_copy is not null)
                 File.CreateSymbolicLink(GetCopyPath(relativePath), target);
         }
         else if ((entry.Attributes & FileAttributes.Directory) != 0)
@@ -213,7 +213,7 @@ internal sealed class PenDirHash : IDisposable
             AppendHead(FileEntry, mode, relativePath);
             AppendLength(length);
         }
-        using var copy = _copy == null || !hashAndCopy ? null : CreateCopyFile(relativePath);
+        using var copy = _copy is null || !hashAndCopy ? null : CreateCopyFile(relativePath);
         var buffer = new byte[64 * 1024];
         long offset = 0;
         for (int read; (read = RandomAccess.Read(file, buffer, offset)) > 0; offset += read)
@@ -226,7 +226,7 @@ internal sealed class PenDirHash : IDisposable
         }
         if (offset != length)
             throw new PenException($"{Describe(relativePath)} changed while pen read it");
-        if (copy != null)
+        if (copy is not null)
         {
             copy.Flush();
             File.SetLastWriteTimeUtc(copy.SafeFileHandle, File.GetLastWriteTimeUtc(file));

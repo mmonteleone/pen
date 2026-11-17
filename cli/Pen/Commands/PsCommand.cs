@@ -93,7 +93,7 @@ internal sealed partial class PsCommand(HostEnv host)
     /// </returns>
     internal static string Describe(string[]? command)
     {
-        if (command == null)
+        if (command is null)
             return "?";
         if (command.Length == 0)
             return "(shell)";

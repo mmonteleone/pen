@@ -307,7 +307,7 @@ internal sealed partial record ProjectDetection
             var directories = string.Concat(
                 segments.Select(segment => "/" + (IsLiteralSegment(segment) ? segment : "*")));
             var pattern = $"{directories}/*{extension}";
-            return HidePattern.TryParse(pattern, out var parsed) == null
+            return HidePattern.TryParse(pattern, out var parsed) is null
                 && parsed!.IsMatch(file.Relative, isDirectory: false)
                     ? pattern
                     : null;
@@ -414,7 +414,7 @@ internal sealed partial record ProjectDetection
 
         private static FoundFile? FindVersionFile(string directory, Dictionary<string, FoundFile>[] versionFiles)
         {
-            for (var dir = directory; dir != null; dir = GetParent(dir))
+            for (var dir = directory; dir is not null; dir = GetParent(dir))
             {
                 foreach (var files in versionFiles)
                 {
@@ -442,10 +442,10 @@ internal sealed partial record ProjectDetection
         private void AddTool(string name, string? version, string? found, IEnumerable<FoundFile> sources)
         {
             var tool = default(ToolSpec);
-            var isPinned = version != null && ToolSpec.TryParse($"{name}:{version}", catalog, out tool) == null;
-            if (!isPinned && ToolSpec.TryParse(name, catalog, out tool) != null)
+            var isPinned = version is not null && ToolSpec.TryParse($"{name}:{version}", catalog, out tool) is null;
+            if (!isPinned && ToolSpec.TryParse(name, catalog, out tool) is not null)
                 return;
-            var unknown = !isPinned && version != null;
+            var unknown = !isPinned && version is not null;
             if (!_tools.TryGetValue(tool, out var finding))
             {
                 finding = new ToolFinding();
@@ -457,7 +457,7 @@ internal sealed partial record ProjectDetection
             if (unknown)
             {
                 finding.HasUnknownVersion = true;
-                if (found != null && ToolSpec.IsVersionSyntax(found))
+                if (found is not null && ToolSpec.IsVersionSyntax(found))
                     finding.UnknownVersions.Add(found);
             }
         }
@@ -495,7 +495,7 @@ internal sealed partial record ProjectDetection
                 .ThenBy(finding => finding.Pattern, StringComparer.Ordinal);
             foreach (var finding in ordered)
             {
-                if (HidePattern.TryParse(finding.Pattern, out _) == null)
+                if (HidePattern.TryParse(finding.Pattern, out _) is null)
                     patterns.Add(new DetectedPattern(finding.Pattern, [.. finding.Sources]));
             }
             return patterns;
@@ -560,7 +560,7 @@ internal sealed partial record ProjectDetection
                 channel = ReadTomlChannel(text, file.Relative);
             else
                 channel = TrimToNull(ReadFirstLine(text));
-            return channel == null ? null : new FoundVersion(channel, channel);
+            return channel is null ? null : new FoundVersion(channel, channel);
         }
 
         private static string? ReadTomlChannel(string text, string displayPath)

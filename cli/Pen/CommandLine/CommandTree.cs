@@ -125,7 +125,7 @@ internal sealed class CommandTree
         TrustList = AddFlag(Trust, "--list", null, "list everything new, however long, and approve nothing");
         Trust.Validators.Add(result =>
         {
-            if (result.GetResult(TrustYes) != null && result.GetResult(TrustList) != null)
+            if (result.GetResult(TrustYes) is not null && result.GetResult(TrustList) is not null)
                 result.AddError("pen trust: --yes and --list don't go together");
         });
 
@@ -265,7 +265,7 @@ internal sealed class CommandTree
     /// The parser's action is the last of help and version given, so help with version is help either way round.
     /// </remarks>
     public bool AsksForHelp(ParseResult result) =>
-        result.Action is DetailedHelpAction || (IsVersion(result.Action) && result.GetResult(Help) != null);
+        result.Action is DetailedHelpAction || (IsVersion(result.Action) && result.GetResult(Help) is not null);
 
     /// <summary>Checks whether <paramref name="action"/> shows Pen's version.</summary>
     public static bool IsVersion(CommandLineAction? action) => action is VersionAction;
@@ -308,7 +308,7 @@ internal sealed class CommandTree
     /// </remarks>
     private static Option<bool> CreateFlag(string name, string? alias, string description)
     {
-        var flag = alias == null ? new Option<bool>(name) : new Option<bool>(name, alias);
+        var flag = alias is null ? new Option<bool>(name) : new Option<bool>(name, alias);
         flag.Arity = ArgumentArity.Zero;
         flag.Description = description;
         return flag;
@@ -441,7 +441,7 @@ internal sealed class CommandTree
     {
         if (result.GetResult(AllowDefaults) is { } defaults)
         {
-            var alone = defaults.IdentifierTokenCount == 1 && result.GetResult(AllowGlobal) == null
+            var alone = defaults.IdentifierTokenCount == 1 && result.GetResult(AllowGlobal) is null
                 && result.GetResult(AllowDomains) is not { Tokens.Count: > 0 };
             if (!alone)
                 result.AddError("pen allow --defaults takes nothing else");
@@ -457,7 +457,7 @@ internal sealed class CommandTree
         Option<bool> global,
         Argument<string[]> domains)
     {
-        if (result.GetResult(global) != null && result.GetResult(domains) is not { Tokens.Count: > 0 })
+        if (result.GetResult(global) is not null && result.GetResult(domains) is not { Tokens.Count: > 0 })
             result.AddError($"pen {name} --global: missing the domains to {name}");
     }
 
@@ -509,7 +509,7 @@ internal sealed class CommandTree
 
         public override int Invoke(ParseResult parseResult)
         {
-            if (parseResult.GetResult(help) != null)
+            if (parseResult.GetResult(help) is not null)
                 return ((SynchronousCommandLineAction)help.Action!).Invoke(parseResult);
             var version = typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
                 ?.InformationalVersion;

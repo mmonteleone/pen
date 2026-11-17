@@ -336,7 +336,7 @@ internal static class RepoGuard
     internal static bool IsSubmodulePath(string dir, string repoDir)
     {
         for (var super = Path.GetDirectoryName(repoDir);
-            super != null && IsInside(dir, super);
+            super is not null && IsInside(dir, super);
             super = Path.GetDirectoryName(super))
         {
             if (ListsSubmodulePath(super, repoDir))
@@ -400,7 +400,7 @@ internal static class RepoGuard
         // extensions.worktreeConfig is on); one the agent planted is quarantined by the session-end check.
         // Only core.bare itself: git ignores a bare key in a subsection such as [core "x"].
         var bare = GitConfigFile.FindLast(GitConfigFile.ParseFile(Path.Combine(common, "config")), "core", "bare");
-        return bare == null || !GitConfigFile.IsTrue(bare);
+        return bare is null || !GitConfigFile.IsTrue(bare);
     }
 
     /// <summary>Describes what makes a nested repo one, for the refusal; nothing for a plain .git dir.</summary>
@@ -508,10 +508,10 @@ internal static class RepoGuard
         while (true)
         {
             var real = Native.RealPath(current);
-            if (real != null)
+            if (real is not null)
                 return rest.Aggregate(real, Path.Combine);
             var parent = Path.GetDirectoryName(current);
-            if (parent == null)
+            if (parent is null)
                 return path;
             rest.Push(Path.GetFileName(current));
             current = parent;
@@ -548,7 +548,7 @@ internal static class RepoGuard
     }
 
     /// <summary>Whether <paramref name="path"/> is a symlink, dangling or not.</summary>
-    internal static bool IsLink(string path) => new FileInfo(path).LinkTarget != null;
+    internal static bool IsLink(string path) => new FileInfo(path).LinkTarget is not null;
 
     /// <summary>Whether <paramref name="path"/> exists, including as a dangling symlink.</summary>
     internal static bool Exists(string path) => Path.Exists(path) || IsLink(path);

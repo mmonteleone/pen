@@ -73,7 +73,7 @@ internal sealed class TrustStore
             text = Native.ReadRegularFile(path);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
-        return (text == null ? null : Parse(text, path, dir)) ?? new TrustStore(path, dir);
+        return (text is null ? null : Parse(text, path, dir)) ?? new TrustStore(path, dir);
     }
 
     /// <summary>Parses the store file's <paramref name="text"/>.</summary>
@@ -104,22 +104,22 @@ internal sealed class TrustStore
         var value = space < 0 ? null : line[(space + 1)..];
         switch (kind)
         {
-            case "allow" when value != null && IsAllowEntry(value):
+            case "allow" when value is not null && IsAllowEntry(value):
                 AddAllowEntry(value);
                 return true;
-            case "github_owner" when value != null && IsOwner(value):
+            case "github_owner" when value is not null && IsOwner(value):
                 _owners.Add(value);
                 return true;
-            case "tool" when value != null && ToolSpec.IsCanonicalText(value):
+            case "tool" when value is not null && ToolSpec.IsCanonicalText(value):
                 _tools.Add(value);
                 return true;
-            case "tool-allow" when value != null && IsToolDomain(value):
+            case "tool-allow" when value is not null && IsToolDomain(value):
                 _toolDomains.Add(value);
                 return true;
-            case "docker" when value == null:
+            case "docker" when value is null:
                 Docker = true;
                 return true;
-            case "layer" when value != null && IsHash(value) && LayerHash == null:
+            case "layer" when value is not null && IsHash(value) && LayerHash is null:
                 LayerHash = value;
                 return true;
             default:
@@ -209,9 +209,9 @@ internal sealed class TrustStore
     {
         var next = Read(_path, _dir);
         next.AddDomains(domains);
-        if (owner != null)
+        if (owner is not null)
             next.AddOwner(owner);
-        if (layerHash != null)
+        if (layerHash is not null)
             next.AddLayerHash(layerHash);
         foreach (var request in tools)
             next.AddTool(request);
@@ -273,7 +273,7 @@ internal sealed class TrustStore
         lines.AddRange(_toolDomains.Order(StringComparer.Ordinal).Select(domain => "tool-allow " + domain));
         if (Docker)
             lines.Add("docker");
-        if (LayerHash != null)
+        if (LayerHash is not null)
             lines.Add("layer " + LayerHash);
 
         var mode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
