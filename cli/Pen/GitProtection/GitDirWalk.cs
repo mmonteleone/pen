@@ -48,7 +48,7 @@ internal static class GitDirWalk
     {
         visit(gitDir);
         var worktrees = Path.Combine(gitDir, "worktrees");
-        if (!PathChecks.Exists(worktrees))
+        if (!PathChecks.ExistsOrIsLink(worktrees))
             return;
         if (!PathChecks.IsLink(worktrees) && Directory.Exists(worktrees) && !Native.CanList(worktrees))
             tryMakeListable?.Invoke(worktrees);

@@ -186,7 +186,7 @@ public class ScanFailClosedTests
         var check = Within10s(() => GitCheck.RunAtSessionEnd(repo, Session(t, Path.Combine(repo, ".git"))));
         Assert.Null(check.Failure);
         Assert.Equal(fifo, Assert.Single(check.Moved).From);
-        Assert.False(PathChecks.Exists(fifo));
+        Assert.False(PathChecks.ExistsOrIsLink(fifo));
     }
 
     [Fact]
@@ -339,7 +339,7 @@ public class ScanFailClosedTests
     private static string Inc(params string[] paths) => string.Concat(paths.Select(p => $"[include]\n\tpath = {p}\n"));
 
     private static List<Mount> Mounts(TempDir t, string repo) =>
-        Within10s(() => RepoGuard.PrepareMounts(repo, t.Path));
+        Within10s(() => RepoGuard.EnsureMountTargetsAndPlan(repo, t.Path));
 
     private static bool ReadOnly(List<Mount> mounts, string path) => mounts.Any(m => m.Path == path && m.ReadOnly);
 
@@ -411,7 +411,7 @@ public class ScanFailClosedTests
         var repo = Git.Repo(t.Sub("repo"));
         var file = Path.Combine(repo, ".git", "config.worktree");
         File.WriteAllText(file, Inc(Enumerable.Range(0, RepoGuard.MaxIncludeFiles + 1).Select(i => $"f{i}.inc").ToArray()));
-        var e = Within10s(() => Assert.Throws<PenException>(() => RepoGuard.PrepareMounts(repo, t.Path)));
+        var e = Within10s(() => Assert.Throws<PenException>(() => RepoGuard.EnsureMountTargetsAndPlan(repo, t.Path)));
         Assert.Contains(".git/config.worktree", e.Message);
         Assert.Contains("remove it", e.Message);
     }
@@ -428,13 +428,13 @@ public class ScanFailClosedTests
         var path = include == "LONG" ? new string('n', 300) : include;
         File.WriteAllText(file, Inc(path));
 
-        var e = Assert.Throws<PenException>(() => RepoGuard.PrepareMounts(repo, t.Path));
+        var e = Assert.Throws<PenException>(() => RepoGuard.EnsureMountTargetsAndPlan(repo, t.Path));
         Assert.Contains(".git/config.worktree includes", e.Message);
         Assert.Contains(path, e.Message);
         Assert.Contains("remove it", e.Message);
 
         File.Delete(file);
-        RepoGuard.PrepareMounts(repo, t.Path);
+        RepoGuard.EnsureMountTargetsAndPlan(repo, t.Path);
     }
 
     [Fact]

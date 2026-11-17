@@ -14,7 +14,7 @@ public class ConfigWorktreeQuarantineTests
         // As Session does: the module repos every open session listed, and the rest unlisted.
         var open = running ?? [];
         var lists = ModuleBaseline.ReadOpenLists(open, common, dir);
-        var mounts = RepoGuard.PrepareMounts(dir, "/nonexistent-home");
+        var mounts = RepoGuard.EnsureMountTargetsAndPlan(dir, "/nonexistent-home");
         var found = RepoScan.FindModuleRepos(common);
         var modules = ModuleBaseline.Choose(found, lists);
         var s = new SessionDir(Key, t.Sub("runtime", "sessions", id));
@@ -643,8 +643,8 @@ public class ConfigWorktreeQuarantineTests
 
         Assert.Contains(check.Moved, q => q.From == link);
         Assert.Contains(check.Moved, q => q.From == entryLink);
-        Assert.False(PathChecks.Exists(link));
-        Assert.False(PathChecks.Exists(entryLink));
+        Assert.False(PathChecks.ExistsOrIsLink(link));
+        Assert.False(PathChecks.ExistsOrIsLink(entryLink));
         Assert.True(File.Exists(Path.Combine(evil, "config.worktree")), "only the symlink moves");
         Assert.True(File.Exists(own));
     }
@@ -663,7 +663,7 @@ public class ConfigWorktreeQuarantineTests
         var check = GitCheck.RunAtSessionEnd(repo, s);
 
         Assert.Contains(check.Moved, q => q.From == link);
-        Assert.False(PathChecks.Exists(link));
+        Assert.False(PathChecks.ExistsOrIsLink(link));
     }
 
     // ---- chmod ----

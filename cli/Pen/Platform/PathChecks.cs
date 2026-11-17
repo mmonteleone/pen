@@ -15,8 +15,11 @@ internal static class PathChecks
     /// <summary>Whether <paramref name="path"/> is a symlink, dangling or not.</summary>
     internal static bool IsLink(string path) => new FileInfo(path).LinkTarget is not null;
 
-    /// <summary>Whether <paramref name="path"/> exists, including as a dangling symlink.</summary>
-    internal static bool Exists(string path) => Path.Exists(path) || IsLink(path);
+    /// <summary>
+    /// Whether <paramref name="path"/> exists, including as a dangling symlink, which <see cref="File.Exists"/> and
+    /// <see cref="Path.Exists"/> don't count.
+    /// </summary>
+    internal static bool ExistsOrIsLink(string path) => Path.Exists(path) || IsLink(path);
 
     /// <summary>
     /// Whether <paramref name="path"/> is <paramref name="dir"/> or below it, comparing names exactly.
@@ -85,7 +88,7 @@ internal static class PathChecks
         var upper = Path.Combine(gitDir, name.ToUpperInvariant());
         try
         {
-            if (Exists(probe) || Exists(upper))
+            if (ExistsOrIsLink(probe) || ExistsOrIsLink(upper))
                 return true;
             try
             {
@@ -95,7 +98,7 @@ internal static class PathChecks
                     Access = FileAccess.Write,
                     UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
                 }).Dispose();
-                return Exists(upper) || !Exists(probe);
+                return ExistsOrIsLink(upper) || !ExistsOrIsLink(probe);
             }
             finally
             {

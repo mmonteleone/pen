@@ -67,7 +67,7 @@ internal sealed class MaskPlanner
     /// </param>
     /// <param name="protectedPaths">
     /// The paths the session mounts read-only to protect git (<see cref="Mount.Path"/> of what
-    /// <see cref="MountPlanner.Plan"/> returns); only those inside the project are looked at.
+    /// <see cref="MountPlanner.EnsureTargetsAndPlan"/> returns); only those inside the project are looked at.
     /// </param>
     /// <param name="hide">The hide patterns: the user's, then the project's.</param>
     /// <param name="replace">The project's [replace] entries (target, source), as checked by Config.</param>
@@ -101,7 +101,7 @@ internal sealed class MaskPlanner
     /// A directory to look in: its path, its path in the project ("" for the project dir), and its device and inode
     /// when it was found.
     /// </summary>
-    private readonly record struct Place(string Path, string Relative, ulong Device, ulong Inode);
+    private readonly record struct SeenDir(string Path, string Relative, ulong Device, ulong Inode);
 
     /// <summary>
     /// A path to hide: the pattern that matched it first, its link count (0 for a directory), and its device and
@@ -138,7 +138,7 @@ internal sealed class MaskPlanner
         var replacements = PlanReplacements(files);
         DropChanged(files, "hide");
         DropChanged(dirs, "hide");
-        replacements.RemoveAll(replacement => IsChanged(replacement.Target.Path, "replace"));
+        replacements.RemoveAll(replacement => WarnIfChanged(replacement.Target.Path, "replace"));
         RefuseProtected(files.Concat(dirs));
         var count = files.Count + dirs.Count + replacements.Count;
         if (count > MaxMounts)
@@ -177,14 +177,14 @@ internal sealed class MaskPlanner
     /// </remarks>
     private void DropChanged(Dictionary<string, Found> planned, string verb)
     {
-        foreach (var path in planned.Keys.Where(path => IsChanged(path, verb)).ToList())
+        foreach (var path in planned.Keys.Where(path => WarnIfChanged(path, verb)).ToList())
             planned.Remove(path);
     }
 
     /// <summary>Tells whether a planned path isn't its own real path any more, warning if so.</summary>
     /// <param name="path">The planned path.</param>
     /// <param name="verb">"hide" or "replace", for the warning.</param>
-    private bool IsChanged(string path, string verb)
+    private bool WarnIfChanged(string path, string verb)
     {
         if (Native.RealPath(path) == path)
             return false;
@@ -231,7 +231,7 @@ internal sealed class MaskPlanner
     /// <summary>Walks the whole project, hiding what the patterns match.</summary>
     private void Walk()
     {
-        var pending = new Stack<Place>();
+        var pending = new Stack<SeenDir>();
         if (Enter(_projectDir, "") is { } root)
             pending.Push(root);
         while (pending.TryPop(out var dir))
@@ -260,10 +260,10 @@ internal sealed class MaskPlanner
         foreach (var pattern in _hide)
         {
             var segments = pattern.LiteralPath!.Split('/');
-            List<Place> level = [root];
+            List<SeenDir> level = [root];
             foreach (var segment in segments)
             {
-                var next = new List<Place>();
+                var next = new List<SeenDir>();
                 foreach (var dir in level)
                 {
                     if (ListOnce(dir) is not { } entries)
@@ -291,7 +291,7 @@ internal sealed class MaskPlanner
     /// The entry as a directory to look in, or null when there's nothing to look in: it isn't a directory (a
     /// symlink to one isn't), it's hidden, it's off limits, or its name can't be used.
     /// </returns>
-    private Place? Visit(Place dir, Entry entry)
+    private SeenDir? Visit(SeenDir dir, Entry entry)
     {
         if (IsOffLimitsName(entry.Name, dir.Relative))
             return null;
@@ -341,7 +341,7 @@ internal sealed class MaskPlanner
     /// <param name="path">The directory.</param>
     /// <param name="relative">Its path in the project ("" for the project dir).</param>
     /// <returns>The place, or null, with a warning, if lstat can't look at it or it isn't a directory now.</returns>
-    private Place? Enter(string path, string relative)
+    private SeenDir? Enter(string path, string relative)
     {
         if (Native.Stat(path, follow: false) is not { } status)
         {
@@ -355,11 +355,11 @@ internal sealed class MaskPlanner
             return null;
         }
 
-        return new Place(path, relative, status.Device, status.Inode);
+        return new SeenDir(path, relative, status.Device, status.Inode);
     }
 
     /// <summary>Tells whether a place is still the directory it was when it was found, by lstat.</summary>
-    private static bool IsUnchanged(Place dir) =>
+    private static bool IsUnchanged(SeenDir dir) =>
         Native.Stat(dir.Path, follow: false) is { IsDirectory: true, IsSymlink: false } status
         && status.Device == dir.Device && status.Inode == dir.Inode;
 
@@ -505,7 +505,7 @@ internal sealed class MaskPlanner
     /// The listing follows a symlink, so the directory is lstat'ed before and after it and must be the one found,
     /// by device and inode: one swapped for a symlink after its parent was listed would lead the walk anywhere.
     /// </remarks>
-    private List<Entry>? List(Place dir)
+    private List<Entry>? List(SeenDir dir)
     {
         if (!IsUnchanged(dir))
         {
@@ -538,7 +538,7 @@ internal sealed class MaskPlanner
     /// finds there is taken for the valid one, and the rest are marked. With no valid name there, lstat finds
     /// nothing and <see cref="Visit"/> warns about each entry already.
     /// </remarks>
-    private static void MarkUndecodable(Place dir, List<Entry> entries)
+    private static void MarkUndecodable(SeenDir dir, List<Entry> entries)
     {
         var collisions = Enumerable.Range(0, entries.Count)
             .Where(index => entries[index].Name.Contains('\uFFFD'))
@@ -556,7 +556,7 @@ internal sealed class MaskPlanner
     }
 
     /// <summary>Lists a directory as <see cref="List"/> does, once however often it's asked.</summary>
-    private List<Entry>? ListOnce(Place dir)
+    private List<Entry>? ListOnce(SeenDir dir)
     {
         if (!_listings.TryGetValue(dir.Path, out var entries))
         {

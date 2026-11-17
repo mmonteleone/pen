@@ -52,10 +52,10 @@ public class PathChecksTests
         File.WriteAllText(file, "");
 
         Assert.True(Path.Exists(dangling)); // .NET already counts a dangling link
-        Assert.True(PathChecks.Exists(dangling));
-        Assert.True(PathChecks.Exists(file));
-        Assert.True(PathChecks.Exists(temp.Sub("dir")));
-        Assert.False(PathChecks.Exists(Path.Combine(temp.Path, "missing")));
+        Assert.True(PathChecks.ExistsOrIsLink(dangling));
+        Assert.True(PathChecks.ExistsOrIsLink(file));
+        Assert.True(PathChecks.ExistsOrIsLink(temp.Sub("dir")));
+        Assert.False(PathChecks.ExistsOrIsLink(Path.Combine(temp.Path, "missing")));
     }
 
     [Fact]

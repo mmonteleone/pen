@@ -269,7 +269,7 @@ public class RepoGuardTests
     // --- mounts ---------------------------------------------------------------
 
     private static List<(string, bool)> Mounts(string dir, string? home = null) =>
-        RepoGuard.PrepareMounts(dir, home ?? "/nonexistent-home").Select(m => (PathChecks.FormatPath(dir, m.Path), m.ReadOnly)).ToList();
+        RepoGuard.EnsureMountTargetsAndPlan(dir, home ?? "/nonexistent-home").Select(m => (PathChecks.FormatPath(dir, m.Path), m.ReadOnly)).ToList();
 
     [Fact]
     public void MountsForARepo()
@@ -510,7 +510,7 @@ public class RepoGuardTests
         File.WriteAllText(Path.Combine(root, "config.worktree"), "[include]\npath = first.inc\n");
         File.WriteAllText(Path.Combine(root, "first.inc"), "[includeIf \"onbranch:other\"]\npath = last.inc\n");
         File.WriteAllText(Path.Combine(root, "last.inc"), "");
-        var mounts = RepoGuard.PrepareMounts(linked ? Path.Combine(repo, "wt") : repo, "/nonexistent-home");
+        var mounts = RepoGuard.EnsureMountTargetsAndPlan(linked ? Path.Combine(repo, "wt") : repo, "/nonexistent-home");
         Assert.Contains(mounts, x => x.Path == Path.Combine(root, "first.inc") && x.ReadOnly);
         Assert.Contains(mounts, x => x.Path == Path.Combine(root, "last.inc") && x.ReadOnly);
     }

@@ -160,11 +160,11 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         var tools = ToolSpec.Merge(catalog, context.User.Tools, context.ProjectConfig.Tools, flagTools);
         // Before anything below uses a setting from .pen/.
         var trust = new TrustGate(context, answers, catalog, clock).RequireForSession(flagTools);
-        var mounts = RepoGuard.PrepareMounts(Project.Dir, context.Host.Home);
+        var mounts = RepoGuard.EnsureMountTargetsAndPlan(Project.Dir, context.Host.Home);
         // A hide or [replace] that can't be used stops the session here, before anything is made for it.
         var masks = new MaskPlanner(Project.Dir, Project.CommonGitDir, [.. mounts.Select(mount => mount.Path)],
             [.. context.User.Hide, .. context.ProjectConfig.Hide], context.ProjectConfig.Replace).Plan();
-        // PrepareMounts protects every module repo; the session-end check takes as the submodules' own only those
+        // The mounts protect every module repo; the session-end check takes as the submodules' own only those
         // listed. The open sessions are found just before the module scan.
         var modules = Project.IsRepo
             ? ModuleBaseline.ChooseAtStart(SessionRegistry.FindOpen(Project.Key, RuntimeDir), Project.CommonGitDir!,

@@ -322,7 +322,7 @@ public class SessionEndTests
         var session = Create(t, docker: false);
         var repo = Path.Combine(t.Path, "repo");
         File.Delete(Path.Combine(repo, ".git", "commondir"));
-        ProtectedFiles.Save(session, RepoGuard.PrepareMounts(repo, "/nonexistent-home"), repo, [], []);
+        ProtectedFiles.Save(session, RepoGuard.EnsureMountTargetsAndPlan(repo, "/nonexistent-home"), repo, [], []);
         return (session, Path.Combine(repo, ".git", "config"));
     }
 
@@ -476,7 +476,7 @@ public class SessionEndTests
         File.WriteAllText(session.StartedWithGit, Path.Combine(repo, ".git") + "\n");
         File.WriteAllText(session.ModulesFile, "");
         File.WriteAllText(session.ProxyLog, "");
-        ProtectedFiles.Save(session, RepoGuard.PrepareMounts(wt, "/nonexistent-home"), wt, [], []);
+        ProtectedFiles.Save(session, RepoGuard.EnsureMountTargetsAndPlan(wt, "/nonexistent-home"), wt, [], []);
 
         File.WriteAllText(gitFile, "gitdir: /forged\n");
         File.SetUnixFileMode(wt, UnixFileMode.None);
@@ -534,7 +534,7 @@ public class SessionEndTests
         var innerSession = new SessionDir("k", t.Sub("runtime2", "sessions", "1"));
         File.WriteAllText(innerSession.StartedWithGit, Path.Combine(inner, ".git") + "\n");
         File.WriteAllText(innerSession.ModulesFile, "");
-        ProtectedFiles.Save(innerSession, RepoGuard.PrepareMounts(inner, "/nonexistent-home"), inner, [], []);
+        ProtectedFiles.Save(innerSession, RepoGuard.EnsureMountTargetsAndPlan(inner, "/nonexistent-home"), inner, [], []);
         File.SetUnixFileMode(holder, UnixFileMode.None);
         try { check = GitCheck.RunAtSessionEnd(inner, innerSession); }
         finally { File.SetUnixFileMode(holder, (UnixFileMode)0b111_101_101); }

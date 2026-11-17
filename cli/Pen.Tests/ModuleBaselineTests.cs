@@ -30,7 +30,7 @@ public sealed class ModuleBaselineTests : IDisposable
     private SessionDir Start(string dir, string common, string id)
     {
         RepoGuard.CheckAtStart(dir);
-        var mounts = RepoGuard.PrepareMounts(dir, "/nonexistent-home");
+        var mounts = RepoGuard.EnsureMountTargetsAndPlan(dir, "/nonexistent-home");
         var chosen = ModuleBaseline.ChooseAtStart(SessionRegistry.FindOpen(Key, Runtime), common, dir);
 
         var s = new SessionDir(Key, _t.Sub("runtime", "sessions", id));
@@ -430,7 +430,7 @@ public sealed class ModuleBaselineTests : IDisposable
         var (hook, _) = Canary();
         var (repo, git) = Repo();
         var (module, _) = Plant(git, Path.Combine(repo, "evil"), hook);
-        var mounts = RepoGuard.PrepareMounts(repo, "/nonexistent-home");
+        var mounts = RepoGuard.EnsureMountTargetsAndPlan(repo, "/nonexistent-home");
         var chosen = ModuleBaseline.ChooseAtStart(SessionRegistry.FindOpen(Key, Runtime), git, repo);
         Assert.Equal([module], chosen.Listed);
         // A session that opened after that read, listing nothing (its Pen has died since): the repo the scan found

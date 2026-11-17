@@ -67,8 +67,8 @@ public class NestedRepoWordingTests
     [Fact]
     public void ABareRepoInTheGitDirIsWordedByPlace()
     {
-        var entry = new NestedRepo("/g/worktrees/w", NestedKind.Bare, GitDirPlace.WorktreeEntry);
-        var refs = new NestedRepo("/g/refs/x", NestedKind.Bare, GitDirPlace.Refs);
+        var entry = new NestedRepo("/g/worktrees/w", NestedKind.Bare, GitDirRegion.WorktreeEntry);
+        var refs = new NestedRepo("/g/refs/x", NestedKind.Bare, GitDirRegion.Refs);
 
         Assert.Equal(
             " (a worktree entry whose commondir doesn't lead back to this repo)",

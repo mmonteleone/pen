@@ -71,7 +71,7 @@ internal static class HooksPath
     private readonly record struct Candidate(string? Value, string File, string? Problem = null);
 
     /// <summary>Where a path leads, as far as the sandbox is concerned.</summary>
-    private enum Place { Elsewhere, Writable, Unknown }
+    private enum SandboxReach { Elsewhere, Writable, Unknown }
 
     /// <summary>The core.worktree the config files themselves set.</summary>
     /// <param name="Value">The last value, or null if there's none.</param>
@@ -239,10 +239,10 @@ internal static class HooksPath
         Candidate? unknown = null;
         foreach (var candidate in Enumerable.Reverse(found))
         {
-            var place = candidate.Value is null
-                ? Place.Unknown
+            var reach = candidate.Value is null
+                ? SandboxReach.Unknown
                 : Locate(candidate.Value, project, host.Home, top, relativeKnown);
-            if (place == Place.Writable)
+            if (reach == SandboxReach.Writable)
             {
                 return $"warning: core.hooksPath ({PausedGit.FormatLine(candidate.Value!)}, " +
                     $"in {Out.Field(host.Display(candidate.File))}) " +
@@ -251,7 +251,7 @@ internal static class HooksPath
                     "running git here";
             }
 
-            if (place == Place.Unknown)
+            if (reach == SandboxReach.Unknown)
                 unknown ??= candidate;
         }
         if (unknown is not { } first)
@@ -267,26 +267,26 @@ internal static class HooksPath
     /// A relative one starts at the work tree's top, but also at the git dir: hooks for a push into this repo run
     /// there. So "../x" reaches project/x that way, though it's outside as a work tree path.
     /// </remarks>
-    private static Place Locate(string raw, Project project, string home, string? top, bool relativeKnown)
+    private static SandboxReach Locate(string raw, Project project, string home, string? top, bool relativeKnown)
     {
         var written = raw.StartsWith(Optional, StringComparison.Ordinal) ? raw[Optional.Length..] : raw;
         // HostEnv.Home is always absolute (HostEnv.FromProcess refuses anything else), so the rooted check
         // takes the expanded path as written.
         if (GitConfigFile.ExpandPath(written, home) is not GitConfigFile.ExpandedPath.Expanded { Path: var value })
-            return Place.Unknown;
+            return SandboxReach.Unknown;
         if (value.Length == 0)
             return LocatePath("/", project); // git looks for /pre-commit
         if (Path.IsPathRooted(value))
             return LocatePath(value, project);
 
-        Place fromTop;
+        SandboxReach fromTop;
         if (!relativeKnown)
-            fromTop = Place.Unknown;
+            fromTop = SandboxReach.Unknown;
         else if (top is null)
-            fromTop = Place.Elsewhere;
+            fromTop = SandboxReach.Elsewhere;
         else
             fromTop = LocatePath(top + "/" + value, project);
-        if (fromTop == Place.Writable || project.CommonGitDir is not { } common)
+        if (fromTop == SandboxReach.Writable || project.CommonGitDir is not { } common)
             return fromTop;
         // .git/hooks, as a work tree path: the read-only one is the one meant.
         if (top is not null && WalkRealPath(top + "/" + value) is { } real
@@ -296,22 +296,22 @@ internal static class HooksPath
         }
 
         var fromGitDir = LocatePath(common + "/" + value, project);
-        return fromGitDir == Place.Elsewhere ? fromTop : fromGitDir;
+        return fromGitDir == SandboxReach.Elsewhere ? fromTop : fromGitDir;
     }
 
     /// <summary>Finds where an absolute path leads: anywhere on its walk in reach makes it writable.</summary>
-    private static Place LocatePath(string path, Project project)
+    private static SandboxReach LocatePath(string path, Project project)
     {
         var real = WalkRealPath(path, p => CanBeReplaced(p, project), out var replaceable);
         if (replaceable)
-            return Place.Writable;
+            return SandboxReach.Writable;
         if (real is null)
-            return Place.Unknown;
+            return SandboxReach.Unknown;
         // As written. Differing only by case is a folding file system's same path, which the walk has seen.
         var written = Path.GetFullPath(path);
         if (!string.Equals(written, real, StringComparison.OrdinalIgnoreCase) && CanBeReplaced(written, project))
-            return Place.Writable;
-        return CanBeReplaced(real, project) ? Place.Writable : Place.Elsewhere;
+            return SandboxReach.Writable;
+        return CanBeReplaced(real, project) ? SandboxReach.Writable : SandboxReach.Elsewhere;
     }
 
     /// <summary>

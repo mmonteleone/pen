@@ -202,7 +202,7 @@ public class GitConfigDifferentialTests
         var included = read!.Single(e => e.Name == "include.path").Value;
         var target = Path.GetFullPath(Path.Combine(dir, ".git", included));
         File.WriteAllText(target, "");
-        var mounts = RepoGuard.PrepareMounts(dir, t.Sub("home"));
+        var mounts = RepoGuard.EnsureMountTargetsAndPlan(dir, t.Sub("home"));
         Assert.Contains(mounts, m => m.Path == target && m.ReadOnly);
     }
 
@@ -212,7 +212,7 @@ public class GitConfigDifferentialTests
         using var t = new TempDir();
         var dir = Git.Repo(t.Sub("project"));
         File.AppendAllText(Path.Combine(dir, ".git", "config"), "[include]\n\tpath = ~someone/inc\n");
-        var e = Assert.Throws<PenException>(() => RepoGuard.PrepareMounts(dir, t.Sub("home")));
+        var e = Assert.Throws<PenException>(() => RepoGuard.EnsureMountTargetsAndPlan(dir, t.Sub("home")));
         Assert.Contains("can't resolve", e.Message);
     }
 
@@ -224,7 +224,7 @@ public class GitConfigDifferentialTests
         var home = t.Sub("home");
         File.WriteAllText(Path.Combine(dir, "inc"), "");
         File.AppendAllText(Path.Combine(dir, ".git", "config"), "[include]\n\tpath = ~/../project/inc\n");
-        var mounts = RepoGuard.PrepareMounts(dir, home);
+        var mounts = RepoGuard.EnsureMountTargetsAndPlan(dir, home);
         Assert.Contains(mounts, m => m.Path == Path.Combine(dir, "inc") && m.ReadOnly);
     }
 
@@ -236,7 +236,7 @@ public class GitConfigDifferentialTests
         var dir = Git.Repo(t.Sub("project"));
         File.WriteAllText(Path.Combine(dir, "inc"), "");
         File.AppendAllText(Path.Combine(dir, ".git", "config"), $"[include]\n\tpath = ~{Environment.UserName}/../../../../../../../../..{dir}/inc\n");
-        Assert.Throws<PenException>(() => RepoGuard.PrepareMounts(dir, t.Sub("home")));
+        Assert.Throws<PenException>(() => RepoGuard.EnsureMountTargetsAndPlan(dir, t.Sub("home")));
     }
 
     [Fact]
@@ -249,7 +249,7 @@ public class GitConfigDifferentialTests
         Directory.CreateDirectory(Path.Combine(dir, "sub"));
         File.WriteAllText(Path.Combine(dir, "inc"), "");
         File.AppendAllText(Path.Combine(dir, ".git", "config"), $"[include]\n\tpath = {outside}/link/../inc\n");
-        var mounts = RepoGuard.PrepareMounts(dir, t.Sub("home"));
+        var mounts = RepoGuard.EnsureMountTargetsAndPlan(dir, t.Sub("home"));
         Assert.Contains(mounts, m => m.Path == Path.Combine(dir, "inc") && m.ReadOnly);
     }
 
@@ -259,7 +259,7 @@ public class GitConfigDifferentialTests
         using var t = new TempDir();
         var dir = Git.Repo(t.Sub("project"));
         using (var c = new FileStream(Path.Combine(dir, ".git", "config"), FileMode.Append)) c.Write(B("[include]\npath=../inc\xa0\n"));
-        Assert.Contains("isn't valid UTF-8", Assert.Throws<PenException>(() => RepoGuard.PrepareMounts(dir, t.Sub("home"))).Message);
+        Assert.Contains("isn't valid UTF-8", Assert.Throws<PenException>(() => RepoGuard.EnsureMountTargetsAndPlan(dir, t.Sub("home"))).Message);
     }
 
     [Theory]
@@ -282,7 +282,7 @@ public class GitConfigDifferentialTests
         using var t = new TempDir();
         var dir = Git.Repo(t.Sub("project"));
         File.AppendAllText(Path.Combine(dir, ".git", "config"), "[core\n");
-        var e = Assert.Throws<PenException>(() => RepoGuard.PrepareMounts(dir, t.Sub("home")));
+        var e = Assert.Throws<PenException>(() => RepoGuard.EnsureMountTargetsAndPlan(dir, t.Sub("home")));
         Assert.Contains(".git/config", e.Message);
         Assert.Contains("line ", e.Message);
     }

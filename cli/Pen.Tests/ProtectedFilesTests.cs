@@ -23,7 +23,7 @@ public class ProtectedFilesTests
     private static SessionDir Started(TempDir t, string dir, string common, string id = "abcd1234")
     {
         var runtime = Path.Combine(t.Path, "runtime");
-        var mounts = RepoGuard.PrepareMounts(dir, "/nonexistent-home");
+        var mounts = RepoGuard.EnsureMountTargetsAndPlan(dir, "/nonexistent-home");
         var chosen = ModuleBaseline.ChooseAtStart(SessionRegistry.FindOpen(Key, runtime), common, dir);
         var s = NewSession(t, id);
         ModuleBaseline.NarrowAndSave(new(s, mounts, chosen, SessionRegistry.FindOpen(Key, runtime), common, dir));
@@ -74,7 +74,7 @@ public class ProtectedFilesTests
     {
         using var t = new TempDir();
         var (repo, git) = Repo(t);
-        var mounts = RepoGuard.PrepareMounts(repo, "/nonexistent-home");
+        var mounts = RepoGuard.EnsureMountTargetsAndPlan(repo, "/nonexistent-home");
         var s = NewSession(t);
         ProtectedFiles.Save(s, mounts, repo, [], []);
         AssertManifestMatchesMounts(s, mounts, Path.Combine(git, "config"));
@@ -91,7 +91,7 @@ public class ProtectedFilesTests
         Git.Run(repo, "worktree", "add", "-q", wt);
         File.WriteAllText(Path.Combine(wt, "f"), "x");
         Git.Run(wt, "add", "f");
-        var mounts = RepoGuard.PrepareMounts(wt, "/nonexistent-home");
+        var mounts = RepoGuard.EnsureMountTargetsAndPlan(wt, "/nonexistent-home");
         Assert.Contains(mounts, m => m.Path == Path.Combine(git, "HEAD") && m.ReadOnly && !m.Verify);
         var s = NewSession(t);
         ProtectedFiles.Save(s, mounts, wt, [], []);
@@ -105,7 +105,7 @@ public class ProtectedFilesTests
         using var t = new TempDir();
         var (repo, git) = Repo(t);
         Git.Run(repo, "worktree", "add", "-q", "in");
-        var mounts = RepoGuard.PrepareMounts(repo, "/nonexistent-home");
+        var mounts = RepoGuard.EnsureMountTargetsAndPlan(repo, "/nonexistent-home");
         var s = NewSession(t);
         ProtectedFiles.Save(s, mounts, repo, [], []);
         AssertManifestMatchesMounts(s, mounts,
@@ -120,7 +120,7 @@ public class ProtectedFilesTests
         Git.Run(repo, "worktree", "add", "-q", Path.Combine(t.Path, "other"));
         var entry = Path.Combine(git, "worktrees", "other");
         File.WriteAllText(Path.Combine(entry, "config.worktree"), "");
-        var mounts = RepoGuard.PrepareMounts(repo, "/nonexistent-home");
+        var mounts = RepoGuard.EnsureMountTargetsAndPlan(repo, "/nonexistent-home");
         var s = NewSession(t);
         ProtectedFiles.Save(s, mounts, repo, [], []);
         AssertManifestMatchesMounts(s, mounts, Path.Combine(git, "config"));
@@ -136,7 +136,7 @@ public class ProtectedFilesTests
         Git.Run(repo, [.. AllowFile, "submodule", "add", "-q", lib, "libs/lib"]);
         var module = Path.Combine(git, "modules", "libs", "lib");
         File.WriteAllText(Path.Combine(module, "config.worktree"), "[core]\n");
-        var mounts = RepoGuard.PrepareMounts(repo, "/nonexistent-home");
+        var mounts = RepoGuard.EnsureMountTargetsAndPlan(repo, "/nonexistent-home");
         var s = NewSession(t);
         ProtectedFiles.Save(s, mounts, repo, [], []);
         AssertManifestMatchesMounts(s, mounts,
@@ -153,7 +153,7 @@ public class ProtectedFilesTests
         File.WriteAllText(Path.Combine(repo, "a.cfg"), "[include]\n path = b.cfg\n");
         File.WriteAllText(Path.Combine(repo, "b.cfg"), "");
         File.AppendAllText(Path.Combine(git, "config"), $"[include]\n path = ../a.cfg\n path = extra.cfg\n path = {outside}\n");
-        var mounts = RepoGuard.PrepareMounts(repo, "/nonexistent-home");
+        var mounts = RepoGuard.EnsureMountTargetsAndPlan(repo, "/nonexistent-home");
         var s = NewSession(t);
         ProtectedFiles.Save(s, mounts, repo, [], []);
         AssertManifestMatchesMounts(s, mounts,
@@ -169,7 +169,7 @@ public class ProtectedFilesTests
         Git.Run(repo, "worktree", "add", "-q", wt);
         File.WriteAllText(Path.Combine(git, "HEAD"), "[a]\n\tk = v\n"); // what git reads as config has to be config
         File.AppendAllText(Path.Combine(git, "config"), "[include]\n path = HEAD\n");
-        var mounts = RepoGuard.PrepareMounts(wt, "/nonexistent-home");
+        var mounts = RepoGuard.EnsureMountTargetsAndPlan(wt, "/nonexistent-home");
         Assert.True(Assert.Single(mounts, m => m.Path == Path.Combine(git, "HEAD")).Verify);
     }
 
@@ -179,7 +179,7 @@ public class ProtectedFilesTests
         using var t = new TempDir();
         var dir = t.Sub("plain");
         var s = NewSession(t);
-        ProtectedFiles.Save(s, RepoGuard.PrepareMounts(dir, "/nonexistent-home"), dir, [], []);
+        ProtectedFiles.Save(s, RepoGuard.EnsureMountTargetsAndPlan(dir, "/nonexistent-home"), dir, [], []);
         Assert.Empty(ProtectedFiles.Read(s)!.Files);
     }
 
@@ -243,7 +243,7 @@ public class ProtectedFilesTests
         var (repo, git) = Repo(t);
         Git.Run(repo, "worktree", "add", "-q", "in");
         var commondir = Path.Combine(git, "worktrees", "in", "commondir");
-        return (repo, commondir, RepoGuard.PrepareMounts(repo, "/nonexistent-home"));
+        return (repo, commondir, RepoGuard.EnsureMountTargetsAndPlan(repo, "/nonexistent-home"));
     }
 
     private static void AssertRefusedWithNoCopiesLeft(TempDir t, string repo, IReadOnlyList<Mount> mounts, string expected)
@@ -274,7 +274,7 @@ public class ProtectedFilesTests
         var commondir = Path.Combine(git, "worktrees", "in", "commondir");
         File.Delete(commondir);
         Mkfifo(commondir);
-        AssertRefusedWithNoCopiesLeft(t, repo, RepoGuard.PrepareMounts(repo, "/nonexistent-home"), "isn't a regular file");
+        AssertRefusedWithNoCopiesLeft(t, repo, RepoGuard.EnsureMountTargetsAndPlan(repo, "/nonexistent-home"), "isn't a regular file");
     }
 
     [Fact]
@@ -338,7 +338,7 @@ public class ProtectedFilesTests
         Git.Run(repo, "worktree", "add", "-q", wt);
         // The common git dir is mounted, though the project dir (all CheckAllowed looks at) doesn't hold it.
         var inGit = new SessionDir(Key, t.Sub("repo", ".git", "state", "sessions", "abcd1234"));
-        var e = Assert.Throws<PenException>(() => ProtectedFiles.Save(inGit, RepoGuard.PrepareMounts(wt, "/nonexistent-home"), wt, [], []));
+        var e = Assert.Throws<PenException>(() => ProtectedFiles.Save(inGit, RepoGuard.EnsureMountTargetsAndPlan(wt, "/nonexistent-home"), wt, [], []));
         Assert.Contains("would be inside the sandbox", e.Message);
         Assert.False(Directory.Exists(inGit.ProtectedDir));
     }
@@ -978,7 +978,7 @@ public class ProtectedFilesTests
         var s = NewSession(t);
         File.WriteAllText(s.StartedWithGit, git + "\n");
         s.WriteModules([Path.Combine(git, "modules", "m2")]);
-        ProtectedFiles.Save(s, RepoGuard.PrepareMounts(repo, "/nonexistent-home"), repo, [],
+        ProtectedFiles.Save(s, RepoGuard.EnsureMountTargetsAndPlan(repo, "/nonexistent-home"), repo, [],
             [Path.Combine(git, "modules", "m")]);
         return (repo, git, s);
     }
@@ -1025,7 +1025,7 @@ public class ProtectedFilesTests
         File.WriteAllText(older.ComposeFile, "");
         var s = NewSession(t, "bbbbbbbb");
 
-        ProtectedFiles.Save(s, RepoGuard.PrepareMounts(repo, "/nonexistent-home"), repo, [older], []);
+        ProtectedFiles.Save(s, RepoGuard.EnsureMountTargetsAndPlan(repo, "/nonexistent-home"), repo, [older], []);
 
         Assert.True(Assert.Single(ProtectedFiles.Read(s)!.Files,
             f => f.Path == Path.Combine(git, "modules", "m", "config")).Adopted);
@@ -1051,7 +1051,7 @@ public class ProtectedFilesTests
         var wt = Path.Combine(t.Path, "wt");
         Git.Run(repo, "worktree", "add", "-q", wt);
 
-        var mounts = RepoGuard.PrepareMounts(wt, "/nonexistent-home");
+        var mounts = RepoGuard.EnsureMountTargetsAndPlan(wt, "/nonexistent-home");
         Assert.Contains(mounts, m => m.Path == inc && m.ReadOnly && m.Verify);
         var s = Started(t, wt, git);
 
@@ -1074,7 +1074,7 @@ public class ProtectedFilesTests
         var wt = Path.Combine(t.Path, "wt");
         Git.Run(repo, "worktree", "add", "-q", wt);
         var inc = Path.Combine(git, "x.cfg");
-        Assert.Contains(RepoGuard.PrepareMounts(wt, "/nonexistent-home"), m => m.Path == inc && m.ReadOnly);
+        Assert.Contains(RepoGuard.EnsureMountTargetsAndPlan(wt, "/nonexistent-home"), m => m.Path == inc && m.ReadOnly);
         Assert.True(File.Exists(inc));
     }
 
@@ -1092,7 +1092,7 @@ public class ProtectedFilesTests
         File.AppendAllText(Path.Combine(module, "config"), "[include]\n path = ../../../../y.cfg\n");
         var wt = Path.Combine(t.Path, "wt");
         Git.Run(repo, "worktree", "add", "-q", wt);
-        Assert.Contains(RepoGuard.PrepareMounts(wt, "/nonexistent-home"), m => m.Path == inc && m.ReadOnly && m.Verify);
+        Assert.Contains(RepoGuard.EnsureMountTargetsAndPlan(wt, "/nonexistent-home"), m => m.Path == inc && m.ReadOnly && m.Verify);
     }
 
     [Fact]

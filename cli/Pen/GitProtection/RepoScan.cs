@@ -312,9 +312,9 @@ internal static class RepoScan
     private static bool IsGitDirLayout(string dir) =>
         IsGitDirLayout(
             head: IsHead(Path.Combine(dir, "HEAD")),
-            objects: PathChecks.Exists(Path.Combine(dir, "objects")),
-            refs: PathChecks.Exists(Path.Combine(dir, "refs")),
-            commondir: PathChecks.Exists(Path.Combine(dir, "commondir")));
+            objects: PathChecks.ExistsOrIsLink(Path.Combine(dir, "objects")),
+            refs: PathChecks.ExistsOrIsLink(Path.Combine(dir, "refs")),
+            commondir: PathChecks.ExistsOrIsLink(Path.Combine(dir, "commondir")));
 
     /// <summary>Whether a git dir's layout is there, given which of its entries are.</summary>
     /// <param name="head">Whether there's a HEAD git could take for one (<see cref="IsHead(bool, bool)"/>).</param>
@@ -482,25 +482,25 @@ internal static class RepoScan
 
         /// <summary>Notes the repo in <paramref name="dir"/> that <paramref name="path"/> makes.</summary>
         private void AddRepo(string dir, string path, NestedKind kind) =>
-            _repos.Add(new(path, kind, _insideGitDir ? FindPlace(dir) : GitDirPlace.Elsewhere));
+            _repos.Add(new(path, kind, _insideGitDir ? FindRegion(dir) : GitDirRegion.Elsewhere));
 
         /// <summary>Where <paramref name="dir"/>, in the git dir, is, for the advice about a repo there.</summary>
-        private GitDirPlace FindPlace(string dir)
+        private GitDirRegion FindRegion(string dir)
         {
             var chain = Paths.EnumerateAncestors(dir).Prepend(dir);
             foreach (var at in chain.TakeWhile(at => at != root && PathChecks.IsInside(root, at)))
             {
                 var parent = Path.GetDirectoryName(at);
                 if (parent is not null && Path.GetFileName(at) is "refs" or "logs" && IsOwnGitDir(parent))
-                    return GitDirPlace.Refs;
+                    return GitDirRegion.Refs;
             }
             var worktrees = Path.GetDirectoryName(dir);
             if (worktrees is not null && Path.GetFileName(worktrees) == "worktrees"
                 && Path.GetDirectoryName(worktrees) is { } owner && IsOwnRepo(owner))
             {
-                return GitDirPlace.WorktreeEntry;
+                return GitDirRegion.WorktreeEntry;
             }
-            return GitDirPlace.Elsewhere;
+            return GitDirRegion.Elsewhere;
         }
 
         /// <summary>
@@ -826,8 +826,8 @@ internal sealed record NestedScan(
 /// <summary>A repo below the root of a walk: the project dir, or its git dir.</summary>
 /// <param name="Path">The entry that makes it one: the .git, or a bare repo's HEAD.</param>
 /// <param name="Kind">What sort of entry <paramref name="Path"/> is.</param>
-/// <param name="Place">Where in the git dir it is, for the advice; elsewhere for one in the tree.</param>
-internal sealed record NestedRepo(string Path, NestedKind Kind, GitDirPlace Place = GitDirPlace.Elsewhere)
+/// <param name="Region">Where in the git dir it is, for the advice; elsewhere for one in the tree.</param>
+internal sealed record NestedRepo(string Path, NestedKind Kind, GitDirRegion Region = GitDirRegion.Elsewhere)
 {
     /// <summary>Gets the repo's directory, for messages.</summary>
     public string RepoDir => Paths.GetParent(Path);
@@ -850,7 +850,7 @@ internal enum NestedKind
 }
 
 /// <summary>Where in the git dir a repo the walk of it found is, for the advice about it.</summary>
-internal enum GitDirPlace
+internal enum GitDirRegion
 {
     /// <summary>Nowhere in particular.</summary>
     Elsewhere,

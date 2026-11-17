@@ -524,7 +524,7 @@ public class WorktreeTests
     }
 
     private static List<(string, bool)> Mounts(string dir) =>
-        RepoGuard.PrepareMounts(dir, "/nonexistent-home").Select(m => (m.Path, m.ReadOnly)).ToList();
+        RepoGuard.EnsureMountTargetsAndPlan(dir, "/nonexistent-home").Select(m => (m.Path, m.ReadOnly)).ToList();
 
     [Fact]
     public void MountsForAWorktree()
@@ -558,7 +558,7 @@ public class WorktreeTests
     {
         using var t = new TempDir();
         var (repo, wt, _) = RepoWithWorktree(t);
-        var yaml = SessionCompose.GenerateOverride(RepoGuard.PrepareMounts(wt, "/nonexistent-home"), readOnlyRoot: false, dindContainer: "x-dind", ports: null);
+        var yaml = SessionCompose.GenerateOverride(RepoGuard.EnsureMountTargetsAndPlan(wt, "/nonexistent-home"), readOnlyRoot: false, dindContainer: "x-dind", ports: null);
         var dind = yaml[yaml.IndexOf("\"dind\"", StringComparison.Ordinal)..];
         Assert.Contains($"\"source\": \"{Path.Combine(repo, ".git")}\"", dind);
         Assert.Contains($"\"source\": \"{Path.Combine(wt, ".git")}\"", dind);

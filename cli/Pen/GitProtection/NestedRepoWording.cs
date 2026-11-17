@@ -46,7 +46,7 @@ internal static class NestedRepoWording
     /// <summary>Describes what makes a repo in the git dir one, for the refusal.</summary>
     public static string DescribeRefusedInGitDir(NestedRepo repo) => repo switch
     {
-        { Place: GitDirPlace.WorktreeEntry, Kind: NestedKind.Bare } =>
+        { Region: GitDirRegion.WorktreeEntry, Kind: NestedKind.Bare } =>
             " (a worktree entry whose commondir doesn't lead back to this repo)",
         _ => For(repo.Kind).RefusedInGitDir,
     };
@@ -57,7 +57,7 @@ internal static class NestedRepoWording
     /// <summary>Words why a repo in the git dir is quarantined.</summary>
     public static string DescribeQuarantinedInGitDir(NestedRepo repo) => repo switch
     {
-        { Place: GitDirPlace.Refs, Kind: NestedKind.Bare } =>
+        { Region: GitDirRegion.Refs, Kind: NestedKind.Bare } =>
             "ref names (a branch named HEAD beside ones under objects/ and refs/, say) that lay this directory " +
             "out as a git dir: git run from it (through a symlink in the project, say) takes it for one and uses " +
             "its config and hooks, which were writable from the sandbox. Renaming its HEAD breaks that; rename " +

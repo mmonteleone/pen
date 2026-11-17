@@ -286,7 +286,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
     /// <summary>Records that a file wasn't put back because a directory holding it went.</summary>
     private void RecordDirectoryGone(ProtectedFile file, string directory)
     {
-        var what = PathChecks.Exists(directory) ? "was replaced by a file" : "was removed";
+        var what = PathChecks.ExistsOrIsLink(directory) ? "was replaced by a file" : "was removed";
         _changes.Restored.Add(new(file.Path, $"not put back: {Out.Field(directory)} {what} during the session"));
     }
 

@@ -98,7 +98,7 @@ internal static class GitQuarantine
         if (!Directory.Exists(moved) || PathChecks.IsLink(moved))
             return null;
         var head = Path.Combine(moved, "HEAD");
-        if (!PathChecks.Exists(head))
+        if (!PathChecks.ExistsOrIsLink(head))
             return null;
         var headTo = FreeName(head);
         Native.Rename(head, headTo);
@@ -110,7 +110,7 @@ internal static class GitQuarantine
     internal static string FreeName(string path)
     {
         var to = path + Suffix;
-        for (var i = 2; PathChecks.Exists(to); i++)
+        for (var i = 2; PathChecks.ExistsOrIsLink(to); i++)
             to = $"{path}{Suffix}-{i}";
         return to;
     }

@@ -18,7 +18,7 @@ public class GitDirRepoTests
         RepoGuard.CheckAtStart(dir);
         // As Session does, with no other session open: every module repo found is listed.
         var lists = ModuleBaseline.ReadOpenLists([], common, dir);
-        var mounts = RepoGuard.PrepareMounts(dir, "/nonexistent-home");
+        var mounts = RepoGuard.EnsureMountTargetsAndPlan(dir, "/nonexistent-home");
         var found = RepoScan.FindModuleRepos(common);
         var modules = ModuleBaseline.Choose(found, lists);
         var s = new SessionDir(Key, t.Sub("runtime", "sessions", id));
@@ -237,7 +237,7 @@ public class GitDirRepoTests
         var removed = Assert.IsType<Quarantined.LinkRemoved>(Assert.Single(check.Moved, q => q.From == link));
         Assert.Equal(target, removed.LinkTarget);
         Assert.Contains("a symlink into the git dir", removed.Why);
-        Assert.False(PathChecks.Exists(link));
+        Assert.False(PathChecks.ExistsOrIsLink(link));
         Assert.Empty(Directory.GetFileSystemEntries(Path.GetDirectoryName(link)!, Path.GetFileName(link) + "*"));
         var warning = GitCheckWording.Warning(dir, check.Moved);
         Assert.Contains($"{PathChecks.FormatPath(dir, link)} (a symlink to {target}) removed", warning);
@@ -614,7 +614,7 @@ public class GitDirRepoTests
 
         Assert.True(Assert.IsType<Quarantined.LinkRemoved>(removed).LinkTargetEscaped);
         Assert.Equal(@".git/objects/\377x", ((Quarantined.LinkRemoved)removed).LinkTarget);
-        Assert.False(PathChecks.Exists(link));
+        Assert.False(PathChecks.ExistsOrIsLink(link));
         var warning = GitCheckWording.Warning(project, [removed]);
         Assert.Contains("pen: They've been moved out of git's way, or removed:", warning);
         Assert.Contains(@"docs (a symlink to .git/objects/\377x) removed", warning);
@@ -1093,13 +1093,13 @@ public class GitDirRepoTests
         Git.Run(repo, "add", "docs");
         Git.Run(repo, "commit", "-q", "-m", "docs");
         Git.Run(repo, "checkout", "-q", "main");
-        Assert.False(PathChecks.Exists(docs));
+        Assert.False(PathChecks.ExistsOrIsLink(docs));
         var s = Started(t, repo, git);
         var plant = Plant(t, git, "bare", "objects/zz", hook);
         Git.Run(repo, "checkout", "-q", "evil");
         AssertFires(docs, marker);
         Git.Run(repo, "checkout", "-q", "main");
-        Assert.False(PathChecks.Exists(docs));
+        Assert.False(PathChecks.ExistsOrIsLink(docs));
         Assert.Contains(".git/objects/zz (laid out as a git dir of its own)",
             Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(repo)).Message);
 

@@ -57,7 +57,7 @@ internal sealed class PromptHazardScan(string gitDir, Func<string, bool>? tryMak
         if (atStart is null)
             return;
         var config = Path.Combine(dir, "config.worktree");
-        if (PathChecks.Exists(config) && !atStart.Vouches(config))
+        if (PathChecks.ExistsOrIsLink(config) && !atStart.Vouches(config))
         {
             _hazards.Add(new(config, null, "a config.worktree that wasn't there at the session's start, or that " +
                 "another session could have made: git reads it as config, so a setting in it can run code on " +

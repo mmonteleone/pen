@@ -368,7 +368,7 @@ internal static class PausedGit
         /// </param>
         private void AddIfPresent(string dir, string kind, Func<string, PausedNote?[]> readNotes)
         {
-            if (!PathChecks.Exists(dir))
+            if (!PathChecks.ExistsOrIsLink(dir))
                 return;
             if (PathChecks.IsLink(dir))
                 _found.Add(new(dir, kind, [new("couldn't read the todo in it: it's a symlink", [])]));

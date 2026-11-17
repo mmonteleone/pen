@@ -32,7 +32,7 @@ public class ModuleRepoTests
         RepoScan.FindModuleRepos(Path.Combine(repo, ".git")).Select(p => PathChecks.FormatPath(repo, p)).ToList();
 
     private static List<(string, bool)> Mounts(string dir) =>
-        RepoGuard.PrepareMounts(dir, "/nonexistent-home").Select(m => (PathChecks.FormatPath(dir, m.Path), m.ReadOnly)).ToList();
+        RepoGuard.EnsureMountTargetsAndPlan(dir, "/nonexistent-home").Select(m => (PathChecks.FormatPath(dir, m.Path), m.ReadOnly)).ToList();
 
     [Fact]
     public void FindsSlashNamedAndNestedModuleRepos_ParentsFirst()
@@ -139,7 +139,7 @@ public class ModuleRepoTests
         var wt = Path.Combine(t.Path, "wt");
         Git.Run(super, "worktree", "add", "-q", wt);
         Sub(wt, "update", "-q", "--init");
-        var m = RepoGuard.PrepareMounts(wt, "/nonexistent-home").Select(x => (x.Path, x.ReadOnly)).ToList();
+        var m = RepoGuard.EnsureMountTargetsAndPlan(wt, "/nonexistent-home").Select(x => (x.Path, x.ReadOnly)).ToList();
         var common = Path.Combine(super, ".git");
         Assert.Contains((Path.Combine(common, "modules", "libs", "mid", "config"), true), m);
         Assert.Contains((Path.Combine(common, "modules", "libs", "mid", "modules", "deps", "leaf", "hooks"), true), m);
@@ -244,7 +244,7 @@ public class ModuleRepoTests
         Assert.True(File.Exists(Path.Combine(wt, "libs", "mid", "deps", "leaf", ".git")));
         RepoGuard.CheckAtStart(wt);
 
-        var m = RepoGuard.PrepareMounts(wt, "/nonexistent-home").Select(x => (x.Path, x.ReadOnly)).ToList();
+        var m = RepoGuard.EnsureMountTargetsAndPlan(wt, "/nonexistent-home").Select(x => (x.Path, x.ReadOnly)).ToList();
         var mods = Path.Combine(super, ".git", "worktrees", "wt", "modules", "libs", "mid");
         Assert.Contains((Path.Combine(mods, "config"), true), m);
         Assert.Contains((Path.Combine(mods, "hooks"), true), m);

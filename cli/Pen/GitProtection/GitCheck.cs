@@ -282,7 +282,7 @@ internal sealed class GitCheck
     /// <summary>Quarantines a .git made in a dir that the session started without one.</summary>
     private void QuarantineNewRepo(string git)
     {
-        if (PathChecks.Exists(git))
+        if (PathChecks.ExistsOrIsLink(git))
         {
             Quarantine(git, "a repo created during the session (git init): " +
                 "its config and hooks were writable from the sandbox", breakLayout: true);
@@ -304,7 +304,7 @@ internal sealed class GitCheck
         }
 
         var commondir = Path.Combine(git, "commondir");
-        if (PathChecks.Exists(commondir))
+        if (PathChecks.ExistsOrIsLink(commondir))
         {
             Quarantine(commondir, "a normal repo never has one: it makes " +
                 "git read config and hooks from another directory", breakLayout: false);
@@ -421,7 +421,7 @@ internal sealed class GitCheck
                 continue;
             if (TryQuarantineModuleRepo(repo, listed))
                 gone.Add(repo);
-            else if (KeepsModuleRepo(repo))
+            else if (QuarantineCommondirToKeep(repo))
                 known.Add(repo);
         }
         foreach (var unreadable in scan.UnreadableDirs)
@@ -480,16 +480,16 @@ internal sealed class GitCheck
 
     /// <summary>Quarantines a commondir in a module repo that stays.</summary>
     /// <returns>Whether the repo is the project's own: it has no commondir left.</returns>
-    private bool KeepsModuleRepo(string repo)
+    private bool QuarantineCommondirToKeep(string repo)
     {
         var commondir = Path.Combine(repo, "commondir");
-        if (PathChecks.Exists(commondir))
+        if (PathChecks.ExistsOrIsLink(commondir))
         {
             Quarantine(commondir, "a submodule's repo never has one: it " +
                 "makes git read config and hooks from another directory", breakLayout: false);
         }
 
-        return !PathChecks.Exists(commondir);
+        return !PathChecks.ExistsOrIsLink(commondir);
     }
 
     /// <summary>Quarantines what a shell prompt would run in <paramref name="git"/>.</summary>
@@ -546,7 +546,7 @@ internal sealed class GitCheck
     private void MoveHazard(PromptHazard hazard)
     {
         // Gone with a state directory that an earlier one in it took aside.
-        if (!PathChecks.Exists(hazard.Path))
+        if (!PathChecks.ExistsOrIsLink(hazard.Path))
             return;
         if (TryRenameMakingWritable(hazard.Path, hazard.Why, breakLayout: false))
             return;

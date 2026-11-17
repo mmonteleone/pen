@@ -26,12 +26,15 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// <summary>The mounts so far, in the order they're planned; a path can be in it more than once.</summary>
     private readonly List<Mount> _mounts = [];
 
-    /// <summary>Plans the project's mounts. Call it once per planner.</summary>
+    /// <summary>
+    /// Creates what must exist to be mounted, if it's missing, and plans the project's mounts. Call it once per
+    /// planner.
+    /// </summary>
     /// <returns>
     /// The mounts in the order first planned, one per path. A path planned more than once keeps its first mount,
     /// verified if any of its mounts was.
     /// </returns>
-    public List<Mount> Plan()
+    public List<Mount> EnsureTargetsAndPlan()
     {
         var git = Path.Combine(dir, ".git");
         if (Directory.Exists(git))
@@ -138,7 +141,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
         if (PathChecks.IsLink(entry))
             throw new PenException($"{FormatPath(entry)} is a symlink, which pen doesn't support");
         var commondir = Path.Combine(entry, "commondir");
-        if (PathChecks.Exists(commondir))
+        if (PathChecks.ExistsOrIsLink(commondir))
             RequireNotLink(dir, commondir);
         if (!RepoScan.IsWorktreeInside(dir, entry))
         {
@@ -152,7 +155,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
             AddIncludes(common, worktreeFile);
             return;
         }
-        if (PathChecks.Exists(commondir))
+        if (PathChecks.ExistsOrIsLink(commondir))
             _mounts.Add(new(commondir, ReadOnly: true, Verify: true));
         AddWorktreeConfig(common, Path.Combine(entry, "config.worktree"), worktreeConfig);
     }
@@ -191,7 +194,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
         }
 
         var commondir = Path.Combine(repo, "commondir");
-        if (PathChecks.Exists(commondir))
+        if (PathChecks.ExistsOrIsLink(commondir))
         {
             throw new PenException($"{FormatPath(commondir)} exists, which a submodule's repo never has: it " +
                 "makes git read config and hooks from another directory. Inspect it and remove it, then rerun");
@@ -229,7 +232,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// </param>
     private void AddWorktreeConfig(string common, string path, bool enabled)
     {
-        if (!enabled && !PathChecks.Exists(path))
+        if (!enabled && !PathChecks.ExistsOrIsLink(path))
             return;
         EnsureFile(path);
         _mounts.Add(new(path, ReadOnly: true, Verify: true));

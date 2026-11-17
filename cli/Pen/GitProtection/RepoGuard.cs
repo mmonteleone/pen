@@ -89,7 +89,7 @@ internal static class RepoGuard
     private static void RequireNoCommondir(string dir, string common)
     {
         var commondir = Path.Combine(common, "commondir");
-        if (PathChecks.Exists(commondir))
+        if (PathChecks.ExistsOrIsLink(commondir))
         {
             throw new PenException($"{PathChecks.FormatPath(dir, commondir)} exists, which a normal repo never " +
                 "has: it makes git read config and hooks from another directory. Inspect it and remove it, then rerun");
@@ -217,10 +217,10 @@ internal static class RepoGuard
         var anyQuarantined = false;
         var listed = CappedList.FormatLines(found, MaxListed, repo =>
         {
-            var refs = repo is { Place: GitDirPlace.Refs, Kind: NestedKind.Bare };
+            var refs = repo is { Region: GitDirRegion.Refs, Kind: NestedKind.Bare };
             anyRefs |= refs;
             anyQuarantined |= IsInQuarantine(common, repo.RepoDir);
-            anyEntry |= repo is { Place: GitDirPlace.WorktreeEntry, Kind: NestedKind.Bare };
+            anyEntry |= repo is { Region: GitDirRegion.WorktreeEntry, Kind: NestedKind.Bare };
             return PathChecks.FormatPath(dir, repo.RepoDir) + (refs ? " (ref names that lay it out as a git dir)" :
                 NestedRepoWording.DescribeRefusedInGitDir(repo));
         });
@@ -408,6 +408,7 @@ internal static class RepoGuard
     /// </summary>
     /// <param name="dir">The project dir, checked by <see cref="CheckAtStart"/> first.</param>
     /// <param name="hostHome">The host user's home, for includes of ~/ paths.</param>
-    /// <returns>The mounts, in order, one per path (see <see cref="MountPlanner.Plan"/>).</returns>
-    public static List<Mount> PrepareMounts(string dir, string hostHome) => new MountPlanner(dir, hostHome).Plan();
+    /// <returns>The mounts, in order, one per path (see <see cref="MountPlanner.EnsureTargetsAndPlan"/>).</returns>
+    public static List<Mount> EnsureMountTargetsAndPlan(string dir, string hostHome) =>
+        new MountPlanner(dir, hostHome).EnsureTargetsAndPlan();
 }
