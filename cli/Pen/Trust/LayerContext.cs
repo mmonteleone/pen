@@ -20,6 +20,9 @@ internal sealed class LayerContext : IDisposable
         | UnixFileMode.UserExecute;
     private static readonly TimeSpan KeepAbandonedReviews = TimeSpan.FromDays(1);
     private static readonly TimeSpan LockPoll = TimeSpan.FromMilliseconds(200);
+
+    /// <summary>How long to wait for another pen's build here, which holds the lock throughout.</summary>
+    private static readonly TimeSpan LockWait = TimeSpan.FromHours(1);
     private readonly FileLock? _lock;
     private readonly string _parent;
 
@@ -87,6 +90,7 @@ internal sealed class LayerContext : IDisposable
     }
 
     /// <summary>Takes the exclusive lock at <paramref name="path"/>, saying so if it has to wait.</summary>
+    /// <exception cref="PenException">It's still held after <see cref="LockWait"/>.</exception>
     [SuppressMessage("Reliability", "CA2000", Justification = "The lock is returned to the caller, which disposes it")]
     private static FileLock WaitForLock(string path, TimeProvider clock)
     {
@@ -94,8 +98,8 @@ internal sealed class LayerContext : IDisposable
         if (heldLock is not null)
             return heldLock;
         Out.WriteLine("waiting for another pen building this directory's project layer");
-        return Retry.Poll(() => FileLock.TryTake(path, exclusive: true), LockPoll, TimeSpan.MaxValue, clock)
-            ?? throw new InvalidOperationException("a wait without a limit ended");
+        return Retry.Poll(() => FileLock.TryTake(path, exclusive: true), LockPoll, LockWait, clock)
+            ?? throw new PenException("another pen is still building this directory's project layer; run this again");
     }
 
     /// <summary>Removes the copy and releases the lock, if it holds one.</summary>

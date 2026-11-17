@@ -395,6 +395,36 @@ public class TrustGateTests
         Assert.NotEmpty(f.Calls);
     }
 
+    [Fact]
+    public async Task ABuildWaitingOverAnHourForAnotherInTheSameDirectory_GivesUp()
+    {
+        using var f = new Fixture(projectToml: "");
+        Approve(f);
+        var lockFile = Path.Combine(f.Host.GetRuntimeDir(f.Project.Key), "layer-" + Project.HashPath(f.Project.Dir) + ".lock");
+        using var held = FileLock.TryTake(lockFile, exclusive: true)!;
+        var clock = new SteppingClock(TimeSpan.FromMinutes(20));
+
+        PenException? error = null;
+        // Bounded, so a wait that never ends fails the test instead of hanging it.
+        var stderr = await Task.Run(() => CapturingStderr(() => error = Assert.Throws<PenException>(() => Image.EnsureProjectLayer(f.Host, f.Project, clock, baseImage: Image.Name))), TestContext.Current.CancellationToken)
+            .WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken);
+
+        Assert.Equal("another pen is still building this directory's project layer; run this again", error!.Message);
+        Assert.Contains("waiting for another pen building this directory's project layer", stderr);
+        Assert.Empty(f.Calls);
+        Assert.Equal(5, clock.Reads); // at 0, 20, 40, 60 and 80 minutes: it gives up at the first read past an hour
+    }
+
+    /// <summary>A clock whose every timestamp read is <c>step</c> later than the one before.</summary>
+    private sealed class SteppingClock(TimeSpan step) : TimeProvider
+    {
+        public int Reads { get; private set; }
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp() => step.Ticks * Reads++;
+    }
+
     /// <summary>Answers y, first doing what an agent does while the user reads.</summary>
     private sealed class DoingThenAnswering(Action meanwhile, string answer = "y") : TextReader
     {
