@@ -51,8 +51,8 @@ internal static class RepoGuard
         // Defence in depth: ResolveModuleCheckout already rejects a checkout whose gitdir resolves through a symlink
         // (it requires the gitdir's real path to be the path it reads as), and planning the mounts refuses the symlink.
         var moduleRepos = modules.Repos.Where(repo => !PathChecks.IsLink(repo)).ToList();
-        var scan = RepoScan.ScanNested(dir, common, moduleRepos, tryOpen: null);
-        var inGitDir = RepoScan.ScanGitDir(common, moduleRepos, tryOpen: null);
+        var scan = RepoScan.ScanNested(dir, common, moduleRepos, tryMakeListable: null);
+        var inGitDir = RepoScan.ScanGitDir(common, moduleRepos, tryMakeListable: null);
         RequireDecodableNames(dir, common, modules, scan, inGitDir);
         RequireListable(dir, scan, inGitDir);
         RequireNoNestedRepos(dir, git, scan.Repos);

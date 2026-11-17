@@ -7,7 +7,9 @@ namespace Pen.GitProtection;
 /// which keeps what it finds as it goes.
 /// </summary>
 /// <param name="gitDir">The git dir; its worktree entries and its module repos and theirs are scanned too.</param>
-/// <param name="tryOpen">Opens a worktrees dir or entry that can't be looked in, or null to change no modes.</param>
+/// <param name="tryMakeListable">
+/// Makes a worktrees dir or entry that can't be looked in listable, or null to change no modes.
+/// </param>
 /// <param name="atStart">
 /// What the session saved at its start, at a session's end; null to leave every config.worktree alone.
 /// </param>
@@ -17,8 +19,8 @@ namespace Pen.GitProtection;
 /// <see cref="PausedGit.IsCount"/> and <see cref="PausedGit.IsHeadName"/>. A planted symlink counts whatever it
 /// points to, and a state directory Pen can't enter counts too, since the prompt reads it once the user fixes its
 /// mode. Every known name is tried directly, so a directory that can be searched but not listed (git and the prompt
-/// can read through one too) hides nothing. A worktree entry or worktrees dir still closed after
-/// <paramref name="tryOpen"/> goes in <see cref="UnreachableDirs"/>: what's in it can't be vouched for.
+/// can read through one too) hides nothing. A worktree entry or worktrees dir still unlistable after
+/// <paramref name="tryMakeListable"/> goes in <see cref="UnreachableDirs"/>: what's in it can't be vouched for.
 /// </para>
 /// <para>
 /// With <paramref name="atStart"/> (a session's end), so does each config.worktree it doesn't vouch for, wherever git
@@ -28,7 +30,7 @@ namespace Pen.GitProtection;
 /// config.worktree nothing checks, and which was refused at the start so can't have been there then.
 /// </para>
 /// </remarks>
-internal sealed class PromptHazardScan(string gitDir, Func<string, bool>? tryOpen, ProtectedManifest? atStart)
+internal sealed class PromptHazardScan(string gitDir, Func<string, bool>? tryMakeListable, ProtectedManifest? atStart)
 {
     private const string Prompt = "git's shell prompt (git-prompt.sh) can run what's in it, with no git command typed";
 
@@ -45,7 +47,7 @@ internal sealed class PromptHazardScan(string gitDir, Func<string, bool>? tryOpe
     /// <remarks>
     /// If it throws, what it found before stays in <see cref="Hazards"/> and <see cref="UnreachableDirs"/>.
     /// </remarks>
-    public void Run() => GitDirWalk.Visit(gitDir, Visit, AddUnreachable, tryOpen);
+    public void Run() => GitDirWalk.Visit(gitDir, Visit, AddUnreachable, tryMakeListable);
 
     /// <summary>Looks for hazards in one git dir or worktree entry.</summary>
     private void Visit(string dir)

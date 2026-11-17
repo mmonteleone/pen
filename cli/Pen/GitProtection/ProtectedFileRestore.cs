@@ -7,7 +7,7 @@ namespace Pen.GitProtection;
 
 /// <summary>
 /// Puts a session's protected files back at its end from the copies <see cref="ProtectedFiles.Save"/> took, keeping
-/// what it renamed, put back and opened as it goes.
+/// what it renamed, put back and made writable as it goes.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -29,7 +29,7 @@ namespace Pen.GitProtection;
 /// <param name="commonGitDir">The git dir the session started with, or null for dir/.git.</param>
 /// <param name="changes">
 /// Where it records, as it goes: in Moved what it renamed, or couldn't rename or restore; in Restored the files
-/// that changed with nothing to set aside (missing, directory gone, or only mode); in Opened the directories it
+/// that changed with nothing to set aside (missing, directory gone, or only mode); in ModeChanges the directories it
 /// added u+rwx to so it could write in them, and left so; in Blocked the directories whose modes kept a file from
 /// being put back, for advice on what to fix.
 /// </param>
@@ -137,7 +137,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
     /// <summary>Recreates a file that was deleted during the session.</summary>
     private void Recreate(ProtectedFile file, byte[] original)
     {
-        OpenParent(file.Path);
+        MakeParentWritable(file.Path);
         ProtectedFiles.WriteNew(file.Path, original, file.Mode);
         _changes.Restored.Add(new(file.Path, "it was deleted during the session, and has been recreated"));
     }
@@ -176,7 +176,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
     /// <summary>Renames what's there aside and recreates the file, if it can be moved.</summary>
     private void ReplaceAside(ProtectedFile file, byte[] original)
     {
-        OpenParent(file.Path);
+        MakeParentWritable(file.Path);
         var quarantined = GitQuarantine.Move(file.Path, "it's no longer the regular file it was at the " +
             "start of the session (a symlink, a directory, or too big or unreadable " +
             "to compare), so it was moved aside and the original put back", breakLayout: false);
@@ -188,7 +188,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
     /// <summary>Keeps the changed version of a file whose original was written back, beside it.</summary>
     private void KeepChangedVersion(ProtectedFile file, byte[] changed)
     {
-        OpenParent(file.Path);
+        MakeParentWritable(file.Path);
         var to = GitQuarantine.FreeName(file.Path);
         try
         {
@@ -207,12 +207,12 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
     /// Lets this user make and rename entries beside the file, if the agent took that away (chmod 555 .git).
     /// </summary>
     /// <remarks>The mode change is reported; a directory it still can't write in is named in Blocked.</remarks>
-    private void OpenParent(string path)
+    private void MakeParentWritable(string path)
     {
         var parent = Paths.GetParent(path);
         if (Native.CanWriteIn(parent))
             return;
-        _changes.TryOpenRecording(parent, write: true);
+        _changes.TryMakeListableRecording(parent, write: true);
         if (!Native.CanWriteIn(parent))
             _changes.Blocked.Add(parent);
     }

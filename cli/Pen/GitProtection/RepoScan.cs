@@ -21,7 +21,7 @@ internal static class RepoScan
     /// <param name="moduleRepos">
     /// The module repos whose checkouts are the project's own too (see <see cref="ResolveModuleCheckout"/>).
     /// </param>
-    /// <param name="tryOpen">
+    /// <param name="tryMakeListable">
     /// If given, gets each directory that can be entered but not listed and returns whether it changed its mode,
     /// after which the listing is tried again.
     /// </param>
@@ -61,12 +61,12 @@ internal static class RepoScan
         string root,
         string commonGitDir,
         IReadOnlyCollection<string> moduleRepos,
-        Func<string, bool>? tryOpen,
+        Func<string, bool>? tryMakeListable,
         IEnumerable<string>? from = null)
     {
         var modules = new HashSet<string>(moduleRepos, StringComparer.Ordinal);
         var links = GitDirLinkCheck.ForProject(root, commonGitDir);
-        return new NestedWalk(root, commonGitDir, modules, tryOpen, links).Run(from ?? [root]);
+        return new NestedWalk(root, commonGitDir, modules, tryMakeListable, links).Run(from ?? [root]);
     }
 
     /// <summary>
@@ -77,7 +77,7 @@ internal static class RepoScan
     /// <param name="moduleRepos">
     /// The module repos kept in it, which are its own (<see cref="FindModuleRepos"/>).
     /// </param>
-    /// <param name="tryOpen">As for <see cref="ScanNested"/>.</param>
+    /// <param name="tryMakeListable">As for <see cref="ScanNested"/>.</param>
     /// <param name="from">
     /// Where to walk from instead of the git dir: directories in it, such as a .git directory just moved aside.
     /// </param>
@@ -109,11 +109,11 @@ internal static class RepoScan
     public static NestedScan ScanGitDir(
         string gitDir,
         IReadOnlyCollection<string> moduleRepos,
-        Func<string, bool>? tryOpen,
+        Func<string, bool>? tryMakeListable,
         IEnumerable<string>? from = null)
     {
         var modules = new HashSet<string>(moduleRepos, StringComparer.Ordinal);
-        return new NestedWalk(gitDir, gitDir, modules, tryOpen, links: null).Run(from ?? [gitDir]);
+        return new NestedWalk(gitDir, gitDir, modules, tryMakeListable, links: null).Run(from ?? [gitDir]);
     }
 
     private static bool HasReplacement(string name) => name.Contains('\uFFFD');
@@ -410,7 +410,7 @@ internal static class RepoScan
     /// <param name="root">The project dir, or the git dir.</param>
     /// <param name="commonGitDir">The project's common git dir; the git dir itself when walking that.</param>
     /// <param name="moduleRepos">The module repos whose checkouts are the project's own.</param>
-    /// <param name="tryOpen">See <see cref="ScanNested"/>.</param>
+    /// <param name="tryMakeListable">See <see cref="ScanNested"/>.</param>
     /// <param name="links">
     /// What decides whether a symlink in the tree leads into the git dir, or null in a walk of the git dir or of a
     /// tree with no git dir: then symlinks aren't looked at. One in the git dir isn't followed, as what it leads to
@@ -424,7 +424,7 @@ internal static class RepoScan
         string root,
         string commonGitDir,
         IReadOnlySet<string> moduleRepos,
-        Func<string, bool>? tryOpen,
+        Func<string, bool>? tryMakeListable,
         GitDirLinkCheck? links)
     {
         private readonly List<NestedRepo> _repos = [];
@@ -465,7 +465,7 @@ internal static class RepoScan
         /// <summary>Notes the repos in one directory and queues its subdirectories.</summary>
         private void ScanDirectory(string dir)
         {
-            var entries = ListOrOpen(dir);
+            var entries = ListOrMakeListable(dir);
             if (entries is null)
                 return;
             var undecodable = FindUndecodable(dir, entries);
@@ -554,11 +554,13 @@ internal static class RepoScan
             }
         }
 
-        /// <summary>Lists <paramref name="dir"/>, trying to open it once if it can be entered but not listed.</summary>
+        /// <summary>
+        /// Lists <paramref name="dir"/>, trying once to make it listable if it can be entered but not listed.
+        /// </summary>
         /// <returns>
         /// The entries, or null if there's nothing to scan: the directory is gone, shut or noted unlistable.
         /// </returns>
-        private List<ListedEntry>? ListOrOpen(string dir)
+        private List<ListedEntry>? ListOrMakeListable(string dir)
         {
             var entries = DirectoryListing.ReadOrNull(dir);
             if (entries is not null)
@@ -566,7 +568,7 @@ internal static class RepoScan
             // Gone, or shut: nothing host git could reach.
             if (Native.IsShutOrGone(dir))
                 return null;
-            if (tryOpen is not null && tryOpen(dir))
+            if (tryMakeListable is not null && tryMakeListable(dir))
                 entries = DirectoryListing.ReadOrNull(dir);
             if (entries is null)
                 _unlistable.Add(dir);

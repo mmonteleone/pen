@@ -748,7 +748,7 @@ public class PausedGitTests
         Assert.Null(check.Failure);
         Assert.False(PathChecks.Exists(path));
         Assert.Contains(check.Moved, q => q.From == path && q.To.Length > 0);
-        Assert.Contains(check.Opened, c => c.Path == Path.GetDirectoryName(path) && c.Now.HasFlag(UnixFileMode.UserWrite));
+        Assert.Contains(check.ModeChanges, c => c.Path == Path.GetDirectoryName(path) && c.Now.HasFlag(UnixFileMode.UserWrite));
     }
 
     public static TheoryData<string, string> ReadOnlyPromptCases()
@@ -866,7 +866,7 @@ public class PausedGitTests
 
         Assert.Null(check.Failure);
         Assert.False(File.Exists(path));
-        Assert.Contains(check.Opened, c => c.Path == git);
+        Assert.Contains(check.ModeChanges, c => c.Path == git);
         DrawPrompt(t, shell, repo, script);
         Assert.False(File.Exists(canary));
     }

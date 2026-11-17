@@ -689,7 +689,7 @@ public class ConfigWorktreeQuarantineTests
             Assert.Null(check.Failure);
             Assert.Contains(check.Moved, q => q.From == file);
             Assert.False(File.Exists(file));
-            if (mode != 0b011_001_001) Assert.Contains(check.Opened, o => o.Path == entry); // 311 is enough to rename in
+            if (mode != 0b011_001_001) Assert.Contains(check.ModeChanges, o => o.Path == entry); // 311 is enough to rename in
         }
         finally { File.SetUnixFileMode(entry, Dir755); }
         AssertDoesntFire(checkout, marker);
@@ -779,7 +779,7 @@ public class ConfigWorktreeQuarantineTests
         TurnOn(repo, git, "directly");
         ForgeWorktree(repo, git, "forged", "[core]\n");
         var entry = Path.Combine(git, "worktrees", "forged");
-        var scan = new PromptHazardScan(git, tryOpen: null, new ProtectedManifest([], []));
+        var scan = new PromptHazardScan(git, tryMakeListable: null, new ProtectedManifest([], []));
         scan.Run();
         var hazards = scan.Hazards;
         Assert.Contains(hazards, h => h.Path == Path.Combine(entry, "config.worktree"));
@@ -787,7 +787,7 @@ public class ConfigWorktreeQuarantineTests
         File.SetUnixFileMode(entry, UnixFileMode.None);
         try
         {
-            var reached = new PromptHazardScan(git, tryOpen: null, new ProtectedManifest([], []));
+            var reached = new PromptHazardScan(git, tryMakeListable: null, new ProtectedManifest([], []));
             reached.Run();
             Assert.Contains(entry, reached.UnreachableDirs);
         }

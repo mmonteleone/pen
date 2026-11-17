@@ -26,13 +26,13 @@ internal static class GitCheck
     /// those left are the project's own. Null (pen sign, which doesn't end a session) takes the ones there now.
     /// </param>
     /// <returns>
-    /// The result, with <see cref="CheckResult.Opened"/>, <see cref="CheckResult.Restored"/> and
+    /// The result, with <see cref="CheckResult.ModeChanges"/>, <see cref="CheckResult.Restored"/> and
     /// <see cref="CheckResult.RestoreBlocked"/> empty.
     /// </returns>
     /// <remarks>
     /// <para>
     /// It changes no modes: a session may still be running in another worktree of the repo, so a directory that
-    /// can't be listed is a Failure rather than something to open.
+    /// can't be listed is a Failure rather than something to make listable.
     /// </para>
     /// <para>
     /// No config.worktree is touched: with no record of the start, one can't be told from the user's.
@@ -43,7 +43,7 @@ internal static class GitCheck
         bool startedWithGit,
         string? commonGitDir,
         IReadOnlyCollection<string>? modulesAtStart) =>
-        new GitCheckRun(dir, mayOpen: false).RunWithoutRestoring(startedWithGit, commonGitDir, modulesAtStart);
+        new GitCheckRun(dir, mayChangeModes: false).RunWithoutRestoring(startedWithGit, commonGitDir, modulesAtStart);
 
     /// <summary>
     /// Checks <paramref name="dir"/> for a session that's ending, against what <paramref name="session"/> recorded
@@ -52,5 +52,5 @@ internal static class GitCheck
     /// <returns>The result; the caller must not run git unless its Failure is null.</returns>
     /// <remarks>See <see cref="GitCheckRun.RunAtSessionEnd"/>. Never throws.</remarks>
     public static CheckResult RunAtSessionEnd(string dir, SessionDir session) =>
-        new GitCheckRun(dir, mayOpen: true).RunAtSessionEnd(session);
+        new GitCheckRun(dir, mayChangeModes: true).RunAtSessionEnd(session);
 }

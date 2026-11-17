@@ -8,7 +8,7 @@ namespace Pen.GitProtection;
 /// </summary>
 internal static class FileModes
 {
-    /// <summary>Adds u+rx to a directory, and u+w if <paramref name="write"/>.</summary>
+    /// <summary>Adds u+rx to a directory so it can be listed, and u+w too if <paramref name="write"/>.</summary>
     /// <param name="path">The directory.</param>
     /// <param name="write">Whether to add u+w too.</param>
     /// <param name="change">The mode change made, when it returns true.</param>
@@ -21,7 +21,7 @@ internal static class FileModes
     /// change whatever it points to. Checking just before is the portable way, since glibc's fchmodat can't do
     /// AT_SYMLINK_NOFOLLOW.
     /// </remarks>
-    internal static bool TryOpen(string path, bool write, [NotNullWhen(true)] out ModeChange? change)
+    internal static bool TryMakeListable(string path, bool write, [NotNullWhen(true)] out ModeChange? change)
     {
         change = null;
         try

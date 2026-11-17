@@ -145,7 +145,7 @@ public class OutputSanitizingTests
         Assert.False(n.Contains(Esc, StringComparison.Ordinal));
         Assert.DoesNotContain("\npen: all clear", n, StringComparison.Ordinal);
 
-        var (err, _) = Capture(() => GitCheckReport.Report("/p", new() { Moved = [], Failure = null, Opened = [new(evil, UnixFileMode.None, UnixFileMode.UserRead)] }));
+        var (err, _) = Capture(() => GitCheckReport.Report("/p", new() { Moved = [], Failure = null, ModeChanges = [new(evil, UnixFileMode.None, UnixFileMode.UserRead)] }));
         Assert.False(err.Contains(Esc, StringComparison.Ordinal));
         Assert.DoesNotContain("\npen: all clear", err, StringComparison.Ordinal);
         Assert.Contains("changed x\\x1b", err);

@@ -6,8 +6,8 @@ namespace Pen.GitProtection;
 internal static class GitCheckReport
 {
     /// <summary>
-    /// Prints what a check found: first what it renamed, put back and opened, then any paused operations, then that
-    /// it didn't finish.
+    /// Prints what a check found: first what it renamed, put back and made listable, then any paused operations,
+    /// then that it didn't finish.
     /// </summary>
     /// <param name="dir">The directory checked; paths are shown relative to it.</param>
     /// <param name="check">The check's result.</param>
@@ -17,7 +17,7 @@ internal static class GitCheckReport
             Out.WriteRaw(GitCheckWording.Warning(dir, check.Moved));
         foreach (var restored in check.Restored)
             Out.WriteLine($"{PathChecks.FormatPath(dir, restored.Path)}: {restored.What}");
-        foreach (var change in check.Opened)
+        foreach (var change in check.ModeChanges)
         {
             Out.WriteLine(
                 $"changed {PathChecks.FormatPath(dir, change.Path)} from mode {FileModes.Octal(change.Was)} " +

@@ -452,7 +452,7 @@ public class GitDirRepoTests
     // ---- What the walk of the git dir finds, and skips ----
 
     private static List<string> Found(string git, IReadOnlyCollection<string>? modules = null) =>
-        RepoScan.ScanGitDir(git, modules ?? RepoScan.FindModuleRepos(git), tryOpen: null).Repos
+        RepoScan.ScanGitDir(git, modules ?? RepoScan.FindModuleRepos(git), tryMakeListable: null).Repos
             .Select(r => Path.GetRelativePath(git, r.Path)).ToList();
 
     [Fact]
@@ -698,7 +698,7 @@ public class GitDirRepoTests
         File.SetUnixFileMode(shut, UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         try
         {
-            Assert.Equal([shut], RepoScan.ScanGitDir(git, RepoScan.FindModuleRepos(git), tryOpen: null).UnlistableDirs);
+            Assert.Equal([shut], RepoScan.ScanGitDir(git, RepoScan.FindModuleRepos(git), tryMakeListable: null).UnlistableDirs);
             Assert.Contains(".git/foo", Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(repo)).Message);
             var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
             Assert.Contains("pen can't list these directories", check.Failure);
@@ -726,7 +726,7 @@ public class GitDirRepoTests
             var check = GitCheck.RunAtSessionEnd(repo, s);
 
             Assert.Null(check.Failure);
-            Assert.Contains(check.Opened, o => o.Path == shut);
+            Assert.Contains(check.ModeChanges, o => o.Path == shut);
             Assert.Contains(check.Moved, q => q.From == plant);
         }
         finally
@@ -1177,7 +1177,7 @@ public class GitDirRepoTests
     private static void AssertStays(TempDir t, string dir, string? common = null, string id = "aaaaaaaa")
     {
         common ??= Path.Combine(dir, ".git");
-        Assert.Empty(RepoScan.ScanGitDir(common, RepoScan.FindModuleRepos(common), tryOpen: null).Repos);
+        Assert.Empty(RepoScan.ScanGitDir(common, RepoScan.FindModuleRepos(common), tryMakeListable: null).Repos);
         var s = Started(t, dir, common, id);
         var end = GitCheck.RunAtSessionEnd(dir, s);
         Assert.Null(end.Failure);

@@ -748,7 +748,7 @@ public class ProtectedFilesTests
             Assert.Equal([config, msgnum], check.Moved.Select(q => q.From));
             Assert.Equal(config + GitQuarantine.Suffix, check.Moved[0].To);
             Assert.Equal(msgnum + GitQuarantine.Suffix, check.Moved[1].To);
-            Assert.Equal(git, Assert.Single(check.Opened).Path);
+            Assert.Equal(git, Assert.Single(check.ModeChanges).Path);
             Assert.Empty(check.Restored);
             Assert.Empty(check.RestoreBlocked);
             Assert.True(File.Exists(commondir));
@@ -834,7 +834,7 @@ public class ProtectedFilesTests
         Assert.Equal(original, File.ReadAllBytes(config));
         var q = Assert.Single(check.Moved);
         Assert.True(File.Exists(q.To));
-        Assert.Contains(check.Opened, o => o.Path == git);
+        Assert.Contains(check.ModeChanges, o => o.Path == git);
         AssertDoesntRun(repo, marker);
     }
 

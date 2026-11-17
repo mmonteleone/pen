@@ -304,7 +304,7 @@ internal static class PausedGit
         {
             try
             {
-                GitDirWalk.Visit(gitDir, Visit, AddUnreachable, tryOpen: null);
+                GitDirWalk.Visit(gitDir, Visit, AddUnreachable, tryMakeListable: null);
             }
             catch (Exception exception)
             {

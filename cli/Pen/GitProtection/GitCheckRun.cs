@@ -20,12 +20,14 @@ internal sealed class GitCheckRun
     private readonly string _dir;
 
     /// <summary>Whether this run may add u+rx (or u+rwx) to a directory and keep that.</summary>
-    private readonly bool _mayOpen;
+    private readonly bool _mayChangeModes;
 
     /// <summary>Adds u+rx to a directory so it can be listed, or null when this run may not change modes.</summary>
-    private readonly Func<string, bool>? _tryOpen;
+    private readonly Func<string, bool>? _tryMakeListable;
 
-    /// <summary>What it renamed or couldn't, put back and opened, in order: the protected files' first.</summary>
+    /// <summary>
+    /// What it renamed or couldn't, put back and made listable, in order: the protected files' first.
+    /// </summary>
     private readonly CheckChanges _changes = new();
 
     /// <summary>The directories it couldn't list, so what's in them can't be vouched for.</summary>
@@ -42,23 +44,25 @@ internal sealed class GitCheckRun
 
     /// <summary>Prepares a run over <paramref name="dir"/>.</summary>
     /// <param name="dir">The project dir.</param>
-    /// <param name="mayOpen">
+    /// <param name="mayChangeModes">
     /// Whether it may add u+rx (or u+rwx) to a directory it can enter but not list (or rename in), and keep that:
     /// only at a session's end, when no session of the repo can still be running.
     /// </param>
-    public GitCheckRun(string dir, bool mayOpen)
+    public GitCheckRun(string dir, bool mayChangeModes)
     {
         _dir = dir;
-        _mayOpen = mayOpen;
-        if (mayOpen)
-            _tryOpen = TryOpenToRead;
+        _mayChangeModes = mayChangeModes;
+        if (mayChangeModes)
+            _tryMakeListable = TryMakeListable;
     }
 
     /// <summary>Checks the dir against what's given and quarantines what it flags. Restores nothing.</summary>
     /// <param name="startedWithGit">Whether the session started with a .git there.</param>
     /// <param name="commonGitDir">The git dir it started with, or null for dir/.git.</param>
     /// <param name="modulesAtStart">The module repos in that git dir at the start, or null for those there now.</param>
-    /// <returns>The result, with Restored and RestoreBlocked empty, and Opened empty if mayOpen was false.</returns>
+    /// <returns>
+    /// The result, with Restored and RestoreBlocked empty, and ModeChanges empty if mayChangeModes was false.
+    /// </returns>
     public CheckResult RunWithoutRestoring(
         bool startedWithGit,
         string? commonGitDir,
@@ -74,7 +78,7 @@ internal sealed class GitCheckRun
     /// First the protected files go back to their saved copies (<see cref="ProtectedFileRestore"/>), so what follows
     /// reads those. If that doesn't complete, RestoreIncomplete says the session's files must be kept for a retry,
     /// since they hold the only good copies. A directory it can enter but not list gets u+rx so it can be scanned,
-    /// and keeps it (Opened).
+    /// and keeps it (ModeChanges).
     /// </para>
     /// <para>
     /// Never throws: whatever goes wrong here (or in code it reaches), a session must still be torn down, and
@@ -114,7 +118,7 @@ internal sealed class GitCheckRun
         }
         return Summarize(stopped) with
         {
-            Opened = _changes.Opened,
+            ModeChanges = _changes.ModeChanges,
             Restored = _changes.Restored,
             RestoreIncomplete = !_restoreDone,
             RestoreBlocked = [.. _changes.Blocked.Distinct(StringComparer.Ordinal)],
@@ -265,7 +269,7 @@ internal sealed class GitCheckRun
         // Like the dir itself: nothing under it can be seen, and it's what git reads first.
         // One it can search, git and the shell prompt read through without listing it.
         if (Native.CanEnter(git) && !Native.CanList(git))
-            _tryOpen?.Invoke(git);
+            _tryMakeListable?.Invoke(git);
         if (Directory.Exists(git) && !Native.CanList(git))
         {
             throw new PenException($"pen can't read {Out.Field(git)}. Once its permissions are " +
@@ -290,9 +294,9 @@ internal sealed class GitCheckRun
     /// <param name="known">The module repos whose checkouts in the tree are the project's own.</param>
     private void QuarantineNestedRepos(string git, HashSet<string> known) =>
         QuarantineFound(
-            RepoScan.ScanNested(_dir, git, known, _tryOpen),
+            RepoScan.ScanNested(_dir, git, known, _tryMakeListable),
             repo => NestedRepoWording.DescribeQuarantined(repo.Kind),
-            movedAside => RepoScan.ScanNested(_dir, git, known, _tryOpen, from: movedAside));
+            movedAside => RepoScan.ScanNested(_dir, git, known, _tryMakeListable, from: movedAside));
 
     /// <summary>
     /// Quarantines the repos anywhere in the git dir where git keeps none (<see cref="RepoScan.ScanGitDir"/>).
@@ -301,9 +305,9 @@ internal sealed class GitCheckRun
     /// <param name="known">The module repos kept in it, which are its own.</param>
     private void QuarantineGitDirRepos(string git, HashSet<string> known) =>
         QuarantineFound(
-            RepoScan.ScanGitDir(git, known, _tryOpen),
+            RepoScan.ScanGitDir(git, known, _tryMakeListable),
             NestedRepoWording.DescribeQuarantinedInGitDir,
-            movedAside => RepoScan.ScanGitDir(git, known, _tryOpen, from: movedAside));
+            movedAside => RepoScan.ScanGitDir(git, known, _tryMakeListable, from: movedAside));
 
     /// <summary>
     /// Quarantines what a walk found and removes the symlinks it found, then walks each .git directory it moved
@@ -358,8 +362,11 @@ internal sealed class GitCheckRun
     private void RemoveLink(string link, string why)
     {
         var attempt = GitQuarantine.RemoveLink(_dir, link, why);
-        if (attempt.Failed && _mayOpen && _changes.TryOpenRecording(Paths.GetParent(link), write: true))
+        if (attempt.Failed && _mayChangeModes
+            && _changes.TryMakeListableRecording(Paths.GetParent(link), write: true))
+        {
             attempt = GitQuarantine.RemoveLink(_dir, link, why);
+        }
         _changes.Moved.Add(attempt);
     }
 
@@ -396,23 +403,25 @@ internal sealed class GitCheckRun
                 continue;
             const string why = "a directory where git keeps submodule repos that can't be read, " +
                 "so pen can't check it: inspect its contents before you fix its permissions";
-            if (!TryRenameWithOpening(unreadable, why, breakLayout: true))
+            if (!TryRenameMakingWritable(unreadable, why, breakLayout: true))
                 Quarantine(unreadable, why, breakLayout: true);
         }
         return known;
     }
 
-    /// <summary>Scans the module repos in <paramref name="gitDir"/>, opening the worktrees dirs it can first.</summary>
+    /// <summary>
+    /// Scans the module repos in <paramref name="gitDir"/>, first making listable the worktrees dirs it can.
+    /// </summary>
     /// <remarks>
-    /// A worktrees dir is opened if it can be (session end only), since what's in it can be checked by name, and
-    /// moving it breaks every worktree of the repo.
+    /// A worktrees dir is made listable if it can be (session end only), since what's in it can be checked by name,
+    /// and moving it breaks every worktree of the repo.
     /// </remarks>
     private ModuleScan ScanModules(string gitDir)
     {
         var scan = RepoScan.ScanModules(gitDir);
-        // Each can only open once, so this ends.
-        while (_tryOpen is { } tryOpen
-            && scan.UnreadableDirs.Any(dir => Path.GetFileName(dir) == "worktrees" && tryOpen(dir)))
+        // Each can only be made listable once, so this ends.
+        while (_tryMakeListable is { } tryMakeListable
+            && scan.UnreadableDirs.Any(dir => Path.GetFileName(dir) == "worktrees" && tryMakeListable(dir)))
         {
             scan = RepoScan.ScanModules(gitDir);
         }
@@ -464,7 +473,7 @@ internal sealed class GitCheckRun
     /// </remarks>
     private void SweepHazards(string git, ProtectedManifest? atStart)
     {
-        var scan = new PromptHazardScan(git, _tryOpen, atStart);
+        var scan = new PromptHazardScan(git, _tryMakeListable, atStart);
         try
         {
             scan.Run();
@@ -512,9 +521,9 @@ internal sealed class GitCheckRun
         // Gone with a state directory that an earlier one in it took aside.
         if (!PathChecks.Exists(hazard.Path))
             return;
-        if (TryRenameWithOpening(hazard.Path, hazard.Why, breakLayout: false))
+        if (TryRenameMakingWritable(hazard.Path, hazard.Why, breakLayout: false))
             return;
-        if (hazard.StateDir is not null && TryRenameWithOpening(hazard.StateDir, hazard.Why, breakLayout: false))
+        if (hazard.StateDir is not null && TryRenameMakingWritable(hazard.StateDir, hazard.Why, breakLayout: false))
             return;
         Quarantine(hazard.StateDir ?? hazard.Path, hazard.Why, breakLayout: false);
     }
@@ -524,11 +533,14 @@ internal sealed class GitCheckRun
     /// and this run may.
     /// </summary>
     /// <returns>Whether it moved; if not, nothing is recorded, so the caller can try something else.</returns>
-    private bool TryRenameWithOpening(string path, string why, bool breakLayout)
+    private bool TryRenameMakingWritable(string path, string why, bool breakLayout)
     {
         var attempt = GitQuarantine.Move(path, why, breakLayout);
-        if (attempt.Failed && _mayOpen && _changes.TryOpenRecording(Paths.GetParent(path), write: true))
+        if (attempt.Failed && _mayChangeModes
+            && _changes.TryMakeListableRecording(Paths.GetParent(path), write: true))
+        {
             attempt = GitQuarantine.Move(path, why, breakLayout);
+        }
         if (attempt.Failed)
             return false;
         _changes.Moved.Add(attempt);
@@ -539,5 +551,5 @@ internal sealed class GitCheckRun
     private void Quarantine(string path, string why, bool breakLayout) =>
         _changes.Moved.Add(GitQuarantine.Move(path, why, breakLayout));
 
-    private bool TryOpenToRead(string path) => _changes.TryOpenRecording(path, write: false);
+    private bool TryMakeListable(string path) => _changes.TryMakeListableRecording(path, write: false);
 }

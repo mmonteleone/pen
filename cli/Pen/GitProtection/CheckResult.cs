@@ -10,8 +10,8 @@ internal sealed record CheckResult
     /// <summary>Gets why the check couldn't finish or vouch for the directory, or null if it did.</summary>
     public required string? Failure { get; init; }
 
-    /// <summary>Gets the directories the check opened and left so.</summary>
-    public List<ModeChange> Opened { get; init; } = [];
+    /// <summary>Gets the directories the check made listable (or writable) and left so.</summary>
+    public List<ModeChange> ModeChanges { get; init; } = [];
 
     /// <summary>Gets the protected files that changed with nothing to set aside.</summary>
     public List<RestoredFile> Restored { get; init; } = [];
@@ -61,7 +61,7 @@ internal sealed record Quarantined(
 /// <param name="What">What happened to it: it was missing, its directory went, or only its mode changed.</param>
 internal sealed record RestoredFile(string Path, string What);
 
-/// <summary>A directory the check opened and left that way.</summary>
+/// <summary>A directory the check made listable (or writable) and left that way.</summary>
 /// <param name="Path">The directory.</param>
 /// <param name="Was">Its mode before.</param>
 /// <param name="Now">Its mode now.</param>

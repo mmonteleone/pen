@@ -78,7 +78,7 @@ public class ScanFailClosedTests
         Assert.Null(check.Failure);
         Assert.Equal(Path.Combine(sub, "x", ".git"), Assert.Single(check.Moved).From);
         Assert.True(Directory.Exists(Path.Combine(sub, "x", ".git.pen-quarantine")));
-        var c = Assert.Single(check.Opened);
+        var c = Assert.Single(check.ModeChanges);
         Assert.Equal((sub, Mode311), (c.Path, c.Was));
         Assert.Equal(c.Now, File.GetUnixFileMode(sub));
         Assert.True(c.Now.HasFlag(UnixFileMode.UserRead));
@@ -91,7 +91,7 @@ public class ScanFailClosedTests
         var stderr = Console.Error;
         var captured = new StringWriter();
         Console.SetError(captured);
-        try { GitCheckReport.Report("/p", new CheckResult { Moved = [], Failure = null, Opened = opened }); }
+        try { GitCheckReport.Report("/p", new CheckResult { Moved = [], Failure = null, ModeChanges = opened }); }
         finally { Console.SetError(stderr); }
         Assert.Contains("changed sub from mode 311 to 711", captured.ToString());
     }
@@ -136,7 +136,7 @@ public class ScanFailClosedTests
 
         Assert.Null(check.Failure);
         Assert.Empty(check.Moved);
-        Assert.Empty(check.Opened);
+        Assert.Empty(check.ModeChanges);
         Assert.Equal(mode, File.GetUnixFileMode(db));
     }
 
@@ -306,11 +306,11 @@ public class ScanFailClosedTests
         var link = Path.Combine(t.Path, "link");
         File.CreateSymbolicLink(link, target);
         using var _ = new Chmod(target, Mode311);
-        Assert.False(FileModes.TryOpen(link, write: false, out var opened));
+        Assert.False(FileModes.TryMakeListable(link, write: false, out var opened));
 
         Assert.Null(opened);
         Assert.Equal(Mode311, File.GetUnixFileMode(target));
-        Assert.True(FileModes.TryOpen(target, write: false, out var reopened)); // the check above is what stopped it
+        Assert.True(FileModes.TryMakeListable(target, write: false, out var reopened)); // the check above is what stopped it
     }
 
     [Fact]
@@ -441,7 +441,7 @@ public class ScanFailClosedTests
     public void AnOpenDirectoryWithTheBitsAlreadySetRecordsNoChange()
     {
         using var t = new TempDir();
-        Assert.False(FileModes.TryOpen(t.Sub("d"), write: false, out var opened));
+        Assert.False(FileModes.TryMakeListable(t.Sub("d"), write: false, out var opened));
         Assert.Null(opened);
     }
 
