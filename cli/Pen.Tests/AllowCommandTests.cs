@@ -246,10 +246,11 @@ public class AllowCommandTests
     }
 
     /// <summary>A running session in <paramref name="project"/>, from this Pen or an older one.</summary>
-    private static (SessionDir Session, FileLock Lock) Running(TempDir t, HostEnv host, Project project, bool old)
+    private static (SessionDir Session, FileLock Lock) Running(TempDir t, HostEnv host, Project project, bool old,
+        string id = "12345678")
     {
         Session.EnsureRuntimeDir(host, project);
-        var s = new SessionDir(project.Key, t.Sub("home", ".local", "state", "pen", project.Key, "sessions", "12345678"));
+        var s = new SessionDir(project.Key, t.Sub("home", ".local", "state", "pen", project.Key, "sessions", id));
         File.WriteAllText(s.ComposeFile, "");
         File.WriteAllText(s.EnvFile, $"PROJECT_DIR={project.Dir}\n");
         File.WriteAllText(s.AllowlistFile, "");
@@ -402,6 +403,37 @@ public class AllowCommandTests
         var err = CapturingStderr(() => Assert.False(AllowCommand.Apply(host, s, RecipeCatalog.Embedded, TimeProvider.System)));
         Assert.Contains($"couldn't apply it to the running session {s.ComposeProject}: couldn't read its proxy's ACL files, so Squid wasn't reloaded; run this again: cat: /etc/squid/allowlist.txt: Permission denied", err);
         Assert.Equal((1, 0), CountProxyCalls(t));
+    }
+
+    [Fact]
+    public void ApplyToRunning_WhenDockerCantStart_ReportsEachSessionAndTriesThemAll()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        File.WriteAllText(host.UserConfigPath, "deny = [\"pastebin.com\"]\n");
+        var project = Project.Resolve(t.Sub("repo"), host);
+        var (first, firstLock) = Running(t, host, project, old: false, id: "11111111");
+        using var _ = firstLock;
+        var (second, secondLock) = Running(t, host, project, old: false, id: "22222222");
+        using var __ = secondLock;
+        var path = Environment.GetEnvironmentVariable("PATH");
+        Environment.SetEnvironmentVariable("PATH", t.Sub("no-docker"));
+        try
+        {
+            var err = CapturingStderr(() =>
+                Assert.False(AllowCommand.ApplyToRunning(host, project, false, RecipeCatalog.Embedded, TimeProvider.System)));
+            foreach (var s in new[] { first, second })
+            {
+                Assert.Contains($"couldn't apply it to the running session {s.ComposeProject}: docker not found: is it installed and on PATH?", err);
+                Assert.Equal("pastebin.com\n", File.ReadAllText(s.DenylistFile));
+            }
+            Assert.DoesNotContain("applied to", err);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", path);
+        }
     }
 
     [Fact]

@@ -102,6 +102,17 @@ public class ProcCaptureTests
     }
 
     [Fact]
+    public void AMissingProgram_GivesTheSameMessageWhenCapturedAsText()
+    {
+        var startInfo = Proc.CreateStartInfo("pen-no-such-binary", []);
+        startInfo.RedirectStandardOutput = startInfo.RedirectStandardError = true;
+
+        var e = Assert.Throws<PenException>(() => Proc.CaptureText(startInfo));
+
+        Assert.Equal("pen-no-such-binary not found: is it installed and on PATH?", e.Message);
+    }
+
+    [Fact]
     public void OutputUpToTheLimit_IsKept()
     {
         var result = Sh("head -c 100000 /dev/zero; head -c 100000 /dev/zero >&2", limit: 100000, timeout: Generous);

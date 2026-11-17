@@ -137,6 +137,70 @@ public class SessionEndTests
         }
     }
 
+    /// <summary>
+    /// A compose down that fails leaves the stack, so the files stay for a retry: whether docker can't be started once
+    /// the agent is removed (the first rm replaces the fake with a file that can't be run), or compose down starts and
+    /// exits non-zero (once).
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AFailedStackStop_RetainsTheFilesForARetry(bool startsButExitsNonZero)
+    {
+        using var t = new TempDir();
+        var session = Create(t, docker: false);
+        var docker = Path.Combine(t.Path, "bin", "docker");
+        using var fake = new FakeDocker(t, startsButExitsNonZero ? """
+            case "$1" in
+              rm) exit 0 ;;
+              compose)
+                if [ ! -f failed ]; then
+                  : > failed
+                  echo boom >&2
+                  exit 1
+                fi
+                ;;
+              *) exit 99 ;;
+            esac
+            """ : """
+            case "$1" in
+              rm)
+                if [ ! -f broken ]; then
+                  : > broken
+                  printf 'not a program\n' > bin/unrunnable; chmod 755 bin/unrunnable; mv bin/unrunnable bin/docker
+                fi
+                ;;
+              compose) exit 0 ;;
+              *) exit 99 ;;
+            esac
+            """);
+        var working = File.ReadAllText(docker);
+
+        var output = CapturingStderr(() => Session.End(session));
+
+        if (startsButExitsNonZero)
+        {
+            Assert.Contains($"stopping session {session.Id}'s stack failed: boom (it will be retried", output);
+        }
+        else
+        {
+            Assert.Contains($"stopping session {session.Id}'s stack failed: can't run docker: ", output);
+            Assert.DoesNotContain("compose", File.ReadAllText(Path.Combine(t.Path, "calls")));
+        }
+        Assert.Contains("(it will be retried by the next pen command here)", output);
+        Assert.True(session.IsOpen);
+        Assert.True(File.Exists(session.EnvFile));
+        Assert.True(File.Exists(session.ModulesFile));
+        // The check ran before the stack was stopped, now that the agent is gone.
+        Assert.True(File.Exists(Path.Combine(t.Path, "repo", ".git", "commondir.pen-quarantine")));
+
+        File.WriteAllText(docker, working);
+        Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System);
+        Assert.False(session.IsOpen);
+        Assert.False(File.Exists(session.EnvFile));
+        Assert.Contains("compose", File.ReadAllText(Path.Combine(t.Path, "calls")));
+    }
+
     [Fact]
     public void TheEndListsBlockedHostsFromBothLogs_AndKeepsThem()
     {

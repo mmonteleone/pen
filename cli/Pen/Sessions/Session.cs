@@ -674,7 +674,10 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     }
 
     /// <summary>Stops the session's stack, then deletes its files unless <paramref name="keepFiles"/>.</summary>
-    /// <remarks>A stack that won't stop keeps the files, for a retry by the next pen command.</remarks>
+    /// <remarks>
+    /// A stack that won't stop, or whose compose down can't start, keeps the files, for a retry by the next pen
+    /// command.
+    /// </remarks>
     private static void StopStack(SessionDir session, Dictionary<string, string> env, bool keepFiles)
     {
         if (env.Count == 0)
@@ -688,11 +691,20 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
             session.BuildComposeArgs("down", "-t", "1", "--remove-orphans"), env);
         startInfo.RedirectStandardOutput = startInfo.RedirectStandardError = true;
         ScrubComposeEnv(startInfo);
-        var down = Proc.CaptureText(startInfo);
-        if (down.ExitStatus.ExitCode != 0)
+        string? failure;
+        try
+        {
+            var down = Proc.CaptureText(startInfo);
+            failure = down.ExitStatus.ExitCode != 0 ? down.StandardError.Trim() : null;
+        }
+        catch (PenException error)
+        {
+            failure = error.Message;
+        }
+        if (failure is not null)
         {
             Out.WriteLine($"stopping session {session.Id}'s stack failed: " +
-                $"{down.StandardError.Trim()} (it will be retried by the next pen command here)");
+                $"{failure} (it will be retried by the next pen command here)");
         }
         else if (!keepFiles)
         {

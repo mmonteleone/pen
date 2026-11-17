@@ -48,11 +48,9 @@ internal static class Proc
 
     /// <summary>Runs a child from <paramref name="startInfo"/>, capturing what it redirects, as text.</summary>
     /// <param name="startInfo">The start info, from <see cref="CreateStartInfo"/> so it inherits no handles.</param>
-    /// <exception cref="Win32Exception">
-    /// The program isn't found or can't be run: unlike <see cref="Capture"/>, this doesn't turn it into a
-    /// <see cref="PenException"/>.
-    /// </exception>
-    public static ProcessTextOutput CaptureText(ProcessStartInfo startInfo) => Process.RunAndCaptureText(startInfo);
+    /// <exception cref="PenException">The program isn't found or can't be run.</exception>
+    public static ProcessTextOutput CaptureText(ProcessStartInfo startInfo) =>
+        Guard(startInfo.FileName, () => Process.RunAndCaptureText(startInfo));
 
     /// <summary>
     /// Runs a child with its stdout and stderr captured as bytes, both read at once so neither pipe fills up.
