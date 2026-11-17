@@ -2,7 +2,7 @@ namespace Pen.Tests;
 
 public class CliTests
 {
-    private static Command P(params string[] args) => CommandParser.Parse(args, () => null);
+    private static Command P(params string[] args) => CommandParser.Parse(args, () => null, RecipeCatalog.Embedded);
 
     /// <summary>Parses <paramref name="args"/>, which must ask for help or the version, and renders it.</summary>
     internal static string Render(params string[] args)
@@ -204,7 +204,7 @@ public class CliTests
         using var t = new TempDir();
         var dir = t.Sub("cwd");
         File.WriteAllText(Path.Combine(dir, entry), "");
-        var e = Assert.Throws<PenException>(() => CommandParser.Parse([command, arg], () => dir));
+        var e = Assert.Throws<PenException>(() => CommandParser.Parse([command, arg], () => dir, RecipeCatalog.Embedded));
         Assert.StartsWith($"pen {command}: \"{arg}\" isn't a domain", e.Message);
         Assert.Contains("; " + advice, e.Message);
     }
@@ -215,9 +215,9 @@ public class CliTests
         using var t = new TempDir();
         var dir = t.Sub("cwd");
         File.WriteAllText(Path.Combine(dir, "LICENSE"), "");
-        var e = Assert.Throws<PenException>(() => CommandParser.Parse(["allow", "other"], () => dir));
+        var e = Assert.Throws<PenException>(() => CommandParser.Parse(["allow", "other"], () => dir, RecipeCatalog.Embedded));
         Assert.DoesNotContain("expand", e.Message);
-        e = Assert.Throws<PenException>(() => CommandParser.Parse(["allow", "license"], () => null));
+        e = Assert.Throws<PenException>(() => CommandParser.Parse(["allow", "license"], () => null, RecipeCatalog.Embedded));
         Assert.DoesNotContain("expand", e.Message);
     }
 
@@ -783,5 +783,5 @@ public class CliTests
 
     [Fact]
     public void AnUnknownOptionAfterARunOptionIsAUsageError() =>
-        Assert.Equal(2, Assert.Throws<PenException>(() => CommandParser.Parse(["--tool", "pen-test", "--nope"], () => null)).ExitCode);
+        Assert.Equal(2, Assert.Throws<PenException>(() => CommandParser.Parse(["--tool", "pen-test", "--nope"], () => null, RecipeCatalog.Embedded)).ExitCode);
 }

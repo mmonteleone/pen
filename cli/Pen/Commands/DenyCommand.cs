@@ -26,10 +26,10 @@ internal sealed class DenyCommand(HostEnv host, RecipeCatalog catalog)
     public int Run(IReadOnlyList<string> domains, bool global)
     {
         var project = AllowCommand.PrepareProject(host, global);
-        var addition = AllowCommand.AddToConfig(host, project, global, ConfigEdit.DenyKey, domains);
+        var addition = AllowCommand.AddToConfig(host, project, global, ConfigEdit.DenyKey, domains, catalog);
         AllowCommand.WriteAdded(addition, domains);
         AllowCommand.WriteGlobHint("deny", addition);
-        return AllowCommand.ApplyToRunning(host, project, global) ? 0 : 1;
+        return AllowCommand.ApplyToRunning(host, project, global, catalog) ? 0 : 1;
     }
 
     /// <summary>Runs pen deny without domains: lists what both config files deny.</summary>

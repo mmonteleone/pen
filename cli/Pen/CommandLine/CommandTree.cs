@@ -41,8 +41,10 @@ internal sealed class CommandTree
     /// Gets the start directory, or null when it can't be read, for the advice on a domain argument named like a file
     /// there (<see cref="ShellGlob"/>).
     /// </param>
-    public CommandTree(Func<string?> startDir)
+    /// <param name="catalog">The recipes --tool values are parsed against.</param>
+    public CommandTree(Func<string?> startDir, RecipeCatalog catalog)
     {
+        Catalog = catalog;
         Root = new RootCommand(RootDescription) { HelpName = "pen" };
         // Never invoked: without an action, System.CommandLine refuses a command line with no subcommand.
         Root.SetAction(_ => 0);
@@ -52,6 +54,7 @@ internal sealed class CommandTree
             Root.Options.Remove(option);
 
         RootOptions = CreateRunOptions(
+            catalog,
             "with Docker-in-Docker (or docker = true in .pen/config.toml)",
             "forward localhost:<n> to the sandbox (repeatable; or ports = [<n>, …] in .pen/config.toml)",
             "a tool or agent, as name or name:version (repeatable; or tools = […] in either config.toml); a " +
@@ -73,6 +76,7 @@ internal sealed class CommandTree
         Run = AddCommand("run", CommandKind.Run,
             "run a command whose name matches a subcommand, e.g. pen run clean", RunDetails);
         RunOptions = CreateRunOptions(
+            catalog,
             "give the session its own Docker daemon (one per project at a time); docker = true in " +
                 ".pen/config.toml does this for every session",
             "forward port <n> on the host's 127.0.0.1 to port <n> in the sandbox (repeatable); ports = [<n>, …] " +
@@ -158,6 +162,9 @@ internal sealed class CommandTree
 
     /// <summary>Gets the root command: running a command or a shell, and the subcommands under it.</summary>
     public RootCommand Root { get; }
+
+    /// <summary>Gets the recipes --tool values are parsed against.</summary>
+    public RecipeCatalog Catalog { get; }
 
     /// <summary>Gets the options for running given before the command (pen --docker claude).</summary>
     public RunOptionSet RootOptions { get; }
@@ -282,15 +289,16 @@ internal sealed class CommandTree
     }
 
     /// <summary>Creates --docker, --port and --tool for one place they can go.</summary>
-    private static RunOptionSet CreateRunOptions(string docker, string port, string tool) => new(
+    private static RunOptionSet CreateRunOptions(RecipeCatalog catalog, string docker, string port, string tool) => new(
         CreateFlag("--docker", "-d", docker),
         new Option<List<int>>("--port", "-p") { Description = port, HelpName = "n", CustomParser = ParsePorts },
         new Option<List<ToolSpec>>("--tool", "-t")
         {
             Description = tool,
             HelpName = "spec",
-            CustomParser = ParseTools,
-        });
+            CustomParser = result => ParseTools(result, catalog),
+        },
+        catalog);
 
     /// <summary>Creates the argument holding the command to run.</summary>
     /// <remarks>
@@ -369,18 +377,20 @@ internal sealed class CommandTree
 
     /// <summary>Parses --tool values into <paramref name="tools"/>, as given.</summary>
     /// <param name="values">The values as given.</param>
+    /// <param name="catalog">The recipes the tools come from.</param>
     /// <param name="tools">The tools when every value is one; otherwise empty.</param>
     /// <param name="error">What's wrong with the first value that isn't a tool; otherwise null.</param>
     /// <returns>Whether every value is a tool.</returns>
     public static bool TryParseTools(
         IEnumerable<string> values,
+        RecipeCatalog catalog,
         out List<ToolSpec> tools,
         [NotNullWhen(false)] out string? error)
     {
         tools = [];
         foreach (var value in values)
         {
-            if (!ToolSpec.TryParse(value, RecipeCatalog.Embedded, out var tool, out var invalid))
+            if (!ToolSpec.TryParse(value, catalog, out var tool, out var invalid))
             {
                 tools = [];
                 error = $"--tool: {invalid}";
@@ -399,9 +409,9 @@ internal sealed class CommandTree
         return ports;
     }
 
-    private static List<ToolSpec> ParseTools(ArgumentResult result)
+    private static List<ToolSpec> ParseTools(ArgumentResult result, RecipeCatalog catalog)
     {
-        if (!TryParseTools(result.Tokens.Select(token => token.Value), out var tools, out var error))
+        if (!TryParseTools(result.Tokens.Select(token => token.Value), catalog, out var tools, out var error))
             result.AddError(error);
         return tools;
     }
@@ -721,7 +731,12 @@ internal sealed class CommandTree
 /// <param name="Docker">--docker or -d.</param>
 /// <param name="Port">--port or -p, repeatable; parsed in order without duplicates.</param>
 /// <param name="Tool">--tool or -t, repeatable.</param>
-internal sealed record RunOptionSet(Option<bool> Docker, Option<List<int>> Port, Option<List<ToolSpec>> Tool)
+/// <param name="Catalog">The recipes --tool values are parsed against.</param>
+internal sealed record RunOptionSet(
+    Option<bool> Docker,
+    Option<List<int>> Port,
+    Option<List<ToolSpec>> Tool,
+    RecipeCatalog Catalog)
 {
     /// <summary>Gets the three options.</summary>
     public IEnumerable<Option> All => [Docker, Port, Tool];
@@ -732,7 +747,7 @@ internal sealed record RunOptionSet(Option<bool> Docker, Option<List<int>> Port,
         new(Port, "--port: missing the port number",
             values => CommandTree.TryParsePorts(values, out _, out var error) ? null : error),
         new(Tool, "--tool: missing the tool (name or name:version)",
-            values => CommandTree.TryParseTools(values, out _, out var error) ? null : error),
+            values => CommandTree.TryParseTools(values, Catalog, out _, out var error) ? null : error),
     ];
 }
 

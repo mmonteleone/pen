@@ -115,7 +115,7 @@ internal readonly partial record struct ToolSpec(string Name, string Version)
 
     /// <summary>Lists the domains the tools' recipes bring, in order.</summary>
     /// <remarks>A tool with no recipe (not one that's parsed) brings none.</remarks>
-    public static List<string> ListDomains(IEnumerable<ToolSpec> tools, RecipeCatalog catalog) =>
+    public static IReadOnlyList<string> ListDomains(IEnumerable<ToolSpec> tools, RecipeCatalog catalog) =>
         [.. tools.Select(t => t.Name).Distinct(StringComparer.Ordinal)
             .SelectMany(name => catalog.TryGet(name, out var recipe) ? recipe.Allow : [])];
 

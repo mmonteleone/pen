@@ -1,4 +1,5 @@
 using System.Text;
+using Pen.Tools;
 using Tomlyn.Parsing;
 using Tomlyn.Syntax;
 
@@ -26,6 +27,7 @@ internal static class ConfigEdit
     /// <param name="kind">Which keys the file may hold.</param>
     /// <param name="key">The list to add to: <see cref="AllowKey"/> or <see cref="DenyKey"/>.</param>
     /// <param name="domains">The domains to add.</param>
+    /// <param name="catalog">The recipes the file's tools come from.</param>
     /// <returns>
     /// The edited text, or <paramref name="text"/> itself if nothing needed adding, and the domains added.
     /// </returns>
@@ -35,11 +37,12 @@ internal static class ConfigEdit
         string displayPath,
         ConfigKind kind,
         string key,
-        IReadOnlyList<string> domains)
+        IReadOnlyList<string> domains,
+        RecipeCatalog catalog)
     {
         if (key is not (AllowKey or DenyKey))
             throw new ArgumentException($"no list {key} to add to.", nameof(key));
-        var before = Config.Parse(text, displayPath, kind);
+        var before = Config.Parse(text, displayPath, kind, catalog);
         var added = domains.Select(domain => domain.ToLowerInvariant())
             .Distinct()
             .Where(domain => !SelectList(before, key).Contains(domain))
@@ -49,7 +52,7 @@ internal static class ConfigEdit
 
         var result = InsertDomains(text, displayPath, key, added);
         // Belt and braces: the edit must change nothing but that list.
-        if (!IsOnlyAdded(before, Reparse(result, displayPath, kind), key, added))
+        if (!IsOnlyAdded(before, Reparse(result, displayPath, kind, catalog), key, added))
         {
             throw new PenException($"{displayPath}: couldn't add to {key} " +
                 $"automatically; add {string.Join(", ", added.Select(Quote))} by hand");
@@ -87,11 +90,11 @@ internal static class ConfigEdit
 
     /// <summary>Parses the edited text.</summary>
     /// <returns>Its settings, or empty ones if it doesn't parse (which the comparison then rejects).</returns>
-    private static Config Reparse(string text, string displayPath, ConfigKind kind)
+    private static Config Reparse(string text, string displayPath, ConfigKind kind, RecipeCatalog catalog)
     {
         try
         {
-            return Config.Parse(text, displayPath, kind);
+            return Config.Parse(text, displayPath, kind, catalog);
         }
         catch (PenException)
         {

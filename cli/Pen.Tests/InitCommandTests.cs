@@ -29,7 +29,7 @@ public class InitCommandTests
     [Fact]
     public void ParsesInit_ItsHelp_AndRefusesArguments()
     {
-        var c = CommandParser.Parse(["init"], () => null);
+        var c = CommandParser.Parse(["init"], () => null, RecipeCatalog.Embedded);
         Assert.Equal(CommandKind.Init, c.Kind);
         Assert.Empty(c.Args);
 
@@ -38,11 +38,11 @@ public class InitCommandTests
         Assert.Contains("It never overwrites", help);
         Assert.Contains("\n  init  ", CliTests.Render("--help"));
 
-        Assert.Equal(2, Assert.Throws<PenException>(() => CommandParser.Parse(["init", "x"], () => null)).ExitCode);
-        Assert.Equal(2, Assert.Throws<PenException>(() => CommandParser.Parse(["init", "--force"], () => null)).ExitCode);
-        var tool = Assert.Throws<PenException>(() => CommandParser.Parse(["--tool", "go", "init"], () => null));
+        Assert.Equal(2, Assert.Throws<PenException>(() => CommandParser.Parse(["init", "x"], () => null, RecipeCatalog.Embedded)).ExitCode);
+        Assert.Equal(2, Assert.Throws<PenException>(() => CommandParser.Parse(["init", "--force"], () => null, RecipeCatalog.Embedded)).ExitCode);
+        var tool = Assert.Throws<PenException>(() => CommandParser.Parse(["--tool", "go", "init"], () => null, RecipeCatalog.Embedded));
         Assert.StartsWith("--tool goes only with a command to run, not pen init", tool.Message);
-        Assert.Equal(["init"], CommandParser.Parse(["run", "init"], () => null).Args);
+        Assert.Equal(["init"], CommandParser.Parse(["run", "init"], () => null, RecipeCatalog.Embedded).Args);
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public class InitCommandTests
         var err = CapturingStderr(() => Assert.Equal(0, Init(host, project)));
 
         var text = File.ReadAllText(project.ProjectConfigPath);
-        var config = Config.Parse(text, ".pen/config.toml", ConfigKind.Project);
+        var config = Config.Parse(text, ".pen/config.toml", ConfigKind.Project, RecipeCatalog.Embedded);
         Assert.Equal(["go"], config.Tools.Select(tool => tool.Name));
         Assert.Equal([".env"], config.Hide.Select(pattern => pattern.Text));
         Assert.Null(config.Docker);

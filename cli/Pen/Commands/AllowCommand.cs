@@ -31,12 +31,12 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     public int Run(IReadOnlyList<string> domains, bool global)
     {
         var project = PrepareProject(host, global);
-        var addition = AddAllowed(host, project, global, domains);
+        var addition = AddAllowed(host, project, global, domains, catalog);
         WriteAdded(addition, domains);
         WriteGlobHint("allow", addition);
         WarnIfDenied(project, domains);
 
-        return ApplyToRunning(host, project, global) ? 0 : 1;
+        return ApplyToRunning(host, project, global, catalog) ? 0 : 1;
     }
 
     /// <summary>Resolves the project in the start directory, and finishes its sessions whose Pen died.</summary>
@@ -72,9 +72,10 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
         HostEnv host,
         Project? project,
         bool global,
-        IReadOnlyList<string> domains)
+        IReadOnlyList<string> domains,
+        RecipeCatalog catalog)
     {
-        var addition = AddToConfig(host, project, global, ConfigEdit.AllowKey, domains);
+        var addition = AddToConfig(host, project, global, ConfigEdit.AllowKey, domains, catalog);
         if (!global)
             TrustStore.For(host, project!).ApproveDomains(domains);
         return addition;
@@ -91,13 +92,14 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
         Project? project,
         bool global,
         string key,
-        IReadOnlyList<string> domains)
+        IReadOnlyList<string> domains,
+        RecipeCatalog catalog)
     {
         if (global)
         {
             var userPath = host.Display(host.UserConfigPath);
             var user = new ConfigTarget(host.UserConfigPath, userPath, ConfigKind.User, Stub: "");
-            return new(userPath, Append(user, key, domains));
+            return new(userPath, Append(user, key, domains, catalog));
         }
 
         var where = ".pen/" + Config.FileName;
@@ -105,7 +107,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
         RepoGuard.RequireNotLink(project.Dir, project.ProjectConfigPath);
         var target = new ConfigTarget(project.ProjectConfigPath, where, ConfigKind.Project,
             ProjectTemplate.Render(ProjectDetection.None));
-        return new(where, Append(target, key, domains));
+        return new(where, Append(target, key, domains, catalog));
     }
 
     /// <summary>Says which of <paramref name="domains"/> were added, and which were there already.</summary>
@@ -126,9 +128,12 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
         try
         {
             denies.Add((host.Display(host.UserConfigPath),
-                Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User).Deny));
+                Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User, catalog).Deny));
             if (project is not null)
-                denies.Add((".pen/" + Config.FileName, Config.Load(project.PenDir, ".pen", ConfigKind.Project).Deny));
+            {
+                denies.Add((".pen/" + Config.FileName,
+                    Config.Load(project.PenDir, ".pen", ConfigKind.Project, catalog).Deny));
+            }
         }
         catch (PenException)
         {
@@ -196,13 +201,13 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
 
     /// <summary>Applies the config files to the running sessions a change in them is for.</summary>
     /// <returns>Whether every one of them took it; each failure is reported, naming the session.</returns>
-    internal static bool ApplyToRunning(HostEnv host, Project? project, bool global)
+    internal static bool ApplyToRunning(HostEnv host, Project? project, bool global, RecipeCatalog catalog)
     {
         var applied = 0;
         var failed = 0;
         foreach (var session in FindTargets(host, project, global))
         {
-            if (Apply(host, session))
+            if (Apply(host, session, catalog))
                 applied++;
             else
                 failed++;
@@ -223,15 +228,21 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     /// <param name="target">The config.toml to change.</param>
     /// <param name="key">The list to add to: allow or deny.</param>
     /// <param name="domains">The domains to add.</param>
+    /// <param name="catalog">The recipes the file's tools come from.</param>
     /// <returns>The domains added, lowercased, in order; none when the file is left alone.</returns>
     /// <remarks>
     /// The edit is <see cref="ConfigEdit.AddToList"/>'s, and the file is replaced by rename, keeping its mode.
     /// </remarks>
-    public static IReadOnlyList<string> Append(ConfigTarget target, string key, IReadOnlyList<string> domains)
+    public static IReadOnlyList<string> Append(
+        ConfigTarget target,
+        string key,
+        IReadOnlyList<string> domains,
+        RecipeCatalog catalog)
     {
         var existing = Config.ReadText(target.Path, target.DisplayPath);
         var exists = existing is not null;
-        var edit = ConfigEdit.AddToList(existing ?? target.Stub, target.DisplayPath, target.Kind, key, domains);
+        var edit = ConfigEdit.AddToList(existing ?? target.Stub, target.DisplayPath, target.Kind, key, domains,
+            catalog);
         if (edit.Added.Count == 0)
             return edit.Added;
 
@@ -324,7 +335,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     /// last. Only these take it, one session at a time, so it can't deadlock with a session, pen sign or pen clean.
     /// </para>
     /// </remarks>
-    internal static bool Apply(HostEnv host, SessionDir session)
+    internal static bool Apply(HostEnv host, SessionDir session, RecipeCatalog catalog)
     {
         try
         {
@@ -333,7 +344,7 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
                 throw new PenException("its session.env is missing");
 
             using var aclLock = TakeAclLock(session);
-            var written = WriteAclFiles(session, MergeEgress(host, session, projectDir));
+            var written = WriteAclFiles(session, MergeEgress(host, session, projectDir, catalog));
             AwaitProxyView(session, env, written.Files);
             var result = RunInProxy(session, env, "squid", "-k", "reconfigure");
             if (result.ExitStatus.ExitCode != 0)
@@ -465,11 +476,11 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
     /// <see cref="TrustGate.SelectAllowedDomains"/> takes it (as session start does) and the session's tools'
     /// domains, and the deny list from the user's and the project's deny.
     /// </returns>
-    private static Egress MergeEgress(HostEnv host, SessionDir session, string projectDir)
+    private static Egress MergeEgress(HostEnv host, SessionDir session, string projectDir, RecipeCatalog catalog)
     {
-        var user = Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User);
+        var user = Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User, catalog);
         var projectConfig = Config.Load(Path.Combine(projectDir, ".pen"),
-            Out.Field(Path.Combine(projectDir, ".pen")), ConfigKind.Project);
+            Out.Field(Path.Combine(projectDir, ".pen")), ConfigKind.Project, catalog);
         var approved = TrustGate.SelectAllowedDomains(user, projectConfig,
             TrustStore.Load(host.GetRuntimeDir(session.ProjectKey), projectDir));
         IEnumerable<string>[] sources = [Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")), user.Allow,

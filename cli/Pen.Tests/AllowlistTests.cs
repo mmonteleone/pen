@@ -136,9 +136,9 @@ public class AllowlistTests
     public void MergeDeny_AppendsTheUsersAndTheProjects()
     {
         var user = Config.Parse("deny = [\"gist.github.com\", \".evil.example\"]", "~/.config/pen/config.toml",
-            ConfigKind.User);
+            ConfigKind.User, RecipeCatalog.Embedded);
         var project = Config.Parse("deny = [\"a.evil.example\", \"Pastebin.com\", \"gist.github.com\"]",
-            ".pen/config.toml", ConfigKind.Project);
+            ".pen/config.toml", ConfigKind.Project, RecipeCatalog.Embedded);
         Assert.Equal(["gist.github.com", ".evil.example", "pastebin.com"], Allowlist.MergeDeny(user, project));
         Assert.Empty(Allowlist.MergeDeny(Config.Empty, Config.Empty));
     }
@@ -385,8 +385,8 @@ public class AllowlistTests
 
     private static List<string> EgressWarnings(string user, string project, string[] deny,
         params (string Tool, IReadOnlyList<string> Domains)[] tools) =>
-        Session.FormatEgressWarnings(Config.Parse(user, "u", ConfigKind.User), "~/.config/pen/config.toml",
-            Config.Parse(project, "p", ConfigKind.Project), deny, tools);
+        Session.FormatEgressWarnings(Config.Parse(user, "u", ConfigKind.User, RecipeCatalog.Embedded), "~/.config/pen/config.toml",
+            Config.Parse(project, "p", ConfigKind.Project, RecipeCatalog.Embedded), deny, tools);
 
     [Fact]
     public void EgressWarnings_OpenEgressNamesTheFilesWithTheStar()

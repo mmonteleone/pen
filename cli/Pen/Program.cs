@@ -59,20 +59,22 @@ internal static class Program
     /// <summary>Runs the command <paramref name="args"/> ask for.</summary>
     /// <remarks>
     /// Each step needs more than the one before, and each command runs as soon as it has
-    /// what it needs: help and listings need nothing, pen ps and pen clean --stale the host,
-    /// pen upgrade, pen allow &lt;domain…&gt; and pen deny &lt;domain…&gt; the user config, the rest the project.
+    /// what it needs: help and listings need only the embedded recipes (no host, config or project),
+    /// pen ps and pen clean --stale the host, pen upgrade, pen allow &lt;domain…&gt; and
+    /// pen deny &lt;domain…&gt; the user config, the rest the project.
     /// Only a session, the pen allow and pen deny listings and pen trust load the project config.
     /// </remarks>
     private static int Run(string[] args)
     {
-        var command = CommandParser.Parse(args, StartDir.TryGet);
+        var catalog = RecipeCatalog.Embedded;
+        var command = CommandParser.Parse(args, StartDir.TryGet, catalog);
         switch (command.Kind)
         {
             case CommandKind.Builtin:
                 CommandTree.InvokeBuiltin(command.ParseResult!, Console.Out);
                 return 0;
             case CommandKind.Tools:
-                Console.Out.Write(RecipeCatalog.Embedded.FormatListing());
+                Console.Out.Write(catalog.FormatListing());
                 return 0;
             case CommandKind.Allow when command.Defaults:
                 Console.Out.Write(AllowCommand.FormatDefaults());
@@ -90,25 +92,25 @@ internal static class Program
         }
 
         Config.EnsureUserConfig(host, GitIdentity.ReadFromHost);
-        var user = Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User);
+        var user = Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User, catalog);
         switch (command.Kind)
         {
             case CommandKind.Upgrade:
-                return new UpgradeCommand(host, user, RecipeCatalog.Embedded).Run(command.NoCache);
+                return new UpgradeCommand(host, user, catalog).Run(command.NoCache);
             case CommandKind.Allow when command.Args.Count > 0:
-                return new AllowCommand(host, RecipeCatalog.Embedded).Run(command.Args, command.Global);
+                return new AllowCommand(host, catalog).Run(command.Args, command.Global);
             case CommandKind.Deny when command.Args.Count > 0:
-                return new DenyCommand(host, RecipeCatalog.Embedded).Run(command.Args, command.Global);
+                return new DenyCommand(host, catalog).Run(command.Args, command.Global);
         }
 
         var project = Project.Resolve(StartDir.Get(), host);
         return command.Kind switch
         {
-            CommandKind.Run => RunSession(ProjectContext.Load(host, project, user), command),
-            CommandKind.Allow => ListBlocked(ProjectContext.Load(host, project, user)),
-            CommandKind.Deny => ListDenied(ProjectContext.Load(host, project, user)),
-            CommandKind.Trust => RunTrust(ProjectContext.Load(host, project, user), command),
-            CommandKind.Init => new InitCommand(host, project, RecipeCatalog.Embedded).Run(),
+            CommandKind.Run => RunSession(ProjectContext.Load(host, project, user, catalog), command, catalog),
+            CommandKind.Allow => ListBlocked(ProjectContext.Load(host, project, user, catalog), catalog),
+            CommandKind.Deny => ListDenied(ProjectContext.Load(host, project, user, catalog), catalog),
+            CommandKind.Trust => RunTrust(ProjectContext.Load(host, project, user, catalog), command, catalog),
+            CommandKind.Init => new InitCommand(host, project, catalog).Run(),
             CommandKind.Sign => RunSign(host, project, command),
             CommandKind.Clean => new CleanCommand(host, project, Console.In).Run(),
             _ => throw new InvalidOperationException($"unhandled command {command.Kind}"),
@@ -122,7 +124,7 @@ internal static class Program
     /// --port adds to ports in .pen/config.toml.
     /// --tool adds to tools in both config files.
     /// </remarks>
-    private static int RunSession(ProjectContext context, Command command)
+    private static int RunSession(ProjectContext context, Command command, RecipeCatalog catalog)
     {
         var request = new SessionRequest(command.Args)
         {
@@ -130,20 +132,20 @@ internal static class Program
             Ports = Port.Merge(context.ProjectConfig.Ports, command.Ports),
             FlagTools = command.Tools,
         };
-        return new Session(context, Answers.FromProcess(), RecipeCatalog.Embedded).Run(request);
+        return new Session(context, Answers.FromProcess(), catalog).Run(request);
     }
 
     /// <summary>Runs pen allow without domains: lists the recently blocked ones.</summary>
-    private static int ListBlocked(ProjectContext context) =>
-        new AllowCommand(context.Host, RecipeCatalog.Embedded).ListBlocked(context);
+    private static int ListBlocked(ProjectContext context, RecipeCatalog catalog) =>
+        new AllowCommand(context.Host, catalog).ListBlocked(context);
 
     /// <summary>Runs pen deny without domains: lists what's denied.</summary>
-    private static int ListDenied(ProjectContext context) =>
-        new DenyCommand(context.Host, RecipeCatalog.Embedded).List(context);
+    private static int ListDenied(ProjectContext context, RecipeCatalog catalog) =>
+        new DenyCommand(context.Host, catalog).List(context);
 
     /// <summary>Runs pen trust.</summary>
-    private static int RunTrust(ProjectContext context, Command command) =>
-        new TrustCommand(context, Answers.FromProcess(), RecipeCatalog.Embedded).Run(command.Yes, command.List);
+    private static int RunTrust(ProjectContext context, Command command, RecipeCatalog catalog) =>
+        new TrustCommand(context, Answers.FromProcess(), catalog).Run(command.Yes, command.List);
 
     /// <summary>Runs pen sign, against the base given or the default one.</summary>
     private static int RunSign(HostEnv host, Project project, Command command) =>

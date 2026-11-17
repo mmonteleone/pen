@@ -67,8 +67,9 @@ internal sealed partial class Config
     /// <param name="dir">The config directory.</param>
     /// <param name="displayDir">How messages name the directory (e.g. "~/.config/pen").</param>
     /// <param name="kind">Which keys the file may hold.</param>
+    /// <param name="catalog">The recipes the file's tools come from.</param>
     /// <returns>The settings, or empty ones if there's no config.toml.</returns>
-    public static Config Load(string dir, string displayDir, ConfigKind kind)
+    public static Config Load(string dir, string displayDir, ConfigKind kind, RecipeCatalog catalog)
     {
         if (File.Exists(Path.Combine(dir, LegacyName)))
         {
@@ -80,7 +81,7 @@ internal sealed partial class Config
 
         var path = Path.Combine(dir, FileName);
         var display = $"{displayDir}/{FileName}";
-        return ReadText(path, display) is { } text ? Parse(text, display, kind) : new Config();
+        return ReadText(path, display) is { } text ? Parse(text, display, kind, catalog) : new Config();
     }
 
     /// <summary>Reads a config.toml's text.</summary>
@@ -133,8 +134,9 @@ internal sealed partial class Config
     /// <param name="text">The TOML text.</param>
     /// <param name="displayPath">Names the file in errors.</param>
     /// <param name="kind">Which keys the file may hold.</param>
+    /// <param name="catalog">The recipes the file's tools come from.</param>
     /// <remarks>Keys are checked in file order, each fully before the next, so the first problem is reported.</remarks>
-    public static Config Parse(string text, string displayPath, ConfigKind kind)
+    public static Config Parse(string text, string displayPath, ConfigKind kind, RecipeCatalog catalog)
     {
         var table = ParseToml(text, displayPath);
         var config = new Config();
@@ -142,7 +144,7 @@ internal sealed partial class Config
         foreach (var (key, value) in table)
         {
             ThrowIfMisplaced(key, kind, Error);
-            config.ReadKey(key, value, Error);
+            config.ReadKey(key, value, catalog, Error);
         }
         return config;
     }
@@ -164,7 +166,7 @@ internal sealed partial class Config
     }
 
     /// <summary>Validates one top-level key's value and stores it.</summary>
-    private void ReadKey(string key, object value, Func<string, PenException> error)
+    private void ReadKey(string key, object value, RecipeCatalog catalog, Func<string, PenException> error)
     {
         switch (key)
         {
@@ -190,7 +192,7 @@ internal sealed partial class Config
                 ReadPorts(value, error);
                 break;
             case "tools":
-                ReadTools(value, error);
+                ReadTools(value, catalog, error);
                 break;
             case "hide":
                 ReadHide(value, error);
@@ -282,7 +284,7 @@ internal sealed partial class Config
         }
     }
 
-    private void ReadTools(object value, Func<string, PenException> error)
+    private void ReadTools(object value, RecipeCatalog catalog, Func<string, PenException> error)
     {
         if (value is not TomlArray toolSpecs)
             throw error("tools must be a list of tools, e.g. tools = [\"name\", \"name:version\"]");
@@ -295,11 +297,11 @@ internal sealed partial class Config
                     "a tool (use name or name:version, in quotes)");
             }
 
-            if (!ToolSpec.TryParse(spec, RecipeCatalog.Embedded, out var tool, out var invalid))
+            if (!ToolSpec.TryParse(spec, catalog, out var tool, out var invalid))
                 throw error($"tools: {invalid}");
             parsed.Add(tool);
         }
-        if (!ToolSpec.TryCanonicalize(parsed, RecipeCatalog.Embedded, out var canonical, out var conflict))
+        if (!ToolSpec.TryCanonicalize(parsed, catalog, out var canonical, out var conflict))
             throw error($"tools: {conflict}");
         Tools = canonical;
     }

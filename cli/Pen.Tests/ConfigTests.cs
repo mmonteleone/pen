@@ -4,8 +4,8 @@ public class ConfigTests
 {
     private const string UserFile = "~/.config/pen/config.toml";
     private const string ProjFile = ".pen/config.toml";
-    private static Config User(string text) => Config.Parse(text, UserFile, ConfigKind.User);
-    private static Config Proj(string text) => Config.Parse(text, ProjFile, ConfigKind.Project);
+    private static Config User(string text) => Config.Parse(text, UserFile, ConfigKind.User, RecipeCatalog.Embedded);
+    private static Config Proj(string text) => Config.Parse(text, ProjFile, ConfigKind.Project, RecipeCatalog.Embedded);
 
     private static string Error(Func<object> f) => Assert.Throws<PenException>(() => f()).Message;
 
@@ -336,16 +336,16 @@ public class ConfigTests
     public void LoadReadsConfigToml_WhichMayBeMissing()
     {
         using var t = new TempDir();
-        Assert.Empty(Config.Load(t.Path, ".pen", ConfigKind.Project).Allow);
+        Assert.Empty(Config.Load(t.Path, ".pen", ConfigKind.Project, RecipeCatalog.Embedded).Allow);
 
         File.WriteAllText(Path.Combine(t.Path, "config.toml"), "docker = true\nallow = [\"a.com\"]\nports = [3000]\n");
-        var c = Config.Load(t.Path, ".pen", ConfigKind.Project);
+        var c = Config.Load(t.Path, ".pen", ConfigKind.Project, RecipeCatalog.Embedded);
         Assert.Equal(["a.com"], c.Allow);
         Assert.True(c.Docker);
         Assert.Equal([3000], c.Ports);
 
         File.WriteAllText(Path.Combine(t.Path, "config.toml"), "docker = 1\n");
-        Assert.StartsWith(".pen/config.toml: docker", Error(() => Config.Load(t.Path, ".pen", ConfigKind.Project)));
+        Assert.StartsWith(".pen/config.toml: docker", Error(() => Config.Load(t.Path, ".pen", ConfigKind.Project, RecipeCatalog.Embedded)));
     }
 
     [Fact]
@@ -353,7 +353,7 @@ public class ConfigTests
     {
         using var t = new TempDir();
         File.WriteAllText(Path.Combine(t.Path, "config"), "allow = a.com\n");
-        var msg = Error(() => Config.Load(t.Path, ".pen", ConfigKind.Project));
+        var msg = Error(() => Config.Load(t.Path, ".pen", ConfigKind.Project, RecipeCatalog.Embedded));
         Assert.StartsWith(".pen/config is pen's old config format", msg);
         Assert.Contains(".pen/config.toml", msg);
     }

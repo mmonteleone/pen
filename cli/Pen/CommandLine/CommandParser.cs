@@ -26,6 +26,7 @@ internal static class CommandParser
     /// Gets the start directory, or null when it can't be read, for the advice on a domain argument named like a file
     /// there (<see cref="ShellGlob"/>).
     /// </param>
+    /// <param name="catalog">The recipes --tool values are parsed against.</param>
     /// <returns>The command they ask for.</returns>
     /// <exception cref="PenException">
     /// The arguments aren't valid; exit code 2, with the help command to run for usage.
@@ -35,9 +36,9 @@ internal static class CommandParser
     /// command to run, as is everything after it. Options before the command are Pen's: --docker, --port and
     /// --tool (for running, also right after run), help and version. Any other one is an error.
     /// </remarks>
-    public static Command Parse(IReadOnlyList<string> args, Func<string?> startDir)
+    public static Command Parse(IReadOnlyList<string> args, Func<string?> startDir, RecipeCatalog catalog)
     {
-        var tree = new CommandTree(startDir);
+        var tree = new CommandTree(startDir, catalog);
         var bounded = CommandBoundary.Insert(args, tree);
         // The root's name goes first, since System.CommandLine drops a first argument whose file name is the root's
         // name (pen pen x would lose a pen).
@@ -224,9 +225,9 @@ internal static class CommandParser
         var parsed = result.CommandResult.Command;
         var command = new Command(tree.GetKind(parsed), ReadArguments(tree, result, parsed));
         if (parsed == tree.Root)
-            return AddRunOptions(command, result, [tree.RootOptions], tree.Root);
+            return AddRunOptions(command, result, [tree.RootOptions], tree.Root, tree.Catalog);
         if (parsed == tree.Run)
-            return AddRunOptions(command, result, [tree.RootOptions, tree.RunOptions], tree.Run);
+            return AddRunOptions(command, result, [tree.RootOptions, tree.RunOptions], tree.Run, tree.Catalog);
         return command with
         {
             NoCache = result.GetValue(tree.NoCache),
@@ -264,7 +265,8 @@ internal static class CommandParser
         Command command,
         ParseResult result,
         RunOptionSet[] places,
-        SclCommand owner)
+        SclCommand owner,
+        RecipeCatalog catalog)
     {
         var ports = new List<int>();
         foreach (var port in places.SelectMany(place => result.GetValue(place.Port) ?? []))
@@ -273,7 +275,7 @@ internal static class CommandParser
                 ports.Add(port);
         }
         var tools = places.SelectMany(place => result.GetValue(place.Tool) ?? []);
-        if (!ToolSpec.TryCanonicalize(tools, RecipeCatalog.Embedded, out var canonical, out var conflict))
+        if (!ToolSpec.TryCanonicalize(tools, catalog, out var canonical, out var conflict))
             throw CreateUsageError($"--tool: {conflict}", owner);
         return command with
         {

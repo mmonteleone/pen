@@ -45,7 +45,7 @@ public class DenyCommandTests
         Assert.Contains("pen: applied to 1 running session\n", err);
         Assert.Equal("gist.github.com\n", File.ReadAllText(s.DenylistFile));
         Assert.Contains("typed.example\n", File.ReadAllText(s.AllowlistFile));
-        var user = Config.Load(host.ConfigDir, "x", ConfigKind.User);
+        var user = Config.Load(host.ConfigDir, "x", ConfigKind.User, RecipeCatalog.Embedded);
         Assert.Equal(["typed.example"], user.Allow);
         Assert.Equal(["gist.github.com"], user.Deny);
 
@@ -62,21 +62,21 @@ public class DenyCommandTests
         Directory.CreateDirectory(host.ConfigDir);
         var project = Project.Resolve(t.Sub("repo"), host);
         Session.EnsureRuntimeDir(host, project);
-        var addition = AllowCommand.AddToConfig(host, project, global: false, "deny", ["pastebin.com"]);
+        var addition = AllowCommand.AddToConfig(host, project, global: false, "deny", ["pastebin.com"], RecipeCatalog.Embedded);
         Assert.Equal(".pen/config.toml", addition.Where);
         Assert.Equal(["pastebin.com"], addition.Added);
         var text = File.ReadAllText(project.ProjectConfigPath);
         Assert.StartsWith(ProjectTemplate.Render(ProjectDetection.None), text);
-        Assert.Equal(["pastebin.com"], Config.Parse(text, "x", ConfigKind.Project).Deny);
-        Assert.Empty(Config.Parse(text, "x", ConfigKind.Project).Allow);
+        Assert.Equal(["pastebin.com"], Config.Parse(text, "x", ConfigKind.Project, RecipeCatalog.Embedded).Deny);
+        Assert.Empty(Config.Parse(text, "x", ConfigKind.Project, RecipeCatalog.Embedded).Allow);
         Assert.False(File.Exists(TrustStore.GetPath(host.GetRuntimeDir(project.Key), project.Dir)));
     }
 
     [Fact]
     public void ListingNamesEachEntrysFile_AndWhatItTakes()
     {
-        var user = Config.Parse("deny = [\"pastebin.com\", \"api.github.com\"]\n", "u", ConfigKind.User);
-        var project = Config.Parse("deny = [\"api.anthropic.com\", \".anthropic.com\"]\n", "p", ConfigKind.Project);
+        var user = Config.Parse("deny = [\"pastebin.com\", \"api.github.com\"]\n", "u", ConfigKind.User, RecipeCatalog.Embedded);
+        var project = Config.Parse("deny = [\"api.anthropic.com\", \".anthropic.com\"]\n", "p", ConfigKind.Project, RecipeCatalog.Embedded);
         Assert.Equal("""
             denied (deny wins over every allow):
               pastebin.com       ~/.config/pen/config.toml

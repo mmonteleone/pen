@@ -13,7 +13,7 @@ public class ProjectTemplateTests
     private static readonly string[] ProjectKeys =
         ["tools", "allow", "deny", "hide", "replace", "ports", "docker", "github_owner"];
 
-    private static Config Parse(string text) => Config.Parse(text, Display, ConfigKind.Project);
+    private static Config Parse(string text) => Config.Parse(text, Display, ConfigKind.Project, RecipeCatalog.Embedded);
 
     private static string[] ActiveLines(string text) =>
         text.Split('\n').Where(line => line.Trim().Length > 0 && !line.TrimStart().StartsWith('#')).ToArray();
@@ -92,7 +92,7 @@ public class ProjectTemplateTests
 
         // A list pen allow adds at the end stays top-level, after the uncommented replace too.
         var edit = ConfigEdit.AddToList(uncommented.Replace("allow = ", "# allow = "), Display, ConfigKind.Project,
-            ConfigEdit.AllowKey, ["example.com"]);
+            ConfigEdit.AllowKey, ["example.com"], RecipeCatalog.Embedded);
         Assert.Equal(["example.com"], Parse(edit.Text).Allow);
         Assert.Single(Parse(edit.Text).Replace);
     }
@@ -102,10 +102,10 @@ public class ProjectTemplateTests
     {
         var text = ProjectTemplate.Render(ProjectDetection.None);
         var allowed = ConfigEdit.AddToList(text, Display, ConfigKind.Project, ConfigEdit.AllowKey,
-            ["example.com", ".example.org"]);
+            ["example.com", ".example.org"], RecipeCatalog.Embedded);
         Assert.StartsWith(text, allowed.Text);
         var denied = ConfigEdit.AddToList(allowed.Text, Display, ConfigKind.Project, ConfigEdit.DenyKey,
-            ["gist.github.com"]);
+            ["gist.github.com"], RecipeCatalog.Embedded);
         var config = Parse(denied.Text);
         Assert.Equal(["example.com", ".example.org"], config.Allow);
         Assert.Equal(["gist.github.com"], config.Deny);
@@ -194,7 +194,7 @@ public class ProjectTemplateTests
     public void AddToList_AddsToAFullRender()
     {
         var text = ProjectTemplate.Render(Full());
-        var edit = ConfigEdit.AddToList(text, Display, ConfigKind.Project, ConfigEdit.DenyKey, ["pastebin.com"]);
+        var edit = ConfigEdit.AddToList(text, Display, ConfigKind.Project, ConfigEdit.DenyKey, ["pastebin.com"], RecipeCatalog.Embedded);
         var config = Parse(edit.Text);
         Assert.Equal(["pastebin.com"], config.Deny);
         Assert.Equal(6, config.Hide.Count);

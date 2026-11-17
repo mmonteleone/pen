@@ -30,7 +30,7 @@ public class AllowCommandTests
     }
 
     private static string Add(string text, params string[] domains) =>
-        ConfigEdit.AddToList(text, "x.toml", ConfigKind.User, "allow", domains).Text;
+        ConfigEdit.AddToList(text, "x.toml", ConfigKind.User, "allow", domains, RecipeCatalog.Embedded).Text;
 
     [Fact]
     public void AddsToAMultiLineArray_KeepingCommentsAndIndent()
@@ -72,7 +72,7 @@ public class AllowCommandTests
         var text = Embedded.ReadText("templates/config.toml");
         var result = Add(text, "b.io");
         Assert.Contains("  # \".example.org\",\n  \"b.io\",\n]", result);
-        Assert.Equal(["b.io"], Config.Parse(result, "x", ConfigKind.User).Allow);
+        Assert.Equal(["b.io"], Config.Parse(result, "x", ConfigKind.User, RecipeCatalog.Embedded).Allow);
     }
 
     [Fact]
@@ -95,9 +95,9 @@ public class AllowCommandTests
     public void KeepsAProjectFilesOtherKeys_PortsIncluded()
     {
         var text = "github_owner = \"acme\"\ndocker = true\nports = [3000, 5173]\nallow = [\"a.io\"]\n";
-        var result = ConfigEdit.AddToList(text, ".pen/config.toml", ConfigKind.Project, "allow", ["b.io"]).Text;
+        var result = ConfigEdit.AddToList(text, ".pen/config.toml", ConfigKind.Project, "allow", ["b.io"], RecipeCatalog.Embedded).Text;
         Assert.Equal(text.Replace("[\"a.io\"]", "[\n  \"a.io\",\n  \"b.io\",\n]"), result);
-        Assert.Equal([3000, 5173], Config.Parse(result, "x", ConfigKind.Project).Ports);
+        Assert.Equal([3000, 5173], Config.Parse(result, "x", ConfigKind.Project, RecipeCatalog.Embedded).Ports);
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public class AllowCommandTests
     public void SkipsWhatsAllowed_AndRefusesABrokenFile()
     {
         var text = "allow = [\"a.io\"]\n";
-        var edit = ConfigEdit.AddToList(text, "x", ConfigKind.User, "allow", ["A.io", "a.io"]);
+        var edit = ConfigEdit.AddToList(text, "x", ConfigKind.User, "allow", ["A.io", "a.io"], RecipeCatalog.Embedded);
         Assert.Same(text, edit.Text);
         Assert.Empty(edit.Added);
         Assert.StartsWith("x.toml: unknown key", Assert.Throws<PenException>(() => Add("allw = 1\n", "b.io")).Message);
@@ -123,16 +123,16 @@ public class AllowCommandTests
     {
         using var t = new TempDir();
         var path = Path.Combine(t.Path, "config.toml");
-        Assert.Equal(["example.com", ".foo.io"], AllowCommand.Append(new(path, ".pen/config.toml", ConfigKind.Project, ProjectTemplate.Render(ProjectDetection.None)), "allow", ["example.com", ".foo.io"]));
+        Assert.Equal(["example.com", ".foo.io"], AllowCommand.Append(new(path, ".pen/config.toml", ConfigKind.Project, ProjectTemplate.Render(ProjectDetection.None)), "allow", ["example.com", ".foo.io"], RecipeCatalog.Embedded));
         var text = File.ReadAllText(path);
         Assert.StartsWith(ProjectTemplate.Render(ProjectDetection.None), text);
-        Assert.Equal(["example.com", ".foo.io"], Config.Parse(text, "x", ConfigKind.Project).Allow);
+        Assert.Equal(["example.com", ".foo.io"], Config.Parse(text, "x", ConfigKind.Project, RecipeCatalog.Embedded).Allow);
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead, File.GetUnixFileMode(path));
 
         File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        Assert.Equal(["b.io"], AllowCommand.Append(new(path, "x", ConfigKind.Project, ""), "allow", ["b.io", "example.com"]));
+        Assert.Equal(["b.io"], AllowCommand.Append(new(path, "x", ConfigKind.Project, ""), "allow", ["b.io", "example.com"], RecipeCatalog.Embedded));
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path));
-        Assert.Equal(["example.com", ".foo.io", "b.io"], Config.Load(t.Path, ".pen", ConfigKind.Project).Allow);
+        Assert.Equal(["example.com", ".foo.io", "b.io"], Config.Load(t.Path, ".pen", ConfigKind.Project, RecipeCatalog.Embedded).Allow);
         Assert.Single(Directory.GetFiles(t.Path)); // no temp file left
     }
 
@@ -142,7 +142,7 @@ public class AllowCommandTests
         using var t = new TempDir();
         var path = Path.Combine(t.Path, "config.toml");
         File.WriteAllText(path, "allw = 1\n");
-        Assert.Throws<PenException>(() => AllowCommand.Append(new(path, ".pen/config.toml", ConfigKind.Project, ProjectTemplate.Render(ProjectDetection.None)), "allow", ["b.io"]));
+        Assert.Throws<PenException>(() => AllowCommand.Append(new(path, ".pen/config.toml", ConfigKind.Project, ProjectTemplate.Render(ProjectDetection.None)), "allow", ["b.io"], RecipeCatalog.Embedded));
         Assert.Equal("allw = 1\n", File.ReadAllText(path));
     }
 
@@ -284,7 +284,7 @@ public class AllowCommandTests
         var (s, l) = Running(t, host, project, old: false);
         using var _ = l;
         using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
-        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s)));
+        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s, RecipeCatalog.Embedded)));
         Assert.Equal("", err);
         var calls = File.ReadAllLines(Path.Combine(t.Path, "calls"));
         Assert.Equal(2, calls.Length);
@@ -312,7 +312,7 @@ public class AllowCommandTests
         var (s, l) = Running(t, host, project, old: true);
         using var _ = l;
         using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
-        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s)));
+        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s, RecipeCatalog.Embedded)));
         // Its proxy has only the allowlist to check.
         var calls = File.ReadAllLines(Path.Combine(t.Path, "calls"));
         Assert.Equal(2, calls.Length);
@@ -354,7 +354,7 @@ public class AllowCommandTests
             exit 0
 
             """);
-        var err = CapturingStderr(() => Assert.False(AllowCommand.Apply(host, s)));
+        var err = CapturingStderr(() => Assert.False(AllowCommand.Apply(host, s, RecipeCatalog.Embedded)));
         Assert.Contains($"couldn't apply it to the running session {s.ComposeProject}: its proxy still sees other ACL files than were written, so Squid wasn't reloaded; run this again", err);
         Assert.Equal((5, 0), CountProxyCalls(t));
         Assert.Equal("pastebin.com\n", File.ReadAllText(s.DenylistFile));
@@ -379,7 +379,7 @@ public class AllowCommandTests
             esac
 
             """ + FakeDocker.ServingAclFiles + "exit 0\n");
-        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s)));
+        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s, RecipeCatalog.Embedded)));
         Assert.Equal("", err);
         Assert.Equal((3, 1), CountProxyCalls(t));
         Assert.EndsWith(" squid -k reconfigure", File.ReadAllLines(Path.Combine(t.Path, "calls"))[^1]);
@@ -399,7 +399,7 @@ public class AllowCommandTests
             exit 0
 
             """);
-        var err = CapturingStderr(() => Assert.False(AllowCommand.Apply(host, s)));
+        var err = CapturingStderr(() => Assert.False(AllowCommand.Apply(host, s, RecipeCatalog.Embedded)));
         Assert.Contains($"couldn't apply it to the running session {s.ComposeProject}: couldn't read its proxy's ACL files, so Squid wasn't reloaded; run this again: cat: /etc/squid/allowlist.txt: Permission denied", err);
         Assert.Equal((1, 0), CountProxyCalls(t));
     }
@@ -416,7 +416,7 @@ public class AllowCommandTests
         using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
         var other = FileLock.TryTake(s.AclLockFile, exclusive: true)!;
         using var release = new Timer(_ => other.Dispose(), null, 500, Timeout.Infinite);
-        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s)));
+        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s, RecipeCatalog.Embedded)));
         Assert.Contains($"waiting for another pen allow or pen deny applying to the running session {s.ComposeProject}", err);
         Assert.Equal((1, 1), CountProxyCalls(t));
         // Not one of the files whose presence says what the session is.
@@ -437,7 +437,7 @@ public class AllowCommandTests
         using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
         var other = FileLock.TryTake(s.AclLockFile, exclusive: true)!;
         bool applied = false;
-        var apply = new Thread(() => CapturingStderr(() => applied = AllowCommand.Apply(host, s)));
+        var apply = new Thread(() => CapturingStderr(() => applied = AllowCommand.Apply(host, s, RecipeCatalog.Embedded)));
         apply.Start();
         Thread.Sleep(500);
         File.WriteAllText(host.UserConfigPath, "deny = [\"pastebin.com\"]\n");
@@ -461,8 +461,8 @@ public class AllowCommandTests
             "2026-11-01T10:00:01Z 172.18.0.3 TCP_DENIED/403 CONNECT example.com:443 -\n" +
             "2026-11-01T10:00:02Z 172.18.0.3 TCP_DENIED/403 CONNECT 1.2.3.4:443 -\n" +
             "2026-11-01T10:00:03Z 172.18.0.3 TCP_DENIED/403 CONNECT github.com:443 -\n");
-        var user = Config.Parse("allow = [\"*\"]\n", "u", ConfigKind.User);
-        var projectConfig = Config.Parse("deny = [\"gist.github.com\"]\n", "p", ConfigKind.Project);
+        var user = Config.Parse("allow = [\"*\"]\n", "u", ConfigKind.User, RecipeCatalog.Embedded);
+        var projectConfig = Config.Parse("deny = [\"gist.github.com\"]\n", "p", ConfigKind.Project, RecipeCatalog.Embedded);
         var stdout = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
@@ -491,7 +491,7 @@ public class AllowCommandTests
         File.WriteAllText(Path.Combine(dir, "proxy.log"),
             "2026-11-01T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT 1.2.3.4:443 -\n" +
             "2026-11-01T10:00:01Z 172.18.0.3 TCP_DENIED/403 CONNECT example.com:443 -\n");
-        var user = Config.Parse("deny = [\"pastebin.com\"]\n", "u", ConfigKind.User);
+        var user = Config.Parse("deny = [\"pastebin.com\"]\n", "u", ConfigKind.User, RecipeCatalog.Embedded);
         var stdout = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
@@ -518,7 +518,7 @@ public class AllowCommandTests
         File.WriteAllText(Path.Combine(dir, "proxy.log"),
             "2026-11-01T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT api.github.com:443 -\n" +
             "2026-11-01T10:00:01Z 172.18.0.3 TCP_DENIED/403 CONNECT example.com:443 -\n");
-        var user = Config.Parse("deny = [\"api.github.com\"]\n", "u", ConfigKind.User);
+        var user = Config.Parse("deny = [\"api.github.com\"]\n", "u", ConfigKind.User, RecipeCatalog.Embedded);
         var stdout = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
@@ -541,7 +541,7 @@ public class AllowCommandTests
         var dir = t.Sub("home", ".local", "state", "pen", project.Key, "sessions", "12345678");
         File.WriteAllText(Path.Combine(dir, "proxy.log"),
             "2026-11-01T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT pastebin.com:443 -\n");
-        var user = Config.Parse("deny = [\"pastebin.com\"]\n", "u", ConfigKind.User);
+        var user = Config.Parse("deny = [\"pastebin.com\"]\n", "u", ConfigKind.User, RecipeCatalog.Embedded);
         var stdout = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
@@ -557,7 +557,7 @@ public class AllowCommandTests
     // Adding to deny, and what pen allow adds.
 
     private static string AddDeny(string text, params string[] domains) =>
-        ConfigEdit.AddToList(text, "x.toml", ConfigKind.User, "deny", domains).Text;
+        ConfigEdit.AddToList(text, "x.toml", ConfigKind.User, "deny", domains, RecipeCatalog.Embedded).Text;
 
     [Fact]
     public void AddToList_CreatesADenyArray_LeavingAllowAlone()
@@ -565,7 +565,7 @@ public class AllowCommandTests
         var text = "allow = [\"a.io\"]\n\n[github]\nacme = \"t\"\n";
         var result = AddDeny(text, "gist.github.com");
         Assert.Equal("allow = [\"a.io\"]\n\ndeny = [\n  \"gist.github.com\",\n]\n\n[github]\nacme = \"t\"\n", result);
-        var config = Config.Parse(result, "x", ConfigKind.User);
+        var config = Config.Parse(result, "x", ConfigKind.User, RecipeCatalog.Embedded);
         Assert.Equal(["a.io"], config.Allow);
         Assert.Equal(["gist.github.com"], config.Deny);
     }
@@ -574,10 +574,10 @@ public class AllowCommandTests
     public void AddToList_AddsToAnExistingDenyArray_SkippingWhatsDenied_NotWhatsAllowed()
     {
         var text = "allow = [\"b.io\"]\ndeny = [\"a.io\"]\n";
-        var edit = ConfigEdit.AddToList(text, "x", ConfigKind.Project, "deny", ["A.io", "b.io"]);
+        var edit = ConfigEdit.AddToList(text, "x", ConfigKind.Project, "deny", ["A.io", "b.io"], RecipeCatalog.Embedded);
         Assert.Equal(["b.io"], edit.Added);
         Assert.Equal("allow = [\"b.io\"]\ndeny = [\n  \"a.io\",\n  \"b.io\",\n]\n", edit.Text);
-        Assert.Same(text, ConfigEdit.AddToList(text, "x", ConfigKind.Project, "deny", ["a.io"]).Text);
+        Assert.Same(text, ConfigEdit.AddToList(text, "x", ConfigKind.Project, "deny", ["a.io"], RecipeCatalog.Embedded).Text);
     }
 
     [Fact]
@@ -585,7 +585,7 @@ public class AllowCommandTests
     {
         var result = Add("allow = [\"a.io\"]\n", "*");
         Assert.Equal("allow = [\n  \"a.io\",\n  \"*\",\n]\n", result);
-        Assert.Equal(["a.io", "*"], Config.Parse(result, "x", ConfigKind.User).Allow);
+        Assert.Equal(["a.io", "*"], Config.Parse(result, "x", ConfigKind.User, RecipeCatalog.Embedded).Allow);
     }
 
     [Fact]
@@ -595,7 +595,7 @@ public class AllowCommandTests
         // A domain the file can't hold makes the re-parse fail, which the check reports for that key.
         Assert.Equal("x.toml: couldn't add to deny automatically; add \"*\" by hand",
             Assert.Throws<PenException>(() => AddDeny("", "*")).Message);
-        Assert.Throws<ArgumentException>(() => ConfigEdit.AddToList("", "x", ConfigKind.User, "tools", ["a.io"]));
+        Assert.Throws<ArgumentException>(() => ConfigEdit.AddToList("", "x", ConfigKind.User, "tools", ["a.io"], RecipeCatalog.Embedded));
     }
 
     [Fact]
@@ -626,7 +626,7 @@ public class AllowCommandTests
         var err = CapturingStderr(() => Assert.Equal(0, new AllowCommand(host, RecipeCatalog.Embedded).Run(["api.pastebin.com", "ok.example"], global: true)));
         Assert.Contains($"pen: api.pastebin.com is also denied by {host.Display(host.UserConfigPath)}; deny wins\n", err);
         Assert.DoesNotContain("ok.example is also", err);
-        Assert.Equal(["api.pastebin.com", "ok.example"], Config.Load(host.ConfigDir, "x", ConfigKind.User).Allow);
+        Assert.Equal(["api.pastebin.com", "ok.example"], Config.Load(host.ConfigDir, "x", ConfigKind.User, RecipeCatalog.Embedded).Allow);
     }
 
     [Fact]
@@ -638,10 +638,10 @@ public class AllowCommandTests
         var project = Project.Resolve(t.Sub("repo"), host);
         Session.EnsureRuntimeDir(host, project);
         Assert.False(TrustStore.For(host, project).CoversDomain("*"));
-        var addition = AllowCommand.AddAllowed(host, project, global: false, ["*"]);
+        var addition = AllowCommand.AddAllowed(host, project, global: false, ["*"], RecipeCatalog.Embedded);
         Assert.Equal(".pen/config.toml", addition.Where);
         Assert.Equal(["*"], addition.Added);
-        Assert.Equal(["*"], Config.Load(project.PenDir, ".pen", ConfigKind.Project).Allow);
+        Assert.Equal(["*"], Config.Load(project.PenDir, ".pen", ConfigKind.Project, RecipeCatalog.Embedded).Allow);
         Assert.True(TrustStore.For(host, project).CoversDomain("*"));
     }
 

@@ -200,7 +200,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     private List<string> ListEgressWarnings(IReadOnlyList<ToolSpec> tools, IReadOnlyList<string> deny)
     {
         var needs = tools.Select(tool => tool.Name).Distinct(StringComparer.Ordinal)
-            .Select(name => (name, catalog.TryGet(name, out var recipe) ? (IReadOnlyList<string>)recipe.Allow : []));
+            .Select(name => (name, catalog.TryGet(name, out var recipe) ? recipe.Allow : []));
         return FormatEgressWarnings(context.User, context.Host.Display(context.Host.UserConfigPath),
             context.ProjectConfig, deny, needs);
     }

@@ -66,7 +66,7 @@ internal sealed class UpgradeCommand(HostEnv host, Config user, RecipeCatalog ca
         ProjectContext context;
         try
         {
-            context = ProjectContext.Load(host, project, user);
+            context = ProjectContext.Load(host, project, user, catalog);
         }
         catch (PenException exception)
         {

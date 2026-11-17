@@ -1,5 +1,6 @@
 using Pen.Configuration;
 using Pen.Platform;
+using Pen.Tools;
 
 namespace Pen.Projects;
 
@@ -11,11 +12,15 @@ namespace Pen.Projects;
 internal sealed record ProjectContext(HostEnv Host, Project Project, Config User, Config ProjectConfig)
 {
     /// <summary>Loads the project's .pen/config.toml and builds the context with it.</summary>
+    /// <param name="host">The host user's environment.</param>
+    /// <param name="project">The resolved project.</param>
+    /// <param name="user">The user's config.</param>
+    /// <param name="catalog">The recipes the project config's tools come from.</param>
     /// <returns>The context for <paramref name="project"/>.</returns>
     /// <remarks>
     /// .pen/ is agent-writable, so only the commands that use the project config build a context:
     /// pen sign and pen clean never read it, and a broken or hostile one can't get in their way.
     /// </remarks>
-    public static ProjectContext Load(HostEnv host, Project project, Config user) =>
-        new(host, project, user, Config.Load(project.PenDir, ".pen", ConfigKind.Project));
+    public static ProjectContext Load(HostEnv host, Project project, Config user, RecipeCatalog catalog) =>
+        new(host, project, user, Config.Load(project.PenDir, ".pen", ConfigKind.Project, catalog));
 }

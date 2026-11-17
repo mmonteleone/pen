@@ -38,7 +38,7 @@ internal sealed class InitCommand(HostEnv host, Project project, RecipeCatalog c
 
         var detection = ProjectDetection.Detect(project.Dir, catalog);
         var text = ProjectTemplate.Render(detection);
-        Validate(text);
+        Validate(text, catalog);
 
         RepoGuard.EnsureDirectory(project.Dir, project.PenDir);
         RepoGuard.RequireNotLink(project.Dir, project.ProjectConfigPath);
@@ -68,11 +68,11 @@ internal sealed class InitCommand(HostEnv host, Project project, RecipeCatalog c
 
     /// <summary>Checks that the rendered text is a valid project config.</summary>
     /// <exception cref="InvalidOperationException">It isn't: the template or its rendering is wrong.</exception>
-    private static void Validate(string text)
+    private static void Validate(string text, RecipeCatalog catalog)
     {
         try
         {
-            Config.Parse(text, Where, ConfigKind.Project);
+            Config.Parse(text, Where, ConfigKind.Project, catalog);
         }
         catch (PenException exception)
         {
