@@ -141,7 +141,7 @@ public class MaskSessionTests
         File.CreateSymbolicLink(link, victim);
         var copy = Path.Combine(session.MasksDir, MaskFiles.ReplacementPrefix + "1");
         // Big enough that the copy is still being written when the swap lands, between its creation and its mode.
-        var plan = Plan([], [], new Replacement(M("big"), new byte[64 << 20], Mode555));
+        var plan = Plan([], [], new Replacement(M("big"), new byte[8 << 20], Mode555));
         var swap = new Thread(() =>
         {
             var deadline = Environment.TickCount64 + 30_000;

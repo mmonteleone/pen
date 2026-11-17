@@ -182,8 +182,8 @@ internal static class ProtectedFiles
 
     /// <summary>Reads a manifest written by <see cref="Serialize"/>.</summary>
     /// <exception cref="PenException">
-    /// It's from another version of Pen, a path, directory or copy's name isn't a string (a JSON null included), or a
-    /// copy's name is damaged.
+    /// It's from another version of Pen, a path, directory or copy's name isn't a string (a JSON null included), or
+    /// one isn't in the shape <see cref="Save"/> writes it.
     /// </exception>
     internal static ProtectedManifest Parse(string json)
     {
@@ -197,21 +197,41 @@ internal static class ProtectedFiles
             var copy = ReadString(entry.GetProperty("copy"));
             if (copy.Length == 0 || !copy.All(char.IsAsciiDigit))
                 throw new PenException(DamagedManifest);
-            var path = ReadString(entry.GetProperty("path"));
+            var path = ReadPath(entry.GetProperty("path"));
             var mode = (UnixFileMode)(entry.GetProperty("mode").GetInt32() & 0xFFF);
             files.Add(new(path, copy, mode, entry.GetProperty("adopted").GetBoolean()));
         }
-        return new(files, [.. root.GetProperty("readOnlyDirs").EnumerateArray().Select(ReadString)]);
+        return new(files, [.. root.GetProperty("readOnlyDirs").EnumerateArray().Select(ReadPath)]);
     }
 
-    /// <summary>Reads a string from a manifest.</summary>
-    /// <exception cref="PenException">
-    /// It's anything else, a JSON null included, which <see cref="JsonElement.GetString"/> would return as null.
-    /// </exception>
+    /// <summary>
+    /// Reads a string from a manifest, where a JSON null or any other type is damage, not a missing value.
+    /// </summary>
+    /// <exception cref="PenException">It isn't a string.</exception>
     private static string ReadString(JsonElement element) =>
         element.ValueKind == JsonValueKind.String && element.GetString() is { } text
             ? text
             : throw new PenException(DamagedManifest);
+
+    /// <summary>
+    /// Reads a file's or read-only directory's path from a manifest, which must be in the shape of a real path, as
+    /// <see cref="Save"/> writes them: absolute, with no empty, "." or ".." component, no trailing slash and no NUL,
+    /// and not the root, which is never a protected file or a read-only mount.
+    /// </summary>
+    /// <exception cref="PenException">It's in any other shape, or isn't a string.</exception>
+    /// <remarks>
+    /// Directories are matched by name (<see cref="PathChecks.IsInside"/>), so one such as "/" or "" would contain
+    /// every path and vouch for any config.worktree; a file's path that isn't absolute can't be put back.
+    /// </remarks>
+    private static string ReadPath(JsonElement element)
+    {
+        var path = ReadString(element);
+        var isRealPathShape = Path.IsPathFullyQualified(path)
+            && path.Length > 1
+            && !path.Contains('\0')
+            && path[1..].Split('/').All(component => component is not ("" or "." or ".."));
+        return isRealPathShape ? path : throw new PenException(DamagedManifest);
+    }
 
     /// <summary>
     /// What open sessions have saved: their files by what each path resolves to now, oldest session first; the files

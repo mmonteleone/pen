@@ -204,7 +204,7 @@ public class ProtectedFilesTests
     [InlineData("/p/a\nb/config")]
     [InlineData("/p/a\r\n\t\"\\'b/é\u202e\u2028😀/\x7f/config")]
     [InlineData("/p/\ufffd/config")]
-    [InlineData("/p/\u0001\u0000/config")]
+    [InlineData("/p/\u0001\u001f/config")]
     public void TheManifest_RoundTripsAnyPath(string path)
     {
         var parsed = ProtectedFiles.Parse(ProtectedFiles.Serialize(new([new(path, "0", (UnixFileMode)0b110_100_100, Adopted: false)], [path])));
@@ -751,26 +751,56 @@ public class ProtectedFilesTests
         """{"version":1,"files":[],"readOnlyDirs":[5]}""",
     ];
 
+    /// <summary>
+    /// Manifests with a path or copy's name in a shape Pen never writes: a read-only directory that would contain
+    /// every path, a path that isn't absolute or normalised or holds a NUL, and a copy's name that isn't a number.
+    /// </summary>
+    public static TheoryData<string> ManifestsWithABadPath =>
+    [
+        """{"version":1,"files":[],"readOnlyDirs":[""]}""",
+        """{"version":1,"files":[],"readOnlyDirs":["/"]}""",
+        """{"version":1,"files":[],"readOnlyDirs":["//"]}""",
+        """{"version":1,"files":[],"readOnlyDirs":["rel"]}""",
+        """{"version":1,"files":[],"readOnlyDirs":["/x\u0000y"]}""",
+        """{"version":1,"files":[],"readOnlyDirs":["/x/"]}""",
+        """{"version":1,"files":[],"readOnlyDirs":["/x/../y"]}""",
+        """{"version":1,"files":[{"path":"","copy":"0","mode":420,"adopted":false}],"readOnlyDirs":[]}""",
+        """{"version":1,"files":[{"path":"/","copy":"0","mode":420,"adopted":false}],"readOnlyDirs":[]}""",
+        """{"version":1,"files":[{"path":"rel","copy":"0","mode":420,"adopted":false}],"readOnlyDirs":[]}""",
+        """{"version":1,"files":[{"path":"/x\u0000y","copy":"0","mode":420,"adopted":false}],"readOnlyDirs":[]}""",
+        """{"version":1,"files":[{"path":"/x/./y","copy":"0","mode":420,"adopted":false}],"readOnlyDirs":[]}""",
+        """{"version":1,"files":[{"path":"","copy":"0","mode":420,"adopted":true}],"readOnlyDirs":[]}""",
+        """{"version":1,"files":[{"path":"/x","copy":"","mode":420,"adopted":false}],"readOnlyDirs":[]}""",
+        """{"version":1,"files":[{"path":"/x","copy":"../x","mode":420,"adopted":false}],"readOnlyDirs":[]}""",
+        """{"version":1,"files":[{"path":"/x","copy":"/etc/x","mode":420,"adopted":false}],"readOnlyDirs":[]}""",
+    ];
+
     [Theory]
     [MemberData(nameof(ManifestsWithoutAString))]
+    [MemberData(nameof(ManifestsWithABadPath))]
     public void AManifestWithoutAStringWhereOneGoes_IsDamaged(string manifest)
     {
         var e = Assert.Throws<PenException>(() => ProtectedFiles.Parse(manifest));
         Assert.True(ProtectedFiles.IsDamage(e));
     }
 
-    /// <summary>Ends a started session after writing <paramref name="manifest"/> over its manifest and planting a commondir.</summary>
+    /// <summary>
+    /// Ends a started session after writing <paramref name="manifest"/> over its manifest and planting a commondir and
+    /// a config.worktree.
+    /// </summary>
     private static (CheckResult Check, SessionDir Session, string Git) EndWithManifest(TempDir t, string manifest)
     {
         var (repo, git) = Repo(t);
         var s = Started(t, repo, git);
         File.WriteAllText(s.ProtectedManifest, manifest);
         File.WriteAllText(Path.Combine(git, "commondir"), "planted\n");
+        File.WriteAllText(Path.Combine(git, "config.worktree"), "[core]\n\tfsmonitor = /evil\n");
         return (End(repo, s), s, git);
     }
 
     [Theory]
     [MemberData(nameof(ManifestsWithoutAString))]
+    [MemberData(nameof(ManifestsWithABadPath))]
     public void AManifestWithoutAStringWhereOneGoes_FailsTheEnd_AsOneFromAnotherVersionDoes(string manifest)
     {
         using var reference = new TempDir();
@@ -785,12 +815,15 @@ public class ProtectedFilesTests
         Assert.Equal(Assert.Single(expected.Moved, q => q is Quarantined.Failed).Why, failed.Why);
         Assert.Contains("couldn't be read, so they weren't compared. COULD NOT RESTORE THEM", failed.Why);
         Assert.True(File.Exists(Path.Combine(git, "commondir" + GitQuarantine.Suffix)));
+        // A session with no readable record vouches for no config.worktree.
+        Assert.False(File.Exists(Path.Combine(git, "config.worktree")));
         Assert.True(File.Exists(s.ProtectedManifest));
         Assert.NotEmpty(Directory.GetFiles(s.ProtectedDir));
     }
 
     [Theory]
     [MemberData(nameof(ManifestsWithoutAString))]
+    [MemberData(nameof(ManifestsWithABadPath))]
     [InlineData("""{"version":99,"files":[],"readOnlyDirs":[]}""")]
     public void AnOpenSessionsManifestWithoutAStringWhereOneGoes_IsNoRecord_ToOneStartingNow(string manifest)
     {
