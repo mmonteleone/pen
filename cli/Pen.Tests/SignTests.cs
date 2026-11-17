@@ -377,10 +377,12 @@ public class SignTests
         var forged = f.Forged(armor);
         Assert.Empty(new SignatureVerifier(f.Git).FindVerified([forged]));
 
-        new BranchSigner(f.Git).Sign(null);
+        var outcome = new BranchSigner(f.Git).Sign(null);
 
         var head = f.Head();
         Assert.NotEqual(forged, head);
+        var signed = Assert.IsType<SignOutcome.Signed>(outcome);
+        Assert.Equal(new SignOutcome.Signed("refs/heads/main", forged, head, [head]), signed, SignedComparer);
         Assert.Equal([b], f.Obj(head).Parents);
         Assert.Equal([head], new SignatureVerifier(f.Git).FindVerified([head]));
     }
@@ -392,10 +394,92 @@ public class SignTests
         SetBase(f);
         var valid = f.SignedBy(f.Key, "valid");
 
-        new BranchSigner(f.Git).Sign(null);
+        var outcome = new BranchSigner(f.Git).Sign(null);
 
         Assert.Equal(valid, f.Head());
+        Assert.Equal(new SignOutcome.AllSigned("refs/remotes/origin/HEAD", 1), outcome);
     }
+
+    [Fact]
+    public void AnEmptyRange_SignsNothing()
+    {
+        using var f = new Fixture();
+        SetBase(f);
+        var head = f.Head();
+
+        var outcome = new BranchSigner(f.Git).Sign(null);
+
+        Assert.Equal(new SignOutcome.NoCommits("refs/remotes/origin/HEAD"), outcome);
+        Assert.Equal(head, f.Head());
+    }
+
+    private static readonly IEqualityComparer<SignOutcome.Signed> SignedComparer = new SignedEquality();
+
+    /// <summary>Compares <see cref="SignOutcome.Signed"/>s by their values, with the created list element by element.</summary>
+    private sealed class SignedEquality : IEqualityComparer<SignOutcome.Signed>
+    {
+        public bool Equals(SignOutcome.Signed? x, SignOutcome.Signed? y) =>
+            x is not null && y is not null && x.BranchRef == y.BranchRef && x.OldHead == y.OldHead &&
+            x.NewHead == y.NewHead && x.Created.SequenceEqual(y.Created);
+
+        public int GetHashCode(SignOutcome.Signed obj) => obj.NewHead.GetHashCode(StringComparison.Ordinal);
+    }
+
+    private static string CapturingStderr(Action action)
+    {
+        var stderr = Console.Error;
+        var captured = new StringWriter();
+        Console.SetError(captured);
+        try { action(); }
+        finally { Console.SetError(stderr); }
+        return captured.ToString();
+    }
+
+    [Fact]
+    public void Report_SaysWhatSigningDid()
+    {
+        using var f = new Fixture();
+        SetBase(f);
+        Assert.Equal("pen: nothing to sign: no commits in refs/remotes/origin/HEAD..HEAD\n",
+            Plain(ReportOf(f)));
+
+        var valid = f.SignedBy(f.Key, "valid");
+        Assert.Equal("pen: nothing to sign: all 1 commits in refs/remotes/origin/HEAD..HEAD are signed\n",
+            Plain(ReportOf(f)));
+
+        var forged = f.Forged("SSH SIGNATURE");
+        var report = Plain(ReportOf(f));
+        var head = f.Head();
+        Assert.Equal(
+            $"pen: signed: main is now {head[..12]} (was {forged[..12]}; the old commits stay in the reflog)\n", report);
+        Assert.NotEqual(valid, head);
+    }
+
+    [Fact]
+    public void Report_GivesTheHint_WhenWhatItSignedDoesntVerify()
+    {
+        using var f = new Fixture(trustKey: false);
+        SetBase(f);
+        f.Commit("a", "1", "A <a@x.io>", "2026-01-01T00:00:00Z", "one");
+        var old = f.Head();
+
+        var report = Plain(ReportOf(f));
+
+        var head = f.Head();
+        Assert.StartsWith(
+            $"pen: signed: main is now {head[..12]} (was {old[..12]}; the old commits stay in the reflog)\n", report);
+        Assert.Contains("gpg.ssh.allowedSignersFile isn't set", report);
+    }
+
+    /// <summary>What <see cref="SignCommand.Report"/> prints for what signing does now, apart from Sign's own listing.</summary>
+    private static string ReportOf(Fixture f)
+    {
+        var outcome = new BranchSigner(f.Git).Sign(null);
+        return CapturingStderr(() => SignCommand.Report(outcome, f.Git));
+    }
+
+    /// <summary>The text without the colors <see cref="Out"/> may add around fields.</summary>
+    private static string Plain(string text) => System.Text.RegularExpressions.Regex.Replace(text, "\u001b\\[[0-9;]*m", "");
 
     [Fact]
     public void TheWholeRangeIsRead_KeepingValidCommitsBelowAForgedOne()

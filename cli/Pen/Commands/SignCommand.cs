@@ -41,7 +41,7 @@ internal sealed class SignCommand(HostEnv host, Project project, TimeProvider cl
     }
 
     /// <summary>Says what signing did, and how to fix the user's setup if what it just signed doesn't verify.</summary>
-    private static void Report(SignOutcome outcome, HostGit git)
+    internal static void Report(SignOutcome outcome, HostGit git)
     {
         switch (outcome)
         {
