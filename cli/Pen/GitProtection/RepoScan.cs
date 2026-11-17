@@ -258,7 +258,7 @@ internal static class RepoScan
         if (PathChecks.IsLink(config))
             return false;
         // An unreadable config: not a checkout Pen can vouch for.
-        if (GitConfigFile.TryParseFile(config) is not { } entries)
+        if (!GitConfigFile.TryParseFile(config, out var entries, out _))
             return false;
         var worktree = GitConfigFile.FindLast(entries, "core", "worktree");
         if (string.IsNullOrEmpty(worktree))

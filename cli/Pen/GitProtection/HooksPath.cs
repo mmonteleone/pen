@@ -109,7 +109,7 @@ internal static class HooksPath
 
         var config = Path.Combine(common, "config");
         walk.Read(config, conditional: false);
-        var commonEntries = GitConfigFile.TryParseFile(config);
+        var commonEntries = GitConfigFile.TryParseFile(config, out var parsed, out _) ? parsed : null;
         var gitDir = project.IsWorktree ? RepoScan.ReadWorktreeEntry(project.GitDir) : common;
         if (gitDir is null)
         {
@@ -147,7 +147,7 @@ internal static class HooksPath
         {
             var worktreeFile = Path.Combine(gitDir, "config.worktree");
             walk.Read(worktreeFile, conditional: false);
-            var own = GitConfigFile.TryParseFile(worktreeFile);
+            var own = GitConfigFile.TryParseFile(worktreeFile, out var parsed, out _) ? parsed : null;
             known &= own is not null;
             workTree = FindLastWorkTree(own) ?? workTree;
         }
@@ -445,7 +445,7 @@ internal static class HooksPath
                 return;
             }
 
-            if (GitConfigFile.TryParseFile(file) is not { } entries)
+            if (!GitConfigFile.TryParseFile(file, out var entries, out _))
             {
                 Found.Add(new(null, file, $"it can't read the config file {Out.Field(file)}"));
                 return;

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using Pen.Platform;
 
@@ -63,64 +64,77 @@ internal static class GitConfigFile
     /// <exception cref="PenException">
     /// It isn't what git would read; the message names <paramref name="source"/>.
     /// </exception>
-    public static List<Entry> Parse(byte[] bytes, string source)
-    {
-        var reader = new Reader(bytes);
-        if (reader.Read() is { } why)
-        {
-            throw new PenException($"can't parse {source} at line {reader.Line} ({why}), so " +
-                "pen can't tell what git would read from it: fix or remove it, then rerun");
-        }
-
-        return reader.Entries;
-    }
+    public static List<Entry> Parse(byte[] bytes, string source) =>
+        TryParse(bytes, source, out var entries, out var error) ? entries : throw new PenException(error);
 
     /// <summary>Parses the entries of the file at <paramref name="path"/>.</summary>
     /// <returns>The entries, in file order; none if the file is missing.</returns>
     /// <exception cref="PenException">The file can't be read or parsed.</exception>
-    public static List<Entry> ParseFile(string path)
+    public static List<Entry> ParseFile(string path) =>
+        TryParseFile(path, out var entries, out var error) ? entries : throw new PenException(error);
+
+    /// <summary>Parses the entries of the file at <paramref name="path"/>, as <see cref="ParseFile"/> does.</summary>
+    /// <param name="path">The file.</param>
+    /// <param name="entries">The entries, in file order; none if the file is missing.</param>
+    /// <param name="error">Why the file can't be read or parsed: what <see cref="ParseFile"/> refuses with.</param>
+    /// <returns>Whether it could be read and parsed, or is missing.</returns>
+    /// <remarks>Only a read or parse failure is false; any other exception propagates on purpose.</remarks>
+    public static bool TryParseFile(
+        string path,
+        [NotNullWhen(true)] out List<Entry>? entries,
+        [NotNullWhen(false)] out string? error)
     {
+        byte[]? bytes;
         try
         {
-            return Parse(Native.ReadRegularBytes(path)
-                ?? throw new PenException("can't read the git config file " +
-                    $"{Out.Field(path)}: it isn't a regular file of a reasonable size"),
-                $"the git config file {Out.Field(path)}");
+            bytes = Native.ReadRegularBytes(path);
         }
-        catch (FileNotFoundException)
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
-            return [];
-        }
-        catch (DirectoryNotFoundException)
-        {
-            return [];
+            entries = [];
+            error = null;
+            return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            throw new PenException("can't read the git config file " +
-                $"{Out.Field(path)}: fix its permissions, then rerun");
+            entries = null;
+            error = $"can't read the git config file {Out.Field(path)}: fix its permissions, then rerun";
+            return false;
         }
+        if (bytes is null)
+        {
+            entries = null;
+            error = "can't read the git config file " +
+                $"{Out.Field(path)}: it isn't a regular file of a reasonable size";
+            return false;
+        }
+        return TryParse(bytes, $"the git config file {Out.Field(path)}", out entries, out error);
     }
 
-    /// <summary>Parses the entries of the file at <paramref name="path"/>, as <see cref="ParseFile"/> does.</summary>
-    /// <returns>
-    /// The entries, in file order; none if the file is missing; null where <see cref="ParseFile"/> throws a
-    /// <see cref="PenException"/>, because the file can't be read or parsed.
-    /// </returns>
-    /// <remarks>
-    /// Only <see cref="PenException"/> (what <see cref="ParseFile"/> turns read and parse failures into) gives
-    /// null; anything else propagates on purpose.
-    /// </remarks>
-    public static List<Entry>? TryParseFile(string path)
+    /// <summary>Parses the entries in a file's bytes, as <see cref="Parse(byte[], string)"/> does.</summary>
+    /// <param name="bytes">The file's bytes.</param>
+    /// <param name="source">What the bytes are, for the message.</param>
+    /// <param name="entries">The entries, in file order.</param>
+    /// <param name="error">Why git wouldn't read it, naming <paramref name="source"/>.</param>
+    /// <returns>Whether it's what git would read.</returns>
+    private static bool TryParse(
+        byte[] bytes,
+        string source,
+        [NotNullWhen(true)] out List<Entry>? entries,
+        [NotNullWhen(false)] out string? error)
     {
-        try
+        var reader = new Reader(bytes);
+        if (reader.Read() is { } why)
         {
-            return ParseFile(path);
+            entries = null;
+            error = $"can't parse {source} at line {reader.Line} ({why}), so " +
+                "pen can't tell what git would read from it: fix or remove it, then rerun";
+            return false;
         }
-        catch (PenException)
-        {
-            return null;
-        }
+
+        entries = reader.Entries;
+        error = null;
+        return true;
     }
 
     /// <summary>Finds the value of the last entry with this section, key and subsection.</summary>

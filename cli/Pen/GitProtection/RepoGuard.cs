@@ -337,8 +337,8 @@ internal static class RepoGuard
             return false;
         var relative = Path.GetRelativePath(super, repoDir);
         // No advice from a file that can't be read.
-        return GitConfigFile.TryParseFile(gitmodules)?.Any(e =>
-            e.Section == "submodule" && e.Key == "path" && e.Value.TrimEnd('/') == relative) ?? false;
+        return GitConfigFile.TryParseFile(gitmodules, out var entries, out _) && entries.Any(e =>
+            e.Section == "submodule" && e.Key == "path" && e.Value.TrimEnd('/') == relative);
     }
 
     /// <summary>Finds the common git dir of the linked worktree whose .git file is <paramref name="git"/>.</summary>

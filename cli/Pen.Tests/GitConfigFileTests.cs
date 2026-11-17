@@ -83,14 +83,16 @@ public class GitConfigFileTests
         var bad = Path.Combine(t.Path, "bad");
         File.WriteAllText(bad, "[core\n");
         var dir = t.Sub("dir");
+        static List<GitConfigFile.Entry>? TryParseFile(string path) =>
+            GitConfigFile.TryParseFile(path, out var entries, out _) ? entries : null;
 
-        Assert.Equal([new GitConfigFile.Entry("core", null, "bare", "false")], GitConfigFile.TryParseFile(good));
-        Assert.Empty(GitConfigFile.TryParseFile(Path.Combine(t.Path, "missing"))!);
-        Assert.Empty(GitConfigFile.TryParseFile(Path.Combine(t.Path, "no-dir", "config"))!);
+        Assert.Equal([new GitConfigFile.Entry("core", null, "bare", "false")], TryParseFile(good));
+        Assert.Empty(TryParseFile(Path.Combine(t.Path, "missing"))!);
+        Assert.Empty(TryParseFile(Path.Combine(t.Path, "no-dir", "config"))!);
         Assert.Throws<PenException>(() => GitConfigFile.ParseFile(bad));
-        Assert.Null(GitConfigFile.TryParseFile(bad));
+        Assert.Null(TryParseFile(bad));
         Assert.Throws<PenException>(() => GitConfigFile.ParseFile(dir));
-        Assert.Null(GitConfigFile.TryParseFile(dir));
+        Assert.Null(TryParseFile(dir));
     }
 
     [Fact]

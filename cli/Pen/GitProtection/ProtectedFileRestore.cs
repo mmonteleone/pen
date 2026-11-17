@@ -84,26 +84,35 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
     /// <summary>Puts one file back, or records that it couldn't.</summary>
     private void RestoreOrRecord(ProtectedFile file)
     {
+        string? failure;
         try
         {
-            RestoreOne(file);
+            failure = RestoreOne(file);
         }
-        catch (Exception exception)
-            when (exception is IOException or UnauthorizedAccessException or PenException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            failure = Out.Describe(exception);
+        }
+        if (failure is not null)
         {
             _changes.Moved.Add(new Quarantined.Failed(file.Path, "a protected file that may have changed. COULD NOT " +
-                $"RESTORE IT ({Out.Describe(exception)}): don't run git here until you've dealt with it"));
+                $"RESTORE IT ({failure}): don't run git here until you've dealt with it"));
         }
     }
 
     /// <summary>Puts one file back if it's missing, changed or has another mode.</summary>
-    private void RestoreOne(ProtectedFile file)
+    /// <returns>
+    /// Null once it's back, unchanged, or left and recorded; otherwise why it couldn't be put back.
+    /// </returns>
+    /// <exception cref="IOException">A file operation failed.</exception>
+    /// <exception cref="UnauthorizedAccessException">A file operation was denied.</exception>
+    private string? RestoreOne(ProtectedFile file)
     {
-        var original = Native.ReadProtected(Path.Combine(_session.ProtectedDir, file.Copy))?.Bytes
-            ?? throw new PenException("pen's copy of it is damaged");
+        if (Native.ReadProtected(Path.Combine(_session.ProtectedDir, file.Copy))?.Bytes is not { } original)
+            return "pen's copy of it is damaged";
         var root = PathChecks.IsInside(_dir, file.Path) ? _dir : _commonGitDir;
-        if (!CheckParents(file, root))
-            return;
+        if (!CheckParents(file, root, out var failure))
+            return failure;
 
         RegularFile? current;
         try
@@ -113,7 +122,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
         catch (FileNotFoundException)
         {
             Recreate(file, original);
-            return;
+            return null;
         }
         catch (UnauthorizedAccessException)
         {
@@ -121,17 +130,14 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
         }
 
         if (current is not null && current.Bytes.AsSpan().SequenceEqual(original))
-        {
-            if (current.Mode != file.Mode)
-                RestoreMode(file, current.Mode);
-            return;
-        }
+            return current.Mode != file.Mode ? RestoreMode(file, current.Mode) : null;
         if (!TryWriteInPlace(file, original, current))
         {
             ReplaceAside(file, original);
-            return;
+            return null;
         }
         KeepChangedVersion(file, current!.Bytes);
+        return null;
     }
 
     /// <summary>Recreates a file that was deleted during the session.</summary>
@@ -221,16 +227,22 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
     /// <summary>Checks that the file's directory is still the real one it was.</summary>
     /// <param name="file">The saved file.</param>
     /// <param name="root">The sandbox's mount the file is under, or null if it's under neither.</param>
-    /// <returns>Whether to go on and restore it; false if a directory on the way was moved aside or is gone.</returns>
+    /// <param name="failure">
+    /// Why the file can't be put back, when that's a failure; null when it returns true, or a directory was moved
+    /// aside or is gone, which is recorded.
+    /// </param>
+    /// <returns>Whether to go on and restore it.</returns>
     /// <remarks>
     /// Directories below the sandbox's mount can be moved and replaced from inside it, so a symlink among them is
     /// renamed aside: writing through it would land wherever the agent pointed it. A directory that's gone or is now
     /// a file is left so (a worktree removed during the session, say) and reported: git reads nothing from there, and
     /// recreating it would invent a half-made entry. One that can't be entered, <paramref name="root"/> included, is
-    /// neither: what's in it may have changed, so it's a failure (it throws), and Blocked names it.
+    /// neither: what's in it may have changed, so it's a failure, and Blocked names it. So is a directory that leads
+    /// somewhere else now.
     /// </remarks>
-    private bool CheckParents(ProtectedFile file, string? root)
+    private bool CheckParents(ProtectedFile file, string? root, out string? failure)
     {
+        failure = null;
         var parent = Paths.GetParent(file.Path);
         foreach (var directory in ListDirectoriesFromRoot(parent, root))
         {
@@ -249,11 +261,18 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
             if (!Native.CanEnter(directory))
             {
                 _changes.Blocked.Add(FindTopmostShut(directory));
-                throw new UnauthorizedAccessException($"Access to the path '{directory}' is denied.");
+                // Worded exactly as Out.Describe words a file operation the OS denies, as for one in the restore
+                // that throws.
+                failure = Out.DescribePermissionDenied(
+                    new UnauthorizedAccessException($"Access to the path '{directory}' is denied."));
+                return false;
             }
         }
         if (!string.Equals(Native.RealPath(parent), parent, StringComparison.OrdinalIgnoreCase))
-            throw new PenException("its directory now leads somewhere else");
+        {
+            failure = "its directory now leads somewhere else";
+            return false;
+        }
         return true;
     }
 
@@ -291,12 +310,15 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
     }
 
     /// <summary>Puts back the mode of a file whose contents didn't change.</summary>
-    private void RestoreMode(ProtectedFile file, UnixFileMode was)
+    /// <returns>Null once it's back; otherwise why it couldn't be.</returns>
+    private string? RestoreMode(ProtectedFile file, UnixFileMode was)
     {
-        using var handle = Native.OpenProtected(file.Path, write: false)
-            ?? throw new PenException("it can't be opened");
+        using var handle = Native.OpenProtected(file.Path, write: false);
+        if (handle is null)
+            return "it can't be opened";
         File.SetUnixFileMode(handle, file.Mode);
         _changes.Restored.Add(new(file.Path, "its mode was changed during the session to " +
             $"{FileModes.Octal(was)}, and is back to {FileModes.Octal(file.Mode)}"));
+        return null;
     }
 }
