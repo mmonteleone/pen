@@ -291,7 +291,7 @@ internal sealed class GitCheckRun
     private void QuarantineNestedRepos(string git, HashSet<string> known) =>
         QuarantineFound(
             RepoScan.ScanNested(_dir, git, known, _tryOpen),
-            repo => DescribeNested(repo.Kind),
+            repo => NestedRepoWording.DescribeQuarantined(repo.Kind),
             movedAside => RepoScan.ScanNested(_dir, git, known, _tryOpen, from: movedAside));
 
     /// <summary>
@@ -302,7 +302,7 @@ internal sealed class GitCheckRun
     private void QuarantineGitDirRepos(string git, HashSet<string> known) =>
         QuarantineFound(
             RepoScan.ScanGitDir(git, known, _tryOpen),
-            DescribeInGitDir,
+            NestedRepoWording.DescribeQuarantinedInGitDir,
             movedAside => RepoScan.ScanGitDir(git, known, _tryOpen, from: movedAside));
 
     /// <summary>
@@ -362,43 +362,6 @@ internal sealed class GitCheckRun
             attempt = GitCheck.RemoveLink(_dir, link, why);
         _changes.Moved.Add(attempt);
     }
-
-    /// <summary>Words why a nested repo of this kind is quarantined.</summary>
-    private static string DescribeNested(NestedKind kind) => kind switch
-    {
-        NestedKind.Bare => "a bare repo: git takes this directory " +
-            "as one, with config and hooks from the sandbox",
-        NestedKind.GitFile => "a .git file that isn't one of this repo's " +
-            "worktrees or submodules: it points git at another directory",
-        NestedKind.GitLink => "a .git symlink: it points git at another directory",
-        _ => "a nested repo: its config and hooks were writable from the sandbox",
-    };
-
-    /// <summary>Words why a repo in the git dir is quarantined.</summary>
-    private static string DescribeInGitDir(NestedRepo repo) => repo switch
-    {
-        { Place: GitDirPlace.Refs, Kind: NestedKind.Bare } =>
-            "ref names (a branch named HEAD beside ones under objects/ and refs/, say) that lay this directory " +
-            "out as a git dir: git run from it (through a symlink in the project, say) takes it for one and uses " +
-            "its config and hooks, which were writable from the sandbox. Renaming its HEAD breaks that; rename " +
-            "those refs before putting it back",
-        _ => DescribeInGitDir(repo.Kind),
-    };
-
-    /// <summary>Words why a repo of this kind in the git dir is quarantined.</summary>
-    private static string DescribeInGitDir(NestedKind kind) => kind switch
-    {
-        NestedKind.Bare => "a directory inside the git dir that git takes for a git dir of its own, where git keeps " +
-            "none outside modules/ and worktrees/: git run from it (through a symlink in the project, say) uses " +
-            "its config and hooks, which were writable from the sandbox",
-        NestedKind.GitFile => "a .git file inside the git dir that isn't one of this repo's worktrees or " +
-            "submodules: git run from that directory (through a symlink in the project, say) follows it to " +
-            "another directory",
-        NestedKind.GitLink => "a .git symlink inside the git dir: git run from that directory (through a " +
-            "symlink in the project, say) follows it to another directory",
-        _ => "a repo inside the git dir, where git keeps none outside modules/: git run from that directory " +
-            "(through a symlink in the project, say) uses it, and its config and hooks were writable from the sandbox",
-    };
 
     /// <summary>
     /// Quarantines the submodule repos in <paramref name="gitDir"/> that weren't there at the start, any symlink

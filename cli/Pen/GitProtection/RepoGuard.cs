@@ -180,7 +180,9 @@ internal static class RepoGuard
             anySubmodule |= submodule;
             anyQuarantined |= quarantined;
             anyOther |= !submodule && !quarantined;
-            var kind = submodule ? " (a submodule with its own .git dir)" : Describe(repo.Kind);
+            var kind = submodule
+                ? " (a submodule with its own .git dir)"
+                : NestedRepoWording.DescribeRefused(repo.Kind);
             return FormatPath(dir, repo.RepoDir) + kind;
         });
         foreach (var line in listed)
@@ -221,7 +223,7 @@ internal static class RepoGuard
             anyQuarantined |= IsInQuarantine(common, repo.RepoDir);
             anyEntry |= repo is { Place: GitDirPlace.WorktreeEntry, Kind: NestedKind.Bare };
             return FormatPath(dir, repo.RepoDir) + (refs ? " (ref names that lay it out as a git dir)" :
-                DescribeInGitDir(repo));
+                NestedRepoWording.DescribeRefusedInGitDir(repo));
         });
         var message = new StringBuilder($"refusing to run in {Out.Field(dir)}: its git dir has repos where git " +
             "keeps none, whose config and hooks pen can't protect, and git run in their directories (through a " +
@@ -382,26 +384,6 @@ internal static class RepoGuard
         var bare = GitConfigFile.FindLast(GitConfigFile.ParseFile(Path.Combine(common, "config")), "core", "bare");
         return bare is null || !GitConfigFile.IsTrue(bare);
     }
-
-    /// <summary>Describes what makes a nested repo one, for the refusal; nothing for a plain .git dir.</summary>
-    private static string Describe(NestedKind kind) => kind switch
-    {
-        NestedKind.Bare => " (a bare repo)",
-        NestedKind.GitFile => " (a .git file that isn't one of this repo's worktrees or submodules)",
-        NestedKind.GitLink => " (a .git symlink)",
-        _ => "",
-    };
-
-    /// <summary>Describes what makes a repo in the git dir one, for the refusal.</summary>
-    private static string DescribeInGitDir(NestedRepo repo) => repo switch
-    {
-        { Place: GitDirPlace.WorktreeEntry, Kind: NestedKind.Bare } =>
-            " (a worktree entry whose commondir doesn't lead back to this repo)",
-        { Kind: NestedKind.Bare } => " (laid out as a git dir of its own)",
-        { Kind: NestedKind.GitFile } => " (a .git file that isn't one of this repo's worktrees or submodules)",
-        { Kind: NestedKind.GitLink } => " (a .git symlink)",
-        _ => " (a .git dir)",
-    };
 
     /// <summary>Warns once if the repo's common git dir may fold case.</summary>
     /// <param name="project">The project; a plain directory has no git dir to probe, so no warning.</param>
