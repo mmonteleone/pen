@@ -61,8 +61,8 @@ internal static class PathChecks
         }
     }
 
-    /// <summary>Whether <paramref name="gitDir"/> may fold case, by probing it with a new random name.</summary>
-    internal static bool MayFoldCase(string gitDir) => MayFoldCase(gitDir, GenerateCaseProbeName());
+    /// <summary>Whether <paramref name="dir"/> may fold case, by probing it with a new random name.</summary>
+    internal static bool MayFoldCase(string dir) => MayFoldCase(dir, GenerateCaseProbeName());
 
     /// <summary>Generates a random name for the case probe.</summary>
     /// <remarks>
@@ -73,7 +73,7 @@ internal static class PathChecks
         ".pen-case-probe-" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
 
     /// <summary>
-    /// Whether <paramref name="gitDir"/> may fold case: an empty file created there is also found under its upper-case
+    /// Whether <paramref name="dir"/> may fold case: an empty file created there is also found under its upper-case
     /// name.
     /// </summary>
     /// <returns>False only for a clean "no".</returns>
@@ -82,10 +82,10 @@ internal static class PathChecks
     /// file not being created, or it having gone by the time it's looked for. Exclusive creation doesn't follow a
     /// symlink, and the file is removed on every path once creating it has been tried.
     /// </remarks>
-    internal static bool MayFoldCase(string gitDir, string name)
+    internal static bool MayFoldCase(string dir, string name)
     {
-        var probe = Path.Combine(gitDir, name);
-        var upper = Path.Combine(gitDir, name.ToUpperInvariant());
+        var probe = Path.Combine(dir, name);
+        var upper = Path.Combine(dir, name.ToUpperInvariant());
         try
         {
             if (ExistsOrIsLink(probe) || ExistsOrIsLink(upper))
