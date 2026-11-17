@@ -37,7 +37,16 @@ public class ReadInsideProjectTests
             "missing/dir/f", "link/f", "real/link/f", "file/f", "real/f/g", "real/missing", "real", "a/b/c/d/e",
         ];
 
-        static int Open() => Directory.GetFileSystemEntries("/dev/fd").Length;
+        // Finalizers of earlier tests' handles can close descriptors mid-measurement, so settle them first. A leak
+        // only ever adds descriptors, so the count after must not exceed the count before.
+        static int Open()
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            return Directory.GetFileSystemEntries("/dev/fd").Length;
+        }
+
         foreach (var path in failing) // once first, so lazy initialisation isn't counted
             Assert.ThrowsAny<IOException>(() => Native.ReadInsideProject(t.Path, path));
         var before = Open();
@@ -45,7 +54,8 @@ public class ReadInsideProjectTests
             foreach (var path in failing)
                 Assert.ThrowsAny<IOException>(() => Native.ReadInsideProject(t.Path, path));
 
-        Assert.Equal(before, Open());
+        var after = Open();
+        Assert.True(after <= before, $"descriptors leaked: {before} before, {after} after");
     }
 
     [Fact]
