@@ -67,12 +67,7 @@ internal sealed class TrustStore
 
     private static TrustStore Read(string path, string dir)
     {
-        string? text = null;
-        try
-        {
-            text = Native.ReadRegularFile(path);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+        var text = Native.ReadRegularFileOrNull(path);
         return (text is null ? null : Parse(text, path, dir)) ?? new TrustStore(path, dir);
     }
 

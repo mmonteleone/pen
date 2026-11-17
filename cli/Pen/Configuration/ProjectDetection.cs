@@ -514,23 +514,11 @@ internal sealed partial record ProjectDetection
             return 2 + extension;
         }
 
-        private static string? ReadText(FoundFile file)
-        {
-            try
-            {
-                return Native.ReadRegularFile(file.Path);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                return null;
-            }
-        }
-
         /// <summary>Reads global.json's sdk.version.</summary>
         /// <returns>The version, trimmed, or null if it can't be read or isn't a non-empty string.</returns>
         private static string? ReadSdkVersion(FoundFile file)
         {
-            if (ReadText(file) is not { } text)
+            if (Native.ReadRegularFileOrNull(file.Path) is not { } text)
                 return null;
             try
             {
@@ -553,7 +541,7 @@ internal sealed partial record ProjectDetection
         /// <summary>Reads the channel from rust-toolchain.toml, or a rust-toolchain file in either format.</summary>
         private static FoundVersion? ReadRustChannel(FoundFile file)
         {
-            if (ReadText(file) is not { } text)
+            if (Native.ReadRegularFileOrNull(file.Path) is not { } text)
                 return null;
             string? channel;
             if (file.Relative.EndsWith(".toml", StringComparison.Ordinal) || text.Contains("[toolchain]"))
@@ -583,8 +571,11 @@ internal sealed partial record ProjectDetection
         /// <summary>Reads .java-version's first line, taking its major (8 for 1.8.x).</summary>
         private static FoundVersion? ReadJavaVersion(FoundFile file)
         {
-            if (ReadText(file) is not { } text || TrimToNull(ReadFirstLine(text)) is not { } line)
+            if (Native.ReadRegularFileOrNull(file.Path) is not { } text
+                || TrimToNull(ReadFirstLine(text)) is not { } line)
+            {
                 return null;
+            }
             var major = line.StartsWith("1.", StringComparison.Ordinal) ? FindMajor(line[2..]) : FindMajor(line);
             return new FoundVersion(major, line);
         }

@@ -193,6 +193,23 @@ internal static partial class Native
         return read > length ? null : new string(chars, 0, read);
     }
 
+    /// <summary>Reads a regular file as <see cref="ReadRegularFile"/> does, giving null where that throws.</summary>
+    /// <returns>
+    /// The text, or null if it's anything but a regular file, over <see cref="MaxTextFile"/>, or can't be read
+    /// (missing, permission denied or any other I/O error).
+    /// </returns>
+    public static string? ReadRegularFileOrNull(string path)
+    {
+        try
+        {
+            return ReadRegularFile(path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Reads a regular file's exact bytes, through a symlink if it's one.</summary>
     /// <returns>The bytes, or null as for <see cref="ReadRegularFile"/>.</returns>
     public static byte[]? ReadRegularBytes(string path)
