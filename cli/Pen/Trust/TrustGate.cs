@@ -203,7 +203,7 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
         RequireCheckable(request);
 
         WriteRequest(request);
-        if (!Out.Confirm(request.Question, answers.Input))
+        if (!Out.Confirm(request.Question, answers))
             throw new PenException("not starting: nothing approved");
         return store.Approve(request);
     }

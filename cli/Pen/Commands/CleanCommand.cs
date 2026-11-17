@@ -1,19 +1,20 @@
 using Pen.Platform;
 using Pen.Projects;
 using Pen.Sessions;
+using Pen.Trust;
 
 namespace Pen.Commands;
 
 /// <summary>Runs pen clean: removes the project's volumes, after asking.</summary>
 /// <param name="host">The host user's environment.</param>
 /// <param name="project">The project whose volumes go.</param>
-/// <param name="input">Where the confirmation is read from.</param>
+/// <param name="answers">Where the confirmation is read from.</param>
 /// <param name="clock">The clock that says when an ended session's files are old enough to delete.</param>
 /// <remarks>
 /// It holds project.lock exclusive throughout, so it refuses while any session or pen sign runs in the project,
 /// and none starts until it's done.
 /// </remarks>
-internal sealed class CleanCommand(HostEnv host, Project project, TextReader input, TimeProvider clock)
+internal sealed class CleanCommand(HostEnv host, Project project, Answers answers, TimeProvider clock)
 {
     /// <summary>What a project's volume names end in, after its key and an underscore.</summary>
     public static readonly string[] VolumeSuffixes = ["home", "nuget", "dind"];
@@ -41,7 +42,7 @@ internal sealed class CleanCommand(HostEnv host, Project project, TextReader inp
                 + images
                 + ".\n  The project's files, your ~/.config/pen, and this project's approvals (pen trust)"
                 + "\n  and blocked-domain logs (pen allow) are kept.");
-        if (!Out.Confirm("remove them?", input))
+        if (!Out.Confirm("remove them?", answers))
         {
             Out.WriteLine("nothing removed");
             return 1;

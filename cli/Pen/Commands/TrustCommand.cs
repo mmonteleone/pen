@@ -80,7 +80,7 @@ internal sealed class TrustCommand(ProjectContext context, Answers answers, Reci
         TrustGate.RequireCheckable(request);
 
         TrustGate.WriteRequest(request);
-        if (!yes && !Out.Confirm(request.Question, answers.Input))
+        if (!yes && !Out.Confirm(request.Question, answers))
         {
             Out.WriteLine("nothing approved");
             return 1;

@@ -82,5 +82,5 @@ public class RuntimeDirTests
     [InlineData("\n", false)]
     [InlineData("", false)] // end of input
     public void ConfirmReadsOneLine(string input, bool expected) =>
-        Assert.Equal(expected, Out.Confirm("remove them?", new StringReader(input)));
+        Assert.Equal(expected, Out.Confirm("remove them?", new Answers(new StringReader(input), IsTerminal: false)));
 }

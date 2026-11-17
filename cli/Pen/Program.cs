@@ -89,7 +89,7 @@ internal static class Program
             case CommandKind.Ps:
                 return new PsCommand(host, clock).Run();
             case CommandKind.Clean when command.Stale:
-                return new CleanStaleCommand(host, Console.In).Run();
+                return new CleanStaleCommand(host, ReadAnswersFromStdin()).Run();
         }
 
         Config.EnsureUserConfig(host, GitIdentity.ReadFromHost);
@@ -115,7 +115,7 @@ internal static class Program
             CommandKind.Trust => RunTrust(ProjectContext.Load(host, project, user, catalog), command, catalog, clock),
             CommandKind.Init => new InitCommand(host, project, catalog).Run(),
             CommandKind.Sign => RunSign(host, project, command, clock),
-            CommandKind.Clean => new CleanCommand(host, project, Console.In, clock).Run(),
+            CommandKind.Clean => new CleanCommand(host, project, ReadAnswersFromStdin(), clock).Run(),
             _ => throw new InvalidOperationException($"unhandled command {command.Kind}"),
         };
     }

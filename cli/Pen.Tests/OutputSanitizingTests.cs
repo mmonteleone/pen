@@ -71,6 +71,17 @@ public class OutputSanitizingTests
     }
 
     [Theory]
+    [InlineData(false, "pen: remove them? [y/N] y\n")]
+    [InlineData(true, "pen: remove them? [y/N] ")]
+    public void ConfirmEchoesTheAnswer_OnlyWhenTheAnswersArentFromATerminal(bool isTerminal, string expected)
+    {
+        var answered = false;
+        var (err, _) = Capture(() => answered = Out.Confirm("remove them?", new Answers(new StringReader("y\n"), isTerminal)));
+        Assert.True(answered);
+        Assert.Equal(expected, err);
+    }
+
+    [Theory]
     [InlineData(typeof(IOException))]
     [InlineData(typeof(UnauthorizedAccessException))]
     public void WritesDontThrow_AfterTheTerminalIsGone(Type failure)

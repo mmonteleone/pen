@@ -13,11 +13,11 @@ namespace Pen.Commands;
 /// the runtime dir) and tools images on an old base, after asking.
 /// </summary>
 /// <param name="host">The host user's environment.</param>
-/// <param name="input">Where the confirmation is read from.</param>
+/// <param name="answers">Where the confirmation is read from.</param>
 /// <remarks>
 /// A key's project is known from the project-dir file its runtime dir holds (<see cref="Session.EnsureRuntimeDir"/>).
 /// </remarks>
-internal sealed partial class CleanStaleCommand(HostEnv host, TextReader input)
+internal sealed partial class CleanStaleCommand(HostEnv host, Answers answers)
 {
     /// <summary>What became of a key's project.</summary>
     internal enum Status
@@ -87,7 +87,7 @@ internal sealed partial class CleanStaleCommand(HostEnv host, TextReader input)
             return 0;
         }
         WriteWhatGoes(removable, staleTools);
-        if (!Out.Confirm(removable.Count + staleTools.Count == 1 ? "remove it?" : "remove them?", input))
+        if (!Out.Confirm(removable.Count + staleTools.Count == 1 ? "remove it?" : "remove them?", answers))
         {
             Out.WriteLine("nothing removed");
             return 1;

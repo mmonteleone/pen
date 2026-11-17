@@ -317,9 +317,9 @@ public class CleanStaleTests
         using var fake = new FakeDocker(t, ImagesDocker);
         string[] Removed() => File.ReadAllLines(Path.Combine(t.Path, "calls")).Where(c => c.StartsWith("image rm", StringComparison.Ordinal)).ToArray();
 
-        Assert.Equal(1, new CleanStaleCommand(host, new StringReader("n\n")).Run());
+        Assert.Equal(1, new CleanStaleCommand(host, new Answers(new StringReader("n\n"), IsTerminal: false)).Run());
         Assert.Empty(Removed());
-        Assert.Equal(0, new CleanStaleCommand(host, new StringReader("y\n")).Run());
+        Assert.Equal(0, new CleanStaleCommand(host, new Answers(new StringReader("y\n"), IsTerminal: false)).Run());
         Assert.Equal($"image rm {OldTools}", Assert.Single(Removed()));
     }
 }

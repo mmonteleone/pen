@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Pen.Trust;
 
 namespace Pen.Platform;
 
@@ -138,22 +139,25 @@ internal static class Out
         catch (UnauthorizedAccessException) { }
     }
 
-    /// <summary>Asks "pen: question [y/N]" and reads the answer from <paramref name="input"/>.</summary>
+    /// <summary>Asks "pen: question [y/N]" and reads the answer from <paramref name="answers"/>.</summary>
     /// <returns>True only for y or yes.</returns>
-    /// <remarks>Without a terminal the answer is echoed, so the transcript reads like an interactive one.</remarks>
-    public static bool Confirm(string question, TextReader input)
+    /// <remarks>
+    /// When the answers don't come from a terminal the answer is echoed, so the transcript reads like an
+    /// interactive one.
+    /// </remarks>
+    public static bool Confirm(string question, Answers answers)
     {
         Prompt($"pen: {question} [y/N] ");
         string? answer;
         try
         {
-            answer = input.ReadLine();
+            answer = answers.Input.ReadLine();
         }
         catch (IOException)
         {
             answer = null;
         }
-        if (!Native.IsATty(0))
+        if (!answers.IsTerminal)
             WriteRaw(answer ?? "");
         return IsYes(answer);
     }
