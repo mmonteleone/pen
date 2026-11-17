@@ -174,3 +174,9 @@ dotnet_diagnostic.IDE0049.severity = warning
 # Undisposed IDisposables; everything here is internal, so check all of it
 dotnet_code_quality.api_surface = all
 dotnet_diagnostic.CA2000.severity = warning
+
+# APIs with one owner each (cli/Pen/BannedSymbols.txt): only their owners may use them.
+dotnet_diagnostic.RS0030.severity = warning
+
+[cli/Pen/{Program.cs,Platform/Out.cs,Platform/Proc.cs,Platform/HostEnv.cs,Platform/Retry.cs}]
+dotnet_diagnostic.RS0030.severity = none

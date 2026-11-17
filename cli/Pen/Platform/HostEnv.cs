@@ -14,7 +14,10 @@ namespace Pen.Platform;
 internal sealed record HostEnv(string Home, uint Uid, uint Gid, string NuGetPackages)
 {
     /// <summary>Gets the environment Pen was started with; empty unless set.</summary>
-    /// <remarks>Pen never changes its own environment, so what it read at startup is what it has later.</remarks>
+    /// <remarks>
+    /// The default is empty: only <see cref="FromProcess"/> captures the real environment. Pen never changes its own
+    /// environment, so what it read at startup is what it has later.
+    /// </remarks>
     public IReadOnlyDictionary<string, string> Variables { get; init; } = new Dictionary<string, string>();
 
     /// <summary>Gets the user's config dir, ~/.config/pen.</summary>

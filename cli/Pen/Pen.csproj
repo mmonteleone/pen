@@ -37,6 +37,12 @@
     <PackageReference Include="System.CommandLine" Version="3.0.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- RS0030: the APIs in BannedSymbols.txt are used only by their owners. Analyzer only, nothing ships. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" PrivateAssets="all" />
+    <AdditionalFiles Include="BannedSymbols.txt" />
+  </ItemGroup>
+
   <!-- Everything the CLI needs at runtime is embedded, so it never reads this
        repo once installed. Logical names are repo-relative paths. -->
   <PropertyGroup>
