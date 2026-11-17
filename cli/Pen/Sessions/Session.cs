@@ -165,9 +165,10 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         var masks = new MaskPlanner(Project.Dir, Project.CommonGitDir, [.. mounts.Select(mount => mount.Path)],
             [.. context.User.Hide, .. context.ProjectConfig.Hide], context.ProjectConfig.Replace).Plan();
         // PrepareMounts protects every module repo; the session-end check takes as the submodules' own only those
-        // listed.
+        // listed. The open sessions are found just before the module scan.
         var modules = Project.IsRepo
-            ? ModuleBaseline.ChooseAtStart(Project.Key, RuntimeDir, Project.CommonGitDir!, Project.Dir)
+            ? ModuleBaseline.ChooseAtStart(SessionRegistry.FindOpen(Project.Key, RuntimeDir), Project.CommonGitDir!,
+                Project.Dir)
             : ModuleChoice.None;
         var image = EnsureImage(tools);
         // Under rootless Docker, the host user is container root: the agent
@@ -400,10 +401,15 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         Preparation prepared,
         IReadOnlyList<int> forwarded)
     {
-        // The protected files and the module list, by the open sessions' lists read again: one that opened between
-        // Prepare's read and its scan could have made a repo the scan found.
-        ModuleBaseline.NarrowAndSave(session, prepared.Mounts, prepared.Modules, RuntimeDir, Project.CommonGitDir,
-            Project.Dir);
+        // The protected files and the module list, by the open sessions found again and their lists read again: one
+        // that opened between Prepare's read and its scan could have made a repo the scan found.
+        ModuleBaseline.NarrowAndSave(new(
+            Session: session,
+            Mounts: prepared.Mounts,
+            Chosen: prepared.Modules,
+            Open: SessionRegistry.FindOpen(session.ProjectKey, RuntimeDir),
+            CommonGitDir: Project.CommonGitDir,
+            Dir: Project.Dir));
         var env = BuildEnv(prepared);
         File.WriteAllLines(session.EnvFile, env.Select(variable => $"{variable.Key}={variable.Value}"));
         WriteRecords(session, request, prepared, forwarded);

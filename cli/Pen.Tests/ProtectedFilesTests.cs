@@ -24,9 +24,9 @@ public class ProtectedFilesTests
     {
         var runtime = Path.Combine(t.Path, "runtime");
         var mounts = RepoGuard.PrepareMounts(dir, "/nonexistent-home");
-        var chosen = ModuleBaseline.ChooseAtStart(Key, runtime, common, dir);
+        var chosen = ModuleBaseline.ChooseAtStart(SessionRegistry.FindOpen(Key, runtime), common, dir);
         var s = NewSession(t, id);
-        ModuleBaseline.NarrowAndSave(s, mounts, chosen, runtime, common, dir);
+        ModuleBaseline.NarrowAndSave(new(s, mounts, chosen, SessionRegistry.FindOpen(Key, runtime), common, dir));
         File.WriteAllText(s.ComposeFile, "");
         return s;
     }

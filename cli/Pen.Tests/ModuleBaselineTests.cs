@@ -31,11 +31,11 @@ public sealed class ModuleBaselineTests : IDisposable
     {
         RepoGuard.CheckAtStart(dir);
         var mounts = RepoGuard.PrepareMounts(dir, "/nonexistent-home");
-        var chosen = ModuleBaseline.ChooseAtStart(Key, Runtime, common, dir);
+        var chosen = ModuleBaseline.ChooseAtStart(SessionRegistry.FindOpen(Key, Runtime), common, dir);
 
         var s = new SessionDir(Key, _t.Sub("runtime", "sessions", id));
         _locks[id] = FileLock.TryTake(s.LockFile, exclusive: true)!;
-        ModuleBaseline.NarrowAndSave(s, mounts, chosen, Runtime, common, dir);
+        ModuleBaseline.NarrowAndSave(new(s, mounts, chosen, SessionRegistry.FindOpen(Key, Runtime), common, dir));
         File.WriteAllText(s.ComposeFile, "");
         return s;
     }
@@ -418,7 +418,7 @@ public sealed class ModuleBaselineTests : IDisposable
         Die(Start(repo, git, "aaaaaaaa"));
         var (module, _) = Plant(git, Path.Combine(repo, "evil"), hook);
 
-        var chosen = ModuleBaseline.ChooseAtStart(Key, Runtime, git, repo);
+        var chosen = ModuleBaseline.ChooseAtStart(SessionRegistry.FindOpen(Key, Runtime), git, repo);
 
         Assert.Equal([kept], chosen.Listed);
         Assert.Equal([module], chosen.Unlisted);
@@ -431,7 +431,7 @@ public sealed class ModuleBaselineTests : IDisposable
         var (repo, git) = Repo();
         var (module, _) = Plant(git, Path.Combine(repo, "evil"), hook);
         var mounts = RepoGuard.PrepareMounts(repo, "/nonexistent-home");
-        var chosen = ModuleBaseline.ChooseAtStart(Key, Runtime, git, repo);
+        var chosen = ModuleBaseline.ChooseAtStart(SessionRegistry.FindOpen(Key, Runtime), git, repo);
         Assert.Equal([module], chosen.Listed);
         // A session that opened after that read, listing nothing (its Pen has died since): the repo the scan found
         // is one its agent could have made.
@@ -441,7 +441,8 @@ public sealed class ModuleBaselineTests : IDisposable
         File.WriteAllText(a.ComposeFile, "");
         var s = new SessionDir(Key, _t.Sub("runtime", "sessions", "bbbbbbbb"));
 
-        var narrowed = ModuleBaseline.NarrowAndSave(s, mounts, chosen, Runtime, git, repo);
+        var narrowed = ModuleBaseline.NarrowAndSave(
+            new(s, mounts, chosen, SessionRegistry.FindOpen(Key, Runtime), git, repo));
 
         Assert.Empty(narrowed.Listed);
         Assert.Equal([module], narrowed.Unlisted);

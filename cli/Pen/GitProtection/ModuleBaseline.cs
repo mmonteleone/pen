@@ -25,11 +25,12 @@ namespace Pen.GitProtection;
 internal static class ModuleBaseline
 {
     /// <summary>
-    /// Splits the module repos in <paramref name="commonGitDir"/> now by the lists the project's open sessions made
-    /// at their start.
+    /// Splits the module repos in <paramref name="commonGitDir"/> now by the lists <paramref name="open"/> sessions
+    /// made at their start.
     /// </summary>
-    /// <param name="projectKey">The project's key.</param>
-    /// <param name="runtimeDir">The project's runtime dir.</param>
+    /// <param name="open">
+    /// The project's open sessions (<see cref="SessionRegistry.FindOpen"/>), found just before this is called.
+    /// </param>
     /// <param name="commonGitDir">The common git dir of the session that's starting.</param>
     /// <param name="dir">The project dir, for the message.</param>
     /// <returns>The repos found, split.</returns>
@@ -38,43 +39,30 @@ internal static class ModuleBaseline
     /// The lists are read before the scan, so a repo it finds that an open session's agent could have made is missing
     /// from that session's list.
     /// </remarks>
-    public static ModuleChoice ChooseAtStart(string projectKey, string runtimeDir, string commonGitDir, string dir)
+    public static ModuleChoice ChooseAtStart(IReadOnlyList<SessionDir> open, string commonGitDir, string dir)
     {
-        var lists = ReadOpenLists(SessionRegistry.FindOpen(projectKey, runtimeDir), commonGitDir, dir);
+        var lists = ReadOpenLists(open, commonGitDir, dir);
         var found = RepoScan.FindModuleRepos(commonGitDir);
         var listed = Choose(found, lists);
         return new(listed, [.. found.Except(listed, StringComparer.Ordinal)]);
     }
 
     /// <summary>
-    /// Saves <paramref name="session"/>'s protected files (<see cref="ProtectedFiles.Save"/>) with the project's
-    /// sessions open now as their baselines, having narrowed <paramref name="chosen"/> to what those sessions listed,
-    /// then records the common git dir and the narrowed list for the session-end check and later sessions.
+    /// Saves the starting session's protected files (<see cref="ProtectedFiles.Save"/>) with the sessions open now
+    /// as their baselines, having narrowed the chosen module repos to what those sessions listed, then records the
+    /// common git dir and the narrowed list for the session-end check and later sessions.
     /// </summary>
-    /// <param name="session">The session that's starting, not yet open itself.</param>
-    /// <param name="mounts">The session's mounts.</param>
-    /// <param name="chosen">
-    /// What <see cref="ChooseAtStart"/> chose, or <see cref="ModuleChoice.None"/> outside a repo.
-    /// </param>
-    /// <param name="runtimeDir">The project's runtime dir.</param>
-    /// <param name="commonGitDir">The common git dir of the session that's starting; null outside a repo.</param>
-    /// <param name="dir">The project dir.</param>
+    /// <param name="request">The session, what it chose, and the sessions open now.</param>
     /// <returns>The narrowed choice.</returns>
     /// <exception cref="PenException">An open session has no list to go by, or a file can't be saved.</exception>
     /// <remarks>
-    /// A session that opened after <see cref="ChooseAtStart"/> read the lists but before its scan could have made a
-    /// repo the scan found, so the lists are read again. The same sessions give the protected files their baselines,
-    /// and the repos left out here are unlisted for those too.
+    /// A session that opened after <see cref="ChooseAtStart"/>'s sessions were found but before its scan could have
+    /// made a repo the scan found, so the lists are read again, from sessions found again. The same sessions give
+    /// the protected files their baselines, and the repos left out here are unlisted for those too.
     /// </remarks>
-    public static ModuleChoice NarrowAndSave(
-        SessionDir session,
-        IReadOnlyList<Mount> mounts,
-        ModuleChoice chosen,
-        string runtimeDir,
-        string? commonGitDir,
-        string dir)
+    public static ModuleChoice NarrowAndSave(BaselineRequest request)
     {
-        var open = SessionRegistry.FindOpen(session.ProjectKey, runtimeDir);
+        var (session, mounts, chosen, open, commonGitDir, dir) = request;
         var narrowed = chosen;
         if (commonGitDir is not null)
         {
@@ -156,3 +144,23 @@ internal static class ModuleBaseline
             "its pen then ends the session), then rerun";
     }
 }
+
+/// <summary>What <see cref="ModuleBaseline.NarrowAndSave"/> narrows and saves for a session that's starting.</summary>
+/// <param name="Session">The session that's starting, not yet open itself.</param>
+/// <param name="Mounts">The session's mounts.</param>
+/// <param name="Chosen">
+/// What <see cref="ModuleBaseline.ChooseAtStart"/> chose, or <see cref="ModuleChoice.None"/> outside a repo.
+/// </param>
+/// <param name="Open">
+/// The project's open sessions (<see cref="SessionRegistry.FindOpen"/>), found again just before the save, after
+/// the scan <see cref="ModuleBaseline.ChooseAtStart"/> made.
+/// </param>
+/// <param name="CommonGitDir">The common git dir of the session that's starting; null outside a repo.</param>
+/// <param name="Dir">The project dir.</param>
+internal sealed record BaselineRequest(
+    SessionDir Session,
+    IReadOnlyList<Mount> Mounts,
+    ModuleChoice Chosen,
+    IReadOnlyList<SessionDir> Open,
+    string? CommonGitDir,
+    string Dir);
