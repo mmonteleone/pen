@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 
 namespace Pen.Signing;
@@ -67,7 +68,7 @@ internal sealed class CommitReader(HostGit git)
         var header = line.Split(' ');
         if (header.Length != 3 || header[1] != "commit")
             throw new PenException($"{sha} isn't a commit ({string.Join(' ', header)})");
-        return int.Parse(header[2]);
+        return int.Parse(header[2], CultureInfo.InvariantCulture);
     }
 
     /// <summary>Parses one commit's bytes, turning a refusal into a message that names the commit.</summary>
