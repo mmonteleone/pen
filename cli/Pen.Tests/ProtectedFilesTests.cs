@@ -737,6 +737,76 @@ public class ProtectedFilesTests
         Assert.True(File.Exists(Path.Combine(git, "commondir" + GitQuarantine.Suffix)));
     }
 
+    /// <summary>
+    /// Manifests with a null, or another type, where a string goes: a copy's name, a path (of a file that's put back,
+    /// and of one that's adopted, which isn't) and a read-only directory.
+    /// </summary>
+    public static TheoryData<string> ManifestsWithoutAString =>
+    [
+        """{"version":1,"files":[{"path":"/x","copy":null,"mode":420,"adopted":false}],"readOnlyDirs":[]}""",
+        """{"version":1,"files":[{"path":null,"copy":"0","mode":420,"adopted":false}],"readOnlyDirs":[]}""",
+        """{"version":1,"files":[{"path":null,"copy":"0","mode":420,"adopted":true}],"readOnlyDirs":[]}""",
+        """{"version":1,"files":[],"readOnlyDirs":[null]}""",
+        """{"version":1,"files":[{"path":5,"copy":"0","mode":420,"adopted":false}],"readOnlyDirs":[]}""",
+        """{"version":1,"files":[],"readOnlyDirs":[5]}""",
+    ];
+
+    [Theory]
+    [MemberData(nameof(ManifestsWithoutAString))]
+    public void AManifestWithoutAStringWhereOneGoes_IsDamaged(string manifest)
+    {
+        var e = Assert.Throws<PenException>(() => ProtectedFiles.Parse(manifest));
+        Assert.True(ProtectedFiles.IsDamage(e));
+    }
+
+    /// <summary>Ends a started session after writing <paramref name="manifest"/> over its manifest and planting a commondir.</summary>
+    private static (CheckResult Check, SessionDir Session, string Git) EndWithManifest(TempDir t, string manifest)
+    {
+        var (repo, git) = Repo(t);
+        var s = Started(t, repo, git);
+        File.WriteAllText(s.ProtectedManifest, manifest);
+        File.WriteAllText(Path.Combine(git, "commondir"), "planted\n");
+        return (End(repo, s), s, git);
+    }
+
+    [Theory]
+    [MemberData(nameof(ManifestsWithoutAString))]
+    public void AManifestWithoutAStringWhereOneGoes_FailsTheEnd_AsOneFromAnotherVersionDoes(string manifest)
+    {
+        using var reference = new TempDir();
+        var (expected, _, _) = EndWithManifest(reference, """{"version":99,"files":[],"readOnlyDirs":[]}""");
+        using var t = new TempDir();
+
+        var (check, s, git) = EndWithManifest(t, manifest);
+
+        Assert.Equal(expected.Failure, check.Failure);
+        Assert.True(check.RestoreIncomplete);
+        var failed = Assert.IsType<Quarantined.Failed>(Assert.Single(check.Moved, q => q.From == s.ProtectedManifest));
+        Assert.Equal(Assert.Single(expected.Moved, q => q is Quarantined.Failed).Why, failed.Why);
+        Assert.Contains("couldn't be read, so they weren't compared. COULD NOT RESTORE THEM", failed.Why);
+        Assert.True(File.Exists(Path.Combine(git, "commondir" + GitQuarantine.Suffix)));
+        Assert.True(File.Exists(s.ProtectedManifest));
+        Assert.NotEmpty(Directory.GetFiles(s.ProtectedDir));
+    }
+
+    [Theory]
+    [MemberData(nameof(ManifestsWithoutAString))]
+    [InlineData("""{"version":99,"files":[],"readOnlyDirs":[]}""")]
+    public void AnOpenSessionsManifestWithoutAStringWhereOneGoes_IsNoRecord_ToOneStartingNow(string manifest)
+    {
+        using var t = new TempDir();
+        var (repo, git) = Repo(t);
+        var first = Started(t, repo, git);
+        File.WriteAllText(first.ProtectedManifest, manifest);
+        var file = Path.Combine(git, "config.worktree");
+        File.WriteAllText(file, "[core]\n\tfsmonitor = /evil\n");
+
+        var second = Started(t, repo, git, "bbbbbbbb");
+
+        // As for an open session with no record: its agent could have planted it.
+        Assert.True(Assert.Single(ProtectedFiles.Read(second)!.Files, f => f.Path == file).Adopted);
+    }
+
     [Fact]
     public void ARetriedEnd_DoesntWriteStaleCopiesOverLaterHostEdits()
     {

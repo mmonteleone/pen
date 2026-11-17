@@ -29,6 +29,7 @@ internal static class ProtectedFiles
 
     private const UnixFileMode Dir700 = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
     private const int ManifestVersion = 1;
+    private const string DamagedManifest = "the saved list of protected files is damaged";
 
     /// <summary>
     /// Saves the files in <paramref name="mounts"/> marked Verify, refusing the session if one can't be saved whole.
@@ -180,7 +181,10 @@ internal static class ProtectedFiles
     }
 
     /// <summary>Reads a manifest written by <see cref="Serialize"/>.</summary>
-    /// <exception cref="PenException">It's from another version of Pen, or a copy's name is damaged.</exception>
+    /// <exception cref="PenException">
+    /// It's from another version of Pen, a path, directory or copy's name isn't a string (a JSON null included), or a
+    /// copy's name is damaged.
+    /// </exception>
     internal static ProtectedManifest Parse(string json)
     {
         using var document = JsonDocument.Parse(json);
@@ -190,15 +194,24 @@ internal static class ProtectedFiles
         var files = new List<ProtectedFile>();
         foreach (var entry in root.GetProperty("files").EnumerateArray())
         {
-            var copy = entry.GetProperty("copy").GetString()!;
+            var copy = ReadString(entry.GetProperty("copy"));
             if (copy.Length == 0 || !copy.All(char.IsAsciiDigit))
-                throw new PenException("the saved list of protected files is damaged");
-            var path = entry.GetProperty("path").GetString()!;
+                throw new PenException(DamagedManifest);
+            var path = ReadString(entry.GetProperty("path"));
             var mode = (UnixFileMode)(entry.GetProperty("mode").GetInt32() & 0xFFF);
             files.Add(new(path, copy, mode, entry.GetProperty("adopted").GetBoolean()));
         }
-        return new(files, [.. root.GetProperty("readOnlyDirs").EnumerateArray().Select(d => d.GetString()!)]);
+        return new(files, [.. root.GetProperty("readOnlyDirs").EnumerateArray().Select(ReadString)]);
     }
+
+    /// <summary>Reads a string from a manifest.</summary>
+    /// <exception cref="PenException">
+    /// It's anything else, a JSON null included, which <see cref="JsonElement.GetString"/> would return as null.
+    /// </exception>
+    private static string ReadString(JsonElement element) =>
+        element.ValueKind == JsonValueKind.String && element.GetString() is { } text
+            ? text
+            : throw new PenException(DamagedManifest);
 
     /// <summary>
     /// What open sessions have saved: their files by what each path resolves to now, oldest session first; the files
