@@ -483,7 +483,8 @@ internal sealed partial class Config
                 Access = FileAccess.Write,
                 UnixCreateMode = mode,
             });
-            Embedded.Open(template).CopyTo(file);
+            using var source = Embedded.Open(template);
+            source.CopyTo(file);
         }
         catch (IOException) when (File.Exists(path))
         {
