@@ -491,31 +491,13 @@ internal sealed class MaskPlanner
             return false;
         }
 
-        return !IsOffLimitsPath(Relative(path));
+        return !HidePattern.IsOffLimits(Relative(path));
     }
 
     /// <summary>Tells whether an entry is a .git (any case) or, at the top, .pen (any case).</summary>
     private static bool IsOffLimitsName(string name, string parentRelative) =>
         name.Equals(".git", StringComparison.OrdinalIgnoreCase)
         || (parentRelative.Length == 0 && name.Equals(".pen", StringComparison.OrdinalIgnoreCase));
-
-    /// <summary>Tells whether a path in the project has a .git segment or starts with .pen, ignoring case.</summary>
-    private static bool IsOffLimitsPath(string relative)
-    {
-        var first = true;
-        foreach (var range in relative.AsSpan().Split('/'))
-        {
-            var segment = relative.AsSpan(range);
-            if (segment.Equals(".git", StringComparison.OrdinalIgnoreCase)
-                || (first && segment.Equals(".pen", StringComparison.OrdinalIgnoreCase)))
-            {
-                return true;
-            }
-
-            first = false;
-        }
-        return false;
-    }
 
     /// <summary>Lists a directory's entries without following symlinks, warning if it can't be listed.</summary>
     /// <returns>The entries, or null if it can't be listed or changed.</returns>
@@ -668,7 +650,7 @@ internal sealed class MaskPlanner
     private (string Path, FileStatus Status) FindTarget(string target)
     {
         var parts = target.Split('/');
-        if (parts.Any(part => part is "" or "." or "..") || IsOffLimitsPath(target))
+        if (parts.Any(part => part is "" or "." or "..") || HidePattern.IsOffLimits(target))
             throw OutsideProject(target);
         var path = _projectDir;
         FileStatus? status = null;

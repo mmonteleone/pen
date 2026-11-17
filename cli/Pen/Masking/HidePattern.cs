@@ -182,8 +182,11 @@ internal sealed class HidePattern
         return MatchesSegments(relativePath);
     }
 
-    /// <summary>Tells whether a path has a .git segment or starts with .pen, which no pattern may match.</summary>
-    private static bool IsOffLimits(string path)
+    /// <summary>
+    /// Tells whether a path in the project has a .git segment or starts with .pen, ignoring case: no pattern may
+    /// match it.
+    /// </summary>
+    internal static bool IsOffLimits(string path)
     {
         var first = true;
         foreach (var range in path.AsSpan().Split('/'))
