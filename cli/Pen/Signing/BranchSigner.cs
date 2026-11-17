@@ -99,7 +99,9 @@ internal sealed class BranchSigner(HostGit git)
     /// <exception cref="PenException">The branch moved meanwhile, so nothing was changed.</exception>
     public void UpdateBranch(string branchRef, string newHead, string oldHead)
     {
-        var result = git.Run("update-ref", "-m", "pen sign", branchRef, newHead, oldHead);
+        // --no-deref writes exactly the ref that was checked to be a branch: should it have become a symbolic ref
+        // meanwhile (say to a tag at the same commit), the write replaces it rather than moving what it points to.
+        var result = git.Run("update-ref", "--no-deref", "-m", "pen sign", branchRef, newHead, oldHead);
         if (!result.Ok)
         {
             throw new PenException($"{Out.Field(branchRef)} moved while signing, so nothing " +

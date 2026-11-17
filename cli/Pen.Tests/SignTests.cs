@@ -284,6 +284,23 @@ public class SignTests
     }
 
     [Fact]
+    public void ABranchThatBecameASymbolicRefDuringTheRewrite_IsReplaced_NotWhatItPointsTo()
+    {
+        using var f = new Fixture();
+        var b = f.Head();
+        var c1 = f.Commit("a", "1", "A <a@x.io>", "2026-01-01T00:00:00Z", "one");
+        var map = f.Rewrite(new BranchSigner(f.Git).ListRange(b, c1));
+        f.Git.ReadOutput("update-ref", "refs/tags/v1", c1);
+        f.Git.ReadOutput("symbolic-ref", "refs/heads/main", "refs/tags/v1");
+
+        new BranchSigner(f.Git).UpdateBranch("refs/heads/main", map[c1], c1);
+
+        Assert.Equal(c1, f.Git.ReadOutput("rev-parse", "refs/tags/v1"));
+        Assert.Equal(map[c1], f.Git.ReadOutput("rev-parse", "refs/heads/main"));
+        Assert.Null(f.Git.TryReadOutput("symbolic-ref", "-q", "--no-recurse", "refs/heads/main"));
+    }
+
+    [Fact]
     public void ABranchThatMovedDuringTheRewrite_IsRefused()
     {
         using var f = new Fixture();
