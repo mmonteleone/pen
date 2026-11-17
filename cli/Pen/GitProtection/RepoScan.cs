@@ -1,4 +1,3 @@
-using System.IO.Enumeration;
 using Pen.Platform;
 
 namespace Pen.GitProtection;
@@ -10,17 +9,6 @@ namespace Pen.GitProtection;
 /// </remarks>
 internal static class RepoScan
 {
-    private static readonly EnumerationOptions Options = new()
-    {
-        AttributesToSkip = 0, // dot files are "hidden" on Unix, and .git is one
-        IgnoreInaccessible = false, // a directory that can't be listed has to be noticed
-        RecurseSubdirectories = false,
-        ReturnSpecialDirectories = false,
-    };
-
-    /// <summary>One name in a directory listing, as the listing reports it (no symlink followed).</summary>
-    private readonly record struct Entry(string Name, bool IsDir, bool IsLink);
-
     /// <summary>
     /// Scans the tree below <paramref name="root"/> for repos, plus a bare layout in the root itself, and for symlinks
     /// into the git dir.
@@ -129,23 +117,6 @@ internal static class RepoScan
     }
 
     private static bool HasReplacement(string name) => name.Contains('\uFFFD');
-
-    /// <summary>Lists <paramref name="dir"/>'s entries without following symlinks.</summary>
-    /// <returns>The entries, or null if the directory can't be listed.</returns>
-    private static List<Entry>? ListEntries(string dir)
-    {
-        try
-        {
-            return new FileSystemEnumerable<Entry>(dir,
-                (ref FileSystemEntry e) =>
-                    new Entry(e.FileName.ToString(), e.IsDirectory, (e.Attributes & FileAttributes.ReparsePoint) != 0),
-                Options).ToList();
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
 
     private static bool IsNamed(string name, string wanted) =>
         name.Equals(wanted, StringComparison.OrdinalIgnoreCase);
@@ -503,7 +474,7 @@ internal static class RepoScan
             if (ScanEntries(dir, entries, undecodable) && !(_insideGitDir && IsOwnGitDir(dir)))
             {
                 // The HEAD that counts, git's own spelling first: renaming it breaks the layout.
-                var head = entries.Where(e => IsNamed(e.Name, "HEAD") && IsHead(e.IsDir, e.IsLink))
+                var head = entries.Where(e => IsNamed(e.Name, "HEAD") && IsHead(e.IsDirectory, e.IsLink))
                     .OrderBy(e => e.Name != "HEAD").First().Name;
                 AddRepo(dir, Path.Combine(dir, head), NestedKind.Bare);
             }
@@ -588,16 +559,16 @@ internal static class RepoScan
         /// <returns>
         /// The entries, or null if there's nothing to scan: the directory is gone, shut or noted unlistable.
         /// </returns>
-        private List<Entry>? ListOrOpen(string dir)
+        private List<ListedEntry>? ListOrOpen(string dir)
         {
-            var entries = ListEntries(dir);
+            var entries = DirectoryListing.ReadOrNull(dir);
             if (entries is not null)
                 return entries;
             // Gone, or shut: nothing host git could reach.
             if (Native.IsShutOrGone(dir))
                 return null;
             if (tryOpen is not null && tryOpen(dir))
-                entries = ListEntries(dir);
+                entries = DirectoryListing.ReadOrNull(dir);
             if (entries is null)
                 _unlistable.Add(dir);
             return entries;
@@ -610,7 +581,7 @@ internal static class RepoScan
         /// The names of all its undecodable entries as listed, or null, noting the directory unlistable, if its raw
         /// names can't be read.
         /// </returns>
-        private HashSet<string>? FindUndecodable(string dir, List<Entry> entries)
+        private HashSet<string>? FindUndecodable(string dir, List<ListedEntry> entries)
         {
             HashSet<string> undecodable = [];
             if (!entries.Any(e => HasReplacement(e.Name)))
@@ -637,7 +608,7 @@ internal static class RepoScan
         /// <returns>
         /// Whether <paramref name="dir"/> itself has a git dir's layout (<see cref="IsGitDirLayout(string)"/>).
         /// </returns>
-        private bool ScanEntries(string dir, List<Entry> entries, HashSet<string> undecodable)
+        private bool ScanEntries(string dir, List<ListedEntry> entries, HashSet<string> undecodable)
         {
             var head = false;
             var objects = false;
@@ -656,7 +627,7 @@ internal static class RepoScan
                 }
                 // Of any type, as IsGitDirLayout says.
                 if (IsNamed(entry.Name, "HEAD"))
-                    head |= IsHead(entry.IsDir, entry.IsLink);
+                    head |= IsHead(entry.IsDirectory, entry.IsLink);
                 else if (IsNamed(entry.Name, "objects"))
                     objects = true;
                 else if (IsNamed(entry.Name, "refs"))
@@ -666,7 +637,7 @@ internal static class RepoScan
 
                 if (entry.IsLink)
                     NoteLink(path);
-                else if (entry.IsDir)
+                else if (entry.IsDirectory)
                     _pending.Push(path);
             }
             return IsGitDirLayout(head, objects, refs, commondir);
@@ -676,7 +647,7 @@ internal static class RepoScan
         /// Notes the .git at <paramref name="path"/> unless it's the project's own, a worktree of it or a known
         /// submodule's checkout. In the tree, a .git symlink that leads into the git dir is noted as such a symlink.
         /// </summary>
-        private void NoteGitEntry(string dir, Entry entry, string path)
+        private void NoteGitEntry(string dir, ListedEntry entry, string path)
         {
             if (dir == root && !_insideGitDir)
                 return; // the project's own; never descended into
@@ -685,7 +656,7 @@ internal static class RepoScan
                 if (!NoteLink(path))
                     AddRepo(dir, path, NestedKind.GitLink);
             }
-            else if (entry.IsDir)
+            else if (entry.IsDirectory)
             {
                 AddRepo(dir, path, NestedKind.GitDir);
             }

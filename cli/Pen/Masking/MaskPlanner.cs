@@ -1,4 +1,3 @@
-using System.IO.Enumeration;
 using Pen.GitProtection;
 using Pen.Platform;
 
@@ -33,14 +32,6 @@ internal sealed class MaskPlanner
 
     private const UnixFileMode ReadAndExecuteBits = UnixFileMode.UserRead | UnixFileMode.UserExecute
         | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
-
-    private static readonly EnumerationOptions Options = new()
-    {
-        AttributesToSkip = 0, // dot files are "hidden" on Unix, and .env is one
-        IgnoreInaccessible = false, // a directory that can't be listed has to be warned about
-        RecurseSubdirectories = false,
-        ReturnSpecialDirectories = false,
-    };
 
     private readonly string _projectDir;
     private readonly string? _commonGitDir;
@@ -540,19 +531,12 @@ internal sealed class MaskPlanner
             return null;
         }
 
-        List<Entry> entries;
-        try
-        {
-            entries = new FileSystemEnumerable<Entry>(dir.Path,
-                (ref FileSystemEntry e) =>
-                    new Entry(e.FileName.ToString(), e.IsDirectory, (e.Attributes & FileAttributes.ReparsePoint) != 0),
-                Options).ToList();
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        if (DirectoryListing.ReadOrNull(dir.Path) is not { } listed)
         {
             Warn($"couldn't look in {Name(dir.Relative)} for files to hide");
             return null;
         }
+        var entries = listed.ConvertAll(entry => new Entry(entry.Name, entry.IsDirectory, entry.IsLink));
         if (!IsUnchanged(dir))
         {
             WarnChangedDir(dir.Relative);
