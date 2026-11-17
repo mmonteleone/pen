@@ -1115,6 +1115,41 @@ public class ProtectedFilesTests
         Assert.Equal(original, File.ReadAllBytes(config));
     }
 
+    /// <summary>
+    /// A session whose Pen died is open until the next run ends it, and its agent may still be running, so the next
+    /// session takes that one's copies as its baseline, not what its agent wrote.
+    /// </summary>
+    [Fact]
+    public void Replay_ASecondSession_TakesTheBaselineOfOneWhosePenDied()
+    {
+        using var t = new TempDir();
+        var (hook, marker) = PlantableFsmonitor(t);
+        var (repo, git) = Repo(t);
+        var runtime = Path.Combine(t.Path, "runtime");
+        var config = Path.Combine(git, "config");
+        var original = File.ReadAllBytes(config);
+        var first = Started(t, repo, git, "aaaaaaaa");
+        using (var pen = FileLock.TryTake(first.LockFile, exclusive: true))
+        {
+            Assert.NotNull(pen);
+            File.AppendAllText(config, $"[core]\n fsmonitor = {hook}\n"); // its agent, past its mount
+        }
+        // Its Pen has died: not running, still open.
+        Assert.Empty(SessionRegistry.FindRunning(Key, runtime));
+        Assert.Equal([first.Id], SessionRegistry.FindOpen(Key, runtime).Select(s => s.Id));
+        AssertRuns(repo, marker);
+
+        var second = Started(t, repo, git, "bbbbbbbb");
+
+        var saved = Assert.Single(ProtectedFiles.Read(second)!.Files, f => f.Path == config);
+        Assert.False(saved.Adopted);
+        Assert.Equal(original, File.ReadAllBytes(Path.Combine(second.ProtectedDir, saved.Copy)));
+        var check = End(repo, second);
+        Assert.Null(check.Failure);
+        Assert.Equal(original, File.ReadAllBytes(config));
+        AssertDoesntRun(repo, marker);
+    }
+
     [Fact]
     public void ASecondSession_FallsBackToTheFile_WhenTheFirstHasJustEnded()
     {
