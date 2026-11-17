@@ -14,24 +14,37 @@ internal sealed class CommitReader(HostGit git)
     /// </exception>
     public Dictionary<string, CommitObject> Read(IReadOnlyList<string> commits)
     {
-        var result = new Dictionary<string, CommitObject>(StringComparer.Ordinal);
         if (commits.Count == 0)
-            return result;
+            return new Dictionary<string, CommitObject>(StringComparer.Ordinal);
         var batch = git.Run(["cat-file", "--batch"], HostGit.EncodeLines(commits));
         if (!batch.Ok)
             throw new PenException($"git cat-file failed: {batch.Stderr.Trim()}");
-        var bytes = batch.Stdout;
+        var result = ParseBatch(commits, batch.Stdout);
+        CheckMatchesGit(commits, result);
+        return result;
+    }
+
+    /// <summary>Splits <c>git cat-file --batch</c> output into <paramref name="commits"/>, and parses each.</summary>
+    /// <param name="commits">The commits asked for, in the order they were asked for.</param>
+    /// <param name="output">git's output: for each commit, a header line, its content, then a newline.</param>
+    /// <returns>Each commit's parsed object, by hash.</returns>
+    /// <exception cref="PenException">
+    /// The output is shorter than its headers say, one isn't a commit, or one has a header Pen can't re-create
+    /// exactly.
+    /// </exception>
+    public static Dictionary<string, CommitObject> ParseBatch(IReadOnlyList<string> commits, byte[] output)
+    {
+        var result = new Dictionary<string, CommitObject>(StringComparer.Ordinal);
         var position = 0;
         foreach (var sha in commits)
         {
-            var newline = Array.IndexOf(bytes, (byte)'\n', position);
+            var newline = Array.IndexOf(output, (byte)'\n', position);
             if (newline < 0)
                 throw new PenException("git cat-file --batch: truncated output");
-            var size = ReadCommitSize(sha, Encoding.ASCII.GetString(bytes, position, newline - position));
-            result[sha] = Parse(sha, bytes[(newline + 1)..(newline + 1 + size)]);
+            var size = ReadCommitSize(sha, Encoding.ASCII.GetString(output, position, newline - position));
+            result[sha] = Parse(sha, output[(newline + 1)..(newline + 1 + size)]);
             position = newline + 1 + size + 1; // content, then a newline
         }
-        CheckMatchesGit(commits, result);
         return result;
     }
 
