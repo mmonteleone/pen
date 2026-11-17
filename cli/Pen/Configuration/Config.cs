@@ -121,7 +121,7 @@ internal sealed partial class Config
         }
         try
         {
-            return TomlSerializer.Deserialize(text, TomlContext.Default.TomlTable) ?? new TomlTable();
+            return TomlSerializer.Deserialize(text, TomlContext.Default.TomlTable) ?? [];
         }
         catch (TomlException exception)
         {

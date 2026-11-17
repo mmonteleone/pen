@@ -76,7 +76,7 @@ internal static partial class Allowlist
     /// <summary>Merges the sources as <see cref="Merge"/> does, leaving out <see cref="AnyDomain"/>.</summary>
     /// <returns>The domains the sources allow by name, which the proxy allows in open egress too.</returns>
     public static List<string> MergeNamed(params IEnumerable<string>[] sources) =>
-        Merge(sources.Select(source => source.Where(domain => domain.Trim() != AnyDomain)).ToArray());
+        Merge([.. sources.Select(source => source.Where(domain => domain.Trim() != AnyDomain))]);
 
     /// <summary>Lists the wildcards that match <paramref name="domain"/>, a domain or a wildcard.</summary>
     /// <remarks>
@@ -272,7 +272,7 @@ internal static partial class Allowlist
     {
         var open = allow.Contains(AnyDomain);
         if (deny.Count == 0 && !open)
-            return FormatBlockedLine(hosts.Where(host => !IsAllowed(allow, host)).ToList()) is { } only ? [only] : [];
+            return FormatBlockedLine([.. hosts.Where(host => !IsAllowed(allow, host))]) is { } only ? [only] : [];
 
         var named = open ? allow.Where(entry => entry != AnyDomain).ToHashSet(StringComparer.Ordinal) : allow;
         var denied = new List<string>();

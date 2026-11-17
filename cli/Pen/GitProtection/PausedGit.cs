@@ -350,7 +350,7 @@ internal static class PausedGit
             else if (!Directory.Exists(dir))
                 _found.Add(new(dir, kind, [new("couldn't read the todo in it: it isn't a directory", [])]));
             else
-                _found.Add(new(dir, kind, readNotes(dir).OfType<PausedNote>().ToList()));
+                _found.Add(new(dir, kind, [.. readNotes(dir).OfType<PausedNote>()]));
         }
     }
 }

@@ -9,19 +9,17 @@ namespace Pen.Platform;
 /// </remarks>
 internal sealed class FileLock : IDisposable
 {
-    private readonly SafeFileHandle _handle;
-
     private FileLock(string path, SafeFileHandle handle)
     {
         Path = path;
-        _handle = handle;
+        Handle = handle;
     }
 
     /// <summary>Gets the path of the lock file.</summary>
     public string Path { get; }
 
     /// <summary>Gets the lock's file descriptor, for checking it isn't inherited.</summary>
-    internal SafeFileHandle Handle => _handle;
+    internal SafeFileHandle Handle { get; }
 
     /// <summary>Takes a lock on <paramref name="path"/>, creating the file if needed, without waiting.</summary>
     /// <param name="path">The lock file.</param>
@@ -45,5 +43,5 @@ internal sealed class FileLock : IDisposable
     }
 
     /// <summary>Releases the lock.</summary>
-    public void Dispose() => _handle.Dispose(); // closing the fd releases the lock
+    public void Dispose() => Handle.Dispose(); // closing the fd releases the lock
 }

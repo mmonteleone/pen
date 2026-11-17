@@ -46,9 +46,8 @@ internal static class Docker
             ["ps", "-a", "--filter", $"volume={volume}", "--format", "{{.Names}}"]);
         if (containers.ExitStatus.ExitCode != 0)
             throw new PenException($"docker ps failed: {containers.StandardError.Trim()}");
-        return containers.StandardOutput
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToList();
+        return [.. containers.StandardOutput
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
     }
 
     /// <summary>

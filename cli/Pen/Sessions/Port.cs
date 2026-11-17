@@ -57,7 +57,7 @@ internal readonly record struct Port(int Number, bool FromFlag)
                 "already in use on this machine, maybe by another pen session (pen ps)");
         }
 
-        return ports.Where(port => !taken.Contains(port)).Select(port => port.Number).ToList();
+        return [.. ports.Where(port => !taken.Contains(port)).Select(port => port.Number)];
     }
 
     /// <summary>Tells whether something on the host already has <paramref name="port"/> on 127.0.0.1.</summary>

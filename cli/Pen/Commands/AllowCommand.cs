@@ -563,10 +563,9 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog)
             if (!last.TryGetValue(blockedHost, out var seen) || time > seen)
                 last[blockedHost] = time;
         }
-        return last.Select(entry => new Blocked(entry.Key, entry.Value))
+        return [.. last.Select(entry => new Blocked(entry.Key, entry.Value))
             .OrderByDescending(blocked => blocked.Last)
-            .ThenBy(blocked => blocked.Host, StringComparer.Ordinal)
-            .ToList();
+            .ThenBy(blocked => blocked.Host, StringComparer.Ordinal)];
     }
 
     /// <summary>

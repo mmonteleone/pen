@@ -229,10 +229,9 @@ internal sealed class SessionDir(string projectKey, string path)
     {
         if (!File.Exists(PortsFile))
             return [];
-        return File.ReadAllLines(PortsFile)
+        return [.. File.ReadAllLines(PortsFile)
             .Select(line => int.TryParse(line, CultureInfo.InvariantCulture, out var port) ? port : 0)
-            .Where(port => port > 0)
-            .ToList();
+            .Where(port => port > 0)];
     }
 
     /// <summary>Writes the session's tools and the domains they brought.</summary>

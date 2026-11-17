@@ -37,10 +37,9 @@ internal static class Embedded
 
     /// <summary>Lists the embedded names under a prefix such as "image/", sorted ordinally.</summary>
     public static List<string> ListUnder(string prefix) =>
-        ResourceAssembly.GetManifestResourceNames()
+        [.. ResourceAssembly.GetManifestResourceNames()
             .Where(n => n.StartsWith(prefix, StringComparison.Ordinal))
-            .Order(StringComparer.Ordinal)
-            .ToList();
+            .Order(StringComparer.Ordinal)];
 
     /// <summary>Computes the image hash: SHA-256 over every embedded image/ file's path and content.</summary>
     /// <returns>The hash's first 16 hex digits.</returns>

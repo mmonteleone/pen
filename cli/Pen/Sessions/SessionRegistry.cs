@@ -59,9 +59,8 @@ internal static class SessionRegistry
     /// </summary>
     /// <returns>The sessions; for a linked worktree, only that worktree's.</returns>
     public static List<SessionDir> FindRunningIn(string projectKey, string runtimeDir, string dir) =>
-        FindRunning(projectKey, runtimeDir)
-            .Where(session => session.ReadEnv().TryGetValue("PROJECT_DIR", out var started) && started == dir)
-            .ToList();
+        [.. FindRunning(projectKey, runtimeDir)
+            .Where(session => session.ReadEnv().TryGetValue("PROJECT_DIR", out var started) && started == dir)];
 
     /// <summary>Gets the path of the project's project.lock.</summary>
     public static string GetProjectLockFile(string runtimeDir) => Path.Combine(runtimeDir, "project.lock");

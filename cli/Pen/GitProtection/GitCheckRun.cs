@@ -117,7 +117,7 @@ internal sealed class GitCheckRun
             Opened = _changes.Opened,
             Restored = _changes.Restored,
             RestoreIncomplete = !_restoreDone,
-            RestoreBlocked = _changes.Blocked.Distinct(StringComparer.Ordinal).ToList(),
+            RestoreBlocked = [.. _changes.Blocked.Distinct(StringComparer.Ordinal)],
         };
     }
 

@@ -12,7 +12,10 @@ namespace Pen.Signing;
 /// agent deleted. Replace refs are off too, so an object read by its hash is that object's own bytes. That doesn't
 /// cover history walks: .git/info/grafts and .git/shallow can still change which parents one follows.
 /// </remarks>
-internal sealed class HostGit
+/// <param name="dir">The repo to run in, or null for a call that reads only global config.</param>
+/// <param name="config">Extra "-c key=value" pairs, already split (e.g. the signing settings).</param>
+/// <param name="env">Extra environment for every call, such as another HOME, or null for none.</param>
+internal sealed class HostGit(string? dir, IReadOnlyList<string> config, IReadOnlyDictionary<string, string>? env)
 {
     /// <summary>The overrides in every call, after any -C &lt;dir&gt; and before every other argument.</summary>
     public static readonly IReadOnlyList<string> Overrides =
@@ -34,26 +37,15 @@ internal sealed class HostGit
     public static readonly IReadOnlyList<string> LogEachArgs =
         ["log", "--no-walk=unsorted", "--stdin", "--no-show-signature", "--no-notes"];
 
-    private readonly string? _dir;
-    private readonly IReadOnlyList<string> _config;
-    private readonly IReadOnlyDictionary<string, string>? _env;
+    private readonly string? _dir = dir;
+    private readonly IReadOnlyList<string> _config = config;
+    private readonly IReadOnlyDictionary<string, string>? _env = env;
 
     /// <summary>Creates a HostGit for <paramref name="dir"/> with no extra settings or environment.</summary>
     /// <param name="dir">The repo to run in, or null for a call that reads only global config.</param>
     public HostGit(string? dir)
         : this(dir, [], null)
     {
-    }
-
-    /// <summary>Creates a HostGit for <paramref name="dir"/> with extra settings and environment.</summary>
-    /// <param name="dir">The repo to run in, or null for a call that reads only global config.</param>
-    /// <param name="config">Extra "-c key=value" pairs, already split (e.g. the signing settings).</param>
-    /// <param name="env">Extra environment for every call, such as another HOME, or null for none.</param>
-    public HostGit(string? dir, IReadOnlyList<string> config, IReadOnlyDictionary<string, string>? env)
-    {
-        _dir = dir;
-        _config = config;
-        _env = env;
     }
 
     /// <summary>A HostGit for global-config reads: it runs from /, so no repo is discovered at all.</summary>

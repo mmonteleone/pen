@@ -41,7 +41,7 @@ internal static class ToolsImage
                 if (!ToolSpec.IsVersionSyntax(tool.Version) || !recipe.AcceptsVersion(tool.Version))
                     throw new PenException($"\"{Out.Field(tool.Version)}\" isn't a valid version of {recipe.Name}");
             }
-            plan.Add(new(recipe, versions.Select(tool => tool.Version).ToList()));
+            plan.Add(new(recipe, [.. versions.Select(tool => tool.Version)]));
         }
         return plan;
     }

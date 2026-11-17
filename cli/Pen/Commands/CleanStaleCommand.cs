@@ -151,12 +151,11 @@ internal sealed partial class CleanStaleCommand(HostEnv host, TextReader input)
     {
         if (currentBase is null)
             return [];
-        return images
+        return [.. images
             .Where(image => ToolsTag().IsMatch(image))
             .Where(image => readBaseId(image) is { } id
                 && id.StartsWith("sha256:", StringComparison.Ordinal) && id != currentBase)
-            .Order(StringComparer.Ordinal)
-            .ToList();
+            .Order(StringComparer.Ordinal)];
     }
 
     /// <summary>Reads <paramref name="image"/>'s base-ID label.</summary>
@@ -187,7 +186,7 @@ internal sealed partial class CleanStaleCommand(HostEnv host, TextReader input)
         }
 
         var imageList = images.ToList();
-        return byKey.Select(group => DescribeEntry(host, group.Key, group.Value, imageList)).ToList();
+        return [.. byKey.Select(group => DescribeEntry(host, group.Key, group.Value, imageList))];
     }
 
     /// <summary>Groups Pen's volumes in <paramref name="volumes"/> by their project key.</summary>
@@ -217,8 +216,8 @@ internal sealed partial class CleanStaleCommand(HostEnv host, TextReader input)
         {
             Key = key,
             Status = status,
-            Volumes = volumes.Order(StringComparer.Ordinal).ToList(),
-            Images = images.Where(image => IsImageOf(key, image)).Order(StringComparer.Ordinal).ToList(),
+            Volumes = [.. volumes.Order(StringComparer.Ordinal)],
+            Images = [.. images.Where(image => IsImageOf(key, image)).Order(StringComparer.Ordinal)],
             RuntimeDir = runtimeDir,
             RecordedDir = recorded,
             CurrentKey = current,
@@ -419,7 +418,7 @@ internal sealed partial class CleanStaleCommand(HostEnv host, TextReader input)
 
     /// <summary>Splits docker's output into its non-empty lines, trimmed.</summary>
     private static List<string> SplitLines(string output) =>
-        output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        [.. output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
 
     /// <summary>A project key: pen-&lt;clean name&gt;-&lt;8 hex&gt; (<see cref="Project.ComputeKey"/>).</summary>
     [GeneratedRegex("^pen-[a-z0-9_-]+-[0-9a-f]{8}$")]

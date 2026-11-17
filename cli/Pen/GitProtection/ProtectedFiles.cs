@@ -197,7 +197,7 @@ internal static class ProtectedFiles
             var mode = (UnixFileMode)(entry.GetProperty("mode").GetInt32() & 0xFFF);
             files.Add(new(path, copy, mode, entry.GetProperty("adopted").GetBoolean()));
         }
-        return new(files, root.GetProperty("readOnlyDirs").EnumerateArray().Select(d => d.GetString()!).ToList());
+        return new(files, [.. root.GetProperty("readOnlyDirs").EnumerateArray().Select(d => d.GetString()!)]);
     }
 
     /// <summary>

@@ -48,9 +48,8 @@ internal sealed class MountPlanner(string dir, string hostHome)
         _mounts.Add(new(penDir, ReadOnly: true));
 
         // A file that's also read as config (an include of HEAD) is verified however else it's mounted.
-        return _mounts.GroupBy(m => m.Path, StringComparer.Ordinal)
-            .Select(g => g.First() with { Verify = g.Any(m => m.Verify) })
-            .ToList();
+        return [.. _mounts.GroupBy(m => m.Path, StringComparer.Ordinal)
+            .Select(g => g.First() with { Verify = g.Any(m => m.Verify) })];
     }
 
     /// <summary>Plans the mounts for a main checkout, whose .git is <paramref name="git"/>.</summary>

@@ -89,10 +89,9 @@ internal sealed class MaskPlanner
     {
         _projectDir = projectDir;
         _commonGitDir = commonGitDir is null ? null : Native.RealPath(commonGitDir) ?? commonGitDir;
-        _protected = protectedPaths.Select(path => Native.RealPath(path) ?? path)
+        _protected = [.. protectedPaths.Select(path => Native.RealPath(path) ?? path)
             .Where(path => path != projectDir && RepoGuard.IsInside(projectDir, path))
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
+            .Distinct(StringComparer.Ordinal)];
         _hide = hide;
         _replace = replace;
     }
@@ -692,13 +691,9 @@ internal sealed class MaskPlanner
         foreach (var part in parts)
         {
             path = Path.Join(path, part);
-            status = Native.Stat(path, follow: false);
-            if (status is null)
-            {
-                throw new PenException($"replace: target \"{Out.Field(target)}\" doesn't exist: pen only replaces " +
+            status = Native.Stat(path, follow: false)
+                ?? throw new PenException($"replace: target \"{Out.Field(target)}\" doesn't exist: pen only replaces " +
                     "a file that's there (Docker would create an empty one in its place)");
-            }
-
             if (status.Value.IsSymlink)
             {
                 throw new PenException($"replace: target \"{Out.Field(target)}\": {Format(path)} is a symlink, " +
@@ -808,7 +803,6 @@ internal sealed class MaskPlanner
 
     /// <summary>Lists found paths as masked paths, sorted by their path in the project.</summary>
     private List<MaskedPath> ToMasked(Dictionary<string, Found> paths) =>
-        paths.Select(path => new MaskedPath(path.Key, Relative(path.Key), path.Value.Device, path.Value.Inode))
-            .OrderBy(masked => masked.RelativePath, StringComparer.Ordinal)
-            .ToList();
+        [.. paths.Select(path => new MaskedPath(path.Key, Relative(path.Key), path.Value.Device, path.Value.Inode))
+            .OrderBy(masked => masked.RelativePath, StringComparer.Ordinal)];
 }

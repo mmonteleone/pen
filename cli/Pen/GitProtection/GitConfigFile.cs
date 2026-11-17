@@ -448,7 +448,7 @@ internal static class GitConfigFile
             var last = full.LastIndexOf((byte)'.');
             var section = first < 0 ? "" : Encoding.UTF8.GetString(full[..first]);
             var subsection = first == last ? null : Encoding.UTF8.GetString(full[(first + 1)..last]);
-            var value = hasValue ? Encoding.UTF8.GetString(_value.ToArray()) : "true";
+            var value = hasValue ? Encoding.UTF8.GetString([.. _value]) : "true";
             Entries.Add(new(section, subsection, Encoding.UTF8.GetString(full[(last + 1)..]), value));
         }
 

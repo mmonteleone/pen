@@ -43,7 +43,7 @@ internal static class ModuleBaseline
         var lists = ReadOpenLists(SessionRegistry.FindOpen(projectKey, runtimeDir), commonGitDir, dir);
         var found = RepoScan.FindModuleRepos(commonGitDir);
         var listed = Choose(found, lists);
-        return new(listed, found.Except(listed, StringComparer.Ordinal).ToList());
+        return new(listed, [.. found.Except(listed, StringComparer.Ordinal)]);
     }
 
     /// <summary>
@@ -124,7 +124,7 @@ internal static class ModuleBaseline
     /// <summary>Keeps the repos in <paramref name="found"/> that every one of <paramref name="lists"/> has.</summary>
     /// <returns>Those repos, in the order found; compared ordinally.</returns>
     public static List<string> Choose(IReadOnlyList<string> found, IReadOnlyList<IReadOnlyList<string>> lists) =>
-        found.Where(repo => lists.All(list => list.Contains(repo, StringComparer.Ordinal))).ToList();
+        [.. found.Where(repo => lists.All(list => list.Contains(repo, StringComparer.Ordinal)))];
 
     /// <summary>Reads the module repos <paramref name="session"/> listed at its start in this common git dir.</summary>
     /// <returns>The list, or null if it has none for that dir or it can't be read.</returns>

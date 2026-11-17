@@ -141,7 +141,7 @@ internal sealed class InitCommand(HostEnv host, Project project, RecipeCatalog c
         }
         if (detection.Hide.Count > 0)
         {
-            var line = $"  hide: {ListFields(detection.Hide.Select(pattern => pattern.Pattern).ToList())}";
+            var line = $"  hide: {ListFields([.. detection.Hide.Select(pattern => pattern.Pattern)])}";
             var found = detection.Hide.SelectMany(pattern => pattern.Sources).Distinct(StringComparer.Ordinal).ToList();
             if (found.Count > 0)
                 line += $" (found {ListFields(found)})";
@@ -157,5 +157,5 @@ internal sealed class InitCommand(HostEnv host, Project project, RecipeCatalog c
 
     /// <summary>Lists repo-derived items through <see cref="Out.Field"/>, capped as the template caps them.</summary>
     private static string ListFields(IReadOnlyList<string> items) =>
-        ProjectTemplate.ListCapped(items.Select(Out.Field).ToList());
+        ProjectTemplate.ListCapped([.. items.Select(Out.Field)]);
 }

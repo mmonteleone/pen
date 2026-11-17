@@ -76,7 +76,7 @@ internal sealed class SignatureVerifier(HostGit git)
     {
         var whole = ReadSignatures(verifying, commits);
         if (whole.Ok)
-            return whole.Lines.ToList();
+            return [.. whole.Lines];
 
         // Some commit killed that read: ssh-keygen giving up on a forged
         // signature before reading the message (git takes the SIGPIPE), or

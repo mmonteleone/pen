@@ -55,7 +55,6 @@ internal sealed class CleanCommand(HostEnv host, Project project, TextReader inp
 
     /// <summary>Finds the project's volumes that exist.</summary>
     private List<string> FindVolumes() =>
-        VolumeSuffixes.Select(suffix => $"{project.Key}_{suffix}")
-            .Where(volume => Proc.Capture("docker", ["volume", "inspect", volume]).ExitStatus.ExitCode == 0)
-            .ToList();
+        [.. VolumeSuffixes.Select(suffix => $"{project.Key}_{suffix}")
+            .Where(volume => Proc.Capture("docker", ["volume", "inspect", volume]).ExitStatus.ExitCode == 0)];
 }

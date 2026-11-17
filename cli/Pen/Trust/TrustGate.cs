@@ -51,7 +51,7 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     private List<string> FindUnapprovedDomains(TrustStore store)
     {
         var covers = CoversProjectDomain(context.User, store);
-        return context.ProjectConfig.Allow.Distinct().Where(domain => !covers(domain)).ToList();
+        return [.. context.ProjectConfig.Allow.Distinct().Where(domain => !covers(domain))];
     }
 
     /// <summary>Selects the entries of the project's allow that a session's allowlist may take.</summary>
@@ -63,7 +63,7 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     /// asking, in order; the rest are what a prompt asks for. Session start and live apply both take these.
     /// </returns>
     internal static List<string> SelectAllowedDomains(Config user, Config projectConfig, TrustStore store) =>
-        projectConfig.Allow.Where(CoversProjectDomain(user, store)).ToList();
+        [.. projectConfig.Allow.Where(CoversProjectDomain(user, store))];
 
     /// <summary>Tells whether a project allow entry needs no approval now.</summary>
     /// <remarks>

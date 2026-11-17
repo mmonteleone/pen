@@ -829,7 +829,7 @@ internal static class RepoScan
         {
             try
             {
-                return Directory.EnumerateFileSystemEntries(dir).Order(StringComparer.Ordinal).ToList();
+                return [.. Directory.EnumerateFileSystemEntries(dir).Order(StringComparer.Ordinal)];
             }
             catch (DirectoryNotFoundException)
             {

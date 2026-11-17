@@ -484,7 +484,7 @@ internal sealed partial record ProjectDetection
             }
             if (ToolSpec.TryCanonicalize(merged.Keys, catalog, out var canonical) is { } conflict)
                 throw new InvalidOperationException($"detected tools don't go together: {conflict}");
-            return canonical.Select(tool => merged[tool].ToDetected(tool)).ToList();
+            return [.. canonical.Select(tool => merged[tool].ToDetected(tool))];
         }
 
         private List<DetectedPattern> BuildHide()

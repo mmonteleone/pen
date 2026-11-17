@@ -23,30 +23,21 @@ namespace Pen.GitProtection;
 /// race with another session's agent; the last component is never followed regardless.
 /// </para>
 /// </remarks>
-internal sealed class ProtectedFileRestore
+/// <param name="session">The session that's ending.</param>
+/// <param name="dir">The project dir.</param>
+/// <param name="commonGitDir">The git dir the session started with, or null for dir/.git.</param>
+/// <param name="changes">
+/// Where it records, as it goes: in Moved what it renamed, or couldn't rename or restore; in Restored the files
+/// that changed with nothing to set aside (missing, directory gone, or only mode); in Opened the directories it
+/// added u+rwx to so it could write in them, and left so; in Blocked the directories whose modes kept a file from
+/// being put back, for advice on what to fix.
+/// </param>
+internal sealed class ProtectedFileRestore(SessionDir session, string dir, string? commonGitDir, CheckChanges changes)
 {
-    private readonly SessionDir _session;
-    private readonly string _dir;
-    private readonly string? _commonGitDir;
-    private readonly CheckChanges _changes;
-
-    /// <summary>Prepares to put back the protected files of <paramref name="session"/>.</summary>
-    /// <param name="session">The session that's ending.</param>
-    /// <param name="dir">The project dir.</param>
-    /// <param name="commonGitDir">The git dir the session started with, or null for dir/.git.</param>
-    /// <param name="changes">
-    /// Where it records, as it goes: in Moved what it renamed, or couldn't rename or restore; in Restored the files
-    /// that changed with nothing to set aside (missing, directory gone, or only mode); in Opened the directories it
-    /// added u+rwx to so it could write in them, and left so; in Blocked the directories whose modes kept a file from
-    /// being put back, for advice on what to fix.
-    /// </param>
-    public ProtectedFileRestore(SessionDir session, string dir, string? commonGitDir, CheckChanges changes)
-    {
-        _session = session;
-        _dir = dir;
-        _commonGitDir = commonGitDir;
-        _changes = changes;
-    }
+    private readonly SessionDir _session = session;
+    private readonly string _dir = dir;
+    private readonly string? _commonGitDir = commonGitDir;
+    private readonly CheckChanges _changes = changes;
 
     /// <summary>Puts each file in the session's manifest back. Call it once per instance.</summary>
     /// <returns>Whether that's all done, or there was no manifest.</returns>
