@@ -32,16 +32,16 @@ internal sealed class InitCommand(HostEnv host, Project project, RecipeCatalog c
     {
         Session.EnsureRuntimeDir(host, project);
         // A symlink is refused as such, dangling or not, rather than as a file that exists.
-        RepoGuard.RequireNotLink(project.Dir, project.PenDir);
-        RepoGuard.RequireNotLink(project.Dir, project.ProjectConfigPath);
+        MountPlanner.RequireNotLink(project.Dir, project.PenDir);
+        MountPlanner.RequireNotLink(project.Dir, project.ProjectConfigPath);
         ThrowIfExists();
 
         var detection = ProjectDetection.Detect(project.Dir, catalog);
         var text = ProjectTemplate.Render(detection);
         Validate(text, catalog);
 
-        RepoGuard.EnsureDirectory(project.Dir, project.PenDir);
-        RepoGuard.RequireNotLink(project.Dir, project.ProjectConfigPath);
+        MountPlanner.EnsureDirectory(project.Dir, project.PenDir);
+        MountPlanner.RequireNotLink(project.Dir, project.ProjectConfigPath);
         Create(project.ProjectConfigPath, text);
 
         Out.WriteLine($"created {Where}");
@@ -96,7 +96,7 @@ internal sealed class InitCommand(HostEnv host, Project project, RecipeCatalog c
                 UnixCreateMode = mode,
             });
         }
-        catch (IOException) when (Path.Exists(path) || RepoGuard.IsLink(path))
+        catch (IOException) when (Path.Exists(path) || PathChecks.IsLink(path))
         {
             throw CreateExistsError();
         }

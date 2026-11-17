@@ -239,10 +239,10 @@ public class GitDirRepoTests
         Assert.False(removed.Failed);
         Assert.Equal(target, removed.LinkTarget);
         Assert.Contains("a symlink into the git dir", removed.Why);
-        Assert.False(RepoGuard.Exists(link));
+        Assert.False(PathChecks.Exists(link));
         Assert.Empty(Directory.GetFileSystemEntries(Path.GetDirectoryName(link)!, Path.GetFileName(link) + "*"));
         var warning = GitCheck.Warning(dir, check.Moved);
-        Assert.Contains($"{RepoGuard.FormatPath(dir, link)} (a symlink to {target}) removed", warning);
+        Assert.Contains($"{PathChecks.FormatPath(dir, link)} (a symlink to {target}) removed", warning);
         Assert.Contains($"  ln -s {GitCheck.Quote(target)} {GitCheck.Quote(link)}\n", warning + "\n");
         return removed;
     }
@@ -309,7 +309,7 @@ public class GitDirRepoTests
         AssertFires(gitRunsIn, marker);
         // What it reaches is named at the start too.
         var refusal = Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(repo)).Message;
-        Assert.Contains(RepoGuard.FormatPath(repo, Path.GetDirectoryName(plant)!), refusal);
+        Assert.Contains(PathChecks.FormatPath(repo, Path.GetDirectoryName(plant)!), refusal);
 
         var check = GitCheck.RunAtSessionEnd(repo, s);
 
@@ -575,8 +575,8 @@ public class GitDirRepoTests
 
         Assert.True(attempt.Failed);
         Assert.Contains("isn't a directory any more", attempt.Why);
-        Assert.True(RepoGuard.IsLink(victim));
-        Assert.True(RepoGuard.IsLink(Path.Combine(project, "a-moved", "b", "docs")));
+        Assert.True(PathChecks.IsLink(victim));
+        Assert.True(PathChecks.IsLink(Path.Combine(project, "a-moved", "b", "docs")));
     }
 
     [Fact]
@@ -596,7 +596,7 @@ public class GitDirRepoTests
             Assert.True(failed.Failed);
             Assert.Contains("COULD NOT REMOVE IT (permission denied", failed.Why);
             Assert.Contains("a file named above couldn't be moved out of git's way, removed or restored", check.Failure);
-            Assert.True(RepoGuard.IsLink(docs));
+            Assert.True(PathChecks.IsLink(docs));
         }
         finally
         {
@@ -617,7 +617,7 @@ public class GitDirRepoTests
         Assert.True(removed.Removed);
         Assert.True(removed.LinkTargetEscaped);
         Assert.Equal(@".git/objects/\377x", removed.LinkTarget);
-        Assert.False(RepoGuard.Exists(link));
+        Assert.False(PathChecks.Exists(link));
         var warning = GitCheck.Warning(project, [removed]);
         Assert.Contains("pen: They've been moved out of git's way, or removed:", warning);
         Assert.Contains(@"docs (a symlink to .git/objects/\377x) removed", warning);
@@ -1096,13 +1096,13 @@ public class GitDirRepoTests
         Git.Run(repo, "add", "docs");
         Git.Run(repo, "commit", "-q", "-m", "docs");
         Git.Run(repo, "checkout", "-q", "main");
-        Assert.False(RepoGuard.Exists(docs));
+        Assert.False(PathChecks.Exists(docs));
         var s = Started(t, repo, git);
         var plant = Plant(t, git, "bare", "objects/zz", hook);
         Git.Run(repo, "checkout", "-q", "evil");
         AssertFires(docs, marker);
         Git.Run(repo, "checkout", "-q", "main");
-        Assert.False(RepoGuard.Exists(docs));
+        Assert.False(PathChecks.Exists(docs));
         Assert.Contains(".git/objects/zz (laid out as a git dir of its own)",
             Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(repo)).Message);
 

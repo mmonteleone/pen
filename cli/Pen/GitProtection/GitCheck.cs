@@ -83,7 +83,7 @@ internal static class GitCheck
         change = null;
         try
         {
-            if (RepoGuard.IsLink(path))
+            if (PathChecks.IsLink(path))
                 return false;
             var was = File.GetUnixFileMode(path);
             var added = UnixFileMode.UserRead | UnixFileMode.UserExecute;
@@ -186,10 +186,10 @@ internal static class GitCheck
     /// <returns>The rename made, or null if it isn't a real directory or has no HEAD.</returns>
     private static (string From, string To)? MoveHeadAside(string moved)
     {
-        if (!Directory.Exists(moved) || RepoGuard.IsLink(moved))
+        if (!Directory.Exists(moved) || PathChecks.IsLink(moved))
             return null;
         var head = Path.Combine(moved, "HEAD");
-        if (!RepoGuard.Exists(head))
+        if (!PathChecks.Exists(head))
             return null;
         var headTo = FreeName(head);
         Native.Rename(head, headTo);
@@ -201,7 +201,7 @@ internal static class GitCheck
     internal static string FreeName(string path)
     {
         var to = path + Suffix;
-        for (var i = 2; RepoGuard.Exists(to); i++)
+        for (var i = 2; PathChecks.Exists(to); i++)
             to = $"{path}{Suffix}-{i}";
         return to;
     }
@@ -219,11 +219,11 @@ internal static class GitCheck
             : "pen: They've been moved out of git's way:");
         foreach (var quarantined in moved)
         {
-            text.Append("  ").Append(RepoGuard.FormatPath(dir, quarantined.From));
+            text.Append("  ").Append(PathChecks.FormatPath(dir, quarantined.From));
             if (quarantined.LinkTarget is { } target)
                 text.Append(" (a symlink to ").Append(Out.Field(target)).Append(") removed");
             else if (!quarantined.Failed)
-                text.Append(" → ").Append(RepoGuard.FormatPath(dir, quarantined.To));
+                text.Append(" → ").Append(PathChecks.FormatPath(dir, quarantined.To));
             text.AppendLine().Append("      ").AppendLine(quarantined.Why);
         }
         var restorable = moved.Where(quarantined => !quarantined.Failed).ToList();
@@ -315,10 +315,10 @@ internal static class GitCheck
         if (check.Moved.Count > 0)
             Out.WriteRaw(Warning(dir, check.Moved));
         foreach (var restored in check.Restored)
-            Out.WriteLine($"{RepoGuard.FormatPath(dir, restored.Path)}: {restored.What}");
+            Out.WriteLine($"{PathChecks.FormatPath(dir, restored.Path)}: {restored.What}");
         foreach (var change in check.Opened)
         {
-            Out.WriteLine($"changed {RepoGuard.FormatPath(dir, change.Path)} from mode {Octal(change.Was)} " +
+            Out.WriteLine($"changed {PathChecks.FormatPath(dir, change.Path)} from mode {Octal(change.Was)} " +
                 $"to {Octal(change.Now)} so it could be checked, and left it that way");
         }
 

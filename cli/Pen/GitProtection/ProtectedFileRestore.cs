@@ -101,7 +101,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
     {
         var original = Native.ReadProtected(Path.Combine(_session.ProtectedDir, file.Copy))?.Bytes
             ?? throw new PenException("pen's copy of it is damaged");
-        var root = RepoGuard.IsInside(_dir, file.Path) ? _dir : _commonGitDir;
+        var root = PathChecks.IsInside(_dir, file.Path) ? _dir : _commonGitDir;
         if (!CheckParents(file, root))
             return;
 
@@ -233,7 +233,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
         var parent = Paths.GetParent(file.Path);
         foreach (var directory in ListDirectoriesFromRoot(parent, root))
         {
-            if (root is not null && directory != root && RepoGuard.IsLink(directory))
+            if (root is not null && directory != root && PathChecks.IsLink(directory))
             {
                 _changes.Moved.Add(GitCheck.Move(directory, "a symlink in place of a directory holding the protected " +
                     $"file {Out.Field(file.Path)}: it points git at a file somewhere else", breakLayout: false));
@@ -261,7 +261,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
     {
         var directories = new Stack<string>();
         directories.Push(parent);
-        if (root is null || !RepoGuard.IsInside(root, parent))
+        if (root is null || !PathChecks.IsInside(root, parent))
             return directories;
         var directory = parent;
         while (directory != root)
@@ -284,7 +284,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
     /// <summary>Records that a file wasn't put back because a directory holding it went.</summary>
     private void RecordDirectoryGone(ProtectedFile file, string directory)
     {
-        var what = RepoGuard.Exists(directory) ? "was replaced by a file" : "was removed";
+        var what = PathChecks.Exists(directory) ? "was replaced by a file" : "was removed";
         _changes.Restored.Add(new(file.Path, $"not put back: {Out.Field(directory)} {what} during the session"));
     }
 

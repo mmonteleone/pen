@@ -493,7 +493,7 @@ public class MaskPlannerTests
     public void TheLiteralLookup_HidesEachEntryDifferingOnlyInCase()
     {
         using var t = new TempDir();
-        Assert.SkipWhen(RepoGuard.MayFoldCase(t.Path), "this file system folds case, so Secret.env and secret.env are one file");
+        Assert.SkipWhen(PathChecks.MayFoldCase(t.Path), "this file system folds case, so Secret.env and secret.env are one file");
         Write(t.Path, "Dir/Secret.env");
         Write(t.Path, "dir/secret.env");
         Write(t.Path, "dir/SECRET.ENV");
@@ -637,7 +637,7 @@ public class MaskPlannerTests
     public void AReplacementTarget_InAnotherCase_IsTheFileOnDisk_WhereTheFileSystemFoldsCase()
     {
         using var t = new TempDir();
-        Assert.SkipUnless(RepoGuard.MayFoldCase(t.Path), "this file system tells case apart");
+        Assert.SkipUnless(PathChecks.MayFoldCase(t.Path), "this file system tells case apart");
         var env = Write(t.Path, ".env");
         Write(t.Path, "agent.env");
 
@@ -953,7 +953,7 @@ public class MaskPlannerTests
     public void ASourceSpelledInAnotherCase_InADirectoryHiddenThroughASymlink_IsRefused_WhereTheFileSystemFoldsCase()
     {
         using var t = new TempDir();
-        Assert.SkipUnless(RepoGuard.MayFoldCase(t.Path), "this file system tells case apart");
+        Assert.SkipUnless(PathChecks.MayFoldCase(t.Path), "this file system tells case apart");
         Write(t.Path, "README.md");
         Write(t.Path, "Vault/key");
         Write(t.Path, "Plain.txt");

@@ -58,7 +58,7 @@ internal static class ProtectedFiles
     {
         // Project.CheckAllowed covers the project dir; this covers every mount, the common git dir among them.
         var realSession = Native.RealPath(session.Path) ?? session.Path;
-        if (RepoGuard.IsInside(dir, realSession) || mounts.Any(m => RepoGuard.IsInside(m.Path, realSession)))
+        if (PathChecks.IsInside(dir, realSession) || mounts.Any(m => PathChecks.IsInside(m.Path, realSession)))
         {
             throw new PenException($"refusing to run in {Out.Field(dir)}: pen's " +
                 $"session dir {Out.Field(realSession)} would be inside the sandbox");
@@ -259,7 +259,7 @@ internal static class ProtectedFiles
     /// </remarks>
     private static bool IsAdopted(string path, OlderSessions older, IReadOnlyList<string> unlistedModules)
     {
-        if (unlistedModules.Any(repo => RepoGuard.IsInside(repo, path)))
+        if (unlistedModules.Any(repo => PathChecks.IsInside(repo, path)))
             return true;
         if (older.Adopted.Contains(path))
             return true;
@@ -267,7 +267,7 @@ internal static class ProtectedFiles
             return false;
         if (older.Files.ContainsKey(path))
             return false;
-        return older.Unrecorded || older.ReadOnlyDirs.Any(dirs => !dirs.Any(d => RepoGuard.IsInside(d, path)));
+        return older.Unrecorded || older.ReadOnlyDirs.Any(dirs => !dirs.Any(d => PathChecks.IsInside(d, path)));
     }
 
     /// <summary>
@@ -294,13 +294,13 @@ internal static class ProtectedFiles
         {
             return Native.ReadProtected(path)
                 ?? throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't save a copy " +
-                    $"of {RepoGuard.FormatPath(dir, path)}: it isn't a regular file of at most 1 MB, so it " +
+                    $"of {PathChecks.FormatPath(dir, path)}: it isn't a regular file of at most 1 MB, so it " +
                     "couldn't be restored at the end of the session. Inspect it and remove it, then rerun");
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't read " +
-                $"{RepoGuard.FormatPath(dir, path)} to save a copy of it: fix its permissions, then rerun");
+                $"{PathChecks.FormatPath(dir, path)} to save a copy of it: fix its permissions, then rerun");
         }
     }
 
@@ -314,7 +314,7 @@ internal static class ProtectedFiles
         var real = Native.RealPath(path);
         if (real is null || !string.Equals(real, path, StringComparison.OrdinalIgnoreCase))
         {
-            throw new PenException($"refusing to run in {Out.Field(dir)}: {RepoGuard.FormatPath(dir, path)} " +
+            throw new PenException($"refusing to run in {Out.Field(dir)}: {PathChecks.FormatPath(dir, path)} " +
                 "isn't where pen expected it (a symlink, or it's gone): inspect it, then rerun");
         }
 

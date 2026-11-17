@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text;
 using Pen.Platform;
 using Pen.Projects;
@@ -51,7 +50,7 @@ internal static class RepoGuard
         RequireReadableModules(dir, modules);
         // Defence in depth: ResolveModuleCheckout already rejects a checkout whose gitdir resolves through a symlink
         // (it requires the gitdir's real path to be the path it reads as), and planning the mounts refuses the symlink.
-        var moduleRepos = modules.Repos.Where(repo => !IsLink(repo)).ToList();
+        var moduleRepos = modules.Repos.Where(repo => !PathChecks.IsLink(repo)).ToList();
         var scan = RepoScan.ScanNested(dir, common, moduleRepos, tryOpen: null);
         var inGitDir = RepoScan.ScanGitDir(common, moduleRepos, tryOpen: null);
         RequireDecodableNames(dir, common, modules, scan, inGitDir);
@@ -67,9 +66,9 @@ internal static class RepoGuard
     /// </returns>
     private static string ResolveCheckableGitDir(string dir, string git)
     {
-        if (IsLink(git))
+        if (PathChecks.IsLink(git))
         {
-            throw new PenException($"{FormatPath(dir, git)} is a symlink, which " +
+            throw new PenException($"{PathChecks.FormatPath(dir, git)} is a symlink, which " +
                 "pen doesn't support: run pen in the repo it points to");
         }
 
@@ -79,7 +78,7 @@ internal static class RepoGuard
         if (Directory.Exists(common) && !Native.CanList(common))
         {
             throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't read " +
-                $"{FormatPath(dir, common)}, so it can't protect it: fix its permissions, then rerun");
+                $"{PathChecks.FormatPath(dir, common)}, so it can't protect it: fix its permissions, then rerun");
         }
 
         return common;
@@ -90,9 +89,9 @@ internal static class RepoGuard
     private static void RequireNoCommondir(string dir, string common)
     {
         var commondir = Path.Combine(common, "commondir");
-        if (Exists(commondir))
+        if (PathChecks.Exists(commondir))
         {
-            throw new PenException($"{FormatPath(dir, commondir)} exists, which a normal repo never " +
+            throw new PenException($"{PathChecks.FormatPath(dir, commondir)} exists, which a normal repo never " +
                 "has: it makes git read config and hooks from another directory. Inspect it and remove it, then rerun");
         }
     }
@@ -107,7 +106,7 @@ internal static class RepoGuard
         {
             throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't read these " +
                 "directories where git keeps submodule repos, so it can't protect what's in them:\n"
-                + string.Join('\n', unreadable.Select(u => "  " + FormatPath(dir, u)))
+                + string.Join('\n', unreadable.Select(u => "  " + PathChecks.FormatPath(dir, u)))
                 + "\nfix their permissions or remove them, then rerun");
         }
     }
@@ -135,7 +134,7 @@ internal static class RepoGuard
         // A repo renamed there would be adopted as a submodule's at the next start.
         if (modules.BadNames.Count > 0)
         {
-            gitDirNote = $"\ninspect any under {FormatPath(dir, common)} first and prefer removing them: " +
+            gitDirNote = $"\ninspect any under {PathChecks.FormatPath(dir, common)} first and prefer removing them: " +
                 "a repo renamed there is trusted as a submodule's repo at the next start";
         }
 
@@ -153,7 +152,7 @@ internal static class RepoGuard
         var unlistable = inGitDir.UnlistableDirs.Concat(scan.UnlistableDirs).ToList();
         if (unlistable.Count == 0)
             return;
-        var listed = CappedList.FormatLines(unlistable, MaxListed, u => FormatPath(dir, u));
+        var listed = CappedList.FormatLines(unlistable, MaxListed, u => PathChecks.FormatPath(dir, u));
         throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't list these directories, " +
             "though git on this machine can still enter them, so it can't see a repo inside one:\n"
             + string.Join('\n', listed.Select(line => "  " + line))
@@ -183,7 +182,7 @@ internal static class RepoGuard
             var kind = submodule
                 ? " (a submodule with its own .git dir)"
                 : NestedRepoWording.DescribeRefused(repo.Kind);
-            return FormatPath(dir, repo.RepoDir) + kind;
+            return PathChecks.FormatPath(dir, repo.RepoDir) + kind;
         });
         foreach (var line in listed)
             message.Append("\n  ").Append(line);
@@ -222,7 +221,7 @@ internal static class RepoGuard
             anyRefs |= refs;
             anyQuarantined |= IsInQuarantine(common, repo.RepoDir);
             anyEntry |= repo is { Place: GitDirPlace.WorktreeEntry, Kind: NestedKind.Bare };
-            return FormatPath(dir, repo.RepoDir) + (refs ? " (ref names that lay it out as a git dir)" :
+            return PathChecks.FormatPath(dir, repo.RepoDir) + (refs ? " (ref names that lay it out as a git dir)" :
                 NestedRepoWording.DescribeRefusedInGitDir(repo));
         });
         var message = new StringBuilder($"refusing to run in {Out.Field(dir)}: its git dir has repos where git " +
@@ -267,7 +266,7 @@ internal static class RepoGuard
         {
             message.Append("these symlinks lead into its git dir (or would, once a directory they name is made), so " +
                 "git run through one would use any repo the sandbox puts there:");
-            foreach (var line in CappedList.FormatLines(links, MaxListed, link => FormatPath(dir, link)))
+            foreach (var line in CappedList.FormatLines(links, MaxListed, link => PathChecks.FormatPath(dir, link)))
                 message.Append("\n  ").Append(line);
         }
         if (untraced.Count > 0)
@@ -277,7 +276,7 @@ internal static class RepoGuard
             message.Append(" (a directory on the way can't be searched, or a target can't be read or isn't valid " +
                 "UTF-8), so they may lead into its git dir, where git run through one would use any repo the " +
                 "sandbox puts there:");
-            foreach (var line in CappedList.FormatLines(untraced, MaxListed, link => FormatPath(dir, link)))
+            foreach (var line in CappedList.FormatLines(untraced, MaxListed, link => PathChecks.FormatPath(dir, link)))
                 message.Append("\n  ").Append(line);
         }
         message.Append("\nremove them, then rerun");
@@ -313,8 +312,8 @@ internal static class RepoGuard
     /// <summary>Formats the first few of <paramref name="names"/> for a message, and how many more there are.</summary>
     /// <returns>One line per name listed, without indent, then "… and N more" if any weren't.</returns>
     internal static List<string> FormatBadNames(string dir, IReadOnlyList<BadName> names) =>
-        CappedList.FormatLines(names, MaxListed, n => FormatPath(dir, n.DisplayPath) + (n.EndsInNewline ? " " +
-            "(it ends in a newline, so no command can name it here: rename it by hand)" : ""));
+        CappedList.FormatLines(names, MaxListed, n => PathChecks.FormatPath(dir, n.DisplayPath) + (n.EndsInNewline
+            ? " (it ends in a newline, so no command can name it here: rename it by hand)" : ""));
 
     /// <summary>
     /// Whether <paramref name="repoDir"/> is a submodule's checkout by the .gitmodules of the project or of a
@@ -324,7 +323,7 @@ internal static class RepoGuard
     /// <remarks>Only for the refusal's advice, so a forged entry changes nothing but the wording.</remarks>
     internal static bool IsSubmodulePath(string dir, string repoDir) =>
         Paths.EnumerateAncestors(repoDir)
-            .TakeWhile(super => IsInside(dir, super))
+            .TakeWhile(super => PathChecks.IsInside(dir, super))
             .Any(super => ListsSubmodulePath(super, repoDir));
 
     /// <summary>
@@ -333,7 +332,7 @@ internal static class RepoGuard
     private static bool ListsSubmodulePath(string super, string repoDir)
     {
         var gitmodules = Path.Combine(super, ".gitmodules");
-        if (!File.Exists(gitmodules) || IsLink(gitmodules))
+        if (!File.Exists(gitmodules) || PathChecks.IsLink(gitmodules))
             return false;
         var relative = Path.GetRelativePath(super, repoDir);
         // No advice from a file that can't be read.
@@ -355,7 +354,7 @@ internal static class RepoGuard
                 "moved), which pen doesn't support. For a submodule, run pen in the repo that " +
                 "has it; for a worktree, git worktree repair in the main checkout may fix it");
         // ResolveWorktree requires the path to be real already; this is belt and braces.
-        if (IsLink(common) || !Directory.Exists(common) || Native.RealPath(common) != common)
+        if (PathChecks.IsLink(common) || !Directory.Exists(common) || Native.RealPath(common) != common)
         {
             throw new PenException($"this worktree's git dir {Out.Field(common)} " +
                 "isn't a real directory, which pen doesn't support");
@@ -388,7 +387,9 @@ internal static class RepoGuard
     /// <summary>Warns once if the repo's common git dir may fold case.</summary>
     /// <param name="project">The project; a plain directory has no git dir to probe, so no warning.</param>
     /// <param name="warn">Where the warning goes.</param>
-    /// <param name="probe">Whether a git dir may fold case: <see cref="MayFoldCase(string)"/> in production.</param>
+    /// <param name="probe">
+    /// Whether a git dir may fold case: <see cref="PathChecks.MayFoldCase(string)"/> in production.
+    /// </param>
     /// <remarks>
     /// The common git dir is where config and hooks are, for a linked worktree too. On a folding file system the
     /// agent could change .git/config by writing .git/CONFIG, past its single-file mount. This warns on every
@@ -400,56 +401,6 @@ internal static class RepoGuard
             warn(CaseWarning);
     }
 
-    /// <summary>Whether <paramref name="gitDir"/> may fold case, by probing it with a new random name.</summary>
-    internal static bool MayFoldCase(string gitDir) => MayFoldCase(gitDir, GenerateCaseProbeName());
-
-    /// <summary>Generates a random name for the case probe.</summary>
-    /// <remarks>
-    /// It's a name git has no use for: the files it reads in a git dir have fixed names, and the only other names it
-    /// takes there as refs are all caps with no dot. Lower case, so the upper-case form is a different name.
-    /// </remarks>
-    internal static string GenerateCaseProbeName() =>
-        ".pen-case-probe-" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
-
-    /// <summary>
-    /// Whether <paramref name="gitDir"/> may fold case: an empty file created there is also found under its
-    /// upper-case name.
-    /// </summary>
-    /// <returns>False only for a clean "no".</returns>
-    /// <remarks>
-    /// Anything short of a clean "no" counts as yes: either name there already (it isn't this probe's to touch), the
-    /// file not being created, or it having gone by the time it's looked for. Exclusive creation doesn't follow a
-    /// symlink, and the file is removed on every path once creating it has been tried.
-    /// </remarks>
-    internal static bool MayFoldCase(string gitDir, string name)
-    {
-        var probe = Path.Combine(gitDir, name);
-        var upper = Path.Combine(gitDir, name.ToUpperInvariant());
-        try
-        {
-            if (Exists(probe) || Exists(upper))
-                return true;
-            try
-            {
-                new FileStream(probe, new FileStreamOptions
-                {
-                    Mode = FileMode.CreateNew,
-                    Access = FileAccess.Write,
-                    UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
-                }).Dispose();
-                return Exists(upper) || !Exists(probe);
-            }
-            finally
-            {
-                File.Delete(probe);
-            }
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            return true;
-        }
-    }
-
     /// <summary>
     /// Plans the mounts over the project mount, creating what must exist to be mounted (.pen/, .git/hooks, and a few
     /// files inside .git) so that the agent can't create them instead.
@@ -458,79 +409,4 @@ internal static class RepoGuard
     /// <param name="hostHome">The host user's home, for includes of ~/ paths.</param>
     /// <returns>The mounts, in order, one per path (see <see cref="MountPlanner.Plan"/>).</returns>
     public static List<Mount> PrepareMounts(string dir, string hostHome) => new MountPlanner(dir, hostHome).Plan();
-
-    /// <summary>
-    /// Resolves the real path of <paramref name="path"/>, or of its deepest existing ancestor plus the rest.
-    /// </summary>
-    /// <returns>The resolved path, or <paramref name="path"/> itself if no ancestor resolves.</returns>
-    internal static string ResolveExisting(string path)
-    {
-        var rest = new Stack<string>();
-        var current = path;
-        while (true)
-        {
-            var real = Native.RealPath(current);
-            if (real is not null)
-                return rest.Aggregate(real, Path.Combine);
-            var parent = Path.GetDirectoryName(current);
-            if (parent is null)
-                return path;
-            rest.Push(Path.GetFileName(current));
-            current = parent;
-        }
-    }
-
-    /// <summary>
-    /// Creates <paramref name="path"/> as a directory to be mounted, refusing a symlink or a file there.
-    /// </summary>
-    /// <param name="dir">The project dir, for messages.</param>
-    /// <param name="path">The directory.</param>
-    internal static void EnsureDirectory(string dir, string path)
-    {
-        RequireNotLink(dir, path);
-        if (File.Exists(path))
-        {
-            throw new PenException($"{FormatPath(dir, path)} is a file, not a " +
-                "directory: pen needs to mount it read-only as a directory");
-        }
-
-        Directory.CreateDirectory(path);
-    }
-
-    /// <summary>Refuses a symlink at <paramref name="path"/>, which Pen has to mount read-only.</summary>
-    /// <param name="dir">The project dir, for messages.</param>
-    /// <param name="path">The path to be mounted.</param>
-    internal static void RequireNotLink(string dir, string path)
-    {
-        if (IsLink(path))
-        {
-            throw new PenException($"{FormatPath(dir, path)} is a symlink, which " +
-                "pen doesn't support here: it has to mount it read-only");
-        }
-    }
-
-    /// <summary>Whether <paramref name="path"/> is a symlink, dangling or not.</summary>
-    internal static bool IsLink(string path) => new FileInfo(path).LinkTarget is not null;
-
-    /// <summary>Whether <paramref name="path"/> exists, including as a dangling symlink.</summary>
-    internal static bool Exists(string path) => Path.Exists(path) || IsLink(path);
-
-    /// <summary>
-    /// Whether <paramref name="path"/> is <paramref name="dir"/> or below it, comparing names exactly.
-    /// </summary>
-    internal static bool IsInside(string dir, string path) =>
-        path == dir || path.StartsWith(dir.TrimEnd('/') + "/", StringComparison.Ordinal);
-
-    /// <summary>
-    /// Formats <paramref name="path"/> for a message: relative to <paramref name="dir"/> when it's inside, and safe to
-    /// print (<see cref="Out.Field"/>).
-    /// </summary>
-    internal static string FormatPath(string dir, string path)
-    {
-        if (path == dir)
-            return Out.Field(".");
-        if (IsInside(dir, path))
-            return Out.Field(path[(dir.TrimEnd('/').Length + 1)..]);
-        return Out.Field(path);
-    }
 }

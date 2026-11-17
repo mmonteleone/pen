@@ -152,7 +152,7 @@ internal sealed class GitCheckRun
         // The walk of the git dir and the prompt-hazard scan can both meet a worktrees dir, or an entry in one.
         var unlistable = _unlistable.Distinct(StringComparer.Ordinal).ToList();
         return "pen can't list these directories, so it can't see a repo inside one: " +
-            CappedList.Join(unlistable, RepoGuard.MaxListed, path => RepoGuard.FormatPath(_dir, path));
+            CappedList.Join(unlistable, RepoGuard.MaxListed, path => PathChecks.FormatPath(_dir, path));
     }
 
     /// <summary>
@@ -251,7 +251,7 @@ internal sealed class GitCheckRun
     /// <summary>Quarantines a .git made in a dir that the session started without one.</summary>
     private void QuarantineNewRepo(string git)
     {
-        if (RepoGuard.Exists(git))
+        if (PathChecks.Exists(git))
         {
             Quarantine(git, "a repo created during the session (git init): " +
                 "its config and hooks were writable from the sandbox", breakLayout: true);
@@ -273,7 +273,7 @@ internal sealed class GitCheckRun
         }
 
         var commondir = Path.Combine(git, "commondir");
-        if (RepoGuard.Exists(commondir))
+        if (PathChecks.Exists(commondir))
         {
             Quarantine(commondir, "a normal repo never has one: it makes " +
                 "git read config and hooks from another directory", breakLayout: false);
@@ -383,7 +383,7 @@ internal sealed class GitCheckRun
         _badNames.AddRange(scan.BadNames);
         foreach (var repo in scan.Repos)
         {
-            if (gone.Any(quarantined => RepoGuard.IsInside(quarantined, repo)))
+            if (gone.Any(quarantined => PathChecks.IsInside(quarantined, repo)))
                 continue;
             if (TryQuarantineModuleRepo(repo, listed))
                 gone.Add(repo);
@@ -392,7 +392,7 @@ internal sealed class GitCheckRun
         }
         foreach (var unreadable in scan.UnreadableDirs)
         {
-            if (gone.Any(quarantined => RepoGuard.IsInside(quarantined, unreadable)))
+            if (gone.Any(quarantined => PathChecks.IsInside(quarantined, unreadable)))
                 continue;
             const string why = "a directory where git keeps submodule repos that can't be read, " +
                 "so pen can't check it: inspect its contents before you fix its permissions";
@@ -427,7 +427,7 @@ internal sealed class GitCheckRun
     /// <returns>Whether it's one of those, so it's gone (or named as couldn't be moved).</returns>
     private bool TryQuarantineModuleRepo(string repo, HashSet<string>? listed)
     {
-        if (RepoGuard.IsLink(repo))
+        if (PathChecks.IsLink(repo))
         {
             Quarantine(repo, "a symlink where git keeps a submodule's repo: " +
                 "it points git at config and hooks in another directory", breakLayout: false);
@@ -447,13 +447,13 @@ internal sealed class GitCheckRun
     private bool KeepsModuleRepo(string repo)
     {
         var commondir = Path.Combine(repo, "commondir");
-        if (RepoGuard.Exists(commondir))
+        if (PathChecks.Exists(commondir))
         {
             Quarantine(commondir, "a submodule's repo never has one: it " +
                 "makes git read config and hooks from another directory", breakLayout: false);
         }
 
-        return !RepoGuard.Exists(commondir);
+        return !PathChecks.Exists(commondir);
     }
 
     /// <summary>Quarantines what a shell prompt would run in <paramref name="git"/>.</summary>
@@ -510,7 +510,7 @@ internal sealed class GitCheckRun
     private void MoveHazard(PromptHazard hazard)
     {
         // Gone with a state directory that an earlier one in it took aside.
-        if (!RepoGuard.Exists(hazard.Path))
+        if (!PathChecks.Exists(hazard.Path))
             return;
         if (TryRenameWithOpening(hazard.Path, hazard.Why, breakLayout: false))
             return;

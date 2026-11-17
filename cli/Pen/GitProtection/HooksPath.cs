@@ -290,7 +290,7 @@ internal static class HooksPath
             return fromTop;
         // .git/hooks, as a work tree path: the read-only one is the one meant.
         if (top is not null && WalkRealPath(top + "/" + value) is { } real
-            && RepoGuard.IsInside(Path.Combine(common, "hooks"), real))
+            && PathChecks.IsInside(Path.Combine(common, "hooks"), real))
         {
             return fromTop;
         }
@@ -322,12 +322,12 @@ internal static class HooksPath
     {
         if (project.CommonGitDir is { } common)
         {
-            if (path == common || RepoGuard.IsInside(Path.Combine(common, "hooks"), path))
+            if (path == common || PathChecks.IsInside(Path.Combine(common, "hooks"), path))
                 return false;
-            if (RepoGuard.IsInside(common, path))
+            if (PathChecks.IsInside(common, path))
                 return true;
         }
-        return path != project.Dir && RepoGuard.IsInside(project.Dir, path);
+        return path != project.Dir && PathChecks.IsInside(project.Dir, path);
     }
 
     /// <summary>
@@ -396,10 +396,10 @@ internal static class HooksPath
             if (target is null)
             {
                 current = next;
-                replaceable |= canBeReplaced(RepoGuard.ResolveExisting(next));
+                replaceable |= canBeReplaced(PathChecks.ResolveExisting(next));
                 continue;
             }
-            replaceable |= canBeReplaced(Path.Combine(RepoGuard.ResolveExisting(current), name));
+            replaceable |= canBeReplaced(Path.Combine(PathChecks.ResolveExisting(current), name));
             if (++links > MaxLinks || target.Contains('\ufffd'))
                 return null;
             if (Path.IsPathRooted(target))
@@ -407,7 +407,7 @@ internal static class HooksPath
             foreach (var part in target.Split('/').Reverse())
                 pending.Push(part);
         }
-        return RepoGuard.ResolveExisting(current);
+        return PathChecks.ResolveExisting(current);
     }
 
     /// <summary>Follows the config files in git's order, collecting what core.hooksPath may be.</summary>

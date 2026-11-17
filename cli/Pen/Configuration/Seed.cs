@@ -1,5 +1,4 @@
 using System.Text;
-using Pen.GitProtection;
 using Pen.Platform;
 
 namespace Pen.Configuration;
@@ -21,7 +20,7 @@ internal static class Seed
     public static bool EnsureExists(HostEnv host, GitIdentity identity)
     {
         var seed = host.SeedDir;
-        if (Path.Exists(seed) || RepoGuard.IsLink(seed))
+        if (Path.Exists(seed) || PathChecks.IsLink(seed))
             return false;
 
         // Built next to it, then renamed, so a failure never leaves half a seed.

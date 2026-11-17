@@ -67,7 +67,7 @@ internal sealed class MaskPlanner
     /// </param>
     /// <param name="protectedPaths">
     /// The paths the session mounts read-only to protect git (<see cref="Mount.Path"/> of what
-    /// <see cref="RepoGuard.PrepareMounts"/> returns); only those inside the project are looked at.
+    /// <see cref="MountPlanner.Plan"/> returns); only those inside the project are looked at.
     /// </param>
     /// <param name="hide">The hide patterns: the user's, then the project's.</param>
     /// <param name="replace">The project's [replace] entries (target, source), as checked by Config.</param>
@@ -81,7 +81,7 @@ internal sealed class MaskPlanner
         _projectDir = projectDir;
         _commonGitDir = commonGitDir is null ? null : Native.RealPath(commonGitDir) ?? commonGitDir;
         _protected = [.. protectedPaths.Select(path => Native.RealPath(path) ?? path)
-            .Where(path => path != projectDir && RepoGuard.IsInside(projectDir, path))
+            .Where(path => path != projectDir && PathChecks.IsInside(projectDir, path))
             .Distinct(StringComparer.Ordinal)];
         _hide = hide;
         _replace = replace;
@@ -220,9 +220,9 @@ internal sealed class MaskPlanner
         {
             if (path == mount)
                 return $"{Format(path)}, {Why}";
-            if (RepoGuard.IsInside(mount, path))
+            if (PathChecks.IsInside(mount, path))
                 return $"{Format(path)}, which is in {Format(mount)}, {Why}";
-            if (RepoGuard.IsInside(path, mount))
+            if (PathChecks.IsInside(path, mount))
                 return $"{Format(path)}, which holds {Format(mount)}, {Why}";
         }
         return null;
@@ -326,7 +326,7 @@ internal sealed class MaskPlanner
         var dirMatch = entry.IsLink ? match ?? FindMatch(relative, isDirectory: true) : match;
         if (dirMatch is null)
             return isDirectory ? Enter(path, relative) : null;
-        if (isDirectory && _commonGitDir is not null && RepoGuard.IsInside(path, _commonGitDir))
+        if (isDirectory && _commonGitDir is not null && PathChecks.IsInside(path, _commonGitDir))
         {
             // Hiding it would hide the git dir, so it's looked in instead, for what else matches.
             Warn($"couldn't hide {Out.Field(relative)}: the repo's git dir is in it, which pen doesn't hide");
@@ -391,7 +391,7 @@ internal sealed class MaskPlanner
             }
 
             real ??= Native.RealPath(path) ?? "";
-            if (real.Length == 0 || !RepoGuard.IsInside(_projectDir, real))
+            if (real.Length == 0 || !PathChecks.IsInside(_projectDir, real))
                 return;
             Warn($"couldn't hide {Out.Field(literal)}: {Out.Field(relative)} on the way is a symlink, which pen " +
                 "doesn't follow; hide the path it leads to");
@@ -473,8 +473,8 @@ internal sealed class MaskPlanner
     /// .git segment (any case).
     /// </summary>
     private bool IsInGitDir(string path) =>
-        (_commonGitDir is not null && RepoGuard.IsInside(_commonGitDir, path))
-        || (path != _projectDir && RepoGuard.IsInside(_projectDir, path)
+        (_commonGitDir is not null && PathChecks.IsInside(_commonGitDir, path))
+        || (path != _projectDir && PathChecks.IsInside(_projectDir, path)
             && Relative(path).Split('/').Any(segment => segment.Equals(".git", StringComparison.OrdinalIgnoreCase)));
 
     /// <summary>
@@ -483,10 +483,10 @@ internal sealed class MaskPlanner
     /// </summary>
     private bool IsHideable(string path)
     {
-        if (path == _projectDir || !RepoGuard.IsInside(_projectDir, path))
+        if (path == _projectDir || !PathChecks.IsInside(_projectDir, path))
             return false;
         if (_commonGitDir is not null
-            && (RepoGuard.IsInside(_commonGitDir, path) || RepoGuard.IsInside(path, _commonGitDir)))
+            && (PathChecks.IsInside(_commonGitDir, path) || PathChecks.IsInside(path, _commonGitDir)))
         {
             return false;
         }

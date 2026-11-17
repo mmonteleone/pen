@@ -316,7 +316,7 @@ public class PausedGitTests
         Directory.CreateSymbolicLink(state, t.Sub("elsewhere"));
         var moved = Assert.Single(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved);
         Assert.Equal(state, moved.From);
-        Assert.False(RepoGuard.Exists(state));
+        Assert.False(PathChecks.Exists(state));
     }
 
     [Fact]
@@ -432,7 +432,7 @@ public class PausedGitTests
         var moved = Within10s(() => GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved);
 
         Assert.Equal(path, Assert.Single(moved).From);
-        Assert.False(RepoGuard.Exists(path));
+        Assert.False(PathChecks.Exists(path));
     }
 
     [Theory]
@@ -701,7 +701,7 @@ public class PausedGitTests
         {
             File.SetUnixFileMode(_root, OpenDir);
             foreach (var d in Directory.EnumerateDirectories(_root, "*", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = 0 }))
-                if (!RepoGuard.IsLink(d)) File.SetUnixFileMode(d, OpenDir);
+                if (!PathChecks.IsLink(d)) File.SetUnixFileMode(d, OpenDir);
         }
     }
 
@@ -746,7 +746,7 @@ public class PausedGitTests
         var check = GitCheck.RunAtSessionEnd(repo, StartedSession(t, repo));
 
         Assert.Null(check.Failure);
-        Assert.False(RepoGuard.Exists(path));
+        Assert.False(PathChecks.Exists(path));
         Assert.Contains(check.Moved, q => q.From == path && q.To.Length > 0);
         Assert.Contains(check.Opened, c => c.Path == Path.GetDirectoryName(path) && c.Now.HasFlag(UnixFileMode.UserWrite));
     }
@@ -830,7 +830,7 @@ public class PausedGitTests
         var check = GitCheck.RunAtSessionEnd(repo, StartedSession(t, repo, [.. modules]));
 
         Assert.Null(check.Failure);
-        Assert.False(RepoGuard.Exists(path));
+        Assert.False(PathChecks.Exists(path));
         Assert.Contains(check.Moved, q => q.From == path && q.To.Length > 0);
     }
 
@@ -921,7 +921,7 @@ public class PausedGitTests
         var check = GitCheck.RunAtSessionEnd(repo, StartedSession(t, repo, modules));
 
         Assert.Null(check.Failure);
-        Assert.False(RepoGuard.Exists(plant));
+        Assert.False(PathChecks.Exists(plant));
     }
 
     [Theory]
@@ -937,7 +937,7 @@ public class PausedGitTests
         var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
 
         // pen sign changes no modes: it moved the plant by name, or it says so and refuses.
-        Assert.True(!RepoGuard.Exists(plant) || check.Failure != null);
+        Assert.True(!PathChecks.Exists(plant) || check.Failure != null);
         if (Directory.Exists(dir)) Assert.Equal((UnixFileMode)mode, File.GetUnixFileMode(dir));
         Assert.True(check.Failure != null || check.Moved.Count > 0);
     }
@@ -1004,7 +1004,7 @@ public class PausedGitTests
 
         Assert.Null(check.Failure);
         Assert.Equal(state, Assert.Single(check.Moved).From);
-        Assert.False(RepoGuard.Exists(state));
+        Assert.False(PathChecks.Exists(state));
         Assert.Equal(ReadOnlyDir, File.GetUnixFileMode(state + GitCheck.Suffix)); // no mode changed
     }
 

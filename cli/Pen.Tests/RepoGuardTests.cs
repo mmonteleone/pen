@@ -189,7 +189,7 @@ public class RepoGuardTests
         var scan = NestedScans.Scan(repo, Path.Combine(repo, ".git"));
         Assert.Equal(
             [("a/HEAD", NestedKind.Bare), ("b/.git", NestedKind.GitFile), ("c/.git", NestedKind.GitLink)],
-            scan.Repos.Select(n => (RepoGuard.FormatPath(repo, n.Path), n.Kind)));
+            scan.Repos.Select(n => (PathChecks.FormatPath(repo, n.Path), n.Kind)));
         Assert.Equal([Path.Combine(repo, "d", ".git")], scan.GitDirLinks);
     }
 
@@ -269,7 +269,7 @@ public class RepoGuardTests
     // --- mounts ---------------------------------------------------------------
 
     private static List<(string, bool)> Mounts(string dir, string? home = null) =>
-        RepoGuard.PrepareMounts(dir, home ?? "/nonexistent-home").Select(m => (RepoGuard.FormatPath(dir, m.Path), m.ReadOnly)).ToList();
+        RepoGuard.PrepareMounts(dir, home ?? "/nonexistent-home").Select(m => (PathChecks.FormatPath(dir, m.Path), m.ReadOnly)).ToList();
 
     [Fact]
     public void MountsForARepo()

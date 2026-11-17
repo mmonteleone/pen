@@ -1,5 +1,4 @@
 using Pen.Configuration;
-using Pen.GitProtection;
 using Pen.Platform;
 using Pen.Projects;
 using Pen.Proxy;
@@ -158,7 +157,7 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     public static bool HasDockerfile(Project project)
     {
         var dockerfile = Path.Combine(project.PenDir, "Dockerfile");
-        return File.Exists(dockerfile) || RepoGuard.IsLink(dockerfile);
+        return File.Exists(dockerfile) || PathChecks.IsLink(dockerfile);
     }
 
     /// <summary>Gets the GitHub owner of the project's origin remote.</summary>

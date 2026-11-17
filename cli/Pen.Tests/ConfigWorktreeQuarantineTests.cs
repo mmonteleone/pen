@@ -643,8 +643,8 @@ public class ConfigWorktreeQuarantineTests
 
         Assert.Contains(check.Moved, q => q.From == link);
         Assert.Contains(check.Moved, q => q.From == entryLink);
-        Assert.False(RepoGuard.Exists(link));
-        Assert.False(RepoGuard.Exists(entryLink));
+        Assert.False(PathChecks.Exists(link));
+        Assert.False(PathChecks.Exists(entryLink));
         Assert.True(File.Exists(Path.Combine(evil, "config.worktree")), "only the symlink moves");
         Assert.True(File.Exists(own));
     }
@@ -663,7 +663,7 @@ public class ConfigWorktreeQuarantineTests
         var check = GitCheck.RunAtSessionEnd(repo, s);
 
         Assert.Contains(check.Moved, q => q.From == link);
-        Assert.False(RepoGuard.Exists(link));
+        Assert.False(PathChecks.Exists(link));
     }
 
     // ---- chmod ----

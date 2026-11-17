@@ -169,7 +169,7 @@ internal static class PausedGit
     {
         try
         {
-            if (RepoGuard.IsLink(path))
+            if (PathChecks.IsLink(path))
                 return (null, "it's a symlink");
             var bytes = Native.ReadProtected(path)?.Bytes;
             return bytes is null
@@ -281,7 +281,7 @@ internal static class PausedGit
     /// <summary>Appends one paused operation and its notes to the warning.</summary>
     private static void AppendOperation(StringBuilder text, string dir, PausedOp operation)
     {
-        text.Append("  ").Append(RepoGuard.FormatPath(dir, operation.Path)).Append(": ").AppendLine(operation.Kind);
+        text.Append("  ").Append(PathChecks.FormatPath(dir, operation.Path)).Append(": ").AppendLine(operation.Kind);
         foreach (var note in operation.Notes)
         {
             text.Append("      ").AppendLine(note.Text);
@@ -343,9 +343,9 @@ internal static class PausedGit
         /// </param>
         private void AddIfPresent(string dir, string kind, Func<string, PausedNote?[]> readNotes)
         {
-            if (!RepoGuard.Exists(dir))
+            if (!PathChecks.Exists(dir))
                 return;
-            if (RepoGuard.IsLink(dir))
+            if (PathChecks.IsLink(dir))
                 _found.Add(new(dir, kind, [new("couldn't read the todo in it: it's a symlink", [])]));
             else if (!Directory.Exists(dir))
                 _found.Add(new(dir, kind, [new("couldn't read the todo in it: it isn't a directory", [])]));

@@ -66,7 +66,7 @@ internal sealed class GitDirLinkCheck
     {
         var dirs = new List<string> { commonGitDir };
         var own = Path.Combine(root, ".git");
-        if (RepoGuard.IsLink(own))
+        if (PathChecks.IsLink(own))
             return For(dirs);
         if (Directory.Exists(own))
             dirs.Add(own);
@@ -179,7 +179,7 @@ internal sealed class GitDirLinkCheck
             }
             if (part == "..")
                 return Lead.Unknown; // reached's parent can't be looked at
-            if (RepoGuard.IsLink(path))
+            if (PathChecks.IsLink(path))
             {
                 if (++linksMet > MaxLinks)
                     return unknown ? Lead.Unknown : Lead.Elsewhere;

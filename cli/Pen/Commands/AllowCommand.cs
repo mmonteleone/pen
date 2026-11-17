@@ -106,8 +106,8 @@ internal sealed class AllowCommand(HostEnv host, StartDir startDir, RecipeCatalo
         }
 
         var where = ".pen/" + Config.FileName;
-        RepoGuard.EnsureDirectory(project!.Dir, project.PenDir);
-        RepoGuard.RequireNotLink(project.Dir, project.ProjectConfigPath);
+        MountPlanner.EnsureDirectory(project!.Dir, project.PenDir);
+        MountPlanner.RequireNotLink(project.Dir, project.ProjectConfigPath);
         var target = new ConfigTarget(project.ProjectConfigPath, where, ConfigKind.Project,
             ProjectTemplate.Render(ProjectDetection.None));
         return new(where, Append(target, key, domains, catalog));

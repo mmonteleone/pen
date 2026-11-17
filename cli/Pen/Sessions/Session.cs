@@ -69,7 +69,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
 
         // Past the refusals, so a session that won't start doesn't warn, and with
         // signals held, so Ctrl-C can't end Pen between the probe's create and delete.
-        RepoGuard.WarnIfCaseMayFold(Project, Out.WriteLine, RepoGuard.MayFoldCase);
+        RepoGuard.WarnIfCaseMayFold(Project, Out.WriteLine, PathChecks.MayFoldCase);
         HooksPath.WarnIfWritable(Project, context.Host, Out.WriteLine, context.Host.GetVariable);
         foreach (var warning in ListEgressWarnings(prepared.Tools, prepared.Deny))
             Out.WriteLine(warning);
@@ -78,7 +78,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
             Out.WriteLine(summary);
         var maskWarnings =
             MaskMessages.ListWarnings(prepared.Masks, Project.PenDir, request.Docker, OperatingSystem.IsMacOS(),
-                RepoGuard.MayFoldCase);
+                PathChecks.MayFoldCase);
         foreach (var warning in maskWarnings)
             Out.WriteLine(warning);
         // Last of the messages, past the refusals in Prepare and the locks, so a session that won't start rarely

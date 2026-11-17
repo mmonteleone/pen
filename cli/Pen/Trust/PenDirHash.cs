@@ -2,7 +2,6 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
 using Pen.Configuration;
-using Pen.GitProtection;
 using Pen.Platform;
 
 namespace Pen.Trust;
@@ -83,7 +82,7 @@ internal sealed class PenDirHash : IDisposable
     {
         try
         {
-            if (RepoGuard.IsLink(penDir))
+            if (PathChecks.IsLink(penDir))
                 return new(null, ".pen is a symlink");
             using var walk = new PenDirHash(penDir, copy);
             walk._hash.AppendData("pen .pen/ hash 1\n"u8);
@@ -273,7 +272,7 @@ internal sealed class PenDirHash : IDisposable
             }
             at.Add(part);
             var path = GetFullPath(string.Join('/', at));
-            if (RepoGuard.IsLink(path) || !Path.Exists(path))
+            if (PathChecks.IsLink(path) || !Path.Exists(path))
                 throw refused;
         }
         // config.toml isn't hashed, so a link to it (ignoring case, for macOS) could change unseen.

@@ -139,7 +139,7 @@ internal static class RepoScan
     {
         try
         {
-            if (RepoGuard.IsLink(gitFile))
+            if (PathChecks.IsLink(gitFile))
                 return null;
             var entry = ReadGitFileTarget(gitFile, requireReal: true);
             if (entry is null)
@@ -191,8 +191,8 @@ internal static class RepoScan
                 return false;
             if (!Path.IsPathRooted(gitdir))
                 gitdir = Path.Combine(entry, gitdir);
-            var real = Native.RealPath(gitdir) ?? RepoGuard.ResolveExisting(Path.GetFullPath(gitdir));
-            return RepoGuard.IsInside(dir, real);
+            var real = Native.RealPath(gitdir) ?? PathChecks.ResolveExisting(Path.GetFullPath(gitdir));
+            return PathChecks.IsInside(dir, real);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -235,7 +235,7 @@ internal static class RepoScan
     {
         try
         {
-            if (moduleRepos.Count == 0 || RepoGuard.IsLink(gitFile))
+            if (moduleRepos.Count == 0 || PathChecks.IsLink(gitFile))
                 return null;
             var repo = ReadGitFileTarget(gitFile, requireReal: true);
             if (repo is null || !moduleRepos.Contains(repo))
@@ -255,7 +255,7 @@ internal static class RepoScan
     private static bool HasWorktreeAt(string repo, string checkout)
     {
         var config = Path.Combine(repo, "config");
-        if (RepoGuard.IsLink(config))
+        if (PathChecks.IsLink(config))
             return false;
         // An unreadable config: not a checkout Pen can vouch for.
         if (GitConfigFile.TryParseFile(config) is not { } entries)
@@ -312,9 +312,9 @@ internal static class RepoScan
     private static bool IsGitDirLayout(string dir) =>
         IsGitDirLayout(
             head: IsHead(Path.Combine(dir, "HEAD")),
-            objects: RepoGuard.Exists(Path.Combine(dir, "objects")),
-            refs: RepoGuard.Exists(Path.Combine(dir, "refs")),
-            commondir: RepoGuard.Exists(Path.Combine(dir, "commondir")));
+            objects: PathChecks.Exists(Path.Combine(dir, "objects")),
+            refs: PathChecks.Exists(Path.Combine(dir, "refs")),
+            commondir: PathChecks.Exists(Path.Combine(dir, "commondir")));
 
     /// <summary>Whether a git dir's layout is there, given which of its entries are.</summary>
     /// <param name="head">Whether there's a HEAD git could take for one (<see cref="IsHead(bool, bool)"/>).</param>
@@ -325,7 +325,7 @@ internal static class RepoScan
         head && ((objects && refs) || commondir);
 
     /// <summary>Whether <paramref name="path"/> is a HEAD git could take for one: a symlink, or no directory.</summary>
-    private static bool IsHead(string path) => RepoGuard.IsLink(path) || File.Exists(path);
+    private static bool IsHead(string path) => PathChecks.IsLink(path) || File.Exists(path);
 
     /// <summary>
     /// Whether a listed HEAD is one git could take for one: a symlink (to a directory too), or anything but a
@@ -382,7 +382,7 @@ internal static class RepoScan
     /// </remarks>
     private static string? ReadPathFile(string path, string prefix)
     {
-        if (!File.Exists(path) || RepoGuard.IsLink(path))
+        if (!File.Exists(path) || PathChecks.IsLink(path))
             return null;
         var text = ReadPathText(path);
         if (text is null || text.StartsWith('\uFEFF') || !text.StartsWith(prefix, StringComparison.Ordinal))
@@ -488,7 +488,7 @@ internal static class RepoScan
         private GitDirPlace FindPlace(string dir)
         {
             var chain = Paths.EnumerateAncestors(dir).Prepend(dir);
-            foreach (var at in chain.TakeWhile(at => at != root && RepoGuard.IsInside(root, at)))
+            foreach (var at in chain.TakeWhile(at => at != root && PathChecks.IsInside(root, at)))
             {
                 var parent = Path.GetDirectoryName(at);
                 if (parent is not null && Path.GetFileName(at) is "refs" or "logs" && IsOwnGitDir(parent))
@@ -687,7 +687,7 @@ internal static class RepoScan
         {
             WalkModules(Path.Combine(gitDir, "modules"));
             var worktrees = Path.Combine(gitDir, "worktrees");
-            if (RepoGuard.IsLink(worktrees) || !Directory.Exists(worktrees))
+            if (PathChecks.IsLink(worktrees) || !Directory.Exists(worktrees))
                 return; // a symlinked worktrees/ is refused by the mounts
             var entries = ListOrNote(worktrees);
             if (entries is null)
@@ -697,7 +697,7 @@ internal static class RepoScan
                 return;
             foreach (var worktree in entries)
             {
-                if (!undecodable.Contains(Path.GetFileName(worktree)) && !RepoGuard.IsLink(worktree))
+                if (!undecodable.Contains(Path.GetFileName(worktree)) && !PathChecks.IsLink(worktree))
                     WalkModules(Path.Combine(worktree, "modules"));
             }
         }
@@ -707,7 +707,7 @@ internal static class RepoScan
         /// </summary>
         private void WalkModules(string dir)
         {
-            if (RepoGuard.IsLink(dir))
+            if (PathChecks.IsLink(dir))
             {
                 _repos.Add(dir);
                 return;
@@ -737,7 +737,7 @@ internal static class RepoScan
             // Before the symlink test, so a quarantined symlink isn't flagged and renamed again.
             if (Path.GetFileName(entry).Contains(GitCheck.Suffix, StringComparison.Ordinal))
                 return true;
-            if (RepoGuard.IsLink(entry))
+            if (PathChecks.IsLink(entry))
             {
                 _repos.Add(entry);
             }

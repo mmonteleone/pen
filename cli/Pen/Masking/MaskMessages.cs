@@ -60,7 +60,7 @@ internal static class MaskMessages
     /// <param name="docker">Whether it's a docker session.</param>
     /// <param name="isMacOS">Whether the host is macOS: <see cref="OperatingSystem.IsMacOS"/> in production.</param>
     /// <param name="probe">
-    /// Whether a directory may fold case: <see cref="GitProtection.RepoGuard.MayFoldCase(string)"/> in production.
+    /// Whether a directory may fold case: <see cref="PathChecks.MayFoldCase(string)"/> in production.
     /// </param>
     /// <returns>
     /// <see cref="CaseWarning"/> if a file is hidden or replaced and <paramref name="penDir"/> may fold case, or

@@ -55,7 +55,7 @@ internal sealed class PromptHazardScan(string gitDir, Func<string, bool>? tryOpe
         if (atStart is null)
             return;
         var config = Path.Combine(dir, "config.worktree");
-        if (RepoGuard.Exists(config) && !atStart.Vouches(config))
+        if (PathChecks.Exists(config) && !atStart.Vouches(config))
         {
             _hazards.Add(new(config, null, "a config.worktree that wasn't there at the session's start, or that " +
                 "another session could have made: git reads it as config, so a setting in it can run code on " +
@@ -66,7 +66,7 @@ internal sealed class PromptHazardScan(string gitDir, Func<string, bool>? tryOpe
     /// <summary>Records a worktrees dir or entry it couldn't look in.</summary>
     private void AddUnreachable(string path)
     {
-        if (!RepoGuard.IsLink(path))
+        if (!PathChecks.IsLink(path))
         {
             _unreachableDirs.Add(path); // git won't follow a symlink here to a project's worktree: a warning covers it
         }
@@ -82,7 +82,7 @@ internal sealed class PromptHazardScan(string gitDir, Func<string, bool>? tryOpe
     /// <param name="counts">The names in it that git only writes a number in.</param>
     private void LookInState(string stateDir, string[] counts)
     {
-        if (RepoGuard.IsLink(stateDir))
+        if (PathChecks.IsLink(stateDir))
         {
             _hazards.Add(new(stateDir, null, $"a symlink where git keeps a paused rebase: {Prompt}"));
             return;
@@ -114,7 +114,7 @@ internal sealed class PromptHazardScan(string gitDir, Func<string, bool>? tryOpe
     {
         try
         {
-            if (RepoGuard.IsLink(path))
+            if (PathChecks.IsLink(path))
                 return false;
             var bytes = Native.ReadProtected(path)?.Bytes;
             return bytes is not null && isValid(bytes);

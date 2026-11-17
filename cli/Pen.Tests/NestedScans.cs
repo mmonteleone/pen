@@ -10,7 +10,7 @@ internal static class NestedScans
     /// </summary>
     public static NestedScan Scan(string root, string commonGitDir)
     {
-        var moduleRepos = RepoScan.FindModuleRepos(commonGitDir).Where(repo => !RepoGuard.IsLink(repo)).ToList();
+        var moduleRepos = RepoScan.FindModuleRepos(commonGitDir).Where(repo => !PathChecks.IsLink(repo)).ToList();
         return RepoScan.ScanNested(root, commonGitDir, moduleRepos, tryOpen: null);
     }
 

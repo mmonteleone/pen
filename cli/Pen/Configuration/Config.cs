@@ -1,5 +1,4 @@
 using System.Text.RegularExpressions;
-using Pen.GitProtection;
 using Pen.Masking;
 using Pen.Platform;
 using Pen.Proxy;
@@ -449,7 +448,7 @@ internal sealed partial class Config
 
     private static bool EnsureSeed(HostEnv host, Func<GitIdentity> identity)
     {
-        if (Path.Exists(host.SeedDir) || RepoGuard.IsLink(host.SeedDir))
+        if (Path.Exists(host.SeedDir) || PathChecks.IsLink(host.SeedDir))
             return false;
         return Seed.EnsureExists(host, identity());
     }

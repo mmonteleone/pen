@@ -186,7 +186,7 @@ public class ScanFailClosedTests
         var check = Within10s(() => GitCheck.RunAtSessionEnd(repo, Session(t, Path.Combine(repo, ".git"))));
         Assert.Null(check.Failure);
         Assert.Equal(fifo, Assert.Single(check.Moved).From);
-        Assert.False(RepoGuard.Exists(fifo));
+        Assert.False(PathChecks.Exists(fifo));
     }
 
     [Fact]
@@ -474,7 +474,7 @@ public class ScanFailClosedTests
 
         Assert.Empty(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved);
         Assert.Empty(RepoScan.FindModuleRepos(Path.Combine(repo, ".git")));
-        Assert.True(RepoGuard.IsLink(foo + GitCheck.Suffix));
+        Assert.True(PathChecks.IsLink(foo + GitCheck.Suffix));
     }
 
     [Fact]

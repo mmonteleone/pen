@@ -44,7 +44,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
 
         // .pen/ sets the next session's policy, so the agent must not change or create it.
         var penDir = Path.Combine(dir, ".pen");
-        RepoGuard.EnsureDirectory(dir, penDir);
+        EnsureDirectory(dir, penDir);
         _mounts.Add(new(penDir, ReadOnly: true));
 
         // A file that's also read as config (an include of HEAD) is verified however else it's mounted.
@@ -70,7 +70,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
             var file = Path.Combine(common, name);
             if (!File.Exists(file))
                 continue;
-            RepoGuard.RequireNotLink(dir, file);
+            RequireNotLink(dir, file);
             // Not verified: the main checkout's git changes these legitimately.
             _mounts.Add(new(file, ReadOnly: true));
         }
@@ -98,7 +98,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
         _mounts.Add(new(config, ReadOnly: true, Verify: true));
 
         var hooks = Path.Combine(gitDir, "hooks");
-        RepoGuard.EnsureDirectory(dir, hooks);
+        EnsureDirectory(dir, hooks);
         _mounts.Add(new(hooks, ReadOnly: true));
 
         var worktreeConfig = AddIncludes(common, config);
@@ -121,7 +121,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
     private void ProtectWorktreeEntries(string gitDir, string common, bool worktreeConfig)
     {
         var worktrees = Path.Combine(gitDir, "worktrees");
-        if (RepoGuard.IsLink(worktrees))
+        if (PathChecks.IsLink(worktrees))
             throw new PenException($"{FormatPath(worktrees)} is a symlink, which pen doesn't support");
         if (!Directory.Exists(worktrees))
             return;
@@ -138,11 +138,11 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// <param name="worktreeConfig">Whether any config in the git dir may enable extensions.worktreeConfig.</param>
     private void ProtectWorktreeEntry(string entry, string common, bool worktreeConfig)
     {
-        if (RepoGuard.IsLink(entry))
+        if (PathChecks.IsLink(entry))
             throw new PenException($"{FormatPath(entry)} is a symlink, which pen doesn't support");
         var commondir = Path.Combine(entry, "commondir");
-        if (RepoGuard.Exists(commondir))
-            RepoGuard.RequireNotLink(dir, commondir);
+        if (PathChecks.Exists(commondir))
+            RequireNotLink(dir, commondir);
         if (!RepoScan.IsWorktreeInside(dir, entry))
         {
             // The worktree isn't visible in the sandbox, so its entry
@@ -151,11 +151,11 @@ internal sealed class MountPlanner(string dir, string hostHome)
             _mounts.Add(new(entry, ReadOnly: true));
             // Its config can include a file in the writable project.
             var worktreeFile = Path.Combine(entry, "config.worktree");
-            RepoGuard.RequireNotLink(dir, worktreeFile);
+            RequireNotLink(dir, worktreeFile);
             AddIncludes(common, worktreeFile);
             return;
         }
-        if (RepoGuard.Exists(commondir))
+        if (PathChecks.Exists(commondir))
             _mounts.Add(new(commondir, ReadOnly: true, Verify: true));
         AddWorktreeConfig(common, Path.Combine(entry, "config.worktree"), worktreeConfig);
     }
@@ -187,14 +187,14 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// <param name="common">The project's git dir.</param>
     private void ProtectModuleRepo(string repo, string common)
     {
-        if (RepoGuard.IsLink(repo))
+        if (PathChecks.IsLink(repo))
         {
             throw new PenException($"{FormatPath(repo)} is a symlink, which pen doesn't support: " +
                 $"a submodule's git dir has to be a real directory inside {FormatPath(common)}");
         }
 
         var commondir = Path.Combine(repo, "commondir");
-        if (RepoGuard.Exists(commondir))
+        if (PathChecks.Exists(commondir))
         {
             throw new PenException($"{FormatPath(commondir)} exists, which a submodule's repo never has: it " +
                 "makes git read config and hooks from another directory. Inspect it and remove it, then rerun");
@@ -203,12 +203,12 @@ internal sealed class MountPlanner(string dir, string hostHome)
         // One under a path already mounted read-only (an external worktree's entry) is left alone: it's read-only
         // with it, and a writable mount of its own would undo that, though what its config includes can still be
         // writable.
-        if (_mounts.Any(m => m.ReadOnly && RepoGuard.IsInside(m.Path, repo)))
+        if (_mounts.Any(m => m.ReadOnly && PathChecks.IsInside(m.Path, repo)))
         {
             foreach (var name in new[] { "config", "config.worktree" })
             {
                 var file = Path.Combine(repo, name);
-                RepoGuard.RequireNotLink(dir, file);
+                RequireNotLink(dir, file);
                 AddIncludes(common, file);
             }
             return;
@@ -221,7 +221,8 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// <summary>Lists the directories strictly between <paramref name="common"/> and <paramref name="repo"/>.</summary>
     /// <returns>The directories, outermost first.</returns>
     private static Stack<string> ListDirsBetween(string common, string repo) =>
-        new(Paths.EnumerateAncestors(repo).TakeWhile(parent => parent != common && RepoGuard.IsInside(common, parent)));
+        new(Paths.EnumerateAncestors(repo)
+            .TakeWhile(parent => parent != common && PathChecks.IsInside(common, parent)));
 
     /// <summary>Plans a read-only mount over a config.worktree, with its includes.</summary>
     /// <param name="common">The project's git dir.</param>
@@ -231,7 +232,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// </param>
     private void AddWorktreeConfig(string common, string path, bool enabled)
     {
-        if (!enabled && !RepoGuard.Exists(path))
+        if (!enabled && !PathChecks.Exists(path))
             return;
         EnsureFile(path);
         _mounts.Add(new(path, ReadOnly: true, Verify: true));
@@ -291,7 +292,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
             }
 
             if (include.Written != include.Real
-                && (RepoGuard.IsInside(dir, include.Written) || RepoGuard.IsInside(common, include.Written)))
+                && (PathChecks.IsInside(dir, include.Written) || PathChecks.IsInside(common, include.Written)))
             {
                 throw new PenException($"{FormatPath(configFile)} includes {FormatPath(include.Written)} through " +
                     "a symlink, which pen doesn't support: the agent could redirect the include");
@@ -361,12 +362,12 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// <param name="real">The included file's real path.</param>
     private void ProtectIncludedFile(string common, string configFile, string real)
     {
-        var writable = RepoGuard.IsInside(dir, real) || RepoGuard.IsInside(common, real);
+        var writable = PathChecks.IsInside(dir, real) || PathChecks.IsInside(common, real);
         if (!writable)
             return;
         if (!File.Exists(real))
             CreateIncludedFile(common, configFile, real);
-        RepoGuard.RequireNotLink(dir, real);
+        RequireNotLink(dir, real);
         _mounts.Add(new(real, ReadOnly: true, Verify: true));
     }
 
@@ -377,7 +378,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// </exception>
     private void CreateIncludedFile(string common, string configFile, string real)
     {
-        if (!RepoGuard.IsInside(common, real))
+        if (!PathChecks.IsInside(common, real))
         {
             throw new PenException($"{FormatPath(configFile)} includes {FormatPath(real)}, which " +
                 "doesn't exist: the agent could create it, and git on this machine would read " +
@@ -402,7 +403,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// </summary>
     private void EnsureFile(string path)
     {
-        RepoGuard.RequireNotLink(dir, path);
+        RequireNotLink(dir, path);
         if (Directory.Exists(path))
             throw new PenException($"{FormatPath(path)} is a directory, not a file");
         if (!File.Exists(path))
@@ -410,7 +411,37 @@ internal sealed class MountPlanner(string dir, string hostHome)
     }
 
     /// <summary>
-    /// Formats <paramref name="path"/> for a message, relative to the project dir (<see cref="RepoGuard.FormatPath"/>).
+    /// Formats <paramref name="path"/> for a message, relative to the project dir
+    /// (<see cref="PathChecks.FormatPath"/>).
     /// </summary>
-    private string FormatPath(string path) => RepoGuard.FormatPath(dir, path);
+    private string FormatPath(string path) => PathChecks.FormatPath(dir, path);
+
+    /// <summary>
+    /// Creates <paramref name="path"/> as a directory to be mounted, refusing a symlink or a file there.
+    /// </summary>
+    /// <param name="dir">The project dir, for messages.</param>
+    /// <param name="path">The directory.</param>
+    internal static void EnsureDirectory(string dir, string path)
+    {
+        RequireNotLink(dir, path);
+        if (File.Exists(path))
+        {
+            throw new PenException($"{PathChecks.FormatPath(dir, path)} is a file, not a " +
+                "directory: pen needs to mount it read-only as a directory");
+        }
+
+        Directory.CreateDirectory(path);
+    }
+
+    /// <summary>Refuses a symlink at <paramref name="path"/>, which Pen has to mount read-only.</summary>
+    /// <param name="dir">The project dir, for messages.</param>
+    /// <param name="path">The path to be mounted.</param>
+    internal static void RequireNotLink(string dir, string path)
+    {
+        if (PathChecks.IsLink(path))
+        {
+            throw new PenException($"{PathChecks.FormatPath(dir, path)} is a symlink, which " +
+                "pen doesn't support here: it has to mount it read-only");
+        }
+    }
 }

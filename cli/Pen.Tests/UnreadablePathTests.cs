@@ -76,7 +76,7 @@ public class UnreadablePathTests
         Assert.Equal([module], atStart);
         using var _ = new Chmod(module);
 
-        var moved = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: atStart).Moved.Select(q => RepoGuard.FormatPath(repo, q.From)).ToList();
+        var moved = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: atStart).Moved.Select(q => PathChecks.FormatPath(repo, q.From)).ToList();
 
         Assert.Equal([".git/modules/lib", "lib/.git"], moved);
     }
@@ -168,7 +168,7 @@ public class UnreadablePathTests
         var atStart = RepoScan.FindModuleRepos(Path.Combine(repo, ".git"));
         using var _ = new Chmod(Path.Combine(repo, ".git", "modules", "lib", "config"));
         var moved = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: atStart).Moved;
-        Assert.Equal("lib/.git", RepoGuard.FormatPath(repo, Assert.Single(moved).From));
+        Assert.Equal("lib/.git", PathChecks.FormatPath(repo, Assert.Single(moved).From));
     }
 
     [Theory]

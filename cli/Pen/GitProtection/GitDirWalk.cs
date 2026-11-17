@@ -34,7 +34,7 @@ internal static class GitDirWalk
         VisitWithWorktrees(gitDir, visit, couldntLook, tryOpen);
         foreach (var repo in RepoScan.FindModuleRepos(gitDir))
         {
-            if (!RepoGuard.IsLink(repo))
+            if (!PathChecks.IsLink(repo))
                 VisitWithWorktrees(repo, visit, couldntLook, tryOpen);
         }
     }
@@ -48,11 +48,11 @@ internal static class GitDirWalk
     {
         visit(gitDir);
         var worktrees = Path.Combine(gitDir, "worktrees");
-        if (!RepoGuard.Exists(worktrees))
+        if (!PathChecks.Exists(worktrees))
             return;
-        if (!RepoGuard.IsLink(worktrees) && Directory.Exists(worktrees) && !Native.CanList(worktrees))
+        if (!PathChecks.IsLink(worktrees) && Directory.Exists(worktrees) && !Native.CanList(worktrees))
             tryOpen?.Invoke(worktrees);
-        if (RepoGuard.IsLink(worktrees) || !Directory.Exists(worktrees) || !Native.CanList(worktrees))
+        if (PathChecks.IsLink(worktrees) || !Directory.Exists(worktrees) || !Native.CanList(worktrees))
         {
             couldntLook(worktrees);
             return;
@@ -61,9 +61,9 @@ internal static class GitDirWalk
         {
             // git keeps only directories here. One it can't enter is what it would
             // read once the user fixes the mode, so it can't pass as empty.
-            if (!RepoGuard.IsLink(entry) && Directory.Exists(entry) && !Native.CanEnter(entry))
+            if (!PathChecks.IsLink(entry) && Directory.Exists(entry) && !Native.CanEnter(entry))
                 tryOpen?.Invoke(entry);
-            if (RepoGuard.IsLink(entry) || !Path.Exists(entry) || (Directory.Exists(entry) && !Native.CanEnter(entry)))
+            if (PathChecks.IsLink(entry) || !Path.Exists(entry) || (Directory.Exists(entry) && !Native.CanEnter(entry)))
                 couldntLook(entry);
             else if (Directory.Exists(entry))
                 visit(entry);

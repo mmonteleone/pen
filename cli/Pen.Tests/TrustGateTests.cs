@@ -322,7 +322,7 @@ public class TrustGateTests
 
         var context = f.Seen("context-path");
         Assert.StartsWith(f.Host.GetRuntimeDir(f.Project.Key) + "/", context);
-        Assert.False(RepoGuard.IsInside(f.Project.Dir, context));
+        Assert.False(PathChecks.IsInside(f.Project.Dir, context));
         Assert.EndsWith("/Dockerfile", f.Calls[^1].Split(' ')[^2]);
         Assert.False(Path.Exists(context));
         Assert.False(Path.Exists(Path.GetDirectoryName(context)));

@@ -470,9 +470,9 @@ public class ProtectedFilesTests
         var check = End(repo, s);
 
         Assert.Null(check.Failure);
-        Assert.False(RepoGuard.IsLink(config));
+        Assert.False(PathChecks.IsLink(config));
         Assert.Equal(original, File.ReadAllBytes(config));
-        Assert.True(RepoGuard.IsLink(config + GitCheck.Suffix));
+        Assert.True(PathChecks.IsLink(config + GitCheck.Suffix));
         if (dangling) Assert.False(File.Exists(target));
         else Assert.Equal("the agent's target", File.ReadAllText(target));
     }
@@ -489,7 +489,7 @@ public class ProtectedFilesTests
         File.Delete(config);
         File.CreateSymbolicLink(config, target);
         var check = End(repo, s);
-        Assert.False(RepoGuard.IsLink(config));
+        Assert.False(PathChecks.IsLink(config));
         Assert.Single(check.Moved);
     }
 
@@ -601,7 +601,7 @@ public class ProtectedFilesTests
         Assert.Equal("the user's keys", File.ReadAllText(victim));
         Assert.False(File.Exists(sub));
         Assert.Equal(sub, Assert.Single(check.Moved, q => q.From == sub).From);
-        Assert.True(RepoGuard.IsLink(sub + GitCheck.Suffix));
+        Assert.True(PathChecks.IsLink(sub + GitCheck.Suffix));
     }
 
     [Fact]
