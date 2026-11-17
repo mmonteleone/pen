@@ -579,7 +579,7 @@ public class ProjectDetectionTests
         Assert.Equal(["certs/dev.pem", "certs/prod.PEM"], Pattern(detection, "/certs/*.pem").Sources);
         Assert.Equal(["tls.key"], Pattern(detection, "/*.key").Sources);
         Assert.Equal(["config/secrets"], Pattern(detection, "secrets/").Sources);
-        Assert.All(detection.Hide, found => Assert.Null(Masking.HidePattern.TryParse(found.Pattern, out _)));
+        Assert.All(detection.Hide, found => Assert.True(Masking.HidePattern.TryParse(found.Pattern, out _, out _)));
     }
 
     [Fact]
@@ -632,8 +632,8 @@ public class ProjectDetectionTests
         var pattern = Assert.Single(Detect(t).Hide);
         Assert.Equal(expected, pattern.Pattern);
         Assert.Equal([file], pattern.Sources);
-        var parsed = HidePattern.TryParse(pattern.Pattern, out var p) == null ? p : null;
-        Assert.False(parsed!.IsMatch(".venv/lib/certifi/cacert.pem", isDirectory: false));
+        Assert.True(HidePattern.TryParse(pattern.Pattern, out var parsed, out _));
+        Assert.False(parsed.IsMatch(".venv/lib/certifi/cacert.pem", isDirectory: false));
         Assert.False(parsed.IsMatch("node_modules/x/y.pem", isDirectory: false));
     }
 
@@ -670,8 +670,8 @@ public class ProjectDetectionTests
         using var t = new TempDir();
         Write(t, file);
         var found = Assert.Single(Detect(t).Hide);
-        Assert.Null(Masking.HidePattern.TryParse(found.Pattern, out var pattern));
-        Assert.True(pattern!.IsMatch(file, isDirectory: false), found.Pattern);
+        Assert.True(Masking.HidePattern.TryParse(found.Pattern, out var pattern, out _));
+        Assert.True(pattern.IsMatch(file, isDirectory: false), found.Pattern);
         Assert.True(pattern.IsAnchored);
     }
 
@@ -681,8 +681,8 @@ public class ProjectDetectionTests
         using var t = new TempDir();
         Write(t, "certs/dev.pem");
         var found = Assert.Single(Detect(t).Hide);
-        Assert.Null(Masking.HidePattern.TryParse(found.Pattern, out var pattern));
-        Assert.False(pattern!.IsMatch(".venv/lib/certifi/cacert.pem", isDirectory: false));
+        Assert.True(Masking.HidePattern.TryParse(found.Pattern, out var pattern, out _));
+        Assert.False(pattern.IsMatch(".venv/lib/certifi/cacert.pem", isDirectory: false));
         Assert.False(pattern.IsMatch("node_modules/x/test/certs/dev.pem", isDirectory: false));
         Assert.False(pattern.IsMatch("certs/sub/dev.pem", isDirectory: false));
     }

@@ -295,11 +295,11 @@ internal sealed partial class Config
                     "a tool (use name or name:version, in quotes)");
             }
 
-            if (ToolSpec.TryParse(spec, RecipeCatalog.Embedded, out var tool) is { } invalid)
+            if (!ToolSpec.TryParse(spec, RecipeCatalog.Embedded, out var tool, out var invalid))
                 throw error($"tools: {invalid}");
             parsed.Add(tool);
         }
-        if (ToolSpec.TryCanonicalize(parsed, RecipeCatalog.Embedded, out var canonical) is { } conflict)
+        if (!ToolSpec.TryCanonicalize(parsed, RecipeCatalog.Embedded, out var canonical, out var conflict))
             throw error($"tools: {conflict}");
         Tools = canonical;
     }
@@ -312,9 +312,9 @@ internal sealed partial class Config
         {
             if (item is not string text)
                 throw error($"hide: {DescribeItem(item)} isn't a pattern (put it in quotes)");
-            if (HidePattern.TryParse(text, out var pattern) is { } problem)
+            if (!HidePattern.TryParse(text, out var pattern, out var problem))
                 throw error($"hide: \"{text}\": {problem}");
-            Hide.Add(pattern!);
+            Hide.Add(pattern);
         }
     }
 

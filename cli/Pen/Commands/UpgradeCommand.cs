@@ -84,7 +84,7 @@ internal sealed class UpgradeCommand(HostEnv host, Config user, RecipeCatalog ca
         }
 
         var approved = user.Tools.Concat(context.ProjectConfig.Tools.Except(unapproved));
-        if (ToolSpec.TryCanonicalize(approved, catalog, out var tools) is { } conflict)
+        if (!ToolSpec.TryCanonicalize(approved, catalog, out var tools, out var conflict))
         {
             Out.WriteLine($"skipping this project's tools: {conflict}");
             return user.Tools;

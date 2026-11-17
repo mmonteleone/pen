@@ -12,8 +12,8 @@ public class MaskPlannerTests
 {
     private static HidePattern P(string text)
     {
-        Assert.Null(HidePattern.TryParse(text, out var pattern));
-        return pattern!;
+        Assert.True(HidePattern.TryParse(text, out var pattern, out var problem), problem);
+        return pattern;
     }
 
     private static MaskPlan Plan(string dir, params string[] hide) => Plan(dir, null, hide, []);

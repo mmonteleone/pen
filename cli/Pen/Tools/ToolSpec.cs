@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.RegularExpressions;
 using Pen.Platform;
 
@@ -14,14 +15,22 @@ internal readonly partial record struct ToolSpec(string Name, string Version)
     public override string ToString() => $"{Name}:{Version}";
 
     /// <summary>Parses "name" (the recipe's default version) or "name:version" into <paramref name="tool"/>.</summary>
-    /// <returns>What's wrong with <paramref name="spec"/>, or null when it parsed.</returns>
+    /// <param name="spec">The tool as written.</param>
+    /// <param name="catalog">The recipes to parse against.</param>
+    /// <param name="tool">The tool when it parsed; otherwise <c>default</c>.</param>
+    /// <param name="error">What's wrong with <paramref name="spec"/> when it didn't parse; otherwise null.</param>
+    /// <returns>Whether <paramref name="spec"/> parsed.</returns>
     /// <remarks>
     /// A version stays as written, since 24.04 and 24.4 are different versions, and a recipe's regex
     /// rejects the forms it doesn't want. The spec may come from .pen/, which an agent can write, and the
     /// version ends up as an argument to a root script. So whatever a recipe's regex says, it's held to
     /// <see cref="IsVersionSyntax"/>: no shell syntax, slash, whitespace or leading dash.
     /// </remarks>
-    public static string? TryParse(string spec, RecipeCatalog catalog, out ToolSpec tool)
+    public static bool TryParse(
+        string spec,
+        RecipeCatalog catalog,
+        out ToolSpec tool,
+        [NotNullWhen(false)] out string? error)
     {
         tool = default;
         var colon = spec.IndexOf(':');
@@ -29,47 +38,61 @@ internal readonly partial record struct ToolSpec(string Name, string Version)
         if (!catalog.TryGet(name, out var recipe))
         {
             var hint = spec == "list" ? "; pen tools lists them" : "";
-            return $"unknown tool \"{Out.Field(name)}\" ({catalog.DescribeAvailable()}){hint}";
+            error = $"unknown tool \"{Out.Field(name)}\" ({catalog.DescribeAvailable()}){hint}";
+            return false;
         }
         if (colon < 0)
         {
             tool = new(name, recipe.Default);
-            return null;
+            error = null;
+            return true;
         }
         var given = spec[(colon + 1)..];
         if (!IsVersionSyntax(given) || !recipe.AcceptsVersion(given))
-            return $"\"{Out.Field(given)}\" isn't a valid version of {name}";
+        {
+            error = $"\"{Out.Field(given)}\" isn't a valid version of {name}";
+            return false;
+        }
         tool = new(name, given);
-        return null;
+        error = null;
+        return true;
     }
 
     /// <summary>Makes <paramref name="canonical"/>: the tools without exact duplicates, sorted ordinally.</summary>
-    /// <returns>
-    /// What's wrong if it holds two versions of a tool whose recipe doesn't allow that, or null.
-    /// </returns>
-    public static string? TryCanonicalize(
+    /// <param name="tools">The tools, in any order.</param>
+    /// <param name="catalog">The recipes, which say whether a tool allows more than one version.</param>
+    /// <param name="canonical">The canonical list when the tools go together; otherwise empty.</param>
+    /// <param name="error">
+    /// What's wrong when the tools hold two versions of a tool whose recipe doesn't allow that; otherwise null.
+    /// </param>
+    /// <returns>Whether the tools go together.</returns>
+    public static bool TryCanonicalize(
         IEnumerable<ToolSpec> tools,
         RecipeCatalog catalog,
-        out IReadOnlyList<ToolSpec> canonical)
+        out IReadOnlyList<ToolSpec> canonical,
+        [NotNullWhen(false)] out string? error)
     {
         var sorted = tools.Distinct().OrderBy(t => t.ToString(), StringComparer.Ordinal).ToList();
-        canonical = sorted;
         foreach (var versions in sorted.GroupBy(t => t.Name, StringComparer.Ordinal))
         {
             if (versions.Count() > 1 && catalog.TryGet(versions.Key, out var recipe) && !recipe.Multiple)
             {
-                return $"{string.Join(" and ", versions)} can't be used together: " +
+                canonical = [];
+                error = $"{string.Join(" and ", versions)} can't be used together: " +
                     $"only one version of {versions.Key} can be installed";
+                return false;
             }
         }
-        return null;
+        canonical = sorted;
+        error = null;
+        return true;
     }
 
     /// <summary>Merges user config, project config and --tool into the canonical list for a session.</summary>
     /// <returns>The canonical list; tools that can't go together throw.</returns>
     public static IReadOnlyList<ToolSpec> Merge(RecipeCatalog catalog, params IEnumerable<ToolSpec>[] lists)
     {
-        if (TryCanonicalize(lists.SelectMany(list => list), catalog, out var canonical) is { } conflict)
+        if (!TryCanonicalize(lists.SelectMany(list => list), catalog, out var canonical, out var conflict))
             throw new PenException($"tools: {conflict}. Check --tool, ~/.config/pen/config.toml and .pen/config.toml");
         return canonical;
     }

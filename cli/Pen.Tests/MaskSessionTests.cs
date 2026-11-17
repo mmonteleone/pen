@@ -125,9 +125,9 @@ public class MaskSessionTests
         File.WriteAllText(Path.Combine(project, ".env"), "SECRET=real\n");
         File.WriteAllText(Path.Combine(t.Sub("project", "secrets"), "key"), "k");
         File.WriteAllText(Path.Combine(t.Sub("project", ".pen"), "agent.env"), "SECRET=\n");
-        Assert.Null(HidePattern.TryParse(".env", out var env));
-        Assert.Null(HidePattern.TryParse("secrets/", out var secrets));
-        var plan = new MaskPlanner(project, null, [], [env!, secrets!], [new(".env", ".pen/agent.env")]).Plan();
+        Assert.True(HidePattern.TryParse(".env", out var env, out _));
+        Assert.True(HidePattern.TryParse("secrets/", out var secrets, out _));
+        var plan = new MaskPlanner(project, null, [], [env, secrets], [new(".env", ".pen/agent.env")]).Plan();
         var session = NewSession(t);
 
         var mounts = MaskFiles.Write(session.MasksDir, plan);
@@ -153,9 +153,9 @@ public class MaskSessionTests
         File.WriteAllText(Path.Combine(t.Sub("project", "secrets"), "key"), "k");
         File.WriteAllText(Path.Combine(project, "config.env"), "B=1\n");
         File.WriteAllText(Path.Combine(t.Sub("project", ".pen"), "agent.env"), "B=\n");
-        Assert.Null(HidePattern.TryParse(".env", out var env));
-        Assert.Null(HidePattern.TryParse("secrets/", out var secrets));
-        var plan = new MaskPlanner(project, null, [], [env!, secrets!], [new("config.env", ".pen/agent.env")]).Plan();
+        Assert.True(HidePattern.TryParse(".env", out var env, out _));
+        Assert.True(HidePattern.TryParse("secrets/", out var secrets, out _));
+        var plan = new MaskPlanner(project, null, [], [env, secrets], [new("config.env", ".pen/agent.env")]).Plan();
         Assert.Equal(["apps/web/.env"], plan.HiddenFiles.Select(file => file.RelativePath));
         Assert.Equal(["secrets"], plan.HiddenDirs.Select(dir => dir.RelativePath));
         Assert.Equal(["config.env"], plan.Replacements.Select(replacement => replacement.Target.RelativePath));
@@ -314,8 +314,8 @@ public class MaskSessionTests
         using var t = new TempDir();
         var project = t.Sub("project");
         File.WriteAllText(Path.Combine(project, "a\nb.env"), "");
-        Assert.Null(HidePattern.TryParse("*.env", out var pattern));
-        var plan = new MaskPlanner(project, null, [], [pattern!], []).Plan();
+        Assert.True(HidePattern.TryParse("*.env", out var pattern, out _));
+        var plan = new MaskPlanner(project, null, [], [pattern], []).Plan();
         File.Delete(Path.Combine(project, "a\nb.env"));
 
         var message = Refusal(plan);

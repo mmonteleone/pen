@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.CommandLine.Help;
 using System.CommandLine.Invocation;
 using System.CommandLine.Parsing;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Reflection;
 using Pen.Proxy;
@@ -340,8 +341,14 @@ internal sealed class CommandTree
     }
 
     /// <summary>Parses --port values into <paramref name="ports"/>: in order, without duplicates.</summary>
-    /// <returns>What's wrong with the first value that isn't a port, or null.</returns>
-    public static string? TryParsePorts(IEnumerable<string> values, out List<int> ports)
+    /// <param name="values">The values as given.</param>
+    /// <param name="ports">The ports when every value is one; otherwise empty.</param>
+    /// <param name="error">What's wrong with the first value that isn't a port; otherwise null.</param>
+    /// <returns>Whether every value is a port.</returns>
+    public static bool TryParsePorts(
+        IEnumerable<string> values,
+        out List<int> ports,
+        [NotNullWhen(false)] out string? error)
     {
         ports = [];
         foreach (var value in values)
@@ -349,38 +356,52 @@ internal sealed class CommandTree
             if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var port)
                 || !Port.IsValid(port))
             {
-                return $"--port: \"{value}\" isn't a port number (1 to 65535)";
+                ports = [];
+                error = $"--port: \"{value}\" isn't a port number (1 to 65535)";
+                return false;
             }
             if (!ports.Contains(port))
                 ports.Add(port);
         }
-        return null;
+        error = null;
+        return true;
     }
 
     /// <summary>Parses --tool values into <paramref name="tools"/>, as given.</summary>
-    /// <returns>What's wrong with the first value that isn't a tool, or null.</returns>
-    public static string? TryParseTools(IEnumerable<string> values, out List<ToolSpec> tools)
+    /// <param name="values">The values as given.</param>
+    /// <param name="tools">The tools when every value is one; otherwise empty.</param>
+    /// <param name="error">What's wrong with the first value that isn't a tool; otherwise null.</param>
+    /// <returns>Whether every value is a tool.</returns>
+    public static bool TryParseTools(
+        IEnumerable<string> values,
+        out List<ToolSpec> tools,
+        [NotNullWhen(false)] out string? error)
     {
         tools = [];
         foreach (var value in values)
         {
-            if (ToolSpec.TryParse(value, RecipeCatalog.Embedded, out var tool) is { } invalid)
-                return $"--tool: {invalid}";
+            if (!ToolSpec.TryParse(value, RecipeCatalog.Embedded, out var tool, out var invalid))
+            {
+                tools = [];
+                error = $"--tool: {invalid}";
+                return false;
+            }
             tools.Add(tool);
         }
-        return null;
+        error = null;
+        return true;
     }
 
     private static List<int> ParsePorts(ArgumentResult result)
     {
-        if (TryParsePorts(result.Tokens.Select(token => token.Value), out var ports) is { } error)
+        if (!TryParsePorts(result.Tokens.Select(token => token.Value), out var ports, out var error))
             result.AddError(error);
         return ports;
     }
 
     private static List<ToolSpec> ParseTools(ArgumentResult result)
     {
-        if (TryParseTools(result.Tokens.Select(token => token.Value), out var tools) is { } error)
+        if (!TryParseTools(result.Tokens.Select(token => token.Value), out var tools, out var error))
             result.AddError(error);
         return tools;
     }
@@ -391,7 +412,7 @@ internal sealed class CommandTree
         var domains = new List<string>();
         foreach (var token in result.Tokens)
         {
-            if (TryReadDomain(name, token.Value, allowStar, startDir, out var domain) is { } error)
+            if (!TryReadDomain(name, token.Value, allowStar, startDir, out var domain, out var error))
             {
                 result.AddError(error);
                 return [];
@@ -412,29 +433,48 @@ internal sealed class CommandTree
     /// Gets the start directory, or null when it can't be read: an argument that isn't a domain but names an entry
     /// there gets the advice for a shell that expanded an unquoted *.
     /// </param>
-    /// <param name="domain">The domain, lowercased, or <see cref="Allowlist.AnyDomain"/>.</param>
-    /// <returns>Why the argument is refused (an unknown option, or not a domain), or null.</returns>
-    private static string? TryReadDomain(
+    /// <param name="domain">
+    /// The domain, lowercased, or <see cref="Allowlist.AnyDomain"/>, when the argument is one; otherwise empty.
+    /// </param>
+    /// <param name="error">Why the argument is refused (an unknown option, or not a domain); otherwise null.</param>
+    /// <returns>Whether the argument is a domain.</returns>
+    private static bool TryReadDomain(
         string name,
         string arg,
         bool allowStar,
         Func<string?> startDir,
-        out string domain)
+        out string domain,
+        [NotNullWhen(false)] out string? error)
     {
-        domain = arg;
+        domain = "";
+        error = null;
         if (arg.StartsWith('-'))
-            return $"pen {name}: unknown option \"{arg}\"";
+        {
+            error = $"pen {name}: unknown option \"{arg}\"";
+            return false;
+        }
         if (arg == Allowlist.AnyDomain)
-            return allowStar ? null : $"pen {name}: \"*\" would block everything; remove the allow entries instead";
+        {
+            if (!allowStar)
+            {
+                error = $"pen {name}: \"*\" would block everything; remove the allow entries instead";
+                return false;
+            }
+            domain = arg;
+            return true;
+        }
 
-        domain = arg.ToLowerInvariant();
-        if (Allowlist.IsValidDomain(domain))
-            return null;
-        var message = $"pen {name}: \"{arg}\" isn't a domain (use " +
+        var lowered = arg.ToLowerInvariant();
+        if (Allowlist.IsValidDomain(lowered))
+        {
+            domain = lowered;
+            return true;
+        }
+        error = $"pen {name}: \"{arg}\" isn't a domain (use " +
             "example.com, or .example.com to include its subdomains)";
         if (startDir() is { } dir && ShellGlob.NamesEntry(dir, arg))
-            message += "; " + ShellGlob.FormatAdvice(name);
-        return message;
+            error += "; " + ShellGlob.FormatAdvice(name);
+        return false;
     }
 
     /// <summary>Checks pen allow's options: --defaults alone, or --global with domains.</summary>
@@ -689,9 +729,10 @@ internal sealed record RunOptionSet(Option<bool> Docker, Option<List<int>> Port,
     /// <summary>Gets the options that take a value, with how their values are checked.</summary>
     public IEnumerable<ValuedOption> Valued =>
     [
-        new(Port, "--port: missing the port number", values => CommandTree.TryParsePorts(values, out _)),
+        new(Port, "--port: missing the port number",
+            values => CommandTree.TryParsePorts(values, out _, out var error) ? null : error),
         new(Tool, "--tool: missing the tool (name or name:version)",
-            values => CommandTree.TryParseTools(values, out _)),
+            values => CommandTree.TryParseTools(values, out _, out var error) ? null : error),
     ];
 }
 

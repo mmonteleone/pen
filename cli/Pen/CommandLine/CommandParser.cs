@@ -273,7 +273,7 @@ internal static class CommandParser
                 ports.Add(port);
         }
         var tools = places.SelectMany(place => result.GetValue(place.Tool) ?? []);
-        if (ToolSpec.TryCanonicalize(tools, RecipeCatalog.Embedded, out var canonical) is { } conflict)
+        if (!ToolSpec.TryCanonicalize(tools, RecipeCatalog.Embedded, out var canonical, out var conflict))
             throw CreateUsageError($"--tool: {conflict}", owner);
         return command with
         {

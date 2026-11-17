@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Pen.Platform;
 
 namespace Pen.Masking;
@@ -64,10 +65,36 @@ internal sealed class HidePattern
     internal const int MaxLength = 1024;
 
     /// <summary>Parses <paramref name="text"/> into <paramref name="pattern"/>.</summary>
-    /// <returns>What's wrong with the pattern, or null when it parsed and <paramref name="pattern"/> is set.</returns>
-    public static string? TryParse(string text, out HidePattern? pattern)
+    /// <param name="text">The pattern as written.</param>
+    /// <param name="pattern">The pattern when it parsed; otherwise null.</param>
+    /// <param name="error">What's wrong with the pattern when it didn't parse; otherwise null.</param>
+    /// <returns>Whether <paramref name="text"/> parsed.</returns>
+    public static bool TryParse(
+        string text,
+        [NotNullWhen(true)] out HidePattern? pattern,
+        [NotNullWhen(false)] out string? error)
     {
         pattern = null;
+        error = Split(text, out var parts, out var isAnchored, out var isDirectoryOnly);
+        if (error is not null)
+            return false;
+        pattern = new HidePattern(text, BuildSegments(parts), isAnchored, isDirectoryOnly);
+        return true;
+    }
+
+    /// <summary>Splits <paramref name="text"/> into its normalized segments, unless it's refused.</summary>
+    /// <returns>
+    /// What's wrong with the pattern, or null when it's accepted. The outs are meaningful only when this returns null.
+    /// </returns>
+    private static string? Split(
+        string text,
+        out string[] parts,
+        out bool isAnchored,
+        out bool isDirectoryOnly)
+    {
+        parts = [];
+        isAnchored = false;
+        isDirectoryOnly = false;
         if (text.Contains('\0'))
             return "a pattern can't contain a NUL character";
         if (text.AsSpan().IndexOfAny("[]\\") >= 0)
@@ -81,7 +108,7 @@ internal sealed class HidePattern
         if (text.Length > MaxLength)
             return $"a pattern can't be longer than {MaxLength} characters";
         var body = text;
-        var isDirectoryOnly = body.EndsWith('/');
+        isDirectoryOnly = body.EndsWith('/');
         if (isDirectoryOnly)
             body = body[..^1];
         var hasLeadingSlash = body.StartsWith('/');
@@ -90,12 +117,9 @@ internal sealed class HidePattern
         if (body.Length == 0)
             return "a pattern can't be empty";
 
-        var parts = body.Split('/').Select(Native.NormalizeFormC).ToArray();
-        if (FindProblem(parts) is { } problem)
-            return problem;
-        var isAnchored = hasLeadingSlash || parts.Length > 1;
-        pattern = new HidePattern(text, BuildSegments(parts), isAnchored, isDirectoryOnly);
-        return null;
+        parts = [.. body.Split('/').Select(Native.NormalizeFormC)];
+        isAnchored = hasLeadingSlash || parts.Length > 1;
+        return FindProblem(parts);
     }
 
     /// <summary>Tells whether the pattern refuses its segments.</summary>

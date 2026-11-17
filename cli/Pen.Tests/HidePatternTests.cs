@@ -6,15 +6,16 @@ public class HidePatternTests
 {
     private static HidePattern Parse(string text)
     {
-        Assert.Null(HidePattern.TryParse(text, out var pattern));
-        return pattern!;
+        Assert.True(HidePattern.TryParse(text, out var pattern, out var problem), problem);
+        Assert.Null(problem);
+        return pattern;
     }
 
     private static string Refuse(string text)
     {
-        var problem = HidePattern.TryParse(text, out var pattern);
+        Assert.False(HidePattern.TryParse(text, out var pattern, out var problem));
         Assert.Null(pattern);
-        return Assert.IsType<string>(problem);
+        return problem;
     }
 
     private static bool File(string pattern, string path) => Parse(pattern).IsMatch(path, isDirectory: false);

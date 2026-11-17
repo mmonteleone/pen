@@ -18,16 +18,28 @@ public class ToolsTests
 
     private static ToolSpec Tool(string spec)
     {
-        Assert.Null(ToolSpec.TryParse(spec, Catalog, out var tool));
+        Assert.True(ToolSpec.TryParse(spec, Catalog, out var tool, out var error), error);
+        Assert.Null(error);
         return tool;
     }
 
-    private static string Bad(string spec) =>
-        Assert.IsType<string>(ToolSpec.TryParse(spec, Catalog, out _));
+    private static string Bad(string spec)
+    {
+        Assert.False(ToolSpec.TryParse(spec, Catalog, out var tool, out var error));
+        Assert.Equal(default, tool);
+        return error;
+    }
+
+    private static string Conflict(RecipeCatalog catalog, params ToolSpec[] tools)
+    {
+        Assert.False(ToolSpec.TryCanonicalize(tools, catalog, out var canonical, out var error));
+        Assert.Empty(canonical);
+        return error;
+    }
 
     private static List<string> Canonical(params string[] specs)
     {
-        Assert.Null(ToolSpec.TryCanonicalize(specs.Select(Tool), Catalog, out var canonical));
+        Assert.True(ToolSpec.TryCanonicalize(specs.Select(Tool), Catalog, out var canonical, out var error), error);
         return canonical.Select(t => t.ToString()).ToList();
     }
 
@@ -115,7 +127,7 @@ public class ToolsTests
     {
         Assert.Equal(["dotnet:010", "dotnet:10"], Canonical("dotnet:10", "dotnet:010", "dotnet:10"));
         Assert.Contains("go:1.01 and go:1.1 can't be used together",
-            ToolSpec.TryCanonicalize([Tool("go:1.1"), Tool("go:1.01")], Catalog, out _));
+            Conflict(Catalog, Tool("go:1.1"), Tool("go:1.01")));
     }
 
     [Fact]
@@ -126,8 +138,9 @@ public class ToolsTests
             ["tools/x/tool.toml"] = "default = \"8\"\nversion = '^[1-9]\\d*$'\n",
             ["tools/x/install.sh"] = "#!/bin/sh\n",
         });
-        Assert.Null(ToolSpec.TryParse("x:8", catalog, out _));
-        Assert.Contains("\"08\" isn't a valid version of x", ToolSpec.TryParse("x:08", catalog, out _));
+        Assert.True(ToolSpec.TryParse("x:8", catalog, out _, out _));
+        Assert.False(ToolSpec.TryParse("x:08", catalog, out _, out var error));
+        Assert.Contains("\"08\" isn't a valid version of x", error);
     }
 
     [Fact]
@@ -149,7 +162,7 @@ public class ToolsTests
             ["tools/a-b/tool.toml"] = "default = \"1\"\nversion = '^\\d+$'\n",
             ["tools/a-b/install.sh"] = "#!/bin/sh\n",
         });
-        Assert.Null(ToolSpec.TryCanonicalize([new("a", "1"), new("a-b", "1")], catalog, out var canonical));
+        Assert.True(ToolSpec.TryCanonicalize([new("a", "1"), new("a-b", "1")], catalog, out var canonical, out _));
         Assert.Equal(["a-b:1", "a:1"], canonical.Select(t => t.ToString()));
     }
 
@@ -195,7 +208,7 @@ public class ToolsTests
     [Fact]
     public void AVersionTooLongIsRefused_WhateverTheRecipeAllows()
     {
-        Assert.Null(ToolSpec.TryParse("dotnet:" + new string('1', 64), Catalog, out _));
+        Assert.True(ToolSpec.TryParse("dotnet:" + new string('1', 64), Catalog, out _, out _));
         Assert.Contains("isn't a valid version", Bad("dotnet:" + new string('1', 65)));
     }
 
@@ -216,9 +229,9 @@ public class ToolsTests
             ["tools/loose/tool.toml"] = "default = \"1\"\nversion = '\\d+'\n",
             ["tools/loose/install.sh"] = "#!/bin/sh\n",
         });
-        Assert.Null(ToolSpec.TryParse("loose:12", catalog, out _));
-        Assert.NotNull(ToolSpec.TryParse("loose:12-x", catalog, out _));
-        Assert.NotNull(ToolSpec.TryParse("loose:x-12", catalog, out _));
+        Assert.True(ToolSpec.TryParse("loose:12", catalog, out _, out _));
+        Assert.False(ToolSpec.TryParse("loose:12-x", catalog, out _, out _));
+        Assert.False(ToolSpec.TryParse("loose:x-12", catalog, out _, out _));
     }
 
     [Fact]
@@ -237,10 +250,10 @@ public class ToolsTests
     [Fact]
     public void TwoVersionsThatCantCoexistAreRefused()
     {
-        var message = ToolSpec.TryCanonicalize([Tool("go:1.24"), Tool("go:1.25")], Catalog, out _);
+        var message = Conflict(Catalog, Tool("go:1.24"), Tool("go:1.25"));
         Assert.Equal("go:1.24 and go:1.25 can't be used together: only one version of go can be installed", message);
-        Assert.Null(ToolSpec.TryCanonicalize([Tool("go:1.24"), Tool("go")], Catalog, out _));
-        Assert.Null(ToolSpec.TryCanonicalize([Tool("dotnet:8"), Tool("dotnet:10")], Catalog, out _));
+        Assert.True(ToolSpec.TryCanonicalize([Tool("go:1.24"), Tool("go")], Catalog, out _, out _));
+        Assert.True(ToolSpec.TryCanonicalize([Tool("dotnet:8"), Tool("dotnet:10")], Catalog, out _, out _));
     }
 
     [Fact]

@@ -307,8 +307,8 @@ internal sealed partial record ProjectDetection
             var directories = string.Concat(
                 segments.Select(segment => "/" + (IsLiteralSegment(segment) ? segment : "*")));
             var pattern = $"{directories}/*{extension}";
-            return HidePattern.TryParse(pattern, out var parsed) is null
-                && parsed!.IsMatch(file.Relative, isDirectory: false)
+            return HidePattern.TryParse(pattern, out var parsed, out _)
+                && parsed.IsMatch(file.Relative, isDirectory: false)
                     ? pattern
                     : null;
         }
@@ -442,8 +442,8 @@ internal sealed partial record ProjectDetection
         private void AddTool(string name, string? version, string? found, IEnumerable<FoundFile> sources)
         {
             var tool = default(ToolSpec);
-            var isPinned = version is not null && ToolSpec.TryParse($"{name}:{version}", catalog, out tool) is null;
-            if (!isPinned && ToolSpec.TryParse(name, catalog, out tool) is not null)
+            var isPinned = version is not null && ToolSpec.TryParse($"{name}:{version}", catalog, out tool, out _);
+            if (!isPinned && !ToolSpec.TryParse(name, catalog, out tool, out _))
                 return;
             var unknown = !isPinned && version is not null;
             if (!_tools.TryGetValue(tool, out var finding))
@@ -482,7 +482,7 @@ internal sealed partial record ProjectDetection
                 else
                     merged[key] = finding;
             }
-            if (ToolSpec.TryCanonicalize(merged.Keys, catalog, out var canonical) is { } conflict)
+            if (!ToolSpec.TryCanonicalize(merged.Keys, catalog, out var canonical, out var conflict))
                 throw new InvalidOperationException($"detected tools don't go together: {conflict}");
             return [.. canonical.Select(tool => merged[tool].ToDetected(tool))];
         }
@@ -495,7 +495,7 @@ internal sealed partial record ProjectDetection
                 .ThenBy(finding => finding.Pattern, StringComparer.Ordinal);
             foreach (var finding in ordered)
             {
-                if (HidePattern.TryParse(finding.Pattern, out _) is null)
+                if (HidePattern.TryParse(finding.Pattern, out _, out _))
                     patterns.Add(new DetectedPattern(finding.Pattern, [.. finding.Sources]));
             }
             return patterns;
