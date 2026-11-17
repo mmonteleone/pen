@@ -483,6 +483,25 @@ public class TrustGateTests
     }
 
     [Fact]
+    public void ACopiedDockerfileThatCantBeReadSaysSo_AndTheCopysHashIsStillWhatsAsked()
+    {
+        Assert.SkipWhen(Native.GetUid() == 0, "root reads everything");
+        using var f = new Fixture(projectToml: "");
+        var store = TrustStore.For(f.Host, f.Project);
+        using var review = LayerContext.Review(f.Host, f.Project);
+        var hash = review.Result.Hash;
+        Assert.NotNull(hash);
+        File.SetUnixFileMode(Path.Combine(review.Dir, "Dockerfile"), UnixFileMode.None);
+
+        var request = TrustGate.WithReviewedLayer(new TrustRequest([], false, null, null, new(hash, null)), review, store, showCopy: true);
+
+        Assert.Equal(hash, request.Layer?.Hash);
+        var shown = string.Join('\n', request.FormatLines());
+        Assert.Contains("can't be read to show here: permission denied", shown);
+        Assert.DoesNotContain("too large", shown);
+    }
+
+    [Fact]
     public void AReviewAbandonedByAKilledPenGoesOnceOld_AndAFreshOneStays()
     {
         using var f = new Fixture(projectToml: "");

@@ -247,15 +247,21 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     }
 
     /// <summary>Formats the Dockerfile at <paramref name="path"/> for the prompt, cut short.</summary>
-    /// <remarks>Its lines are escaped, as it's the agent's, and what's cut is counted.</remarks>
+    /// <remarks>
+    /// Its lines are escaped, as it's the agent's, and what's cut is counted. Only what's shown depends on
+    /// reading it: the hash that's approved was taken already.
+    /// </remarks>
     private static string FormatDockerfile(string path)
     {
-        string? text = null;
+        string? text;
         try
         {
             text = Native.ReadRegularFile(path);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return $"    (can't be read to show here: {Out.Describe(exception)})";
+        }
         if (text is null)
             return "    (too large to show here)";
 
