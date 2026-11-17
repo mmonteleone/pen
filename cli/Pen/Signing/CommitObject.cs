@@ -41,7 +41,7 @@ internal sealed record CommitObject
     /// Parses the raw bytes of <c>git cat-file commit</c>, refusing any header shape git doesn't write.
     /// </summary>
     /// <returns>The parsed commit.</returns>
-    /// <exception cref="PenException">A header git doesn't write; the message says what the commit has.</exception>
+    /// <exception cref="CommitShapeException">A header shape git doesn't write.</exception>
     /// <exception cref="NotUtf8Exception">A header field that must go to git as a string isn't valid UTF-8.</exception>
     /// <remarks>
     /// git reads the first of a duplicated header and stops collecting parents at the first other line, so a laxer
@@ -52,17 +52,18 @@ internal sealed record CommitObject
     {
         var split = raw.AsSpan().IndexOf("\n\n"u8);
         if (split < 0)
-            throw new PenException("no blank line after its headers");
+            throw new CommitShapeException("no blank line after its headers");
         var headers = new HeaderLines(DecodeHeaders(raw.AsSpan(0, split)));
 
         var tree = headers.Take("tree");
         if (tree is null || !IsHash(tree))
-            throw new PenException("no valid tree as its first header");
+            throw new CommitShapeException("no valid tree as its first header");
         var parents = ReadParents(headers, tree);
         var author = ParseIdent(
-            headers.Take("author") ?? throw new PenException("no author header after its parents"), "author");
+            headers.Take("author") ?? throw new CommitShapeException("no author header after its parents"), "author");
         ParseIdent(
-            headers.Take("committer") ?? throw new PenException("no committer header after its author"), "committer");
+            headers.Take("committer") ?? throw new CommitShapeException("no committer header after its author"),
+            "committer");
         var encoding = ReadExtraHeaders(headers.Rest);
         return new CommitObject
         {
@@ -81,9 +82,9 @@ internal sealed record CommitObject
     private static string[] DecodeHeaders(ReadOnlySpan<byte> header)
     {
         if (header.Contains((byte)0))
-            throw new PenException("a NUL in its headers");
+            throw new CommitShapeException("a NUL in its headers");
         if (header.Contains((byte)'\r'))
-            throw new PenException("a carriage return in its headers");
+            throw new CommitShapeException("a carriage return in its headers");
 
         // Latin-1 keeps each byte as one char, so nothing is lost before the strict decoding below.
         return System.Text.Encoding.Latin1.GetString(header).Split('\n');
@@ -96,7 +97,7 @@ internal sealed record CommitObject
         while (headers.Take("parent") is { } parent)
         {
             if (!IsHash(parent) || parent.Length != tree.Length)
-                throw new PenException("an invalid parent header");
+                throw new CommitShapeException("an invalid parent header");
             parents.Add(parent);
         }
         return parents;
@@ -118,17 +119,17 @@ internal sealed record CommitObject
                 // A tag's message inside a mergetag is free text. Anywhere else, a
                 // continuation that reads as a core header has no honest purpose.
                 if (current is null || (current != "mergetag" && IsCoreHeader(line[1..].Split(' ')[0])))
-                    throw new PenException("a header continuation line where none belongs");
+                    throw new CommitShapeException("a header continuation line where none belongs");
                 continue;
             }
             var space = line.IndexOf(' ');
             if (space <= 0)
-                throw new PenException("a malformed header");
+                throw new CommitShapeException("a malformed header");
             current = line[..space];
             if (IsCoreHeader(current))
-                throw new PenException($"a second \"{current}\" header, or one out of place");
+                throw new CommitShapeException($"a second \"{current}\" header, or one out of place");
             if (current is "encoding" or "gpgsig" or "gpgsig-sha256" && !seen.Add(current))
-                throw new PenException($"a second \"{current}\" header");
+                throw new CommitShapeException($"a second \"{current}\" header");
             if (current == "encoding")
                 encoding = DecodeUtf8(line[(space + 1)..], "encoding header");
         }
@@ -147,13 +148,13 @@ internal sealed record CommitObject
         var open = value.IndexOf('<');
         var close = value.IndexOf('>');
         if (open < 0 || close < open || value.LastIndexOf('<') != open || value.LastIndexOf('>') != close)
-            throw new PenException($"a malformed {key} header");
+            throw new CommitShapeException($"a malformed {key} header");
         var date = value[(close + 1)..].Trim();
         if (date.Split(' ') is not [var seconds, var zone]
             || seconds.Length == 0 || !seconds.All(char.IsAsciiDigit)
             || zone.Length != 5 || zone[0] is not ('+' or '-') || !zone[1..].All(char.IsAsciiDigit))
         {
-            throw new PenException($"a malformed date in its {key} header");
+            throw new CommitShapeException($"a malformed date in its {key} header");
         }
 
         var name = DecodeUtf8(value[..open].TrimEnd(), key + " name");
@@ -190,6 +191,18 @@ internal sealed record CommitObject
             return lines[_next++][(key.Length + 1)..];
         }
     }
+}
+
+/// <summary>The exception thrown when a commit object has a header shape git doesn't write.</summary>
+/// <param name="shape">What the commit has, such as "a NUL in its headers".</param>
+/// <remarks>A laxer reading could re-create such a commit differently from how git reads it.</remarks>
+internal sealed class CommitShapeException(string shape) : Exception(shape)
+{
+    /// <summary>
+    /// What the commit has that git doesn't write, as a phrase that completes "it has …", such as "a NUL in its
+    /// headers".
+    /// </summary>
+    public string Shape { get; } = shape;
 }
 
 /// <summary>The exception thrown when a commit header field isn't valid UTF-8.</summary>

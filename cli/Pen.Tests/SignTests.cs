@@ -857,13 +857,13 @@ public class SignTests
     [Theory]
     [MemberData(nameof(BadHeaders))]
     public void HeadersGitWouldntWrite_AreRefused(string headers) =>
-        Assert.Throws<PenException>(() => CommitObject.Parse(System.Text.Encoding.UTF8.GetBytes(headers + "\n\nmessage\n")));
+        Assert.Throws<CommitShapeException>(() => CommitObject.Parse(System.Text.Encoding.UTF8.GetBytes(headers + "\n\nmessage\n")));
 
     [Theory]
     [InlineData("\n")]
     [InlineData("")]
     public void NoBlankLineAfterTheHeaders_IsRefused(string end) =>
-        Assert.Throws<PenException>(() => CommitObject.Parse(System.Text.Encoding.UTF8.GetBytes($"tree {Tree1}\n{Author}\n{Committer}{end}")));
+        Assert.Throws<CommitShapeException>(() => CommitObject.Parse(System.Text.Encoding.UTF8.GetBytes($"tree {Tree1}\n{Author}\n{Committer}{end}")));
 
     [Theory]
     [InlineData("author José <a@x.io> 1 +0000\ncommitter C <c@x.io> 1 +0000", "author name")]

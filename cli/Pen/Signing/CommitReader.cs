@@ -78,9 +78,9 @@ internal sealed class CommitReader(HostGit git)
         {
             return CommitObject.Parse(content);
         }
-        catch (PenException refusal)
+        catch (CommitShapeException refusal)
         {
-            throw new PenException($"refusing commit {sha[..12]}: it has {refusal.Message}, " +
+            throw new PenException($"refusing commit {sha[..12]}: it has {refusal.Shape}, " +
                 "which git doesn't write, so it could be re-created wrongly");
         }
         catch (NotUtf8Exception notUtf8)
