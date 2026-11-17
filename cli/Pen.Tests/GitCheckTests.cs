@@ -5,6 +5,29 @@ public class GitCheckTests
     private static List<(string From, string To)> Check(string dir, bool startedWithGit = true) =>
         GitCheck.RunWithoutSession(dir, startedWithGit, commonGitDir: null, modulesAtStart: null).Moved.Select(q => (PathChecks.FormatPath(dir, q.From), PathChecks.FormatPath(dir, q is Quarantined.Moved m ? m.To : ""))).ToList();
 
+    /// <summary>Module repos whose enumeration fails as a bug in Pen would: no I/O, and no PenException.</summary>
+    private sealed class Unenumerable : IReadOnlyCollection<string>
+    {
+        public int Count => 1;
+        public IEnumerator<string> GetEnumerator() => throw new InvalidOperationException("a bug");
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    [Fact]
+    public void AnUnexpectedException_FailsTheCheck_NamingItsType()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+
+        var check = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null,
+            modulesAtStart: new Unenumerable());
+
+        Assert.NotNull(check.Failure);
+        Assert.Equal(nameof(InvalidOperationException), check.Failure);
+        Assert.Contains($"couldn't finish: {nameof(InvalidOperationException)}",
+            GitCheckWording.NotCheckedWarning(repo, check.Failure));
+    }
+
     [Fact]
     public void NothingFlaggedForCommitsBranchesAndWorktrees()
     {
