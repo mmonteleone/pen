@@ -233,7 +233,7 @@ internal static partial class Native
         {
             var errno = Marshal.GetLastPInvokeError();
             if (errno is EACCES or EPERM)
-                throw new UnauthorizedAccessException($"Access to the path '{path}' is denied.");
+                throw AccessDenied(path);
             if (errno is ENOENT or ENOTDIR)
                 throw new FileNotFoundException(path);
             return null;
@@ -499,12 +499,8 @@ internal static partial class Native
     /// </remarks>
     public static byte[] RemoveSymlink(string root, string path)
     {
-        // O_NOFOLLOW and O_DIRECTORY differ by architecture on Linux, so this fails closed where they aren't known.
-        if (!CanStat || (!OperatingSystem.IsMacOS()
-            && RuntimeInformation.ProcessArchitecture is not (Architecture.X64 or Architecture.Arm64)))
-        {
+        if (!CanWalkDescriptors)
             throw new IOException("pen can't remove a symlink safely on this platform");
-        }
         var relative = Path.GetRelativePath(root, path);
         if (relative == "." || relative == ".." || relative.StartsWith("../", StringComparison.Ordinal)
             || Path.IsPathRooted(relative))
@@ -512,27 +508,15 @@ internal static partial class Native
             throw new IOException($"it isn't below {root}");
         }
         var parts = relative.Split('/');
-        var fd = OpenNative(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-        if (fd < 0)
-            throw ErrnoException(root);
+        var (fd, at) = OpenDirectoriesDown(root, parts, (failed, _) => RemoveSymlinkException(failed), opened: null);
         try
         {
-            var at = root;
-            foreach (var part in parts[..^1])
-            {
-                at = Path.Combine(at, part);
-                var next = OpenAtNative(fd, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-                if (next < 0)
-                    throw ErrnoException(at);
-                CloseNative(fd);
-                fd = next;
-            }
             var name = parts[^1];
             if (StatAt(fd, name, follow: false) is not { IsSymlink: true })
                 throw new IOException("it isn't a symlink any more");
             var target = ReadLinkAt(fd, name) ?? throw new IOException("what it holds can't be read");
             if (UnlinkAtNative(fd, name, 0) != 0)
-                throw ErrnoException(at);
+                throw RemoveSymlinkException(at);
             return target;
         }
         finally
@@ -568,32 +552,18 @@ internal static partial class Native
     /// </remarks>
     public static ProjectFile ReadInsideProject(string root, string relative)
     {
-        // O_NOFOLLOW and O_DIRECTORY differ by architecture on Linux, so this fails closed where they aren't known.
-        if (!CanStat || (!OperatingSystem.IsMacOS()
-            && RuntimeInformation.ProcessArchitecture is not (Architecture.X64 or Architecture.Arm64)))
-        {
+        if (!CanWalkDescriptors)
             throw new IOException("pen can't read a file in the project safely on this platform");
-        }
         var parts = relative.Split('/');
         if (Path.IsPathRooted(relative) || relative.Contains('\0') || parts.Any(part => part is "" or "." or ".."))
             throw new IOException($"{relative} isn't a path below {root}");
-        var fd = OpenNative(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-        if (fd < 0)
-            throw ReadInsideException(root, "isn't a directory");
+        var steps = new List<FileStatus>();
+        var (fd, _) = OpenDirectoriesDown(root, parts,
+            (failed, isRoot) => ReadInsideException(
+                failed, isRoot ? "isn't a directory" : "isn't a directory (a symlink, say)"),
+            (opened, at) => steps.Add(StatOpen(opened) ?? throw new IOException($"{at} can't be stat'ed")));
         try
         {
-            var at = root;
-            var steps = new List<FileStatus>();
-            foreach (var part in parts[..^1])
-            {
-                at = Path.Combine(at, part);
-                var next = OpenAtNative(fd, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-                if (next < 0)
-                    throw ReadInsideException(at, "isn't a directory (a symlink, say)");
-                CloseNative(fd);
-                fd = next;
-                steps.Add(StatOpen(fd) ?? throw new IOException($"{at} can't be stat'ed"));
-            }
             var path = Path.Combine(root, relative);
             var file = OpenAtNative(fd, parts[^1], O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
             if (file < 0)
@@ -612,35 +582,97 @@ internal static partial class Native
         }
     }
 
+    /// <summary>Whether the open flags a walk down through descriptors needs are known here, and stat works.</summary>
+    /// <remarks>
+    /// O_NOFOLLOW and O_DIRECTORY differ by architecture on Linux, so a walk fails closed where they aren't known.
+    /// </remarks>
+    private static bool CanWalkDescriptors =>
+        CanStat && (OperatingSystem.IsMacOS()
+            || RuntimeInformation.ProcessArchitecture is Architecture.X64 or Architecture.Arm64);
+
+    /// <summary>
+    /// Opens the directory that holds the last of <paramref name="parts"/>: <paramref name="root"/> as named, then
+    /// each directory below it from the one before, without following a symlink.
+    /// </summary>
+    /// <param name="root">A directory to start from, opened as named.</param>
+    /// <param name="parts">The path below <paramref name="root"/>, split at /; the last part isn't opened.</param>
+    /// <param name="refuse">
+    /// Gives the exception for an open that failed, from its errno: the path, and whether it's <paramref name="root"/>.
+    /// </param>
+    /// <param name="opened">Called with each directory below root, its descriptor and path, once it's opened.</param>
+    /// <returns>The last directory's descriptor, which the caller closes, and its path.</returns>
+    /// <remarks>
+    /// Each step is taken in the directory reached without a symlink, so a directory on the way swapped for a
+    /// symlink can't lead the walk elsewhere. Every descriptor but the one returned is closed, whatever stops it.
+    /// </remarks>
+    private static (int Fd, string Path) OpenDirectoriesDown(
+        string root,
+        string[] parts,
+        Func<string, bool, Exception> refuse,
+        Action<int, string>? opened)
+    {
+        var fd = OpenNative(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        if (fd < 0)
+            throw refuse(root, true);
+        var at = root;
+        try
+        {
+            foreach (var part in parts[..^1])
+            {
+                at = Path.Combine(at, part);
+                var next = OpenAtNative(fd, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+                if (next < 0)
+                    throw refuse(at, false);
+                CloseNative(fd);
+                fd = next;
+                opened?.Invoke(fd, at);
+            }
+        }
+        catch
+        {
+            CloseNative(fd);
+            throw;
+        }
+        return (fd, at);
+    }
+
     /// <summary>Turns the last call's errno, in <see cref="ReadInsideProject"/>, into an exception.</summary>
     /// <param name="path">The path the step opened.</param>
     /// <param name="refused">What's wrong with <paramref name="path"/> if O_NOFOLLOW or O_DIRECTORY refused it.</param>
     private static Exception ReadInsideException(string path, string refused)
     {
         var errno = Marshal.GetLastPInvokeError();
-        if (errno is EACCES or EPERM)
-            return new UnauthorizedAccessException($"Access to the path '{path}' is denied.");
         if (errno == ENOENT)
             return new FileNotFoundException($"{path} doesn't exist", path);
-        if (errno == ELOOP || errno == ENOTDIR)
-            return new IOException($"{path} {refused}");
         // A socket or device node can't be opened for reading: ENXIO, EOPNOTSUPP or ENODEV.
         if (errno is ENXIO or ENODEV || errno == EOPNOTSUPP)
             return new IOException($"{path} isn't a regular file");
+        return ErrnoException(path, errno, refused);
+    }
+
+    /// <summary>
+    /// Turns the last call's errno, in <see cref="RemoveSymlink"/>, into the exception for <paramref name="path"/>.
+    /// </summary>
+    private static Exception RemoveSymlinkException(string path) =>
+        ErrnoException(path, Marshal.GetLastPInvokeError(), "isn't a directory any more (a symlink, say)");
+
+    /// <summary>
+    /// Turns <paramref name="errno"/>, from a call on <paramref name="path"/>, into an exception, which says
+    /// <paramref name="refused"/> about the path if O_NOFOLLOW or O_DIRECTORY refused it.
+    /// </summary>
+    private static Exception ErrnoException(string path, int errno, string refused)
+    {
+        if (errno is EACCES or EPERM)
+            return AccessDenied(path);
+        // ELOOP or ENOTDIR: O_NOFOLLOW met a symlink, or O_DIRECTORY something else.
+        if (errno == ELOOP || errno == ENOTDIR)
+            return new IOException($"{path} {refused}");
         return new IOException($"{path}: {Marshal.GetPInvokeErrorMessage(errno)}");
     }
 
-    /// <summary>Turns the last call's errno into the exception for <paramref name="path"/>.</summary>
-    private static Exception ErrnoException(string path)
-    {
-        var errno = Marshal.GetLastPInvokeError();
-        if (errno is EACCES or EPERM)
-            return new UnauthorizedAccessException($"Access to the path '{path}' is denied.");
-        // ELOOP or ENOTDIR: O_NOFOLLOW met a symlink, or O_DIRECTORY something else.
-        if (errno == ELOOP || errno == ENOTDIR)
-            return new IOException($"{path} isn't a directory any more (a symlink, say)");
-        return new IOException($"{path}: {Marshal.GetPInvokeErrorMessage(errno)}");
-    }
+    /// <summary>The exception for EACCES or EPERM on <paramref name="path"/>, worded as .NET words its own.</summary>
+    private static UnauthorizedAccessException AccessDenied(string path) =>
+        new($"Access to the path '{path}' is denied.");
 
     /// <summary>Checks whether the file descriptor <paramref name="fd"/> is a terminal, with isatty(3).</summary>
     public static bool IsATty(int fd) => IsATtyNative(fd) == 1;
