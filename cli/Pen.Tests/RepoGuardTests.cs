@@ -672,6 +672,19 @@ public class RepoGuardTests
     }
 
     [Fact]
+    public void ALinkedWorktreesIncludeOfADirectoryInItsOwnWorkingTree_IsRefused()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        var wt = Path.Combine(t.Path, "wt");
+        Git.Run(repo, "worktree", "add", "-q", wt);
+        var incdir = Path.Combine(wt, "incdir");
+        Directory.CreateDirectory(incdir);
+        Git.Run(repo, "config", "includeIf.onbranch:feature.path", incdir);
+        Assert.Contains("includes incdir, which is a directory", Assert.Throws<PenException>(() => Mounts(wt)).Message);
+    }
+
+    [Fact]
     public void AnIncludeOfAWritableDirectoryThroughASymlinkOutside_IsRefusedByWhereItLeads()
     {
         using var t = new TempDir();
