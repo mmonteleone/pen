@@ -23,16 +23,14 @@ namespace Pen.GitProtection;
 /// Like the rest of the check, it reads files directly and never runs git. Checks made just before a write can still
 /// race with another session's agent; the last component is never followed regardless.
 /// </para>
+/// <para>
+/// The common git dir is the one the session started with, or null for dir/.git. It records into changes as it
+/// goes: in Moved what it renamed, or couldn't rename or restore; in Restored the files that changed with nothing to
+/// set aside (missing, directory gone, or only mode); in ModeChanges the directories it added u+rwx to so it could
+/// write in them, and left so; in Blocked the directories whose modes kept a file from being put back, for advice on
+/// what to fix.
+/// </para>
 /// </remarks>
-/// <param name="session">The session that's ending.</param>
-/// <param name="dir">The project dir.</param>
-/// <param name="commonGitDir">The git dir the session started with, or null for dir/.git.</param>
-/// <param name="changes">
-/// Where it records, as it goes: in Moved what it renamed, or couldn't rename or restore; in Restored the files
-/// that changed with nothing to set aside (missing, directory gone, or only mode); in ModeChanges the directories it
-/// added u+rwx to so it could write in them, and left so; in Blocked the directories whose modes kept a file from
-/// being put back, for advice on what to fix.
-/// </param>
 internal sealed class ProtectedFileRestore(SessionDir session, string dir, string? commonGitDir, CheckChanges changes)
 {
     private readonly SessionDir _session = session;
@@ -148,10 +146,10 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
         _changes.Restored.Add(new(file.Path, "it was deleted during the session, and has been recreated"));
     }
 
-    /// <summary>Writes the original back into the regular file that's there now, with its mode.</summary>
-    /// <param name="file">The saved file.</param>
-    /// <param name="original">Its contents at the start.</param>
-    /// <param name="current">What's there now, or null if it couldn't be read.</param>
+    /// <summary>
+    /// Writes the original contents back into the regular file that's there now (null if it couldn't be read), with
+    /// its mode.
+    /// </summary>
     /// <returns>Whether it was written back; false if it isn't a regular file it can open for writing.</returns>
     [SuppressMessage("Reliability", "CA2000", Justification = "The using block disposes it once it isn't null")]
     private static bool TryWriteInPlace(ProtectedFile file, byte[] original, RegularFile? current)
@@ -224,14 +222,14 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
             _changes.Blocked.Add(parent);
     }
 
-    /// <summary>Checks that the file's directory is still the real one it was.</summary>
-    /// <param name="file">The saved file.</param>
-    /// <param name="root">The sandbox's mount the file is under, or null if it's under neither.</param>
-    /// <param name="failure">
-    /// Why the file can't be put back, when that's a failure; null when it returns true, or a directory was moved
-    /// aside or is gone, which is recorded.
-    /// </param>
-    /// <returns>Whether to go on and restore it.</returns>
+    /// <summary>
+    /// Checks that the file's directory is still the real one it was, below <paramref name="root"/>, the sandbox's
+    /// mount the file is under (null if it's under neither).
+    /// </summary>
+    /// <returns>
+    /// Whether to go on and restore it. When it's false, <paramref name="failure"/> says why the file can't be put
+    /// back, or is null when a directory was moved aside or is gone, which is recorded.
+    /// </returns>
     /// <remarks>
     /// Directories below the sandbox's mount can be moved and replaced from inside it, so a symlink among them is
     /// renamed aside: writing through it would land wherever the agent pointed it. A directory that's gone or is now

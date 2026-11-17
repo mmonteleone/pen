@@ -11,7 +11,7 @@ internal static class RepoScan
 {
     /// <summary>
     /// Scans the tree below <paramref name="root"/> for repos, plus a bare layout in the root itself, and for symlinks
-    /// into the git dir.
+    /// into the git dir, by the rules of <see cref="NestedWalk"/>.
     /// </summary>
     /// <param name="root">The project dir, a real path. Its own .git is the project's and is skipped.</param>
     /// <param name="commonGitDir">
@@ -29,33 +29,9 @@ internal static class RepoScan
     /// Where to walk from instead of the root: directories below it, such as a nested .git directory just moved
     /// aside, whose contents the walk that found it didn't enter.
     /// </param>
-    /// <returns>
-    /// The repos found, the directories it couldn't list although they can be entered (chmod 311), the entries
-    /// with names that aren't valid UTF-8 that could hold a repo, and the symlinks that lead into the git dir.
-    /// </returns>
     /// <remarks>
-    /// <para>
-    /// Names compare case-insensitively, because on the Mac's file system .GIT is .git.
-    /// </para>
-    /// <para>
     /// Host git could run in a repo in a directory that can't be listed, so callers must not treat the scan as
-    /// complete when there are any. One that can't be entered at all (a root-owned 700 database directory) isn't
-    /// reported, since host git can't get in either. The access(2) call is only made after a listing fails, so a
-    /// healthy tree pays nothing for it. Likewise, only a listed name with U+FFFD in it costs a look at the
-    /// directory's raw names. A plain file with such a name can't hold a repo, so it's left alone.
-    /// </para>
-    /// <para>
-    /// A symlink is never followed, but one that leads to a directory at or inside the git dir, or would once a
-    /// directory it names is made, is reported whatever its name, a .git symlink included (not as a repo, then)
-    /// (<see cref="GitDirLinkCheck"/>): git run through it starts in the git dir. One Pen can't trace is reported
-    /// apart, as it may lead there. What's there is the walk of the
-    /// git dir's to find (<see cref="ScanGitDir"/>); this is a second line, against a repo put there after that walk
-    /// (by a commit that makes objects/ab, say) or that the walk couldn't see. A symlink committed on a branch only
-    /// arrives at checkout, so only the walk of the git dir covers that.
-    /// </para>
-    /// <para>
-    /// A nested .git directory isn't entered: it's reported, and the end check walks it once it's moved aside.
-    /// </para>
+    /// complete when there are any (<see cref="NestedScan.UnlistableDirs"/>).
     /// </remarks>
     public static NestedScan ScanNested(
         string root,
@@ -81,30 +57,15 @@ internal static class RepoScan
     /// <param name="from">
     /// Where to walk from instead of the git dir: directories in it, such as a .git directory just moved aside.
     /// </param>
-    /// <returns>
-    /// What <see cref="ScanNested"/> returns, with no symlinks: the repos found, the directories it couldn't list and
-    /// the names that aren't valid UTF-8 that could hold a repo.
-    /// </returns>
+    /// <returns>What <see cref="ScanNested"/> returns, with no symlinks.</returns>
     /// <remarks>
-    /// <para>
-    /// Git, started in a directory, looks there for a .git, then takes the directory itself for a git dir if it has
-    /// the layout (is_git_directory), then does the same in each parent. Started inside a git dir, the first one it
-    /// meets is the git dir's own only if nothing is put in the way. So, walking the git dir as
-    /// <see cref="ScanNested"/> walks the tree, a .git anywhere in it is a repo, its own .git included, under the
-    /// same rules: a .git file that's a validated worktree of the git dir (git-subrepo makes those under tmp/) or
-    /// a known submodule's checkout is allowed. A directory with a git dir's layout is a repo unless it's one of the
-    /// git dir's own (<see cref="NestedWalk"/>'s IsOwnGitDir): the git dir, a module repo, or a worktree entry of
-    /// either whose commondir leads back to it.
-    /// </para>
-    /// <para>
-    /// Nothing is skipped, by place or by name: git can be started anywhere in the git dir, through a symlink that
-    /// arrives later (committed on a branch, it comes with a checkout), or one that leads nowhere until a commit
-    /// makes the directory it names. That includes the object stores, objects/, lfs/objects/ and annex/objects/, so
-    /// a git dir with many Git LFS or git-annex objects takes longer to walk (a little over a second for 50,000
-    /// directories), and what Pen put aside (named …<see cref="GitQuarantine.Suffix"/>…): its layout was broken when it
-    /// was moved, so only a repo still inside one is reported. Symlinks in the git dir aren't followed: what they
-    /// lead to in it is walked anyway.
-    /// </para>
+    /// Git started in a directory looks there for a .git, then takes the directory itself for a git dir if it has the
+    /// layout (is_git_directory), then repeats in each parent. Started inside a git dir, it uses the git dir's own
+    /// repo only if nothing is put in the way. So a .git anywhere in the git dir is a repo, under the same rules as in
+    /// <see cref="ScanNested"/>: a .git file that's a validated worktree of the git dir (git-subrepo makes those under
+    /// tmp/) or a known submodule's checkout is allowed. A directory with a git dir's layout is a repo unless it's one
+    /// of the git dir's own (<see cref="NestedWalk.IsOwnGitDir"/>). Nothing in the git dir is skipped
+    /// (<see cref="NestedWalk"/>).
     /// </remarks>
     public static NestedScan ScanGitDir(
         string gitDir,
@@ -134,7 +95,7 @@ internal static class RepoScan
     /// <item>&lt;name&gt;/gitdir points back to this .git file.</item>
     /// </list>
     /// </returns>
-    /// <remarks>Reads the files directly; never runs git.</remarks>
+    /// <remarks>This reads the files directly and never runs git.</remarks>
     internal static string? ResolveWorktree(string gitFile)
     {
         try
@@ -229,7 +190,7 @@ internal static class RepoScan
     /// </returns>
     /// <remarks>
     /// The repo's config and hooks are protected (and its list is the one taken at the session's start), so host git
-    /// there runs nothing the sandbox wrote. Reads the files directly; never runs git.
+    /// there runs nothing the sandbox wrote. This reads the files directly and never runs git.
     /// </remarks>
     internal static string? ResolveModuleCheckout(string gitFile, IReadOnlySet<string> moduleRepos)
     {
@@ -281,8 +242,8 @@ internal static class RepoScan
     /// </para>
     /// <para>
     /// Any symlink met along the way is listed as is and not followed: git would follow it to a repo elsewhere, so
-    /// callers refuse it too. A directory Pen quarantined (named …<see cref="GitQuarantine.Suffix"/>…) isn't walked:
-    /// repos nested in a quarantined one are no submodule's. Reads directories only; never runs git.
+    /// callers refuse it too. A directory Pen quarantined (named …<see cref="GitQuarantine.Suffix"/>…) isn't walked,
+    /// since repos nested in a quarantined one belong to no submodule. It reads directories only and never runs git.
     /// </para>
     /// </remarks>
     internal static IReadOnlyList<string> FindModuleRepos(string gitDir) => ScanModules(gitDir).Repos;
@@ -302,12 +263,12 @@ internal static class RepoScan
     /// Whether <paramref name="dir"/> has a git dir's layout, as git's is_git_directory takes it or more broadly.
     /// </summary>
     /// <remarks>
-    /// Git wants a HEAD that's a symlink whose text starts with "refs/" (whatever it points to, a directory
-    /// included) or a file reading as a ref or an object id, then objects and refs that pass access(X_OK), which an
-    /// executable file does too; those of the commondir's target when there's a commondir. So: a HEAD that's a
-    /// symlink or anything but a directory, and objects and refs of any type, or a commondir of any type. Git skips
-    /// the objects check when GIT_OBJECT_DIRECTORY is set, which Pen doesn't follow: logs/ has HEAD and refs/ in
-    /// every repo.
+    /// Git wants a HEAD that's a symlink whose text starts with "refs/" (whatever it points to, a directory included)
+    /// or a file reading as a ref or an object id. It then wants objects and refs that pass access(X_OK), which an
+    /// executable file does too, or those of the commondir's target when there's a commondir. This takes the broader
+    /// form: a HEAD that's a symlink or anything but a directory, with objects and refs of any type or a commondir of
+    /// any type. Git skips the objects check when GIT_OBJECT_DIRECTORY is set, but Pen doesn't follow that, since
+    /// logs/ would then count in every repo (it has HEAD and refs/).
     /// </remarks>
     private static bool IsGitDirLayout(string dir) =>
         IsGitDirLayout(
@@ -316,11 +277,10 @@ internal static class RepoScan
             refs: PathChecks.ExistsOrIsLink(Path.Combine(dir, "refs")),
             commondir: PathChecks.ExistsOrIsLink(Path.Combine(dir, "commondir")));
 
-    /// <summary>Whether a git dir's layout is there, given which of its entries are.</summary>
-    /// <param name="head">Whether there's a HEAD git could take for one (<see cref="IsHead(bool, bool)"/>).</param>
-    /// <param name="objects">Whether there's an objects entry, of any type.</param>
-    /// <param name="refs">Whether there's a refs entry, of any type.</param>
-    /// <param name="commondir">Whether there's a commondir entry, of any type.</param>
+    /// <summary>
+    /// Whether a git dir's layout is there, given which of its entries are: a HEAD git could take for one
+    /// (<see cref="IsHead(bool, bool)"/>), and objects and refs or a commondir, each of any type.
+    /// </summary>
     private static bool IsGitDirLayout(bool head, bool objects, bool refs, bool commondir) =>
         head && ((objects && refs) || commondir);
 
@@ -333,11 +293,11 @@ internal static class RepoScan
     /// </summary>
     private static bool IsHead(bool isDir, bool isLink) => isLink || !isDir;
 
-    /// <summary>Reads the path a .git file's "gitdir: " line names, as a full path.</summary>
-    /// <param name="gitFile">The .git file; a relative path in it is from the file's own dir.</param>
-    /// <param name="requireReal">
-    /// Whether the value as written must resolve, as git resolves it, to the path it reads as.
-    /// </param>
+    /// <summary>
+    /// Reads the path a .git file's "gitdir: " line names, as a full path; a relative path in it is from the file's
+    /// own dir. With <paramref name="requireReal"/>, the value as written must resolve, as git resolves it, to the
+    /// path it reads as.
+    /// </summary>
     /// <returns>
     /// The full path, without a trailing slash, or null if the file doesn't name one, or if
     /// <paramref name="requireReal"/> and the value's real path isn't that path (nothing there, or a symlink in the
@@ -358,8 +318,8 @@ internal static class RepoScan
         if (!requireReal)
             return full;
 
-        // git opens the value as written and takes its realpath, following any
-        // symlink before a later "..", so resolve that, not the text form.
+        // Git opens the value as written and takes its real path, following any symlink before a later "..", so
+        // resolve that, not the text form.
         return Native.RealPath(gitdir) == full ? full : null;
     }
 
@@ -370,8 +330,8 @@ internal static class RepoScan
     /// </returns>
     /// <remarks>
     /// <para>
-    /// The read itself (<see cref="ReadPathText"/>) doesn't follow a symlink, so one swapped in after the check
-    /// isn't read through; the check stays because O_NOFOLLOW's value isn't known on every architecture.
+    /// The read itself (<see cref="ReadPathText"/>) doesn't follow a symlink, so one swapped in after the check isn't
+    /// read through. The symlink check stays because O_NOFOLLOW's value isn't known on every architecture.
     /// </para>
     /// <para>
     /// Git never writes a byte order mark here, and reads one as part of the file: a gitdir or commondir file's path
@@ -407,18 +367,41 @@ internal static class RepoScan
     }
 
     /// <summary>One walk of a project's tree, or of its git dir, collecting what it finds.</summary>
-    /// <param name="root">The project dir, or the git dir.</param>
-    /// <param name="commonGitDir">The project's common git dir; the git dir itself when walking that.</param>
-    /// <param name="moduleRepos">The module repos whose checkouts are the project's own.</param>
-    /// <param name="tryMakeListable">See <see cref="ScanNested"/>.</param>
-    /// <param name="links">
-    /// What decides whether a symlink in the tree leads into the git dir, or null in a walk of the git dir or of a
-    /// tree with no git dir: then symlinks aren't looked at. One in the git dir isn't followed, as what it leads to
-    /// there is walked anyway, and what it leads to in the tree is the tree walk's.
-    /// </param>
     /// <remarks>
+    /// <para>
+    /// The root is the project dir or the git dir; <paramref name="commonGitDir"/> is the project's common git dir,
+    /// the root itself in a walk of the git dir. <paramref name="links"/> decides whether a symlink in the tree leads
+    /// into the git dir; it's null in a walk of the git dir or of a tree with no git dir, where symlinks aren't looked
+    /// at. Names compare case-insensitively, because on the Mac's file system .GIT is .git.
+    /// </para>
+    /// <para>
+    /// A directory that can be entered but not listed (chmod 311) is noted, since host git could run in a repo in it.
+    /// One that can't be entered at all (a root-owned 700 database directory) isn't, since host git can't get in
+    /// either. The access(2) call and the read of a directory's raw names happen only after a listing fails or shows a
+    /// name with U+FFFD in it, so a healthy tree pays nothing for them. A plain file with an undecodable name can't
+    /// hold a repo, so it's left alone.
+    /// </para>
+    /// <para>
+    /// A symlink is never followed. In the tree, one that leads to a directory at or inside the git dir, or would once
+    /// a directory it names is made, is noted whatever its name, a .git symlink included, since git run through it
+    /// starts in the git dir (<see cref="GitDirLinkCheck"/>). One Pen can't trace is noted separately, since it may
+    /// lead there. This is defence in depth: the walk of the git dir finds a repo in the git dir itself, and this
+    /// catches one put there after that walk (by a commit that makes objects/ab, say) or that the walk couldn't see.
+    /// A symlink committed on a branch arrives only at checkout, so only the walk of the git dir covers that case. A
+    /// symlink in the git dir isn't looked at, since what it leads to there is walked anyway, and what it leads to in
+    /// the tree is the tree walk's concern.
+    /// </para>
+    /// <para>
+    /// A .git directory isn't entered, since its contents are that repo's: it's noted, and the end check walks it once
+    /// it's moved aside.
+    /// </para>
+    /// <para>
     /// In a walk of the git dir (<see cref="ScanGitDir"/>), the root's own .git counts and the git dir's own git dirs
-    /// aren't repos; nothing is skipped.
+    /// aren't repos. Nothing is skipped, by place or by name, since git can be started anywhere in the git dir through
+    /// a symlink that arrives later or one that leads nowhere until a commit makes the directory it names. That
+    /// includes the object stores and what Pen put aside (named …<see cref="GitQuarantine.Suffix"/>…), whose layout
+    /// was broken when it was moved, so only a repo still inside one is noted.
+    /// </para>
     /// </remarks>
     private sealed class NestedWalk(
         string root,
@@ -536,9 +519,9 @@ internal static class RepoScan
 
         /// <summary>
         /// Notes <paramref name="link"/>, a symlink in the tree, if it leads into the git dir, or would once a
-        /// directory it names is made, or if Pen can't tell where it leads, whatever its name.
+        /// directory it names is made, or if Pen can't tell where it leads, whatever its name, and returns whether it
+        /// was.
         /// </summary>
-        /// <returns>Whether it was noted.</returns>
         private bool NoteLink(string link)
         {
             switch (links?.Trace(link))
@@ -806,7 +789,7 @@ internal static class RepoScan
 
 /// <summary>What the walk of a project's tree, or of its git dir, found.</summary>
 /// <param name="Repos">The repos below the root, in ordinal order of their paths.</param>
-/// <param name="UnlistableDirs">The directories it could enter but not list, in ordinal order.</param>
+/// <param name="UnlistableDirs">The directories it could enter but not list (chmod 311), in ordinal order.</param>
 /// <param name="BadNames">The entries it couldn't name that could hold a repo, in ordinal order.</param>
 /// <param name="GitDirLinks">
 /// The symlinks in the tree that lead into the common git dir, or would once a directory they name is made, in
@@ -823,13 +806,12 @@ internal sealed record NestedScan(
     IReadOnlyList<string> GitDirLinks,
     IReadOnlyList<string> UntracedLinks);
 
-/// <summary>A repo below the root of a walk: the project dir, or its git dir.</summary>
-/// <param name="Path">The entry that makes it one: the .git, or a bare repo's HEAD.</param>
-/// <param name="Kind">What sort of entry <paramref name="Path"/> is.</param>
-/// <param name="Region">Where in the git dir it is, for the advice; elsewhere for one in the tree.</param>
+/// <summary>
+/// A repo below the root of a walk (the project dir, or its git dir), by the entry that makes it one: the .git, or a
+/// bare repo's HEAD. Region is where in the git dir it is, for the advice, and Elsewhere for one in the tree.
+/// </summary>
 internal sealed record NestedRepo(string Path, NestedKind Kind, GitDirRegion Region = GitDirRegion.Elsewhere)
 {
-    /// <summary>Gets the repo's directory, for messages.</summary>
     public string RepoDir => Paths.GetParent(Path);
 }
 

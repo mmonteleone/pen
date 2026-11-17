@@ -50,48 +50,37 @@ internal abstract record Quarantined
     public string Why { get; }
 
     /// <summary>A rename the check made, which renaming <see cref="To"/> back to From undoes.</summary>
-    /// <param name="From">What was moved; for a protected file written back in place, that file.</param>
-    /// <param name="To">
-    /// Where it went; for a protected file written back in place, where its changed version was kept.
-    /// </param>
-    /// <param name="Why">Why it was moved.</param>
-    /// <param name="Inner">A second rename inside the moved item (a .git directory's HEAD), if any.</param>
+    /// <remarks>
+    /// For a protected file written back in place, From is that file and To is where its changed version was kept.
+    /// Inner is a second rename inside the moved item (a .git directory's HEAD), if any.
+    /// </remarks>
     internal sealed record Moved(string From, string To, string Why, InnerRename? Inner = null)
         : Quarantined(From, Why);
 
     /// <summary>
     /// A symlink the check removed rather than renamed: it holds no data, and under any name leads to the same place.
     /// </summary>
-    /// <param name="From">The symlink.</param>
-    /// <param name="Why">Why it was removed.</param>
-    /// <param name="LinkTarget">What it held, so it can be made again.</param>
-    /// <param name="LinkTargetEscaped">
-    /// Whether what it held isn't valid UTF-8, so <paramref name="LinkTarget"/> shows it with octal escapes and names
-    /// it only for reading.
-    /// </param>
+    /// <remarks>
+    /// LinkTarget is what it held, so it can be made again. LinkTargetEscaped is set when that isn't valid UTF-8, so
+    /// LinkTarget shows it with octal escapes and names it only for reading.
+    /// </remarks>
     internal sealed record LinkRemoved(string From, string Why, string LinkTarget, bool LinkTargetEscaped = false)
         : Quarantined(From, Why);
 
     /// <summary>
     /// Something the check couldn't move or remove, or a protected file it couldn't restore: it fails the check.
     /// </summary>
-    /// <param name="From">What couldn't be moved, removed or restored.</param>
-    /// <param name="Why">Why it was to be, and why it couldn't be.</param>
     internal sealed record Failed(string From, string Why) : Quarantined(From, Why);
 }
 
-/// <summary>A rename inside an item the check moved.</summary>
-/// <param name="From">The name it had, inside the item's new place.</param>
-/// <param name="To">The name it has now.</param>
+/// <summary>A rename inside an item the check moved, from the name it had inside the item's new place.</summary>
 internal sealed record InnerRename(string From, string To);
 
-/// <summary>A protected file that changed with nothing to set aside.</summary>
-/// <param name="Path">The file.</param>
-/// <param name="What">What happened to it: it was missing, its directory went, or only its mode changed.</param>
+/// <summary>
+/// A protected file that changed with nothing to set aside, and what happened to it: it was missing, its directory
+/// went, or only its mode changed.
+/// </summary>
 internal sealed record RestoredFile(string Path, string What);
 
 /// <summary>A directory the check made listable (or writable) and left that way.</summary>
-/// <param name="Path">The directory.</param>
-/// <param name="Was">Its mode before.</param>
-/// <param name="Now">Its mode now.</param>
 internal sealed record ModeChange(string Path, UnixFileMode Was, UnixFileMode Now);

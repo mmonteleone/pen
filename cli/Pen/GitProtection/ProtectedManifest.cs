@@ -13,7 +13,7 @@ internal sealed record ProtectedManifest(IReadOnlyList<ProtectedFile> Files, IRe
     /// <returns>
     /// True if it was saved at the start and not adopted, or is in a directory the sandbox had read-only as a whole.
     /// </returns>
-    /// <remarks>Never a symlink, which only reads as the file it leads to.</remarks>
+    /// <remarks>A symlink is never vouched for, since it only reads as the file it leads to.</remarks>
     public bool Vouches(string path)
     {
         if (PathChecks.IsLink(path))

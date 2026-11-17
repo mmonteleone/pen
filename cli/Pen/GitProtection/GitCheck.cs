@@ -46,12 +46,11 @@ internal sealed class GitCheck
     /// <summary>Whether the protected files are all back, or there were none to put back.</summary>
     private bool _restoreDone;
 
-    /// <summary>Prepares a run over <paramref name="dir"/>.</summary>
-    /// <param name="dir">The project dir.</param>
-    /// <param name="mayChangeModes">
-    /// Whether it may add u+rx (or u+rwx) to a directory it can enter but not list (or rename in), and keep that:
-    /// only at a session's end, when no session of the repo can still be running.
-    /// </param>
+    /// <summary>Prepares a run over the project dir <paramref name="dir"/>.</summary>
+    /// <remarks>
+    /// <paramref name="mayChangeModes"/> lets it add u+rx (or u+rwx) to a directory it can enter but not list (or
+    /// rename in), and keep that: only at a session's end, when no session of the repo can still be running.
+    /// </remarks>
     private GitCheck(string dir, bool mayChangeModes)
     {
         _dir = dir;
@@ -236,10 +235,11 @@ internal sealed class GitCheck
     /// where git keeps none, nested repos and symlinks into the git dir, then what a shell prompt would run and the
     /// paused operations.
     /// </summary>
-    /// <param name="startedWithGit">Whether the session started with a .git there.</param>
-    /// <param name="commonGitDir">The git dir it started with, or null for dir/.git.</param>
-    /// <param name="modulesAtStart">The module repos in that git dir at the start, or null for those there now.</param>
-    /// <param name="atStart">What the session saved at its start, or null when there's no such record.</param>
+    /// <remarks>
+    /// <paramref name="commonGitDir"/> is the git dir the session started with, or null for dir/.git;
+    /// <paramref name="modulesAtStart"/> is null to take the module repos there now; and <paramref name="atStart"/>,
+    /// what the session saved at its start, is null when there's no such record.
+    /// </remarks>
     private void Check(
         bool startedWithGit,
         string? commonGitDir,
@@ -248,8 +248,8 @@ internal sealed class GitCheck
     {
         if (!Directory.Exists(_dir))
             return;
-        // The agent could do this to a mount's root too. The user will fix the
-        // mode and then run git, so "host git can't get in" doesn't excuse it.
+        // The agent could make a mount's root unenterable too. The user will fix the mode and then run git, so "host
+        // git can't get in" doesn't excuse it.
         if (!Native.CanEnter(_dir))
         {
             throw new PenException($"pen can't enter {Out.Field(_dir)}. Once its permissions are " +
@@ -293,8 +293,8 @@ internal sealed class GitCheck
     /// <returns>The module repos left, whose checkouts in the tree are the project's own.</returns>
     private HashSet<string> CheckGitDir(string git, IReadOnlyCollection<string>? modulesAtStart)
     {
-        // Like the dir itself: nothing under it can be seen, and it's what git reads first.
-        // One it can search, git and the shell prompt read through without listing it.
+        // As with the dir itself, nothing under an unlistable git dir can be seen, and it's what git reads first.
+        // Git and the shell prompt read through one they can search without listing it.
         if (Native.CanEnter(git) && !Native.CanList(git))
             _tryMakeListable?.Invoke(git);
         if (Directory.Exists(git) && !Native.CanList(git))
@@ -326,10 +326,9 @@ internal sealed class GitCheck
             movedAside => RepoScan.ScanNested(_dir, git, known, _tryMakeListable, from: movedAside));
 
     /// <summary>
-    /// Quarantines the repos anywhere in the git dir where git keeps none (<see cref="RepoScan.ScanGitDir"/>).
+    /// Quarantines the repos anywhere in the git dir where git keeps none (<see cref="RepoScan.ScanGitDir"/>). The
+    /// module repos kept in it (<paramref name="known"/>) are its own.
     /// </summary>
-    /// <param name="git">The git dir.</param>
-    /// <param name="known">The module repos kept in it, which are its own.</param>
     private void QuarantineGitDirRepos(string git, HashSet<string> known) =>
         QuarantineFound(
             RepoScan.ScanGitDir(git, known, _tryMakeListable),
@@ -338,11 +337,8 @@ internal sealed class GitCheck
 
     /// <summary>
     /// Quarantines what a walk found and removes the symlinks it found, then walks each .git directory it moved
-    /// aside, and so on.
+    /// aside with <paramref name="walkFrom"/>, and so on.
     /// </summary>
-    /// <param name="scan">What the walk found.</param>
-    /// <param name="describe">Words why a repo it found is quarantined.</param>
-    /// <param name="walkFrom">Walks again from the directories given, in the same way.</param>
     /// <remarks>
     /// A walk doesn't enter a .git directory, whose contents are that repo's. Once it's moved aside, with its HEAD,
     /// what's inside is reachable all the same (by a symlink to its new, predictable name, or one in it), so it's
@@ -399,10 +395,8 @@ internal sealed class GitCheck
 
     /// <summary>
     /// Quarantines the submodule repos in <paramref name="gitDir"/> that weren't there at the start, any symlink
-    /// where git keeps them, and a commondir in one that stays.
+    /// where git keeps them, and a commondir in one that stays. Null <paramref name="modulesAtStart"/> keeps all.
     /// </summary>
-    /// <param name="gitDir">The git dir.</param>
-    /// <param name="modulesAtStart">The module repos there at the start, or null to keep all.</param>
     /// <returns>The repos left, whose checkouts in the tree are the project's own.</returns>
     /// <remarks>
     /// Repos nested in a quarantined one go with it. A directory there that can't be read is quarantined whether or
@@ -460,11 +454,10 @@ internal sealed class GitCheck
         return scan;
     }
 
-    /// <summary>Quarantines a module repo that's a symlink or the session didn't list at its start.</summary>
-    /// <param name="repo">The module repo.</param>
-    /// <param name="listed">
-    /// The module repos the session listed at its start (<see cref="ModuleBaseline"/>), or null to keep all.
-    /// </param>
+    /// <summary>
+    /// Quarantines a module repo that's a symlink or the session didn't list at its start
+    /// (<see cref="ModuleBaseline"/>). Null <paramref name="listed"/> keeps all.
+    /// </summary>
     /// <returns>Whether it's one of those, so it's gone (or named as couldn't be moved).</returns>
     private bool TryQuarantineModuleRepo(string repo, HashSet<string>? listed)
     {
@@ -494,9 +487,10 @@ internal sealed class GitCheck
         }
     }
 
-    /// <summary>Quarantines what a shell prompt would run in <paramref name="git"/>.</summary>
-    /// <param name="git">The git dir.</param>
-    /// <param name="atStart">What the session saved at its start, or null when there's no such record.</param>
+    /// <summary>
+    /// Quarantines what a shell prompt would run in the git dir <paramref name="git"/>. <paramref name="atStart"/>,
+    /// what the session saved at its start, is null when there's no such record.
+    /// </summary>
     /// <remarks>
     /// What the scan couldn't reach is kept even if it stops, as the directories in it can't be vouched for.
     /// </remarks>
@@ -515,9 +509,9 @@ internal sealed class GitCheck
             MoveHazard(hazard);
     }
 
-    /// <summary>Sweeps prompt hazards for a check that stopped early, if there's a git dir to sweep.</summary>
-    /// <param name="git">The git dir the session started with, or null if none.</param>
-    /// <param name="atStart">What the session saved at its start, or null when there's no such record.</param>
+    /// <summary>
+    /// Sweeps prompt hazards for a check that stopped early, if the session started with a git dir to sweep.
+    /// </summary>
     /// <remarks>
     /// If the check stops early, what a shell prompt would run still has to go, since the prompt reads through a git
     /// dir Pen can't list and doesn't wait for the failure to be read: every known name is tried directly. If even

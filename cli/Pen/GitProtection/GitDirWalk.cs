@@ -59,8 +59,8 @@ internal static class GitDirWalk
         }
         foreach (var entry in Directory.EnumerateFileSystemEntries(worktrees).Order(StringComparer.Ordinal))
         {
-            // git keeps only directories here. One it can't enter is what it would
-            // read once the user fixes the mode, so it can't pass as empty.
+            // Git keeps only directories here. One Pen can't enter is what git would read once the user fixes the
+            // mode, so it can't pass as empty.
             if (!PathChecks.IsLink(entry) && Directory.Exists(entry) && !Native.CanEnter(entry))
                 tryMakeListable?.Invoke(entry);
             if (PathChecks.IsLink(entry) || !Path.Exists(entry) || (Directory.Exists(entry) && !Native.CanEnter(entry)))

@@ -12,17 +12,15 @@ internal static class GitQuarantine
     /// <summary>The suffix of the names the check renames things to.</summary>
     public const string Suffix = ".pen-quarantine";
 
-    /// <summary>Renames <paramref name="path"/> to a free "….pen-quarantine" name.</summary>
-    /// <param name="path">What to move.</param>
-    /// <param name="why">Why it's moved, for the warning.</param>
-    /// <param name="breakLayout">
-    /// Whether it's a .git directory, whose HEAD goes too: renamed, it would still look like a bare repo to git.
-    /// </param>
+    /// <summary>
+    /// Renames <paramref name="path"/> to a free "….pen-quarantine" name. <paramref name="breakLayout"/> is for a .git
+    /// directory, whose HEAD goes too: renamed, it would still look like a bare repo to git.
+    /// </summary>
     /// <returns>
     /// The rename made, or a <see cref="Quarantined.Failed"/> whose Why says it couldn't be moved.
     /// </returns>
     /// <remarks>
-    /// Never fatal: the rest still gets checked, and the warning names what couldn't be moved.
+    /// This is never fatal: the rest still gets checked, and the warning names what couldn't be moved.
     /// </remarks>
     internal static Quarantined Move(string path, string why, bool breakLayout)
     {
@@ -44,19 +42,19 @@ internal static class GitQuarantine
         }
     }
 
-    /// <summary>Removes the symlink <paramref name="path"/>, keeping what it held for the warning.</summary>
-    /// <param name="root">The project dir, which <paramref name="path"/> is below.</param>
-    /// <param name="path">The symlink.</param>
-    /// <param name="why">Why it's removed, for the warning.</param>
+    /// <summary>
+    /// Removes the symlink <paramref name="path"/>, below the project dir <paramref name="root"/>, keeping what it held
+    /// for the warning.
+    /// </summary>
     /// <returns>
     /// The removal made, or a <see cref="Quarantined.Failed"/> whose Why says it couldn't be removed.
     /// </returns>
     /// <remarks>
-    /// Renamed, a symlink would lead to the same place, so it's removed instead: it holds no data. Only ever a
-    /// symlink is removed, in the directory reached from <paramref name="root"/> without following a symlink
+    /// Renamed, a symlink would lead to the same place, so it's removed instead: it holds no data. Only a symlink is
+    /// ever removed, in the directory reached from <paramref name="root"/> without following a symlink
     /// (<see cref="Native.RemoveSymlink"/>), so another session's agent can't swap a directory on the way for one
-    /// that leads elsewhere; anything but a symlink there now is left, and the removal fails. Never fatal, like
-    /// <see cref="Move"/>.
+    /// that leads elsewhere. Anything but a symlink there now is left, and the removal fails. Like
+    /// <see cref="Move"/>, this is never fatal.
     /// </remarks>
     internal static Quarantined RemoveLink(string root, string path, string why)
     {

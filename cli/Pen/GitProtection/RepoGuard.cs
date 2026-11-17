@@ -159,10 +159,10 @@ internal static class RepoGuard
             + "\nfix their permissions (chmod u+rx) or remove them, then rerun");
     }
 
-    /// <summary>Refuses repos inside the project, whose config and hooks Pen can't protect.</summary>
-    /// <param name="dir">The project dir.</param>
-    /// <param name="git">The project's .git, which decides the message's wording.</param>
-    /// <param name="nested">The repos found inside the project.</param>
+    /// <summary>
+    /// Refuses repos inside the project, whose config and hooks Pen can't protect. The project's .git decides the
+    /// message's wording.
+    /// </summary>
     private static void RequireNoNestedRepos(string dir, string git, IReadOnlyList<NestedRepo> nested)
     {
         if (nested.Count == 0)
@@ -201,9 +201,6 @@ internal static class RepoGuard
     }
 
     /// <summary>Refuses repos in the git dir where git keeps none (<see cref="RepoScan.ScanGitDir"/>).</summary>
-    /// <param name="dir">The project dir.</param>
-    /// <param name="common">The common git dir, which the repos found are inside.</param>
-    /// <param name="found">The repos found in the git dir.</param>
     /// <remarks>
     /// Only the repos listed are looked at for the advice: one in refs/ or logs/ is made by ref names, which
     /// renaming fixes, and a worktree entry may be a stale one, which git can tidy.
@@ -253,9 +250,6 @@ internal static class RepoGuard
     /// Refuses symlinks in the tree that lead into the git dir, or would once a directory they name is made, and
     /// those Pen can't tell lead elsewhere (<see cref="GitDirLinkCheck"/>).
     /// </summary>
-    /// <param name="dir">The project dir.</param>
-    /// <param name="links">The symlinks that lead into the git dir.</param>
-    /// <param name="untraced">The symlinks Pen can't trace.</param>
     /// <remarks>Git run through one starts in the git dir, where the sandbox could put a repo for it to use.</remarks>
     private static void RequireNoGitDirLinks(string dir, IReadOnlyList<string> links, IReadOnlyList<string> untraced)
     {
@@ -385,12 +379,10 @@ internal static class RepoGuard
         return bare is null || !GitConfigFile.IsTrue(bare);
     }
 
-    /// <summary>Warns once if the repo's common git dir may fold case.</summary>
-    /// <param name="project">The project; a plain directory has no git dir to probe, so no warning.</param>
-    /// <param name="warn">Where the warning goes.</param>
-    /// <param name="probe">
-    /// Whether a git dir may fold case: <see cref="PathChecks.MayFoldCase(string)"/> in production.
-    /// </param>
+    /// <summary>
+    /// Warns once if the repo's common git dir may fold case, by <paramref name="probe"/>
+    /// (<see cref="PathChecks.MayFoldCase(string)"/> in production). A plain directory has no git dir to probe.
+    /// </summary>
     /// <remarks>
     /// The common git dir is where config and hooks are, for a linked worktree too. On a folding file system the
     /// agent could change .git/config by writing .git/CONFIG, past its single-file mount. This warns on every

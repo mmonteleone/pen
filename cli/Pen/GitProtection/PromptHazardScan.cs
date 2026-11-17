@@ -15,6 +15,14 @@ namespace Pen.GitProtection;
 /// </param>
 /// <remarks>
 /// <para>
+/// Git's own git-prompt.sh puts the first line of rebase-merge/msgnum and end, and rebase-apply/next and last, into
+/// PS1 unprotected. Where the shell expands PS1 (bash's PROMPT_COMMAND mode, zsh's precmd with PROMPT_SUBST),
+/// "$(cmd)" there runs at the next prompt, with no git command typed, so this can't wait for the user to look.
+/// git-prompt.sh protects head-name, HEAD and describe output from expansion, and only tests whether the rest
+/// (MERGE_HEAD, BISECT_LOG, sequencer/todo) exist, so those run nothing. HEAD is left alone in any case: a branch may
+/// legally be named "$(cmd)", so its content can't tell a planted one from the user's.
+/// </para>
+/// <para>
 /// It looks in the same git dirs as <see cref="PausedGit.Find"/>. A real rebase's own files always pass: see
 /// <see cref="PausedGit.IsCount"/> and <see cref="PausedGit.IsHeadName"/>. A planted symlink counts whatever it
 /// points to, and a state directory Pen can't enter counts too, since the prompt reads it once the user fixes its
@@ -79,9 +87,10 @@ internal sealed class PromptHazardScan(string gitDir, Func<string, bool>? tryMak
         }
     }
 
-    /// <summary>Looks in a paused rebase's state directory for what the prompt would expand.</summary>
-    /// <param name="stateDir">The state directory.</param>
-    /// <param name="counts">The names in it that git only writes a number in.</param>
+    /// <summary>
+    /// Looks in a paused rebase's state directory for what the prompt would expand. <paramref name="counts"/> are
+    /// the names in it that git only writes a number in.
+    /// </summary>
     private void LookInState(string stateDir, string[] counts)
     {
         if (PathChecks.IsLink(stateDir))
@@ -136,10 +145,8 @@ internal sealed class PromptHazardScan(string gitDir, Func<string, bool>? tryMak
     }
 }
 
-/// <summary>A file or state directory a shell prompt would run.</summary>
-/// <param name="Path">The file or directory.</param>
-/// <param name="StateDir">
-/// The state directory holding it, if it's a file: the directory can go aside in its place.
-/// </param>
-/// <param name="Why">Why it's quarantined.</param>
+/// <summary>
+/// A file or state directory a shell prompt would run, and why it's quarantined. StateDir is the state directory
+/// holding it, if it's a file: the directory can go aside in its place.
+/// </summary>
 internal sealed record PromptHazard(string Path, string? StateDir, string Why);

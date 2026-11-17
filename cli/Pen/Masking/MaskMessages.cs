@@ -63,9 +63,9 @@ internal static class MaskMessages
     /// Whether a directory may fold case: <see cref="PathChecks.MayFoldCase(string)"/> in production.
     /// </param>
     /// <returns>
-    /// <see cref="CaseWarning"/> if a file is hidden or replaced and <paramref name="penDir"/> may fold case, or
-    /// else <see cref="UnicodeWarning"/> on macOS for a non-ASCII name, then
-    /// the plan's own warnings, then <see cref="DockerWarning"/> in a docker session that hides or replaces anything.
+    /// <see cref="CaseWarning"/> if a file is hidden or replaced and <paramref name="penDir"/> may fold case, or else
+    /// <see cref="UnicodeWarning"/> on macOS for a non-ASCII name, then the plan's own warnings, then
+    /// <see cref="DockerWarning"/> in a docker session that hides or replaces anything.
     /// </returns>
     /// <remarks>
     /// The probe runs only when a file is hidden or replaced: another spelling of a hidden directory's name reaches

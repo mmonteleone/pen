@@ -7,10 +7,8 @@ internal static class GitCheckReport
 {
     /// <summary>
     /// Prints what a check found: first what it renamed, put back and made listable, then any paused operations,
-    /// then that it didn't finish.
+    /// then that it didn't finish. Paths are shown relative to the directory checked.
     /// </summary>
-    /// <param name="dir">The directory checked; paths are shown relative to it.</param>
-    /// <param name="check">The check's result.</param>
     public static void Print(string dir, CheckResult check)
     {
         if (check.Moved.Count > 0)

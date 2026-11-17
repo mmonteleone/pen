@@ -74,11 +74,10 @@ internal static class NestedRepoWording
         _ => GitDir,
     };
 
-    /// <summary>One kind's wordings.</summary>
-    /// <param name="Refused">After its path in the refusal of a repo in the tree.</param>
-    /// <param name="RefusedInGitDir">After its path in the refusal of a repo in the git dir.</param>
-    /// <param name="Quarantined">Why one in the tree is quarantined.</param>
-    /// <param name="QuarantinedInGitDir">Why one in the git dir is quarantined.</param>
+    /// <summary>
+    /// One kind's wordings: what follows its path when a repo in the tree or the git dir is refused, and why one in
+    /// either is quarantined.
+    /// </summary>
     private sealed record Wording(
         string Refused,
         string RefusedInGitDir,

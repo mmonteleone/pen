@@ -43,8 +43,8 @@ internal static class SignatureConfig
             config.AddRange(FormatSetting("user.signingkey", key));
         if (keyCommand is not null)
             config.AddRange(FormatSetting("gpg.ssh.defaultKeyCommand", keyCommand));
-        // With ssh and no key, git runs gpg.ssh.defaultKeyCommand, which a
-        // repo could set: so one of the two has to come from global config.
+        // With ssh and no key, git runs gpg.ssh.defaultKeyCommand, which a repo could set, so one of the two has to
+        // come from global config.
         if (format == "ssh" && key is null && keyCommand is null)
         {
             throw new PenException("gpg.format is ssh but user.signingkey isn't set in your global " +

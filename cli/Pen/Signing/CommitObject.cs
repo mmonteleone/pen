@@ -116,8 +116,8 @@ internal sealed record CommitObject
         {
             if (line.StartsWith(' '))
             {
-                // A tag's message inside a mergetag is free text. Anywhere else, a
-                // continuation that reads as a core header has no honest purpose.
+                // A tag's message inside a mergetag is free text. Anywhere else, a continuation that reads as a core
+                // header has no honest purpose.
                 if (current is null || (current != "mergetag" && IsCoreHeader(line[1..].Split(' ')[0])))
                     throw new CommitShapeException("a header continuation line where none belongs");
                 continue;

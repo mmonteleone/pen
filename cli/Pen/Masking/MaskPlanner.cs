@@ -5,22 +5,9 @@ namespace Pen.Masking;
 
 /// <summary>Plans what a session hides and replaces in the project: what hide matches and [replace] names.</summary>
 /// <remarks>
-/// <para>
-/// It walks the project without following symlinks, never entering or matching a .git (any case, at any depth),
-/// the top-level .pen (any case, since a folding file system takes .PEN for it) or the common git dir, and doesn't
-/// descend into a directory it hides, since that's hidden whole. When every pattern is literal it doesn't walk:
-/// it follows each pattern's path down from the project dir by the same rules, comparing names as
-/// <see cref="HidePattern.IsMatch"/> does, so it finds what the walk would.
-/// </para>
-/// <para>
-/// A symlink that matches hides what it leads to, if that's in the project and not off limits; what's outside the
-/// project isn't in the sandbox, so it's left alone. The planner reads the tree and the [replace] sources, and
-/// never runs git or writes anything.
-/// </para>
-/// <para>
-/// Names come from the disk, which the agent writes, so every one is passed through <see cref="Out.Field"/> before
-/// it goes into a warning or an error.
-/// </para>
+/// The planner reads the tree and the [replace] sources, and never runs git or writes anything. Names come from the
+/// disk, which the agent writes, so every one is passed through <see cref="Out.Field"/> before it goes into a warning
+/// or an error.
 /// </remarks>
 internal sealed class MaskPlanner
 {
@@ -229,6 +216,11 @@ internal sealed class MaskPlanner
     }
 
     /// <summary>Walks the whole project, hiding what the patterns match.</summary>
+    /// <remarks>
+    /// The walk never follows a symlink. It never enters or matches a .git (any case, at any depth), the top-level
+    /// .pen (any case, since a folding file system takes .PEN for it) or the common git dir, and doesn't descend into
+    /// a directory it hides, since that's hidden whole.
+    /// </remarks>
     private void Walk()
     {
         var pending = new Stack<SeenDir>();
@@ -248,10 +240,11 @@ internal sealed class MaskPlanner
 
     /// <summary>Follows each literal pattern's path down from the project dir, hiding what it reaches.</summary>
     /// <remarks>
-    /// Each step takes every entry whose name is the segment as <see cref="HidePattern.IsMatch"/> compares (so on a
-    /// file system that tells case apart, a segment can lead to several entries), and goes on only into a directory
-    /// the walk would enter: not a symlink, not off limits, not hidden. So it reaches exactly the entries the walk
-    /// would test against the pattern, and <see cref="Visit"/> tests each the same way.
+    /// This replaces the walk when every pattern is literal, and finds what the walk would. Each step takes every entry
+    /// whose name is the segment as <see cref="HidePattern.IsMatch"/> compares (so on a file system that tells case
+    /// apart, a segment can lead to several entries), and goes on only into a directory the walk would enter: not a
+    /// symlink, not off limits, not hidden. So it reaches exactly the entries the walk would test against the pattern,
+    /// and <see cref="Visit"/> tests each the same way.
     /// </remarks>
     private void FindLiterals()
     {
@@ -426,6 +419,7 @@ internal sealed class MaskPlanner
     /// <param name="fileMatch">The pattern that matched it as listed, or null if only a directory would match.</param>
     /// <param name="dirMatch">The pattern that matched it, taken as a directory.</param>
     /// <remarks>
+    /// A symlink hides what it leads to, if that's in the project; what's outside the project isn't in the sandbox.
     /// The type comes from lstat, not the listing, in case it changed since. A FIFO, socket or device is left
     /// alone, as is a symlink that leads nowhere, out of the project or somewhere off limits. What lstat can't look
     /// at (a path too long, a real path that isn't valid UTF-8) is warned about.

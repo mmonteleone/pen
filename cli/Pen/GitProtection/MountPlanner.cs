@@ -5,11 +5,11 @@ namespace Pen.GitProtection;
 /// <summary>
 /// Plans the mounts over the project mount that keep the agent from changing what host git reads or runs.
 /// </summary>
-/// <param name="dir">
-/// The project dir, checked by <see cref="RepoGuard.CheckAtStart"/>; messages are relative to it.
-/// </param>
-/// <param name="hostHome">The host user's home, for includes of ~/ paths.</param>
 /// <remarks>
+/// <para>
+/// The project dir is checked by <see cref="RepoGuard.CheckAtStart"/> first, and messages are relative to it. The
+/// host user's home is for includes of ~/ paths.
+/// </para>
 /// <para>
 /// It creates what must exist to be mounted (.pen/, .git/hooks, and a few files inside .git) so that the agent can't
 /// create them instead. Like the rest of <see cref="RepoGuard"/>, it reads files directly and never runs git.
@@ -82,12 +82,9 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// <summary>
     /// Plans the mounts over a git dir (the project's .git, the common dir of the worktree it is, or a module repo in
     /// either) that keep the agent from changing what host git reads as config or runs as hooks, for this checkout
-    /// and every other worktree sharing the dir.
+    /// and every other worktree sharing the dir. All of <paramref name="common"/>, the project's git dir, is writable
+    /// in the sandbox, whichever repo in it <paramref name="gitDir"/> is.
     /// </summary>
-    /// <param name="gitDir">The git dir to protect.</param>
-    /// <param name="common">
-    /// The project's git dir, all of it writable in the sandbox, whichever repo in it <paramref name="gitDir"/> is.
-    /// </param>
     private void ProtectGitDir(string gitDir, string common)
     {
         // The git dir itself becomes a mount point, so it can't be renamed away and replaced.
@@ -102,18 +99,17 @@ internal sealed class MountPlanner(string dir, string hostHome)
         _mounts.Add(new(hooks, ReadOnly: true));
 
         var worktreeConfig = AddIncludes(common, config);
-        // With extensions.worktreeConfig, git also reads config.worktree
-        // files, which the agent could otherwise create.
-        // Any true value is enough: includeIf conditions may differ in a
-        // different worktree or branch sharing this git dir.
+        // With extensions.worktreeConfig, git also reads config.worktree files, which the agent could otherwise
+        // create. Any true value is enough, since includeIf conditions may differ in another worktree or branch
+        // sharing this git dir.
         AddWorktreeConfig(common, Path.Combine(gitDir, "config.worktree"), worktreeConfig);
         ProtectWorktreeEntries(gitDir, common, worktreeConfig);
     }
 
-    /// <summary>Plans the mounts over each linked worktree's entry in <paramref name="gitDir"/>.</summary>
-    /// <param name="gitDir">The git dir whose worktrees/ to protect.</param>
-    /// <param name="common">The project's git dir.</param>
-    /// <param name="worktreeConfig">Whether any config in the git dir may enable extensions.worktreeConfig.</param>
+    /// <summary>
+    /// Plans the mounts over each linked worktree's entry in <paramref name="gitDir"/>.
+    /// <paramref name="worktreeConfig"/> is whether any config in the git dir may enable extensions.worktreeConfig.
+    /// </summary>
     /// <remarks>
     /// Host git in each linked worktree reads config and hooks from wherever its commondir points. The worktrees the
     /// project dir doesn't contain aren't visible in the sandbox, so their entries are read-only as a whole.
@@ -125,17 +121,17 @@ internal sealed class MountPlanner(string dir, string hostHome)
             throw new PenException($"{FormatPath(worktrees)} is a symlink, which pen doesn't support");
         if (!Directory.Exists(worktrees))
             return;
-        // A mount point too, so the entries mounted below can't be moved
-        // aside together and replaced with forged ones.
+        // This is a mount point too, so the entries mounted below can't be moved aside together and replaced with
+        // forged ones.
         _mounts.Add(new(worktrees, ReadOnly: false));
         foreach (var entry in Directory.EnumerateDirectories(worktrees).Order(StringComparer.Ordinal))
             ProtectWorktreeEntry(entry, common, worktreeConfig);
     }
 
-    /// <summary>Plans the mounts over one linked worktree's entry, &lt;git dir&gt;/worktrees/&lt;name&gt;.</summary>
-    /// <param name="entry">The worktree's entry.</param>
-    /// <param name="common">The project's git dir.</param>
-    /// <param name="worktreeConfig">Whether any config in the git dir may enable extensions.worktreeConfig.</param>
+    /// <summary>
+    /// Plans the mounts over one linked worktree's entry, &lt;git dir&gt;/worktrees/&lt;name&gt;.
+    /// <paramref name="worktreeConfig"/> is whether any config in the git dir may enable extensions.worktreeConfig.
+    /// </summary>
     private void ProtectWorktreeEntry(string entry, string common, bool worktreeConfig)
     {
         if (PathChecks.IsLink(entry))
@@ -145,9 +141,8 @@ internal sealed class MountPlanner(string dir, string hostHome)
             RequireNotLink(dir, commondir);
         if (!RepoScan.IsWorktreeInside(dir, entry))
         {
-            // The worktree isn't visible in the sandbox, so its entry
-            // looks dangling there: `git worktree prune` would delete
-            // it. Read-only keeps it, and its HEAD, index and commondir.
+            // The worktree isn't visible in the sandbox, so its entry looks dangling there and `git worktree prune`
+            // would delete it. Read-only keeps it, and its HEAD, index and commondir.
             _mounts.Add(new(entry, ReadOnly: true));
             // Its config can include a file in the writable project.
             var worktreeFile = Path.Combine(entry, "config.worktree");
@@ -164,7 +159,6 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// Plans the mounts over each submodule repo kept in <paramref name="common"/> (see
     /// <see cref="RepoScan.FindModuleRepos"/>): the same protection as the git dir itself.
     /// </summary>
-    /// <param name="common">The project's git dir.</param>
     /// <remarks>
     /// <para>
     /// Host git running in a submodule checkout reads its config and runs its hooks. A module repo that's a symlink
@@ -183,8 +177,6 @@ internal sealed class MountPlanner(string dir, string hostHome)
     }
 
     /// <summary>Plans the mounts over one submodule repo kept in <paramref name="common"/>.</summary>
-    /// <param name="repo">The module repo.</param>
-    /// <param name="common">The project's git dir.</param>
     private void ProtectModuleRepo(string repo, string common)
     {
         if (PathChecks.IsLink(repo))
@@ -224,12 +216,10 @@ internal sealed class MountPlanner(string dir, string hostHome)
         new(Paths.EnumerateAncestors(repo)
             .TakeWhile(parent => parent != common && PathChecks.IsInside(common, parent)));
 
-    /// <summary>Plans a read-only mount over a config.worktree, with its includes.</summary>
-    /// <param name="common">The project's git dir.</param>
-    /// <param name="path">The config.worktree.</param>
-    /// <param name="enabled">
-    /// Whether extensions.worktreeConfig may be on; if not, only an existing file is mounted.
-    /// </param>
+    /// <summary>
+    /// Plans a read-only mount over a config.worktree, with its includes. Unless extensions.worktreeConfig may be on
+    /// (<paramref name="enabled"/>), only an existing file is mounted.
+    /// </summary>
     private void AddWorktreeConfig(string common, string path, bool enabled)
     {
         if (!enabled && !PathChecks.ExistsOrIsLink(path))
@@ -243,8 +233,6 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// Plans read-only mounts over the files <paramref name="configFile"/>'s include.path and includeIf.*.path
     /// settings name, recursively, wherever they're inside the project or <paramref name="common"/>.
     /// </summary>
-    /// <param name="common">The project's git dir.</param>
-    /// <param name="configFile">The config file whose includes to follow.</param>
     /// <returns>Whether any file in the walk sets extensions.worktreeConfig.</returns>
     /// <remarks>
     /// <para>
@@ -269,10 +257,10 @@ internal sealed class MountPlanner(string dir, string hostHome)
         return FollowIncludes(common, configFile, visited);
     }
 
-    /// <summary>Follows <paramref name="configFile"/>'s includes, within one walk.</summary>
-    /// <param name="common">The project's git dir.</param>
-    /// <param name="configFile">The config file whose includes to follow.</param>
-    /// <param name="visited">The config files the walk has met, keyed by path as written.</param>
+    /// <summary>
+    /// Follows <paramref name="configFile"/>'s includes, within one walk, whose config files met so far are in
+    /// <paramref name="visited"/>.
+    /// </summary>
     /// <returns>Whether it or any file it leads to sets extensions.worktreeConfig.</returns>
     private bool FollowIncludes(string common, string configFile, HashSet<string> visited)
     {
@@ -303,9 +291,8 @@ internal sealed class MountPlanner(string dir, string hostHome)
             if (Directory.Exists(include.Real))
                 continue; // git ignores a directory
             ProtectIncludedFile(common, configFile, include.Real);
-            // Even host-only includes can enable worktreeConfig or include
-            // another file that the sandbox can write. Conditional includes
-            // are followed conservatively for every worktree and branch.
+            // Even host-only includes can enable worktreeConfig or include another file that the sandbox can write.
+            // Conditional includes are followed conservatively, for every worktree and branch.
             worktreeConfig |= FollowIncludes(common, include.Path, visited);
         }
         return worktreeConfig;
@@ -321,9 +308,6 @@ internal sealed class MountPlanner(string dir, string hostHome)
     private sealed record Include(string Path, string Written, string Real);
 
     /// <summary>Resolves the file an include in <paramref name="configFile"/> names.</summary>
-    /// <param name="configFile">The config file with the include.</param>
-    /// <param name="value">The include's path value.</param>
-    /// <returns>The included file's paths.</returns>
     /// <exception cref="PenException">
     /// The path isn't valid UTF-8, is a form Pen can't resolve, or can't be followed.
     /// </exception>
@@ -355,12 +339,9 @@ internal sealed class MountPlanner(string dir, string hostHome)
     }
 
     /// <summary>
-    /// Plans a verified read-only mount over an included file the sandbox could write, creating it first if it's
-    /// missing from the git dir.
+    /// Plans a verified read-only mount over an included file, by its real path, if the sandbox could write it,
+    /// creating it first if it's missing from the git dir.
     /// </summary>
-    /// <param name="common">The project's git dir.</param>
-    /// <param name="configFile">The config file with the include, for messages.</param>
-    /// <param name="real">The included file's real path.</param>
     private void ProtectIncludedFile(string common, string configFile, string real)
     {
         var writable = PathChecks.IsInside(dir, real) || PathChecks.IsInside(common, real);
@@ -420,8 +401,6 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// <summary>
     /// Creates <paramref name="path"/> as a directory to be mounted, refusing a symlink or a file there.
     /// </summary>
-    /// <param name="dir">The project dir, for messages.</param>
-    /// <param name="path">The directory.</param>
     internal static void EnsureDirectory(string dir, string path)
     {
         RequireNotLink(dir, path);
@@ -435,8 +414,6 @@ internal sealed class MountPlanner(string dir, string hostHome)
     }
 
     /// <summary>Refuses a symlink at <paramref name="path"/>, which Pen has to mount read-only.</summary>
-    /// <param name="dir">The project dir, for messages.</param>
-    /// <param name="path">The path to be mounted.</param>
     internal static void RequireNotLink(string dir, string path)
     {
         if (PathChecks.IsLink(path))

@@ -78,9 +78,8 @@ internal sealed class SignatureVerifier(HostGit git)
         if (whole.Ok)
             return [.. whole.Lines];
 
-        // Some commit killed that read: ssh-keygen giving up on a forged
-        // signature before reading the message (git takes the SIGPIPE), or
-        // git refusing a signature header. Its output could be cut short.
+        // Some commit killed that read: ssh-keygen giving up on a forged signature before reading the message (git
+        // takes the SIGPIPE), or git refusing a signature header. Its output could be cut short.
         var lines = new List<string>();
         foreach (var commit in commits)
         {

@@ -44,11 +44,9 @@ internal static class GitConfigFile
         }
 
         /// <summary>The path expanded.</summary>
-        /// <param name="Path">The expanded path.</param>
         internal sealed record Expanded(string Path) : ExpandedPath;
 
-        /// <summary>A path Pen can't expand as git would.</summary>
-        /// <param name="Refusal">Why it can't be expanded.</param>
+        /// <summary>A path Pen can't expand as git would, and why.</summary>
         internal sealed record Refused(PathRefusal Refusal) : ExpandedPath;
     }
 
@@ -57,9 +55,7 @@ internal static class GitConfigFile
     /// <exception cref="PenException">It isn't what git would read.</exception>
     public static List<Entry> Parse(string text) => Parse(Encoding.UTF8.GetBytes(text), "git config");
 
-    /// <summary>Parses the entries in a file's bytes.</summary>
-    /// <param name="bytes">The file's bytes.</param>
-    /// <param name="source">What the bytes are, for the message.</param>
+    /// <summary>Parses the entries in a file's bytes, which <paramref name="source"/> names in the message.</summary>
     /// <returns>The entries, in file order.</returns>
     /// <exception cref="PenException">
     /// It isn't what git would read; the message names <paramref name="source"/>.
@@ -73,10 +69,10 @@ internal static class GitConfigFile
     public static List<Entry> ParseFile(string path) =>
         TryParseFile(path, out var entries, out var error) ? entries : throw new PenException(error);
 
-    /// <summary>Parses the entries of the file at <paramref name="path"/>, as <see cref="ParseFile"/> does.</summary>
-    /// <param name="path">The file.</param>
-    /// <param name="entries">The entries, in file order; none if the file is missing.</param>
-    /// <param name="error">Why the file can't be read or parsed: what <see cref="ParseFile"/> refuses with.</param>
+    /// <summary>
+    /// Parses the entries of the file at <paramref name="path"/>, as <see cref="ParseFile"/> does, giving none if
+    /// it's missing and otherwise what <see cref="ParseFile"/> refuses with.
+    /// </summary>
     /// <returns>Whether it could be read and parsed, or is missing.</returns>
     /// <remarks>Only a read or parse failure is false; any other exception propagates on purpose.</remarks>
     public static bool TryParseFile(
@@ -112,10 +108,6 @@ internal static class GitConfigFile
     }
 
     /// <summary>Parses the entries in a file's bytes, as <see cref="Parse(byte[], string)"/> does.</summary>
-    /// <param name="bytes">The file's bytes.</param>
-    /// <param name="source">What the bytes are, for the message.</param>
-    /// <param name="entries">The entries, in file order.</param>
-    /// <param name="error">Why git wouldn't read it, naming <paramref name="source"/>.</param>
     /// <returns>Whether it's what git would read.</returns>
     private static bool TryParse(
         byte[] bytes,
@@ -189,6 +181,7 @@ internal static class GitConfigFile
     }
 
     /// <summary>One pass over a file, following git_parse_source and its helpers.</summary>
+    /// <remarks>Each method that reads returns why the file can't be read, or null if it can.</remarks>
     private sealed class Reader(byte[] bytes)
     {
         private const int Newline = '\n';
@@ -213,14 +206,12 @@ internal static class GitConfigFile
         /// </summary>
         private int _sectionLength;
 
-        /// <summary>Gets the entries read so far.</summary>
         public List<Entry> Entries { get; } = [];
 
         /// <summary>Gets the line of the last character read.</summary>
         public int Line { get; private set; } = 1;
 
         /// <summary>Reads the whole file.</summary>
-        /// <returns>Why it can't be read, or null if it can.</returns>
         public string? Read()
         {
             if (bytes.AsSpan().StartsWith(Bom))
@@ -272,7 +263,6 @@ internal static class GitConfigFile
         }
 
         /// <summary>Reads a section header after its "[", making it the current section.</summary>
-        /// <returns>Why it can't be read, or null if it can.</returns>
         private string? ReadSectionHeader()
         {
             _name.Clear();
@@ -286,7 +276,6 @@ internal static class GitConfigFile
         }
 
         /// <summary>Reads a section name up to "]", or up to whitespace and then its subsection.</summary>
-        /// <returns>Why it can't be read, or null if it can.</returns>
         private string? ReadSectionName()
         {
             while (true)
@@ -307,7 +296,6 @@ internal static class GitConfigFile
         /// <summary>
         /// Reads a quoted subsection and the "]" after it, from the whitespace <paramref name="character"/> before it.
         /// </summary>
-        /// <returns>Why it can't be read, or null if it can.</returns>
         private string? ReadSubsection(int character)
         {
             do
@@ -342,7 +330,6 @@ internal static class GitConfigFile
         /// <summary>
         /// Reads a key, starting with <paramref name="character"/>, and its value in the current section.
         /// </summary>
-        /// <returns>Why it can't be read, or null if it can.</returns>
         private string? ReadEntry(int character)
         {
             if (!IsAlpha(character))
@@ -372,7 +359,6 @@ internal static class GitConfigFile
         }
 
         /// <summary>git's parse_value: reads a value after its "=", to the end of its line.</summary>
-        /// <returns>Why it can't be read, or null if it can.</returns>
         /// <remarks>
         /// Whitespace is dropped at the start, and at the end only if nothing, not even a pair of quotes or a
         /// backslash, came after it.
@@ -422,7 +408,6 @@ internal static class GitConfigFile
         /// <summary>
         /// Ends a value at its newline, trimming trailing whitespace from <paramref name="trimTo"/> if set.
         /// </summary>
-        /// <returns>Why it can't be read, or null if it can.</returns>
         private string? EndValue(bool quoted, int trimTo)
         {
             if (quoted)
@@ -435,7 +420,6 @@ internal static class GitConfigFile
         }
 
         /// <summary>Reads the character after a backslash in a value and adds what it stands for.</summary>
-        /// <returns>Why it can't be read, or null if it can.</returns>
         private string? AddEscaped()
         {
             var escaped = Unescape(ReadChar());

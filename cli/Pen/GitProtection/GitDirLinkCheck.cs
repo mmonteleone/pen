@@ -7,25 +7,9 @@ namespace Pen.GitProtection;
 /// it names is made.
 /// </summary>
 /// <remarks>
-/// <para>
-/// A directory is compared by which file it is (device and inode), not by how its path is spelled: realpath(3) leaves
-/// a macOS firmlink as written, so /System/Volumes/Data/Users/x/.git is the git dir with a different path. From what
-/// a symlink leads to, the walk goes up by "..", which the kernel resolves physically, as far as "/".
-/// </para>
-/// <para>
-/// A symlink that leads nowhere now (or nowhere Pen may look) still counts if it would once something is made: a
-/// later commit makes objects/ab, say, and then .git/objects/ab/../x resolves. So it's resolved as the kernel resolves
-/// it as far as what's there allows (a symlink met on the way spliced in as the kernel splices it), with what's missing
-/// taken as directories yet to be made, and it counts if any directory it stops at is at or inside the git dir.
-/// </para>
-/// <para>
-/// Where Pen can't tell (a target that isn't valid UTF-8 or can't be read, a directory whose ".." can't be searched)
-/// that's its own answer, <see cref="Lead.Unknown"/>, which callers refuse just the same but word differently.
-/// </para>
-/// <para>
-/// Where stat(2) can't be called (<see cref="Native.CanStat"/>), a directory is known by its real path instead,
-/// which is the same on Linux except across bind mounts.
-/// </para>
+/// From what a symlink leads to, the check goes up by "..", which the kernel resolves physically, as far as "/". A
+/// symlink that leads nowhere now still counts if it would lead in once something is made: a later commit makes
+/// objects/ab, say, and then .git/objects/ab/../x resolves.
 /// </remarks>
 internal sealed class GitDirLinkCheck
 {
@@ -60,8 +44,6 @@ internal sealed class GitDirLinkCheck
     /// Prepares the check for a project's tree: the common git dir, the project's own .git if it's a directory, and
     /// a linked worktree's own entry (both inside the common git dir when Pen accepted them).
     /// </summary>
-    /// <param name="root">The project dir.</param>
-    /// <param name="commonGitDir">The common git dir.</param>
     public static GitDirLinkCheck? ForProject(string root, string commonGitDir)
     {
         var dirs = new List<string> { commonGitDir };
@@ -88,6 +70,7 @@ internal sealed class GitDirLinkCheck
         /// Pen can't tell: its target can't be read or isn't valid UTF-8, or a directory on the way up from where it
         /// leads can't be looked at, or the way up is too long to walk.
         /// </summary>
+        /// <remarks>Callers refuse this just as they refuse <see cref="Inside"/>, but word it differently.</remarks>
         Unknown,
     }
 
@@ -234,6 +217,12 @@ internal sealed class GitDirLinkCheck
 
     /// <summary>Names the directory at <paramref name="path"/> by which file it is, or by its real path.</summary>
     /// <returns>The name, or null if it can't be looked at.</returns>
+    /// <remarks>
+    /// A directory is compared by device and inode, not by how its path is spelled: realpath(3) leaves a macOS
+    /// firmlink as written, so /System/Volumes/Data/Users/x/.git is the git dir with a different path. Where stat(2)
+    /// can't be called (<see cref="Native.CanStat"/>), the real path stands in, which is the same on Linux except
+    /// across bind mounts.
+    /// </remarks>
     private static string? Identify(string path)
     {
         if (!Native.CanStat)

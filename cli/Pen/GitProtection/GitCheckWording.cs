@@ -16,9 +16,10 @@ internal static class GitCheckWording
     /// </summary>
     internal const string RetryCommand = "pen true";
 
-    /// <summary>Words the loud warning: what moved or was removed, why, and how to put it back.</summary>
-    /// <param name="dir">The project dir; paths are shown relative to it.</param>
-    /// <param name="moved">What the check renamed or removed.</param>
+    /// <summary>
+    /// Words the loud warning: what moved or was removed, why, and how to put it back. Paths are shown relative to the
+    /// project dir.
+    /// </summary>
     public static string Warning(string dir, IReadOnlyList<Quarantined> moved)
     {
         var text = new StringBuilder();
@@ -73,8 +74,7 @@ internal static class GitCheckWording
     /// <summary>Appends the line that makes <paramref name="removed"/> again, or says why there's none.</summary>
     private static void AppendRemakeCommand(StringBuilder text, Quarantined.LinkRemoved removed)
     {
-        // Command substitution drops trailing newlines, so no quoting
-        // that works in every shell can name this one.
+        // Command substitution drops trailing newlines, so no quoting that works in every shell can name this one.
         if (removed.From.EndsWith('\n') || removed.LinkTarget.EndsWith('\n'))
         {
             text.Append("  pen can't write a command for ").Append(Out.Field(removed.From)).AppendLine(
@@ -94,8 +94,7 @@ internal static class GitCheckWording
     /// <summary>Appends the line that puts <paramref name="renamed"/> back, or says why there's none.</summary>
     private static void AppendMoveBackCommand(StringBuilder text, Quarantined.Moved renamed)
     {
-        // Command substitution drops trailing newlines, so no quoting
-        // that works in every shell can name this one.
+        // Command substitution drops trailing newlines, so no quoting that works in every shell can name this one.
         if (renamed.From.EndsWith('\n'))
         {
             text.Append("  pen can't write a command for ").Append(Out.Field(renamed.From)).AppendLine(
@@ -114,9 +113,8 @@ internal static class GitCheckWording
 
     /// <summary>
     /// Words what to do about a session whose protected files couldn't all be put back and which keeps its copies.
+    /// <paramref name="blocked"/> is the directories whose modes stopped the restore, or null if none are known.
     /// </summary>
-    /// <param name="session">The session.</param>
-    /// <param name="blocked">The directories whose modes stopped the restore, or null if none are known.</param>
     /// <remarks>
     /// First the way that uses the copies, in one command so that nothing (a shell prompt) runs git between it and
     /// Pen's retry. Only then the way that gives them up.
@@ -136,8 +134,6 @@ internal static class GitCheckWording
     }
 
     /// <summary>Words the loud warning for a check that couldn't vouch for <paramref name="dir"/>.</summary>
-    /// <param name="dir">The directory the check was for.</param>
-    /// <param name="why">What stopped it.</param>
     public static string NotCheckedWarning(string dir, string why) =>
         $"""
         pen: WARNING: git wasn't checked: don't run git here ({Out.Field(dir)}).

@@ -5,16 +5,16 @@ namespace Pen.Masking;
 
 /// <summary>One hide pattern: the subset of gitignore patterns that hide accepts, matched ignoring case.</summary>
 /// <remarks>
-/// A pattern with no / except a trailing one matches a name at any depth; a leading or inner / anchors it
-/// at the project root. A trailing / matches directories only. * and ? match within one path segment.
-/// ** as a whole segment matches zero or more directories, except at the end, where it matches one or more
-/// entries inside, as in gitignore; ** inside a segment (a**b) is a plain *. Matching is ordinal and ignores
-/// case; on macOS it ignores Unicode normalization form too (both sides compare as form C, through
-/// <see cref="Native.NormalizeFormC"/>, since APFS and HFS+ treat NFC and NFD spellings as one name), while on
-/// Linux, whose file systems tell them apart, NFC and NFD spellings are different names. On a file system that
-/// tells case or form apart where Pen ignores it, a pattern hides more than asked, which is the safe direction.
-/// Patterns can't name a .git segment anywhere or start with .pen, and <see cref="IsMatch"/> never matches
-/// a path that has a .git segment or starts with .pen, whatever its wildcards would say.
+/// A pattern with no / except a trailing one matches a name at any depth; a leading or inner / anchors it at the
+/// project root. A trailing / matches directories only. * and ? match within one path segment. ** as a whole segment
+/// matches zero or more directories, except at the end, where it matches one or more entries inside, as in gitignore;
+/// ** inside a segment (a**b) is a plain *. Matching is ordinal and ignores case; on macOS it ignores Unicode
+/// normalization form too (both sides compare as form C, through <see cref="Native.NormalizeFormC"/>, since APFS and
+/// HFS+ treat NFC and NFD spellings as one name), while on Linux, whose file systems tell them apart, NFC and NFD
+/// spellings are different names. On a file system that tells case or form apart where Pen ignores it, a pattern hides
+/// more than asked, which is the safe direction. Patterns can't name a .git segment anywhere or start with .pen, and
+/// <see cref="IsMatch"/> never matches a path that has a .git segment or starts with .pen, whatever its wildcards would
+/// say.
 /// </remarks>
 internal sealed class HidePattern
 {
@@ -47,14 +47,14 @@ internal sealed class HidePattern
     public bool IsLiteral => LiteralPath is not null;
 
     /// <summary>
-    /// The project-relative path a literal pattern names, /-separated with no leading or trailing /,
-    /// in the pattern's case; null when the pattern isn't literal.
+    /// The project-relative path a literal pattern names, /-separated with no leading or trailing /, in the pattern's
+    /// case; null when the pattern isn't literal.
     /// </summary>
     /// <remarks>
-    /// It is in the pattern's spelling (Form C) while <see cref="IsMatch"/> ignores case and normalization, so
-    /// a lookup by path must resolve each segment against the directory's listing the way
-    /// <see cref="IsMatch"/> compares, not by a plain stat of this string.
-    /// It never has a .git segment or starts with .pen, but a segment of it may be a symlink.
+    /// It is in the pattern's spelling (Form C) while <see cref="IsMatch"/> ignores case and normalization, so a lookup
+    /// by path must resolve each segment against the directory's listing the way <see cref="IsMatch"/> compares, not by
+    /// a plain stat of this string. It never has a .git segment or starts with .pen, but a segment of it may be a
+    /// symlink.
     /// </remarks>
     public string? LiteralPath { get; }
 

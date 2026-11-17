@@ -8,30 +8,10 @@ namespace Pen.GitProtection;
 /// warning about it.
 /// </summary>
 /// <remarks>
-/// <para>
 /// Continuing a paused operation runs commands on this machine, but it may be the user's own, so it's reported and
-/// left in place, apart from what <see cref="PromptHazardScan"/> finds. Reads files directly and never runs git.
+/// left in place, apart from what <see cref="PromptHazardScan"/> finds. This reads files directly and never runs git.
 /// Every file is hostile input: anything Pen can't read is reported as such, so a planted file can't hang this or
-/// silence it.
-/// </para>
-/// <para>
-/// What git does with these files, checked against git 2.56: an exec line runs only from
-/// rebase-merge/git-rebase-todo. The todo's other copies and sequencer/todo (where git refuses anything but pick or
-/// revert) run nothing, but they're listed too, as nothing here depends on which version of git reads them. Any
-/// merge strategy other than the stock ones is run as a program named git-merge-&lt;strategy&gt;, and "x/../evil"
-/// reaches a planted file through a directory named git-merge-x, so rebase-merge/strategy and sequencer/opts count
-/// too. rebase-apply runs nothing itself, but rebase-apply/apply-opt passes options to git apply, and
-/// --build-fake-ancestor writes a file anywhere.
-/// </para>
-/// <para>
-/// One thing can't wait for the user to look: git's own git-prompt.sh puts the first line of rebase-merge/msgnum and
-/// end, and rebase-apply/next and last, into PS1 unprotected. Where the shell expands PS1 (bash's PROMPT_COMMAND
-/// mode, zsh's precmd with PROMPT_SUBST), "$(cmd)" there runs at the next prompt, with no git command typed. So
-/// <see cref="PromptHazardScan"/> finds what git wouldn't have written for the caller to quarantine. git-prompt.sh
-/// protects head-name, HEAD and describe output from expansion, and only tests for the rest (MERGE_HEAD, BISECT_LOG,
-/// sequencer/todo): those replays run nothing. HEAD is left alone in any case: a branch may legally be named
-/// "$(cmd)", so its content can't tell a planted one from the user's.
-/// </para>
+/// silence it. What git does with each file was checked against git 2.56.
 /// </remarks>
 internal static class PausedGit
 {
@@ -102,6 +82,11 @@ internal static class PausedGit
 
     /// <summary>Reads the exec lines in a todo file into a note.</summary>
     /// <returns>The note, or null if the file isn't there or has none.</returns>
+    /// <remarks>
+    /// Git runs exec lines only from rebase-merge/git-rebase-todo. The todo's other copies and sequencer/todo (where
+    /// git refuses anything but pick or revert) run nothing, but they're listed too, so nothing here depends on which
+    /// version of git reads them.
+    /// </remarks>
     private static PausedNote? ReadExecNote(string dir, string file, string heading)
     {
         var read = ReadText(Path.Combine(dir, file));
@@ -111,6 +96,10 @@ internal static class PausedGit
     }
 
     /// <summary>Reads rebase-merge/strategy into a note if it names a strategy other than git's own.</summary>
+    /// <remarks>
+    /// Git runs any merge strategy other than the stock ones as a program named git-merge-&lt;strategy&gt;, and
+    /// "x/../evil" reaches a planted file through a directory named git-merge-x.
+    /// </remarks>
     private static PausedNote? ReadStrategyFileNote(string dir)
     {
         var read = ReadText(Path.Combine(dir, "strategy"));
@@ -137,6 +126,10 @@ internal static class PausedGit
         "one of git's own: git runs it as a program on this machine when the operation continues:";
 
     /// <summary>Reads rebase-apply/apply-opt into a note if it holds options.</summary>
+    /// <remarks>
+    /// rebase-apply runs nothing itself, but apply-opt passes options to git apply, and --build-fake-ancestor writes
+    /// a file anywhere.
+    /// </remarks>
     private static PausedNote? ReadApplyOptNote(string dir)
     {
         var read = ReadText(Path.Combine(dir, "apply-opt"));
@@ -206,12 +199,10 @@ internal static class PausedGit
         /// <summary>The file isn't there.</summary>
         public sealed record Missing : FileText;
 
-        /// <summary>The file's text.</summary>
-        /// <param name="Text">Its bytes, decoded as UTF-8.</param>
+        /// <summary>The file's bytes, decoded as UTF-8.</summary>
         public sealed record Read(string Text) : FileText;
 
-        /// <summary>The file is there but can't be read as a regular file.</summary>
-        /// <param name="Problem">Why.</param>
+        /// <summary>The file is there but can't be read as a regular file, and why.</summary>
         public sealed record Unreadable(string Problem) : FileText;
     }
 
@@ -277,9 +268,10 @@ internal static class PausedGit
             && StockStrategies.Contains(line[(equals + 1)..].Trim());
     }
 
-    /// <summary>Words the warning for what <see cref="Find"/> returned.</summary>
-    /// <param name="dir">The project dir; paths are relative to it where they can be.</param>
-    /// <param name="paused">The paused operations.</param>
+    /// <summary>
+    /// Words the warning for what <see cref="Find"/> returned, with paths relative to the project dir where they can
+    /// be.
+    /// </summary>
     public static string Warning(string dir, IReadOnlyList<PausedOp> paused)
     {
         var text = new StringBuilder();
@@ -318,7 +310,6 @@ internal static class PausedGit
     }
 
     /// <summary>One search of a git dir for paused operations, which keeps what it finds as it goes.</summary>
-    /// <param name="gitDir">The git dir.</param>
     private sealed class PausedOpSearch(string gitDir)
     {
         private readonly List<PausedOp> _found = [];
@@ -361,11 +352,10 @@ internal static class PausedGit
         }
 
         /// <summary>Adds the state directory <paramref name="dir"/> as a paused operation, if it's there.</summary>
-        /// <param name="dir">The state directory.</param>
-        /// <param name="kind">What kind of operation it is, as words.</param>
-        /// <param name="readNotes">
-        /// Reads its notes, with null where there's nothing to say; called only if it's a real directory.
-        /// </param>
+        /// <remarks>
+        /// <paramref name="readNotes"/> gives null where there's nothing to say, and is called only if it's a real
+        /// directory.
+        /// </remarks>
         private void AddIfPresent(string dir, string kind, Func<string, PausedNote?[]> readNotes)
         {
             if (!PathChecks.ExistsOrIsLink(dir))
@@ -380,14 +370,14 @@ internal static class PausedGit
     }
 }
 
-/// <summary>A detail of a paused operation.</summary>
-/// <param name="Text">The heading.</param>
-/// <param name="Lines">The lines under it, already safe to print.</param>
-/// <param name="More">How many more lines there were than are listed.</param>
+/// <summary>
+/// A detail of a paused operation: a heading, the lines under it, already safe to print, and how many more lines
+/// there were than are listed.
+/// </summary>
 internal sealed record PausedNote(string Text, IReadOnlyList<string> Lines, int More = 0);
 
-/// <summary>State for a paused operation in a git dir, as found.</summary>
-/// <param name="Path">The state directory.</param>
-/// <param name="Kind">What kind of operation it is, as words.</param>
-/// <param name="Notes">What in it is worth a look.</param>
+/// <summary>
+/// State for a paused operation in a git dir, as found: its state directory, what kind of operation it is in words,
+/// and what in it is worth a look.
+/// </summary>
 internal sealed record PausedOp(string Path, string Kind, IReadOnlyList<PausedNote> Notes);

@@ -9,17 +9,14 @@ namespace Pen.GitProtection;
 internal static class FileModes
 {
     /// <summary>Adds u+rx to a directory so it can be listed, and u+w too if <paramref name="write"/>.</summary>
-    /// <param name="path">The directory.</param>
-    /// <param name="write">Whether to add u+w too.</param>
-    /// <param name="change">The mode change made, when it returns true.</param>
     /// <returns>
     /// Whether it changed the mode: false for a symlink, a directory that already has the bits, or one it can't
     /// change.
     /// </returns>
     /// <remarks>
-    /// Never through a symlink, which an overlapping session could have swapped in since the listing: chmod would
-    /// change whatever it points to. Checking just before is the portable way, since glibc's fchmodat can't do
-    /// AT_SYMLINK_NOFOLLOW.
+    /// It never changes a mode through a symlink, which an overlapping session could have swapped in since the
+    /// listing, since chmod would change whatever the symlink points to. Checking just before the chmod is the
+    /// portable way, because glibc's fchmodat can't do AT_SYMLINK_NOFOLLOW.
     /// </remarks>
     internal static bool TryMakeListable(string path, bool write, [NotNullWhen(true)] out ModeChange? change)
     {

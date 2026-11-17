@@ -67,14 +67,14 @@ internal static class PathChecks
     /// <summary>Generates a random name for the case probe.</summary>
     /// <remarks>
     /// It's a name git has no use for: the files it reads in a git dir have fixed names, and the only other names it
-    /// takes there as refs are all caps with no dot. Lower case, so the upper-case form is a different name.
+    /// takes there as refs are all caps with no dot. It's lower case, so the upper-case form is a different name.
     /// </remarks>
     internal static string GenerateCaseProbeName() =>
         ".pen-case-probe-" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
 
     /// <summary>
-    /// Whether <paramref name="gitDir"/> may fold case: an empty file created there is also found under its
-    /// upper-case name.
+    /// Whether <paramref name="gitDir"/> may fold case: an empty file created there is also found under its upper-case
+    /// name.
     /// </summary>
     /// <returns>False only for a clean "no".</returns>
     /// <remarks>

@@ -32,16 +32,16 @@ internal static class ProtectedFiles
     private const string DamagedManifest = "the saved list of protected files is damaged";
 
     /// <summary>
-    /// Saves the files in <paramref name="mounts"/> marked Verify, refusing the session if one can't be saved whole.
+    /// Saves the files in <paramref name="mounts"/> marked Verify for the session that's starting, refusing the
+    /// session if one can't be saved whole.
     /// </summary>
-    /// <param name="session">The session that's starting.</param>
-    /// <param name="mounts">The session's mounts.</param>
-    /// <param name="dir">The project dir; messages are relative to it.</param>
-    /// <param name="open">The project's other open sessions (<see cref="SessionRegistry.FindOpen"/>).</param>
-    /// <param name="unlistedModules">
-    /// The module repos there now that an open session didn't list at its start (<see cref="ModuleBaseline"/>).
-    /// </param>
     /// <remarks>
+    /// <para>
+    /// Messages are relative to the project dir. <paramref name="open"/> is the project's other open sessions
+    /// (<see cref="SessionRegistry.FindOpen"/>), and <paramref name="unlistedModules"/> the module repos there now
+    /// that an open session didn't list at its start (<see cref="ModuleBaseline"/>).
+    /// </para>
+    /// <para>
     /// A file <paramref name="open"/> sessions already saved keeps their copy, the oldest that still has one: its
     /// agent may have changed the file since, and this session's end would otherwise put that change back after that
     /// session's end had removed it. The file on disk is only taken when no session has a copy, which means none
@@ -49,6 +49,7 @@ internal static class ProtectedFiles
     /// rename on a case-insensitive filesystem), so they're matched by what each name resolves to today. A session
     /// that adopted a file hands that on, since its copy is whatever was there. The manifest goes last, through a
     /// rename, so its presence means the copies are complete.
+    /// </para>
     /// </remarks>
     public static void Save(
         SessionDir session,
@@ -134,7 +135,7 @@ internal static class ProtectedFiles
             }
             catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
             {
-                // moved just now
+                // The manifest was moved to the restored manifest just now.
             }
             return File.Exists(session.RestoredManifest) ? Parse(File.ReadAllText(session.RestoredManifest)) : null;
         }
@@ -262,8 +263,8 @@ internal static class ProtectedFiles
             var manifest = ReadRecord(session);
             if (manifest is null)
             {
-                // Its record goes after its compose.yaml, so one that's still open with
-                // no record is from an older Pen or damaged: its agent could write.
+                // A session's record is deleted after its compose.yaml, so one that's still open with no record is
+                // from an older Pen or damaged, and its agent could still write.
                 unrecorded |= session.IsOpen;
                 continue;
             }
@@ -320,7 +321,7 @@ internal static class ProtectedFiles
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
-                // that session has put its files back
+                // That session has put its files back.
             }
         }
         try
@@ -338,7 +339,6 @@ internal static class ProtectedFiles
     }
 
     /// <summary>Resolves <paramref name="path"/> as it is on disk, which may differ from it only in case.</summary>
-    /// <returns>The real path.</returns>
     /// <exception cref="PenException">
     /// It resolves anywhere else, which means a symlink was swapped in since it was checked, or it's gone.
     /// </exception>
@@ -354,8 +354,7 @@ internal static class ProtectedFiles
         return real;
     }
 
-    /// <summary>Checks that a path can be written to the manifest and read back the same.</summary>
-    /// <returns>The path.</returns>
+    /// <summary>Checks that a path can be written to the manifest and read back the same, and returns it.</summary>
     /// <remarks>Paths reach here from the file system, as valid UTF-16; one that isn't is refused.</remarks>
     private static string RequireEncodable(string path)
     {
