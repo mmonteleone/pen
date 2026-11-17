@@ -83,7 +83,7 @@ internal static class HooksPath
     /// <param name="host">The host environment, for the user's home and how paths are shown.</param>
     /// <param name="warn">Where the warning goes.</param>
     /// <param name="env">
-    /// Reads an environment variable: <see cref="Environment.GetEnvironmentVariable(string)"/> in production.
+    /// Reads an environment variable: <see cref="HostEnv.GetVariable"/> in production.
     /// </param>
     /// <remarks>This warns on every session and blocks nothing.</remarks>
     public static void WarnIfWritable(Project project, HostEnv host, Action<string> warn, Func<string, string?> env)

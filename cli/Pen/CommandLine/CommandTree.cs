@@ -5,6 +5,7 @@ using System.CommandLine.Parsing;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Reflection;
+using Pen.Platform;
 using Pen.Proxy;
 using Pen.Sessions;
 using Pen.Tools;
@@ -526,26 +527,11 @@ internal sealed class CommandTree
         public override int Invoke(ParseResult parseResult)
         {
             var output = parseResult.InvocationConfiguration.Output;
-            help.MaxWidth = ChooseHelpWidth(ReadTerminalWidth(output));
+            help.MaxWidth = ChooseHelpWidth(Out.ReadTerminalWidth(output));
             help.Invoke(parseResult);
             if (details.TryGetValue(parseResult.CommandResult.Command, out var text))
                 output.Write(text);
             return 0;
-        }
-
-        /// <summary>Reads the terminal's width when <paramref name="output"/> goes to one, otherwise null.</summary>
-        private static int? ReadTerminalWidth(TextWriter output)
-        {
-            if (output != Console.Out || Console.IsOutputRedirected)
-                return null;
-            try
-            {
-                return Console.WindowWidth;
-            }
-            catch (IOException)
-            {
-                return null;
-            }
         }
     }
 

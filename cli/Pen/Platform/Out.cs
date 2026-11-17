@@ -30,6 +30,24 @@ internal static class Out
     }
 
     /// <summary>
+    /// Reads the terminal's width when <paramref name="output"/> is the process's stdout and that goes to one,
+    /// otherwise null.
+    /// </summary>
+    public static int? ReadTerminalWidth(TextWriter output)
+    {
+        if (output != Console.Out || Console.IsOutputRedirected)
+            return null;
+        try
+        {
+            return Console.WindowWidth;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Checks whether a terminal could act on this character: C0, DEL, C1, or one that reorders or
     /// breaks lines of text.
     /// </summary>

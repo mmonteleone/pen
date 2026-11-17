@@ -58,6 +58,61 @@ public class OutputSanitizingTests
     }
 
     [Fact]
+    public void EachWriterGoesToItsOwnStream()
+    {
+        var (err, stdout) = Capture(() => Out.WriteLine("to stderr"));
+        Assert.Equal(("pen: to stderr\n", ""), (err, stdout));
+        (err, stdout) = Capture(() => Out.WriteRaw("raw"));
+        Assert.Equal(("raw\n", ""), (err, stdout));
+        (err, stdout) = Capture(() => Out.Prompt("question? "));
+        Assert.Equal(("question? ", ""), (err, stdout));
+        (err, stdout) = Capture(() => Out.WriteStdout("to stdout"));
+        Assert.Equal(("", "to stdout"), (err, stdout));
+    }
+
+    [Theory]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(UnauthorizedAccessException))]
+    public void WritesDontThrow_AfterTheTerminalIsGone(Type failure)
+    {
+        var (stderr, stdout) = (Console.Error, Console.Out);
+        using var gone = new GoneTerminal((Exception)Activator.CreateInstance(failure)!);
+        Console.SetError(gone);
+        Console.SetOut(gone);
+        try
+        {
+            Out.WriteLine("line");
+            Out.WriteRaw("raw");
+            Out.Prompt("question? ");
+            Out.WriteStdout("text");
+        }
+        finally { Console.SetError(stderr); Console.SetOut(stdout); }
+        Assert.True(gone.Attempts >= 4, $"{gone.Attempts} writes reached the writer");
+    }
+
+    /// <summary>A writer whose terminal hung up: every write and flush throws.</summary>
+    private sealed class GoneTerminal(Exception failure) : TextWriter
+    {
+        public int Attempts { get; private set; }
+
+        public override System.Text.Encoding Encoding => System.Text.Encoding.UTF8;
+
+        public override void Write(char value) => Fail();
+
+        public override void Write(string? value) => Fail();
+
+        public override void WriteLine(string? value) => Fail();
+
+        public override void Flush() => Fail();
+
+        private void Fail()
+        {
+            Attempts++;
+            throw failure;
+        }
+    }
+
+    [Fact]
     public void APermissionErrorsPathIsAField()
     {
         var m = Out.DescribePermissionDenied(new UnauthorizedAccessException("UnauthorizedAccess_IODenied_Path, /a" + Esc + "\nb"));
@@ -152,7 +207,7 @@ public class OutputSanitizingTests
         Session.EnsureRuntimeDir(host, project);
         var dir = t.Sub("home", ".local", "state", "pen", project.Key, "sessions", "12345678");
         File.WriteAllText(Path.Combine(dir, "proxy.log"), $"2026-01-01T00:00:00Z 1.1.1.1 TCP_DENIED/403 CONNECT evil{Esc}[2J.com:443 -\n");
-        var (_, stdout) = Capture(() => new AllowCommand(host, RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, new Config(), new Config())));
+        var (_, stdout) = Capture(() => new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, new Config(), new Config())));
         Assert.False(stdout.Contains(Esc, StringComparison.Ordinal));
         Assert.Contains("evil\\x1b[2j.com", stdout); // HostOf lowercases
         Assert.DoesNotContain("pen allow evil", stdout);
@@ -170,7 +225,7 @@ public class OutputSanitizingTests
         var start = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         File.WriteAllLines(Path.Combine(dir, "proxy.log"), Enumerable.Range(0, 5000).Select(i =>
             $"{start.AddSeconds(i):yyyy-MM-ddTHH:mm:ssZ} 1.1.1.1 TCP_DENIED/403 CONNECT h{i}.example:443 -"));
-        var (_, stdout) = Capture(() => new AllowCommand(host, RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, new Config(), new Config())));
+        var (_, stdout) = Capture(() => new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, new Config(), new Config())));
         var lines = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal(1 + Allowlist.MaxListed + 2, lines.Length);
         Assert.StartsWith("  h4999.example ", lines[1]);

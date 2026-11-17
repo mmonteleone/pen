@@ -19,9 +19,10 @@ namespace Pen.Commands;
 /// recently blocked domains.
 /// </summary>
 /// <param name="host">The host user's environment.</param>
+/// <param name="startDir">The directory Pen was started in, where the project is.</param>
 /// <param name="catalog">The recipes that say which domains a tool brings.</param>
 /// <param name="clock">The clock waits for another pen allow or pen deny are timed by.</param>
-internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog, TimeProvider clock)
+internal sealed class AllowCommand(HostEnv host, StartDir startDir, RecipeCatalog catalog, TimeProvider clock)
 {
     /// <summary>Adds <paramref name="domains"/> to allow and applies them to running sessions.</summary>
     /// <param name="domains">The domains to allow (lowercased), or <see cref="Allowlist.AnyDomain"/>.</param>
@@ -32,10 +33,10 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog, TimeProv
     /// <returns>0, or 1 when applying to a running session failed; a failure to add throws.</returns>
     public int Run(IReadOnlyList<string> domains, bool global)
     {
-        var project = PrepareProject(host, global, clock);
+        var project = PrepareProject(host, startDir, global, clock);
         var addition = AddAllowed(host, project, global, domains, catalog);
         WriteAdded(addition, domains);
-        WriteGlobHint("allow", addition);
+        WriteGlobHint("allow", startDir, addition);
         WarnIfDenied(project, domains);
 
         return ApplyToRunning(host, project, global, catalog, clock) ? 0 : 1;
@@ -44,12 +45,12 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog, TimeProv
     /// <summary>Resolves the project in the start directory, and finishes its sessions whose Pen died.</summary>
     /// <returns>The project, or null with <paramref name="global"/> when there isn't one to resolve there.</returns>
     /// <remarks>--global works from anywhere; without it, a failure to resolve throws.</remarks>
-    internal static Project? PrepareProject(HostEnv host, bool global, TimeProvider clock)
+    internal static Project? PrepareProject(HostEnv host, StartDir startDir, bool global, TimeProvider clock)
     {
         Project? project;
         try
         {
-            project = Project.Resolve(StartDir.Get(), host);
+            project = Project.Resolve(startDir.Get(), host);
         }
         catch (PenException) when (global)
         {
@@ -170,11 +171,12 @@ internal sealed class AllowCommand(HostEnv host, RecipeCatalog catalog, TimeProv
     /// the start directory, that the shell may have expanded an unquoted *, and where the names went.
     /// </summary>
     /// <param name="command">The subcommand.</param>
+    /// <param name="startDir">The start directory; no hint when it couldn't be read.</param>
     /// <param name="addition">What was added, and to which file.</param>
     /// <remarks>The domains are still added: a file and a domain can share a name.</remarks>
-    internal static void WriteGlobHint(string command, ConfigAddition addition)
+    internal static void WriteGlobHint(string command, StartDir startDir, ConfigAddition addition)
     {
-        if (StartDir.TryGet() is { } dir && FormatGlobHint(command, dir, addition.Added, addition.Where) is { } hint)
+        if (startDir.Dir is { } dir && FormatGlobHint(command, dir, addition.Added, addition.Where) is { } hint)
             Out.WriteLine(hint);
     }
 

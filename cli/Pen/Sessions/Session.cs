@@ -70,7 +70,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         // Past the refusals, so a session that won't start doesn't warn, and with
         // signals held, so Ctrl-C can't end Pen between the probe's create and delete.
         RepoGuard.WarnIfCaseMayFold(Project, Out.WriteLine, RepoGuard.MayFoldCase);
-        HooksPath.WarnIfWritable(Project, context.Host, Out.WriteLine, Environment.GetEnvironmentVariable);
+        HooksPath.WarnIfWritable(Project, context.Host, Out.WriteLine, context.Host.GetVariable);
         foreach (var warning in ListEgressWarnings(prepared.Tools, prepared.Deny))
             Out.WriteLine(warning);
         // The case probe goes in .pen, so it too waits for the signals to be held.
@@ -94,7 +94,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         // matching the host's (InteractiveShell.For).
         var command = request.Command.Count > 0
             ? request.Command
-            : InteractiveShell.For(Environment.GetEnvironmentVariable("SHELL"));
+            : InteractiveShell.For(context.Host.GetVariable("SHELL"));
         var startInfo = CreateAgentStartInfo(session, command, prepared.Token, env);
         var exitCode = RunAgent(session, startInfo, env, signals);
 

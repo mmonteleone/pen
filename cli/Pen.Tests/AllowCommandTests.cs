@@ -17,11 +17,11 @@ public class AllowCommandTests
         File.WriteAllText(s.GetPath("allowlist.txt"), "");
         using var sessionLock = FileLock.TryTake(s.LockFile, exclusive: true);
         using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "if [ ! -f retry ]; then exit 1; fi\n");
-        Assert.Equal(1, new AllowCommand(host, RecipeCatalog.Embedded, TimeProvider.System).Run(["retry.example"], global: true));
+        Assert.Equal(1, new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).Run(["retry.example"], global: true));
         var config = File.ReadAllText(host.UserConfigPath);
         var written = File.GetLastWriteTimeUtc(host.UserConfigPath);
         File.WriteAllText(Path.Combine(t.Path, "retry"), "");
-        Assert.Equal(0, new AllowCommand(host, RecipeCatalog.Embedded, TimeProvider.System).Run(["retry.example"], global: true));
+        Assert.Equal(0, new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).Run(["retry.example"], global: true));
         Assert.Equal(config, File.ReadAllText(host.UserConfigPath));
         Assert.Equal(written, File.GetLastWriteTimeUtc(host.UserConfigPath));
         Assert.Contains("retry.example", File.ReadAllText(s.GetPath("allowlist.txt")));
@@ -466,7 +466,7 @@ public class AllowCommandTests
         var stdout = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
-        try { new AllowCommand(host, RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, user, projectConfig)); }
+        try { new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, user, projectConfig)); }
         finally { Console.SetOut(stdout); }
         var lines = captured.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
         // example.com resolved privately, say, or was blocked before egress opened: "*" covers it, but it's listed.
@@ -495,7 +495,7 @@ public class AllowCommandTests
         var stdout = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
-        try { new AllowCommand(host, RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, user, new Config())); }
+        try { new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, user, new Config())); }
         finally { Console.SetOut(stdout); }
         Assert.Equal(
             "blocked in this project's sessions, newest first:\n" +
@@ -522,7 +522,7 @@ public class AllowCommandTests
         var stdout = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
-        try { new AllowCommand(host, RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, user, new Config())); }
+        try { new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, user, new Config())); }
         finally { Console.SetOut(stdout); }
         var text = captured.ToString();
         Assert.Contains("pen allow example.com   (add --global for all projects)\n", text);
@@ -545,7 +545,7 @@ public class AllowCommandTests
         var stdout = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
-        try { new AllowCommand(host, RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, user, new Config())); }
+        try { new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, user, new Config())); }
         finally { Console.SetOut(stdout); }
         var lines = captured.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal("denied by config, blocked in this project's sessions, newest first:", lines[0]);
@@ -623,7 +623,7 @@ public class AllowCommandTests
         var host = t.Host();
         Directory.CreateDirectory(host.ConfigDir);
         File.WriteAllText(host.UserConfigPath, "deny = [\".pastebin.com\"]\n");
-        var err = CapturingStderr(() => Assert.Equal(0, new AllowCommand(host, RecipeCatalog.Embedded, TimeProvider.System).Run(["api.pastebin.com", "ok.example"], global: true)));
+        var err = CapturingStderr(() => Assert.Equal(0, new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).Run(["api.pastebin.com", "ok.example"], global: true)));
         Assert.Contains($"pen: api.pastebin.com is also denied by {host.Display(host.UserConfigPath)}; deny wins\n", err);
         Assert.DoesNotContain("ok.example is also", err);
         Assert.Equal(["api.pastebin.com", "ok.example"], Config.Load(host.ConfigDir, "x", ConfigKind.User, RecipeCatalog.Embedded).Allow);

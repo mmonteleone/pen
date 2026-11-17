@@ -27,6 +27,36 @@ public sealed class CliDispatchTests(SmokeFixture fixture) : IClassFixture<Smoke
         Assert.True(result.ExitCode == 0, result.Describe());
     }
 
+    [Fact(DisplayName = "pen --version runs from a removed directory")]
+    public void VersionRunsFromARemovedDirectory()
+    {
+        var result = RunFromRemovedDirectory("--version");
+
+        Assert.True(
+            result.ExitCode == 0 && Regex.IsMatch(result.Stdout, "^pen [0-9]", RegexOptions.Multiline),
+            result.Describe());
+    }
+
+    [Fact(DisplayName = "...and pen init there says it can't read the current directory (exit 1)")]
+    public void InitFromARemovedDirectorySaysWhy()
+    {
+        var result = RunFromRemovedDirectory("init");
+
+        Assert.True(
+            result.IsRefusal("pen: pen can't read the current directory: it was removed, or its permissions or a "
+                + "parent's were changed. Fix that (chmod u+rwx . if it's only this directory's) or cd to the "
+                + "project, then rerun\n") && result.ExitCode == 1,
+            result.Describe());
+    }
+
+    /// <summary>Runs pen with <paramref name="args"/> from a directory that's removed before it starts.</summary>
+    private CommandResult RunFromRemovedDirectory(params string[] args)
+    {
+        var dir = Path.Combine(fixture.Scratch, "removed-" + Guid.NewGuid().ToString("N"));
+        const string script = "mkdir \"$1\" && cd \"$1\" && rmdir \"$1\" && shift && exec \"$@\"";
+        return Cli.Wrap("/bin/sh", ["-c", script, "sh", dir, SmokeEnvironment.PenPath, .. args]).Run();
+    }
+
     [Fact(DisplayName = "pen --help lists the subcommands")]
     public void HelpListsTheSubcommands()
     {

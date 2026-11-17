@@ -12,6 +12,7 @@ namespace Pen.Commands;
 /// </summary>
 /// <param name="host">The host user's environment.</param>
 /// <param name="user">The user's ~/.config/pen/config.toml.</param>
+/// <param name="startDir">The directory Pen was started in, where a project may be.</param>
 /// <param name="catalog">The recipes tools come from.</param>
 /// <param name="clock">The clock PEN_REFRESH and the wait for another project layer build are taken from.</param>
 /// <remarks>
@@ -19,7 +20,12 @@ namespace Pen.Commands;
 /// included, rebuilds on it: the ones from config here now, any other on its next use. pen upgrade never
 /// asks for approval, so it builds only what's already approved from .pen/.
 /// </remarks>
-internal sealed class UpgradeCommand(HostEnv host, Config user, RecipeCatalog catalog, TimeProvider clock)
+internal sealed class UpgradeCommand(
+    HostEnv host,
+    Config user,
+    StartDir startDir,
+    RecipeCatalog catalog,
+    TimeProvider clock)
 {
     /// <summary>Upgrades the images, without the build cache when <paramref name="noCache"/> (--no-cache).</summary>
     /// <returns>0; a failure throws.</returns>
@@ -46,7 +52,7 @@ internal sealed class UpgradeCommand(HostEnv host, Config user, RecipeCatalog ca
     {
         try
         {
-            return Project.Resolve(StartDir.Get(), host);
+            return Project.Resolve(startDir.Get(), host);
         }
         catch (PenException)
         {
