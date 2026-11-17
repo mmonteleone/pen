@@ -54,6 +54,15 @@ cd cli && dotnet run --project Pen.SmokeTests -- --filter-class "*CliDispatchTes
 
 # C# Engineering Guidelines
 
+## Applying the guidelines in Pen
+
+- Pen is synchronous: only `Proc` and the port probe wait on tasks, and there is no `CancellationToken`. Cancellation comes from POSIX signals through `SessionSignals`.
+- No interface without a second real production implementation. A test double isn't one.
+- `Try…` methods return `bool` and annotate their result with `[NotNullWhen]` or `[MaybeNullWhen]`. Results expose read-only snapshots, not collectors that callers can mutate.
+- Banned APIs have one owner each, and everything else goes through it: `DateTime.Now`/`UtcNow` (a `TimeProvider` from `Program`), `Thread.Sleep`, `Console` (`Out`), `Process.Start` and `new Process` (`Proc`), `Environment.GetEnvironmentVariable` and `CurrentDirectory` (`HostEnv`), `Task.Wait` and `Task<T>.Result` (`Proc`, `Port`), and `RecipeCatalog.Embedded` (`Program`, which passes the catalog on).
+- Comments: delete documentation that restates a member's name or signature, and `<param>`/`<returns>` on private helpers unless they state a constraint. Keep, as plain complete sentences, every comment that explains intent, an invariant, a security constraint or a platform quirk. Prefer a short summary to a design essay; architecture-level detail belongs here or in `docs/`. Wrap at 120 columns.
+- Style: `var` wherever it is legal (explicit types only where `var` can't express them, such as a target-typed collection expression), `is null` and `is not null`, `is T x` patterns instead of `as` plus a null check, collection expressions, target-typed `new`, switch expressions, file-scoped namespaces, no `this.`, and predefined type names. `.editorconfig` enforces most of these in the build for `cli/Pen`; the test projects aren't restyled.
+
 ## Core Philosophy
 
 Write modern, idiomatic C# that prioritizes correctness, clarity, maintainability, and simplicity.
