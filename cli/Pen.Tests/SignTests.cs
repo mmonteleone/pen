@@ -969,6 +969,55 @@ public class SignTests
         Assert.Equal([b], new CommitReader(f.Git).Read([c1])[c1].Parents);
     }
 
+    private static readonly string ShaA = new('a', 40);
+    private static readonly string ShaB = new('b', 40);
+    private static readonly byte[] Content = System.Text.Encoding.ASCII.GetBytes($"tree {Tree1}\n{Author}\n{Committer}\n\nm\n");
+
+    private static byte[] Batch(params object[] parts) =>
+        [.. parts.SelectMany(p => p as byte[] ?? System.Text.Encoding.ASCII.GetBytes((string)p))];
+
+    [Fact]
+    public void ABatchGitWrites_IsSplitIntoItsCommits()
+    {
+        var read = CommitReader.ParseBatch([ShaA, ShaB], Batch($"{ShaA} commit {Content.Length}\n", Content, "\n", $"{ShaB} commit {Content.Length}\n", Content, "\n"));
+        Assert.Equal(Tree1, read[ShaA].Tree);
+        Assert.Equal("m\n"u8.ToArray(), read[ShaB].Message);
+    }
+
+    /// <summary>
+    /// git writes the size as digits that fit in an int. Anything else used to escape as FormatException,
+    /// OverflowException or ArgumentOutOfRangeException (a negative size), or, with a sign or trailing space, to
+    /// be read as a number; it's refused like any other output Pen can't read.
+    /// </summary>
+    [Theory]
+    [InlineData("abc")]
+    [InlineData("")]
+    [InlineData("99999999999")]
+    [InlineData("-1")]
+    [InlineData("+5")]
+    [InlineData("5\t")]
+    public void ASizeGitWouldntWrite_IsRefused(string size)
+    {
+        var e = Assert.Throws<PenException>(() => CommitReader.ParseBatch([ShaA], Batch($"{ShaA} commit {size}\n", Content, "\n")));
+        Assert.Equal($"git cat-file --batch: unreadable size for {ShaA} ({ShaA} commit {size})", e.Message);
+    }
+
+    /// <summary>Output shorter than its sizes say used to escape as ArgumentOutOfRangeException.</summary>
+    [Fact]
+    public void ASizePastTheEndOfTheOutput_IsTruncatedOutput()
+    {
+        var e = Assert.Throws<PenException>(() => CommitReader.ParseBatch([ShaA], Batch($"{ShaA} commit {Content.Length + 1}\n", Content)));
+        Assert.Equal("git cat-file --batch: truncated output", e.Message);
+    }
+
+    /// <summary>The next header is looked for past the end, which used to escape as ArgumentOutOfRangeException.</summary>
+    [Fact]
+    public void ACommitEndingTheOutputWithMoreToCome_IsTruncatedOutput()
+    {
+        var e = Assert.Throws<PenException>(() => CommitReader.ParseBatch([ShaA, ShaB], Batch($"{ShaA} commit {Content.Length}\n", Content)));
+        Assert.Equal("git cat-file --batch: truncated output", e.Message);
+    }
+
     [Fact]
     public void AnEncodingHeader_IsKeptWhenReSigning()
     {

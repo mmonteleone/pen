@@ -29,8 +29,8 @@ internal sealed class CommitReader(HostGit git)
     /// <param name="output">git's output: for each commit, a header line, its content, then a newline.</param>
     /// <returns>Each commit's parsed object, by hash.</returns>
     /// <exception cref="PenException">
-    /// The output is shorter than its headers say, one isn't a commit, or one has a header Pen can't re-create
-    /// exactly.
+    /// The output is shorter than its headers say or a size can't be read, one isn't a commit, or one has a header
+    /// Pen can't re-create exactly.
     /// </exception>
     public static Dictionary<string, CommitObject> ParseBatch(IReadOnlyList<string> commits, byte[] output)
     {
@@ -38,12 +38,16 @@ internal sealed class CommitReader(HostGit git)
         var position = 0;
         foreach (var sha in commits)
         {
-            var newline = Array.IndexOf(output, (byte)'\n', position);
+            // A commit that ends the output leaves position one past its end.
+            var newline = position < output.Length ? Array.IndexOf(output, (byte)'\n', position) : -1;
             if (newline < 0)
                 throw new PenException("git cat-file --batch: truncated output");
             var size = ReadCommitSize(sha, Encoding.ASCII.GetString(output, position, newline - position));
-            result[sha] = Parse(sha, output[(newline + 1)..(newline + 1 + size)]);
-            position = newline + 1 + size + 1; // content, then a newline
+            var start = newline + 1;
+            if (size > output.Length - start)
+                throw new PenException("git cat-file --batch: truncated output");
+            result[sha] = Parse(sha, output[start..(start + size)]);
+            position = start + size + 1; // content, then a newline
         }
         return result;
     }
@@ -75,13 +79,16 @@ internal sealed class CommitReader(HostGit git)
     }
 
     /// <summary>Reads the object's size from its <c>git cat-file --batch</c> header line.</summary>
-    /// <exception cref="PenException">The object isn't a commit.</exception>
+    /// <exception cref="PenException">The object isn't a commit, or its size isn't a number of bytes.</exception>
     private static int ReadCommitSize(string sha, string line)
     {
         var header = line.Split(' ');
         if (header.Length != 3 || header[1] != "commit")
             throw new PenException($"{sha} isn't a commit ({string.Join(' ', header)})");
-        return int.Parse(header[2], CultureInfo.InvariantCulture);
+        // git writes the size as plain digits: no sign or spaces.
+        if (!int.TryParse(header[2], NumberStyles.None, CultureInfo.InvariantCulture, out var size))
+            throw new PenException($"git cat-file --batch: unreadable size for {sha} ({line})");
+        return size;
     }
 
     /// <summary>Parses one commit's bytes, turning a refusal into a message that names the commit.</summary>
