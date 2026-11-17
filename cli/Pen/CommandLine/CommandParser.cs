@@ -1,24 +1,23 @@
+using System.CommandLine;
+using System.CommandLine.Parsing;
 using System.Globalization;
-using Pen.Proxy;
-using Pen.Sessions;
 using Pen.Tools;
+using SclCommand = System.CommandLine.Command;
 
 namespace Pen.CommandLine;
 
 /// <summary>Parses Pen's command line into a <see cref="Command"/>.</summary>
 internal static class CommandParser
 {
-    private static readonly Dictionary<string, CommandKind> Subcommands = new(StringComparer.Ordinal)
+    /// <summary>The parser's settings: no POSIX bundling (-dp) and no response files (@file).</summary>
+    /// <remarks>
+    /// Bundling would let the parser read -dp differently from <see cref="CommandBoundary"/>, and a response file
+    /// would turn an argument into others.
+    /// </remarks>
+    private static readonly ParserConfiguration Configuration = new()
     {
-        ["run"] = CommandKind.Run,
-        ["upgrade"] = CommandKind.Upgrade,
-        ["allow"] = CommandKind.Allow,
-        ["deny"] = CommandKind.Deny,
-        ["init"] = CommandKind.Init,
-        ["trust"] = CommandKind.Trust,
-        ["sign"] = CommandKind.Sign,
-        ["clean"] = CommandKind.Clean,
-        ["ps"] = CommandKind.Ps,
+        EnablePosixBundling = false,
+        ResponseFileTokenReplacer = null,
     };
 
     /// <summary>Parses the arguments Pen was started with.</summary>
@@ -28,345 +27,276 @@ internal static class CommandParser
     /// there (<see cref="ShellGlob"/>).
     /// </param>
     /// <returns>The command they ask for.</returns>
-    /// <exception cref="PenException">The arguments aren't valid; exit code 2, with the usage.</exception>
+    /// <exception cref="PenException">
+    /// The arguments aren't valid; exit code 2, with the help command to run for usage.
+    /// </exception>
     /// <remarks>
-    /// A first argument that's a subcommand selects it; any other first argument
-    /// is the command to run. Options before the command are Pen's: --docker,
-    /// --port and --tool (for running), help and version. Any other one is an error.
+    /// A first argument that's a subcommand selects it; any other first argument that isn't an option is the
+    /// command to run, as is everything after it. Options before the command are Pen's: --docker, --port and
+    /// --tool (for running, also right after run), help and version. Any other one is an error.
     /// </remarks>
     public static Command Parse(IReadOnlyList<string> args, Func<string?> startDir)
     {
-        // The options for running, in any order and repeatable.
-        var options = new RunOptions();
-        var index = 0;
-        while (index < args.Count && !options.IsToolList)
+        var tree = new CommandTree(startDir);
+        var bounded = CommandBoundary.Insert(args, tree);
+        // The root's name goes first, since System.CommandLine drops a first argument whose file name is the root's
+        // name (pen pen x would lose a pen).
+        var result = tree.Root.Parse([tree.Root.Name, .. bounded], Configuration);
+        var parsed = result.CommandResult.Command;
+
+        ThrowIfInformationValueGiven(tree, bounded, result);
+
+        // Help clears every parse error but an unknown option before the command: pen allow bad --help is allow's
+        // help, and pen --dockr --help is an error.
+        if (tree.AsksForHelp(result))
         {
-            var consumed = options.ReadAt(args, index);
-            if (consumed == 0)
-                break;
-            index += consumed;
+            ThrowIfUnknownRootOption(tree, result, help: true);
+            return new(CommandKind.Builtin, []) { ParseResult = result };
+        }
+        if (CommandTree.IsVersion(result.Action))
+        {
+            if (result.Errors.Count > 0)
+                throw CreateUsageError(result.Errors[0].Message, tree.Root);
+            return new(CommandKind.Builtin, []) { ParseResult = result };
         }
 
-        if (options.IsToolList)
-            return new(CommandKind.ToolList, []);
-        if (options.FirstName == null)
-            return ParseCommand(args, startDir);
-        return ParseWithRunOptions(args.Skip(index).ToList(), options, startDir);
+        ThrowIfAttachedValueInvalid(tree, bounded, result);
+        ThrowIfUnknownRootOption(tree, result, help: false);
+        ThrowIfRunOptionInvalid(result, tree.RootOptions, tree.Root);
+        ThrowIfInvalid(tree, result);
+        if (parsed != tree.Root && parsed != tree.Run)
+            ThrowIfRunOptionGiven(tree, result);
+        return CreateCommand(tree, result);
     }
 
-    /// <summary>Parses the command that follows Pen's options for running, and adds those options to it.</summary>
-    private static Command ParseWithRunOptions(List<string> after, RunOptions options, Func<string?> startDir)
+    /// <summary>Refuses a value attached after : or = to help or version, empty or not.</summary>
+    /// <remarks>
+    /// This runs before help and version are acted on, which would otherwise show or print for --help=1 or read -h:-x
+    /// as an unknown option. Only the arguments before the command boundary are looked at: the rest are the
+    /// command's.
+    /// </remarks>
+    private static void ThrowIfInformationValueGiven(CommandTree tree, List<string> bounded, ParseResult result)
     {
-        var command = ParseCommand(after, startDir);
-        if (command.Kind != CommandKind.Run)
+        foreach (var arg in bounded.TakeWhile(arg => arg != "--"))
         {
-            throw CreateUsageError(after.Count > 0 && Subcommands.ContainsKey(after[0])
-                ? $"{options.FirstName} goes only with a command to run, not pen {after[0]}"
-                : $"{options.FirstName} goes only with a command to run");
+            var end = arg.IndexOfAny([':', '=']);
+            if (end < 0)
+                continue;
+            var name = arg[..end];
+            foreach (var option in new Option[] { tree.Help, tree.Version })
+            {
+                if (option.Name != name && !option.Aliases.Contains(name))
+                    continue;
+                var context = option == tree.Help ? result.CommandResult.Command : tree.Root;
+                throw CreateUsageError($"{option.Name} takes no value", context);
+            }
         }
-
-        if (ToolSpec.TryCanonicalize(options.Tools, RecipeCatalog.Embedded, out var canonical) is { } conflict)
-            throw CreateUsageError($"--tool: {conflict}");
-        return command with { Docker = options.Docker, Ports = options.Ports, Tools = canonical };
     }
 
-    /// <summary>Parses a command line that doesn't start with an option for running.</summary>
-    private static Command ParseCommand(IReadOnlyList<string> args, Func<string?> startDir)
+    /// <summary>
+    /// Refuses a value attached after : or = to an on-or-off option (--docker=false), or an empty one (--port=).
+    /// </summary>
+    /// <remarks>
+    /// For an on-or-off option the parser makes the value an argument, which would run false as the command or add
+    /// x as a domain (allow --global=x a.com); for an empty one it takes the next argument as the value. Up to the
+    /// --, each argument is one token, or an option token and, when something follows the : or =, a value token:
+    /// that's how arguments and tokens are matched up here, and anything else is Pen's bug.
+    /// </remarks>
+    private static void ThrowIfAttachedValueInvalid(CommandTree tree, List<string> bounded, ParseResult result)
     {
-        if (args.Count == 0)
-            return new(CommandKind.Run, []);
-        var first = args[0];
-        var rest = args.Skip(1).ToList();
-
-        switch (first)
+        var tokens = result.Tokens;
+        var next = 0;
+        SclCommand context = tree.Root;
+        foreach (var arg in bounded)
         {
-            case "-h" or "--help":
-                return new(CommandKind.Help, []);
-            case "--version":
-                return new(CommandKind.Version, []);
-            case "--":
-                return new(CommandKind.Run, rest);
+            if (next == tokens.Count || tokens[next].Type == TokenType.DoubleDash)
+                return;
+            var token = tokens[next++];
+            if (token.Type == TokenType.Command)
+                context = result.CommandResult.Command;
+            if (token.Value == arg)
+                continue;
+            if (token.Type != TokenType.Option || !arg.StartsWith(token.Value, StringComparison.Ordinal)
+                || arg[token.Value.Length] is not (':' or '='))
+            {
+                throw new InvalidOperationException($"the parser's token \"{token.Value}\" doesn't match \"{arg}\"");
+            }
+            var option = FindOption(context == tree.Root ? context.Options : [.. context.Options, tree.Help], token);
+            if (option.Arity.MaximumNumberOfValues == 0)
+                throw CreateUsageError($"{option.Name} takes no value", context);
+            if (arg.Length == token.Value.Length + 1)
+                throw CreateUsageError(FindMissingValueMessage(tree, option), context);
+            next++;
         }
-
-        if (Subcommands.TryGetValue(first, out var kind))
-            return ParseSubcommand(first, kind, rest, startDir);
-        if (first.StartsWith('-'))
-            throw CreateUsageError($"unknown option \"{first}\"");
-
-        return new(CommandKind.Run, args.ToList());
     }
 
-    /// <summary>Parses the arguments after a subcommand's name.</summary>
-    private static Command ParseSubcommand(string name, CommandKind kind, List<string> rest, Func<string?> startDir)
+    /// <summary>Finds what to say when <paramref name="option"/> is given without its value.</summary>
+    private static string FindMissingValueMessage(CommandTree tree, Option option) =>
+        tree.RootOptions.Valued.Concat(tree.RunOptions.Valued).FirstOrDefault(v => v.Option == option)?.Missing
+            ?? $"{option.Name}: missing the value";
+
+    /// <summary>Refuses an argument starting with - before the command that isn't one of Pen's options.</summary>
+    /// <param name="tree">The tree that was parsed.</param>
+    /// <param name="result">The parse.</param>
+    /// <param name="help">
+    /// Whether help was asked for: then only the root's arguments up to the first that doesn't start with - are
+    /// checked, since the command starts there (pen --help claude is help, pen --dockr claude --help an error).
+    /// </param>
+    /// <remarks>
+    /// The parser doesn't report these: they become the root's command to run, even with a subcommand after them
+    /// (pen --dockr allow x.com). Without help, the root's arguments that come before a -- are always these, since
+    /// <see cref="CommandBoundary"/> puts one before the command.
+    /// </remarks>
+    private static void ThrowIfUnknownRootOption(CommandTree tree, ParseResult result, bool help)
     {
-        if (IsHelpRequest(kind, rest))
-            return new(CommandKind.Help, [name]);
-        return kind switch
+        if (result.GetResult(tree.RootCommandLine) is not { Tokens: var tokens })
+            return;
+        var afterDash = 0;
+        if (result.CommandResult.Command == tree.Root)
+            afterDash = result.Tokens.SkipWhile(t => t.Type != TokenType.DoubleDash).Skip(1).Count();
+        var before = tokens.Take(tokens.Count - afterDash);
+        if (help)
+            before = before.TakeWhile(token => token.Value.StartsWith('-'));
+        if (before.FirstOrDefault()?.Value is not { } first)
+            return;
+        throw CreateUsageError(
+            first.StartsWith('-') ? $"unknown option \"{first}\"" : $"unexpected argument \"{first}\"", tree.Root);
+    }
+
+    /// <summary>Refuses a --port or --tool of <paramref name="options"/> without a valid value.</summary>
+    /// <remarks>
+    /// When a subcommand is parsed, the root's values are only parsed when read, so their errors aren't in the
+    /// result's: they're read here, before anything else is checked.
+    /// </remarks>
+    private static void ThrowIfRunOptionInvalid(ParseResult result, RunOptionSet options, SclCommand owner)
+    {
+        foreach (var valued in options.Valued)
         {
-            CommandKind.Run => ParseRun(rest),
-            CommandKind.Upgrade => ParseUpgrade(rest),
-            CommandKind.Clean => ParseClean(rest),
-            CommandKind.Ps or CommandKind.Init => ParseWithoutArguments(name, kind, rest),
-            CommandKind.Allow => ParseAllow(rest, startDir),
-            CommandKind.Deny => ParseDomains(name, kind, rest, startDir),
-            CommandKind.Trust => ParseTrust(rest),
-            CommandKind.Sign => ParseSign(rest),
-            _ => new(kind, rest),
+            if (result.GetResult(valued.Option) is not { } optionResult)
+                continue;
+            if (optionResult.Tokens.Count < optionResult.IdentifierTokenCount)
+                throw CreateUsageError(valued.Missing, owner);
+            if (valued.FindError(optionResult.Tokens.Select(token => token.Value)) is { } error)
+                throw CreateUsageError(error, owner);
+        }
+    }
+
+    /// <summary>Refuses what the parser found wrong in the command that was parsed.</summary>
+    private static void ThrowIfInvalid(CommandTree tree, ParseResult result)
+    {
+        var parsed = result.CommandResult.Command;
+        if (result.UnmatchedTokens.Count > 0)
+        {
+            var name = parsed == tree.Root ? "" : $"pen {FormatName(result)}: ";
+            // The command to run takes every argument after it, up to the most the parser allows.
+            var commandLine = parsed == tree.Run ? tree.RunCommandLine : tree.RootCommandLine;
+            var most = commandLine.Arity.MaximumNumberOfValues;
+            var full = (parsed == tree.Root || parsed == tree.Run)
+                && result.GetResult(commandLine) is { } given && given.Tokens.Count >= most;
+            var problem = full
+                ? string.Create(CultureInfo.InvariantCulture, $"too many arguments (at most {most:N0})")
+                : $"unexpected argument \"{result.UnmatchedTokens[0]}\"";
+            throw CreateUsageError(name + problem, parsed);
+        }
+        if (parsed == tree.Run)
+            ThrowIfRunOptionInvalid(result, tree.RunOptions, tree.Run);
+        if (result.Errors.Count > 0)
+            throw CreateUsageError(result.Errors[0].Message, parsed);
+    }
+
+    /// <summary>Refuses an option for running given before a subcommand other than run.</summary>
+    private static void ThrowIfRunOptionGiven(CommandTree tree, ParseResult result)
+    {
+        // Before the subcommand, every option is the root's, and help and version have been handled.
+        var first = result.Tokens.TakeWhile(token => token.Type != TokenType.Command)
+            .FirstOrDefault(token => token.Type == TokenType.Option);
+        if (first != null)
+        {
+            var option = FindOption(tree.RootOptions.All, first);
+            throw CreateUsageError(
+                $"{option.Name} goes only with a command to run, not pen {FormatName(result)}", tree.Root);
+        }
+    }
+
+    /// <summary>Creates the command a valid parse asks for.</summary>
+    private static Command CreateCommand(CommandTree tree, ParseResult result)
+    {
+        var parsed = result.CommandResult.Command;
+        var command = new Command(tree.GetKind(parsed), ReadArguments(tree, result, parsed));
+        if (parsed == tree.Root)
+            return AddRunOptions(command, result, [tree.RootOptions], tree.Root);
+        if (parsed == tree.Run)
+            return AddRunOptions(command, result, [tree.RootOptions, tree.RunOptions], tree.Run);
+        return command with
+        {
+            NoCache = result.GetValue(tree.NoCache),
+            Stale = result.GetValue(tree.CleanStale),
+            Global = result.GetValue(tree.AllowGlobal) || result.GetValue(tree.DenyGlobal),
+            Defaults = result.GetValue(tree.AllowDefaults),
+            Yes = result.GetValue(tree.TrustYes),
+            List = result.GetValue(tree.TrustList),
         };
     }
 
-    /// <summary>Checks whether the arguments after a subcommand ask for its help.</summary>
-    /// <remarks>run's own help only right after it: later, --help belongs to the command.</remarks>
-    private static bool IsHelpRequest(CommandKind kind, List<string> rest)
+    /// <summary>Reads the arguments of the command that was parsed, as <see cref="Command.Args"/> holds them.</summary>
+    private static IReadOnlyList<string> ReadArguments(CommandTree tree, ParseResult result, SclCommand parsed)
     {
-        if (kind == CommandKind.Run)
-            return rest.Count > 0 && IsHelp(rest[0]);
-        return rest.Any(IsHelp);
+        if (parsed == tree.Root)
+            return ReadTokens(result, tree.RootCommandLine);
+        if (parsed == tree.Run)
+            return ReadTokens(result, tree.RunCommandLine);
+        if (parsed == tree.Allow)
+            return result.GetValue(tree.AllowDomains) ?? [];
+        if (parsed == tree.Deny)
+            return result.GetValue(tree.DenyDomains) ?? [];
+        if (parsed == tree.Sign)
+            return ReadTokens(result, tree.SignBase);
+        return [];
     }
 
-    private static bool IsHelp(string arg) => arg is "-h" or "--help";
+    /// <summary>Reads an argument's values exactly as given.</summary>
+    private static List<string> ReadTokens(ParseResult result, Argument argument) =>
+        result.GetResult(argument)?.Tokens.Select(token => token.Value).ToList() ?? [];
 
-    /// <summary>Parses pen run's arguments: an optional --, then the command to run.</summary>
-    private static Command ParseRun(List<string> rest)
+    /// <summary>Adds the options for running from each place they were given (before and after run) to
+    /// <paramref name="command"/>.</summary>
+    private static Command AddRunOptions(
+        Command command,
+        ParseResult result,
+        RunOptionSet[] places,
+        SclCommand owner)
     {
-        if (rest.Count > 0 && rest[0] == "--")
-            rest.RemoveAt(0);
-        if (rest.Count == 0)
-            throw CreateUsageError("pen run: missing the command to run");
-        return new(CommandKind.Run, rest);
+        var ports = new List<int>();
+        foreach (var port in places.SelectMany(place => result.GetValue(place.Port) ?? []))
+        {
+            if (!ports.Contains(port))
+                ports.Add(port);
+        }
+        var tools = places.SelectMany(place => result.GetValue(place.Tool) ?? []);
+        if (ToolSpec.TryCanonicalize(tools, RecipeCatalog.Embedded, out var canonical) is { } conflict)
+            throw CreateUsageError($"--tool: {conflict}", owner);
+        return command with
+        {
+            Docker = places.Any(place => result.GetValue(place.Docker)),
+            Ports = ports,
+            Tools = canonical,
+        };
     }
 
-    /// <summary>Parses pen upgrade's arguments: only --no-cache.</summary>
-    private static Command ParseUpgrade(List<string> rest)
+    /// <summary>Finds the option of <paramref name="options"/> that the parser read <paramref name="token"/> as.
+    /// </summary>
+    private static Option FindOption(IEnumerable<Option> options, Token token) =>
+        options.Single(option => option.Name == token.Value || option.Aliases.Contains(token.Value));
+
+    /// <summary>Formats the parsed subcommand's name as it was given (ls for pen ls).</summary>
+    private static string FormatName(ParseResult result) => result.CommandResult.IdentifierToken.Value;
+
+    /// <summary>Creates the error for an invalid command line: the message, then where to find the usage.</summary>
+    /// <param name="message">What's wrong.</param>
+    /// <param name="command">The command whose help shows the usage.</param>
+    private static PenException CreateUsageError(string message, SclCommand command)
     {
-        var noCache = false;
-        foreach (var arg in rest)
-        {
-            if (arg == "--no-cache")
-                noCache = true;
-            else
-                throw CreateUsageError($"pen upgrade: unexpected argument \"{arg}\"");
-        }
-        return new(CommandKind.Upgrade, []) { NoCache = noCache };
-    }
-
-    /// <summary>Parses pen clean's arguments: only --stale.</summary>
-    private static Command ParseClean(List<string> rest)
-    {
-        var stale = false;
-        foreach (var arg in rest)
-        {
-            if (arg == "--stale")
-                stale = true;
-            else
-                throw CreateUsageError($"pen clean: unexpected argument \"{arg}\"");
-        }
-        return new(CommandKind.Clean, []) { Stale = stale };
-    }
-
-    /// <summary>Parses the arguments of a subcommand that takes none (pen ps, pen init).</summary>
-    private static Command ParseWithoutArguments(string name, CommandKind kind, List<string> rest)
-    {
-        if (rest.Count > 0)
-            throw CreateUsageError($"pen {name}: unexpected argument \"{rest[0]}\"");
-        return new(kind, []);
-    }
-
-    /// <summary>Parses pen allow's arguments: --defaults alone, or domains and --global.</summary>
-    private static Command ParseAllow(List<string> rest, Func<string?> startDir)
-    {
-        if (rest.Contains("--defaults"))
-        {
-            if (rest.Count > 1)
-                throw CreateUsageError("pen allow --defaults takes nothing else");
-            return new(CommandKind.Allow, []) { Defaults = true };
-        }
-
-        return ParseDomains("allow", CommandKind.Allow, rest, startDir);
-    }
-
-    /// <summary>Parses the domains and --global of pen allow or pen deny (<paramref name="name"/>).</summary>
-    private static Command ParseDomains(string name, CommandKind kind, List<string> rest, Func<string?> startDir)
-    {
-        var global = false;
-        var domains = new List<string>();
-        foreach (var arg in rest)
-        {
-            if (arg == "--global")
-            {
-                global = true;
-                continue;
-            }
-
-            var domain = ReadDomain(name, arg, allowStar: kind == CommandKind.Allow, startDir);
-            if (!domains.Contains(domain))
-                domains.Add(domain);
-        }
-        if (global && domains.Count == 0)
-            throw CreateUsageError($"pen {name} --global: missing the domains to {name}");
-        return new(kind, domains) { Global = global };
-    }
-
-    /// <summary>Reads one domain argument of pen allow or pen deny (<paramref name="name"/>).</summary>
-    /// <param name="name">The subcommand, for messages.</param>
-    /// <param name="arg">The argument.</param>
-    /// <param name="allowStar">
-    /// Whether <see cref="Allowlist.AnyDomain"/> is valid: pen allow's, not pen deny's.
-    /// </param>
-    /// <param name="startDir">
-    /// Gets the start directory, or null when it can't be read: an argument that isn't a domain but names an entry
-    /// there gets the advice for a shell that expanded an unquoted *.
-    /// </param>
-    /// <returns>The domain, lowercased, or <see cref="Allowlist.AnyDomain"/>.</returns>
-    /// <exception cref="PenException">The argument is an unknown option or isn't a domain.</exception>
-    private static string ReadDomain(string name, string arg, bool allowStar, Func<string?> startDir)
-    {
-        if (arg.StartsWith('-'))
-            throw CreateUsageError($"pen {name}: unknown option \"{arg}\"");
-        if (arg == Allowlist.AnyDomain)
-        {
-            if (allowStar)
-                return arg;
-            throw CreateUsageError($"pen {name}: \"*\" would block everything; remove the allow entries instead");
-        }
-
-        var domain = arg.ToLowerInvariant();
-        if (!Allowlist.IsValidDomain(domain))
-        {
-            var message = $"pen {name}: \"{arg}\" isn't a domain (use " +
-                "example.com, or .example.com to include its subdomains)";
-            if (startDir() is { } dir && ShellGlob.NamesEntry(dir, arg))
-                message += "; " + ShellGlob.FormatAdvice(name);
-            throw CreateUsageError(message);
-        }
-
-        return domain;
-    }
-
-    /// <summary>Parses pen trust's arguments: --yes or --list.</summary>
-    private static Command ParseTrust(List<string> rest)
-    {
-        var yes = false;
-        var list = false;
-        foreach (var arg in rest)
-        {
-            if (arg == "--yes")
-                yes = true;
-            else if (arg == "--list")
-                list = true;
-            else
-                throw CreateUsageError($"pen trust: unexpected argument \"{arg}\"");
-        }
-        if (yes && list)
-            throw CreateUsageError("pen trust: --yes and --list don't go together");
-        return new(CommandKind.Trust, []) { Yes = yes, List = list };
-    }
-
-    /// <summary>Parses pen sign's arguments: at most a base, which can't look like an option.</summary>
-    private static Command ParseSign(List<string> rest)
-    {
-        if (rest.Count > 1)
-            throw CreateUsageError($"pen sign: unexpected argument \"{rest[1]}\"");
-        if (rest.Count == 1 && rest[0].StartsWith('-'))
-            throw CreateUsageError($"pen sign: unknown option \"{rest[0]}\"");
-        return new(CommandKind.Sign, rest);
-    }
-
-    /// <summary>Creates the error for an invalid command line: the message, then the usage, with exit code 2.</summary>
-    private static PenException CreateUsageError(string message) =>
-        new($"{message}\n{HelpText.Usage}", exitCode: 2);
-
-    /// <summary>The value of an option given as <c>--name value</c> or <c>--name=value</c>.</summary>
-    /// <param name="Value">The value, or null when <c>--name</c> is the last argument.</param>
-    /// <param name="Width">How many arguments the option and its value take up: 2, or 1 with =.</param>
-    private readonly record struct OptionValue(string? Value, int Width)
-    {
-        /// <summary>
-        /// Matches the argument at <paramref name="index"/> against the option <paramref name="name"/>.
-        /// </summary>
-        /// <returns>The option's value, or null if the argument is a different one.</returns>
-        public static OptionValue? Match(IReadOnlyList<string> args, int index, string name)
-        {
-            var arg = args[index];
-            if (arg == name)
-                return new(index + 1 < args.Count ? args[index + 1] : null, 2);
-            if (arg.StartsWith(name + "=", StringComparison.Ordinal))
-                return new(arg[(name.Length + 1)..], 1);
-            return null;
-        }
-    }
-
-    /// <summary>The options for running that come before the command: --docker, --port and --tool.</summary>
-    private sealed class RunOptions
-    {
-        private readonly List<int> _ports = [];
-        private readonly List<ToolSpec> _tools = [];
-
-        /// <summary>Gets the first option given (--docker, --port or --tool), for errors; null if none was.</summary>
-        public string? FirstName { get; private set; }
-
-        /// <summary>Gets whether --docker was given.</summary>
-        public bool Docker { get; private set; }
-
-        /// <summary>Gets whether the command line is <c>pen --tool list</c>.</summary>
-        public bool IsToolList { get; private set; }
-
-        /// <summary>Gets the --port values, in order without duplicates.</summary>
-        public IReadOnlyList<int> Ports => _ports;
-
-        /// <summary>Gets the --tool values, as given.</summary>
-        public IReadOnlyList<ToolSpec> Tools => _tools;
-
-        /// <summary>Reads the option for running at <paramref name="index"/>, if it's one.</summary>
-        /// <returns>How many arguments it took, or 0 if the argument there isn't an option for running.</returns>
-        public int ReadAt(IReadOnlyList<string> args, int index)
-        {
-            if (args[index] == "--docker")
-            {
-                Docker = true;
-                FirstName ??= "--docker";
-                return 1;
-            }
-            if (OptionValue.Match(args, index, "--port") is { } port)
-            {
-                AddPort(port.Value);
-                FirstName ??= "--port";
-                return port.Width;
-            }
-            if (OptionValue.Match(args, index, "--tool") is { } tool)
-            {
-                if (tool.Value == "list")
-                {
-                    // Only the whole command line: pen --tool list.
-                    if (args.Count != tool.Width)
-                        throw CreateUsageError("--tool list takes nothing else");
-                    IsToolList = true;
-                    return tool.Width;
-                }
-                AddTool(tool.Value);
-                FirstName ??= "--tool";
-                return tool.Width;
-            }
-            return 0;
-        }
-
-        private void AddPort(string? value)
-        {
-            if (value == null)
-                throw CreateUsageError("--port: missing the port number");
-            if (!int.TryParse(value, NumberStyles.None, null, out var port) || !Port.IsValid(port))
-                throw CreateUsageError($"--port: \"{value}\" isn't a port number (1 to 65535)");
-            if (!_ports.Contains(port))
-                _ports.Add(port);
-        }
-
-        private void AddTool(string? value)
-        {
-            if (value == null)
-                throw CreateUsageError("--tool: missing the tool (name or name:version)");
-            if (ToolSpec.TryParse(value, RecipeCatalog.Embedded, out var tool) is { } invalid)
-                throw CreateUsageError($"--tool: {invalid}");
-            _tools.Add(tool);
-        }
+        var help = command is RootCommand ? "pen --help" : $"pen {command.Name} --help";
+        return new($"{message}\nRun '{help}' for usage.", exitCode: 2);
     }
 }

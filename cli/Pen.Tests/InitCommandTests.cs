@@ -33,11 +33,10 @@ public class InitCommandTests
         Assert.Equal(CommandKind.Init, c.Kind);
         Assert.Empty(c.Args);
 
-        var help = CommandParser.Parse(["init", "--help"], () => null);
-        Assert.Equal(CommandKind.Help, help.Kind);
-        Assert.Equal(["init"], help.Args);
-        Assert.StartsWith("usage: pen init", HelpText.Subcommands["init"]);
-        Assert.Contains("pen init ", HelpText.Usage);
+        var help = CliTests.Render("init", "--help");
+        Assert.Contains("Usage:\n  pen init [options]", help);
+        Assert.Contains("It never overwrites", help);
+        Assert.Contains("\n  init  ", CliTests.Render("--help"));
 
         Assert.Equal(2, Assert.Throws<PenException>(() => CommandParser.Parse(["init", "x"], () => null)).ExitCode);
         Assert.Equal(2, Assert.Throws<PenException>(() => CommandParser.Parse(["init", "--force"], () => null)).ExitCode);

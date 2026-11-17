@@ -2,8 +2,8 @@ using System.Text.RegularExpressions;
 
 namespace Pen.SmokeTests;
 
-/// <summary>The installed pen's command line: version, help, usage errors, pen init and where --port and --tool
-/// go.</summary>
+/// <summary>The installed pen's command line: version, help, usage errors, pen init, pen tools, pen ls and where
+/// --port and --tool go.</summary>
 public sealed class CliDispatchTests(SmokeFixture fixture) : IClassFixture<SmokeFixture>
 {
     private PenCli Cli => fixture.Cli;
@@ -33,9 +33,12 @@ public sealed class CliDispatchTests(SmokeFixture fixture) : IClassFixture<Smoke
         var help = Cli.Run("--help").Stdout;
 
         Assert.Multiple(
-            () => Assert.Contains("pen allow", help, StringComparison.Ordinal),
-            () => Assert.Contains("pen deny", help, StringComparison.Ordinal),
-            () => Assert.Contains("pen upgrade", help, StringComparison.Ordinal));
+            () => Assert.Contains("Usage:\n  pen ", help, StringComparison.Ordinal),
+            () => Assert.Contains("\n  allow <domain>", help, StringComparison.Ordinal),
+            () => Assert.Contains("\n  deny <domain>", help, StringComparison.Ordinal),
+            () => Assert.Contains("\n  upgrade ", help, StringComparison.Ordinal),
+            () => Assert.Contains("\n  tools ", help, StringComparison.Ordinal),
+            () => Assert.Contains("\n  ls, ps ", help, StringComparison.Ordinal));
     }
 
     [Fact(DisplayName = "pen deny --help describes it, and pen deny '*' is a usage error")]
@@ -46,7 +49,7 @@ public sealed class CliDispatchTests(SmokeFixture fixture) : IClassFixture<Smoke
 
         Assert.Multiple(
             () => Assert.True(
-                help.ExitCode == 0 && help.Stdout.StartsWith("usage: pen deny", StringComparison.Ordinal),
+                help.ExitCode == 0 && help.Stdout.Contains("Usage:\n  pen deny ", StringComparison.Ordinal),
                 help.Describe()),
             () => Assert.True(star.IsUsageError("pen deny: \"*\" would block everything"), star.Describe()));
     }
@@ -83,12 +86,15 @@ public sealed class CliDispatchTests(SmokeFixture fixture) : IClassFixture<Smoke
         var help = Cli.Run("init", "--help");
 
         Assert.True(
-            help.ExitCode == 0 && help.Stdout.StartsWith("usage: pen init", StringComparison.Ordinal),
+            help.ExitCode == 0 && help.Stdout.Contains("Usage:\n  pen init ", StringComparison.Ordinal),
             help.Describe());
     }
 
     [Fact(DisplayName = "pen --port 0 is a usage error (exit 2), before any session")]
     public void PortZeroIsAUsageError() => AssertBadPort("--port", "0");
+
+    [Fact(DisplayName = "pen -p 0 claude is a usage error (exit 2), before any session")]
+    public void ShortPortZeroIsAUsageError() => AssertBadPort("-p", "0", "claude");
 
     [Fact(DisplayName = "--port with a subcommand is a usage error")]
     public void PortWithASubcommandIsAUsageError()
@@ -112,10 +118,10 @@ public sealed class CliDispatchTests(SmokeFixture fixture) : IClassFixture<Smoke
             () => Assert.Contains("ports = [", help, StringComparison.Ordinal));
     }
 
-    [Fact(DisplayName = "pen --port 8765 --port=8766 starts a session")]
+    [Fact(DisplayName = "pen --port=8765 -p 8766 starts a session")]
     public void PortsStartASession()
     {
-        var result = Cli.Run("--port", "8765", "--port=8766", "run", "true");
+        var result = Cli.Run("--port=8765", "-p", "8766", "run", "true");
 
         Assert.True(result.ExitCode == 0, result.Describe());
     }
@@ -132,12 +138,37 @@ public sealed class CliDispatchTests(SmokeFixture fixture) : IClassFixture<Smoke
     public void HelpDocumentsTool() =>
         Assert.Contains("--tool <spec>", Cli.Run("--help").Stdout, StringComparison.Ordinal);
 
-    [Fact(DisplayName = "pen --tool list works outside a session")]
-    public void ToolListWorksOutsideASession()
+    [Fact(DisplayName = "pen tools lists the agents outside a session")]
+    public void ToolsWorksOutsideASession()
     {
-        var result = Cli.Run("--tool", "list");
+        var result = Cli.Run("tools");
 
-        Assert.True(result.ExitCode == 0, result.Describe());
+        Assert.True(
+            result.ExitCode == 0 && result.Stdout.Contains("claude", StringComparison.Ordinal), result.Describe());
+    }
+
+    [Fact(DisplayName = "pen ls lists the running sessions, as pen ps does")]
+    public void LsIsPs()
+    {
+        var ls = Cli.Run("ls");
+        var ps = Cli.Run("ps");
+
+        Assert.True(ls.ExitCode == 0 && ps.ExitCode == 0, ls.Describe() + ps.Describe());
+        Assert.Equal(ps.Stderr, ls.Stderr);
+        // Another project's session may start or age between the two calls, so the age column is left out: with
+        // no sessions the table is absent and both are empty.
+        Assert.Equal(WithoutAge(ps.Stdout), WithoutAge(ls.Stdout));
+    }
+
+    /// <summary>Drops the AGE column from pen ps's table, whose lines pad each cell to the column's width.</summary>
+    private static string[] WithoutAge(string table)
+    {
+        var lines = table.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        if (lines.Length == 0)
+            return [];
+        var start = lines[0].IndexOf("AGE", StringComparison.Ordinal);
+        var end = lines[0].IndexOf("COMMAND", StringComparison.Ordinal);
+        return [.. lines.Select(line => line.Length > end ? line[..start] + line[end..] : line)];
     }
 
     [Fact(DisplayName = "pen --tool nope is a usage error (exit 2), before any session")]

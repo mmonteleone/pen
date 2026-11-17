@@ -9,8 +9,6 @@ internal sealed partial class RecipeCatalog
     public const string Root = "tools/";
     public const string SettingsFile = "tool.toml";
     public const string InstallFile = "install.sh";
-    /// <summary>A name no tool can have, since --tool list means the listing.</summary>
-    private const string ReservedName = "list";
 
     private static readonly Lazy<RecipeCatalog> EmbeddedCatalog = new(() =>
         FromFiles(Pen.Platform.Embedded.ListUnder(Root)
@@ -37,10 +35,10 @@ internal sealed partial class RecipeCatalog
         foreach (var (path, text) in files)
         {
             var parts = path.StartsWith(Root, StringComparison.Ordinal) ? path[Root.Length..].Split('/') : [];
-            if (parts.Length != 2 || !NameRegex().IsMatch(parts[0]) || parts[0] == ReservedName)
+            if (parts.Length != 2 || !NameRegex().IsMatch(parts[0]))
             {
                 throw new PenException($"{path}: not part of a recipe (tools/<name>/{SettingsFile} " +
-                    $"and {InstallFile}, with a lowercase name other than {ReservedName})");
+                    $"and {InstallFile}, with a lowercase name)");
             }
 
             if (parts[1] == SettingsFile)
@@ -79,7 +77,7 @@ internal sealed partial class RecipeCatalog
         ? $"available: {string.Join(", ", Offered.Select(r => r.Name))}"
         : "none are available yet";
 
-    /// <summary>Formats what pen --tool list prints: the offered agents and tools, each with its default.</summary>
+    /// <summary>Formats what pen tools prints: the offered agents and tools, each with its default.</summary>
     public string FormatListing()
     {
         if (!Offered.Any())

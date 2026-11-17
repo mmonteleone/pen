@@ -1,3 +1,4 @@
+using System.CommandLine;
 using Pen.Tools;
 
 namespace Pen.CommandLine;
@@ -6,7 +7,7 @@ namespace Pen.CommandLine;
 /// <param name="Kind">The command.</param>
 /// <param name="Args">
 /// For Run, the command to run in the sandbox (empty: a shell); for Allow and Deny, the domains (lowercased);
-/// for Sign, the base, if given; for Help, the subcommand to describe, if any.
+/// for Sign, the base, if given.
 /// </param>
 internal sealed record Command(CommandKind Kind, IReadOnlyList<string> Args)
 {
@@ -36,4 +37,8 @@ internal sealed record Command(CommandKind Kind, IReadOnlyList<string> Args)
 
     /// <summary>Gets the pen --tool values, canonical.</summary>
     public IReadOnlyList<ToolSpec> Tools { get; init; } = [];
+
+    /// <summary>Gets, for Builtin, the parse to invoke (<see cref="CommandTree.InvokeBuiltin"/>) for the help or
+    /// version it asks for.</summary>
+    public ParseResult? ParseResult { get; init; }
 }

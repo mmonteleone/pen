@@ -308,11 +308,14 @@ public class ToolsTests
         Assert.Equal(2, Assert.Throws<PenException>(() => CommandParser.Parse(args, () => null)).ExitCode);
 
     [Fact]
-    public void ToolListIsItsOwnCommand()
+    public void TheListingIsPenTools_AndToolListIsJustAnUnknownTool()
     {
-        Assert.Equal(CommandKind.ToolList, CommandParser.Parse(["--tool", "list"], () => null).Kind);
-        Assert.Equal(CommandKind.ToolList, CommandParser.Parse(["--tool=list"], () => null).Kind);
-        Assert.Contains("--tool list", HelpText.Usage);
-        Assert.Contains("--tool <spec>", HelpText.Subcommands["run"]);
+        Assert.Equal(CommandKind.Tools, CommandParser.Parse(["tools"], () => null).Kind);
+        var list = Assert.Throws<PenException>(() => CommandParser.Parse(["--tool", "list"], () => null)).Message;
+        Assert.StartsWith("--tool: unknown tool \"list\"", list);
+        Assert.Contains("; pen tools lists them", list);
+        Assert.Contains("\n  tools  ", CliTests.Render("--help"));
+        Assert.Contains("-t, --tool <spec>", CliTests.Render("run", "--help"));
+        Assert.Contains("tools shows what's available", CliTests.Render("run", "--help"));
     }
 }

@@ -30,12 +30,9 @@ internal enum CommandKind
     /// <summary>pen ps.</summary>
     Ps,
 
-    /// <summary>pen --help, or pen &lt;subcommand&gt; --help.</summary>
-    Help,
+    /// <summary>pen tools.</summary>
+    Tools,
 
-    /// <summary>pen --version.</summary>
-    Version,
-
-    /// <summary>pen --tool list.</summary>
-    ToolList,
+    /// <summary>Help or the version: pen --help, pen &lt;subcommand&gt; --help, pen --version.</summary>
+    Builtin,
 }

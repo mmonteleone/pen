@@ -27,7 +27,10 @@ internal readonly partial record struct ToolSpec(string Name, string Version)
         var colon = spec.IndexOf(':');
         var name = colon < 0 ? spec : spec[..colon];
         if (!catalog.TryGet(name, out var recipe))
-            return $"unknown tool \"{Out.Field(name)}\" ({catalog.DescribeAvailable()})";
+        {
+            var hint = spec == "list" ? "; pen tools lists them" : "";
+            return $"unknown tool \"{Out.Field(name)}\" ({catalog.DescribeAvailable()}){hint}";
+        }
         if (colon < 0)
         {
             tool = new(name, recipe.Default);

@@ -402,10 +402,6 @@ public class RecipeTests
         Load(("tools/x/tool.toml", Good), ("tools/x/install.sh", "#!/bin/sh\n"), (extra, ""));
 
     [Fact]
-    public void NoRecipeCanTakeTheNameOfTheListing() =>
-        Assert.Contains("not part of a recipe", Error(() => Load(("tools/list/tool.toml", Good), ("tools/list/install.sh", "#!/bin/sh\n"))));
-
-    [Fact]
     public void TheListingSaysWhatEachToolOffers()
     {
         var catalog = Load(

@@ -1,4 +1,3 @@
-using System.Reflection;
 using Pen.CommandLine;
 using Pen.Commands;
 using Pen.Configuration;
@@ -69,16 +68,15 @@ internal static class Program
         var command = CommandParser.Parse(args, StartDir.TryGet);
         switch (command.Kind)
         {
-            case CommandKind.Help:
-                return WriteHelp(command);
-            case CommandKind.ToolList:
+            case CommandKind.Builtin:
+                CommandTree.InvokeBuiltin(command.ParseResult!, Console.Out);
+                return 0;
+            case CommandKind.Tools:
                 Console.Out.Write(RecipeCatalog.Embedded.FormatListing());
                 return 0;
             case CommandKind.Allow when command.Defaults:
                 Console.Out.Write(AllowCommand.FormatDefaults());
                 return 0;
-            case CommandKind.Version:
-                return WriteVersion();
         }
 
         var host = HostEnv.FromProcess();
@@ -115,23 +113,6 @@ internal static class Program
             CommandKind.Clean => new CleanCommand(host, project, Console.In).Run(),
             _ => throw new InvalidOperationException($"unhandled command {command.Kind}"),
         };
-    }
-
-    /// <summary>Writes pen --help, or a subcommand's help, to stdout.</summary>
-    private static int WriteHelp(Command command)
-    {
-        var text = command.Args.Count > 0 ? HelpText.Subcommands[command.Args[0]] + "\n" : HelpText.Usage;
-        Console.Out.Write(text);
-        return 0;
-    }
-
-    /// <summary>Writes pen --version to stdout.</summary>
-    private static int WriteVersion()
-    {
-        var version = typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-            ?.InformationalVersion;
-        Console.Out.WriteLine("pen " + (version ?? "?"));
-        return 0;
     }
 
     /// <summary>Runs a session in the project's sandbox.</summary>
