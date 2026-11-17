@@ -30,6 +30,12 @@ internal sealed record TrustRequest(
     /// <summary>Tools in .pen/ not approved, and not also named by the user's config or --tool.</summary>
     public IReadOnlyList<ToolRequest> Tools { get; init; } = [];
 
+    /// <summary>The allow domains nothing approves yet.</summary>
+    /// <remarks>
+    /// Without an init accessor, so <see cref="NamedDomains"/>, taken from it once, can't fall out of step.
+    /// </remarks>
+    public IReadOnlyList<string> Domains { get; } = Domains;
+
     /// <summary>Whether nothing needs approving.</summary>
     public bool IsEmpty => Domains.Count == 0 && !Docker && GitHubOwner is null && Layer is null && Tools.Count == 0;
 
@@ -37,9 +43,9 @@ internal sealed record TrustRequest(
     public bool AnyDomain => Domains.Contains(Allowlist.AnyDomain);
 
     /// <summary>The domains listed a line each: all but <see cref="Allowlist.AnyDomain"/>, which has its own.</summary>
-    private IEnumerable<string> NamedDomains => Domains.Where(domain => domain != Allowlist.AnyDomain);
+    private IReadOnlyList<string> NamedDomains { get; } = [.. Domains.Where(domain => domain != Allowlist.AnyDomain)];
 
-    private int HiddenDomainCount => Math.Max(NamedDomains.Count() - MaxListedDomains, 0);
+    private int HiddenDomainCount => Math.Max(NamedDomains.Count - MaxListedDomains, 0);
     private int HiddenToolCount => Math.Max(Tools.Count - MaxListedTools, 0);
 
     /// <summary>Formats one indented line for each item, saying what it grants, for a prompt.</summary>
@@ -92,7 +98,7 @@ internal sealed record TrustRequest(
         }
     }
 
-    private bool HasNamedDomainBesideAny => AnyDomain && NamedDomains.Any();
+    private bool HasNamedDomainBesideAny => AnyDomain && NamedDomains.Count > 0;
 
     /// <summary>Said after the domains when <see cref="Allowlist.AnyDomain"/> is requested beside named ones.</summary>
     internal const string NamedBesideAnyLine =

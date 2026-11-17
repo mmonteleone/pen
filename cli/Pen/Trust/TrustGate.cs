@@ -27,6 +27,10 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     /// <summary>How many characters of each .pen/Dockerfile line a prompt shows.</summary>
     internal const int MaxShownLineLength = 200;
 
+    /// <summary>The domains the embedded default allowlist names, read once: it's part of the binary.</summary>
+    private static readonly string[] DefaultDomains =
+        [.. Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt"))];
+
     /// <summary>Finds what's in the project config and .pen/ that nothing approves yet.</summary>
     /// <param name="store">The approvals for the project's directory.</param>
     /// <param name="flagTools">The tools pen --tool names, which need no approval.</param>
@@ -75,8 +79,7 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     /// </remarks>
     private static Func<string, bool> CoversProjectDomain(Config user, TrustStore store)
     {
-        var defaults = Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt"));
-        var named = Allowlist.MergeNamed(defaults, user.Allow).ToHashSet(StringComparer.Ordinal);
+        var named = Allowlist.MergeNamed(DefaultDomains, user.Allow).ToHashSet(StringComparer.Ordinal);
         var userOpen = Allowlist.Merge(user.Allow).Contains(Allowlist.AnyDomain);
         return domain =>
             (domain == Allowlist.AnyDomain ? userOpen : Allowlist.IsAllowed(named, domain))
