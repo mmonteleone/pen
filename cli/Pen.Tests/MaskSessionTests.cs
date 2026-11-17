@@ -84,6 +84,84 @@ public class MaskSessionTests
         Assert.Equal("x", File.ReadAllText(Path.Combine(session.MasksDir, "replace-1")));
     }
 
+    [Theory]
+    [InlineData(0b100_100_100)]
+    [InlineData(0b101_101_101)]
+    [InlineData(0b100_000_000)]
+    [InlineData(0b101_000_000)]
+    [InlineData(0b110_110_110)] // wider than the usual umask lets a new file have
+    public void AWrittenFileGetsExactlyItsModeAndBytes(int mode)
+    {
+        using var t = new TempDir();
+        var path = Path.Combine(t.Path, "copy");
+
+        MaskFiles.WriteNew(path, Encoding.UTF8.GetBytes("A=1\n"), (UnixFileMode)mode);
+
+        Assert.False(PathChecks.IsLink(path));
+        Assert.Equal((UnixFileMode)mode, ModeOf(path));
+        Assert.Equal("A=1\n", File.ReadAllText(path));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ASymlinkWhereAFileIsWritten_IsRefused_AndWhatItLeadsToIsLeftAlone(bool dangling)
+    {
+        using var t = new TempDir();
+        var victim = Path.Combine(t.Path, "victim");
+        if (!dangling)
+        {
+            File.WriteAllText(victim, "the user's file");
+            File.SetUnixFileMode(victim, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+        var path = Path.Combine(t.Path, "copy");
+        File.CreateSymbolicLink(path, victim);
+
+        Assert.Throws<IOException>(() => MaskFiles.WriteNew(path, Encoding.UTF8.GetBytes("A=1\n"), Mode555));
+
+        Assert.True(PathChecks.IsLink(path));
+        if (dangling)
+        {
+            Assert.False(PathChecks.ExistsOrIsLink(victim));
+            return;
+        }
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, ModeOf(victim));
+        Assert.Equal("the user's file", File.ReadAllText(victim));
+    }
+
+    [Fact]
+    public void ASymlinkSwappedInWhileACopyIsWritten_DoesntGetItsMode()
+    {
+        using var t = new TempDir();
+        var session = NewSession(t);
+        var victim = Path.Combine(t.Path, "victim");
+        File.WriteAllText(victim, "the user's file");
+        File.SetUnixFileMode(victim, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        var link = Path.Combine(t.Path, "link");
+        File.CreateSymbolicLink(link, victim);
+        var copy = Path.Combine(session.MasksDir, MaskFiles.ReplacementPrefix + "1");
+        // Big enough that the copy is still being written when the swap lands, between its creation and its mode.
+        var plan = Plan([], [], new Replacement(M("big"), new byte[64 << 20], Mode555));
+        var swap = new Thread(() =>
+        {
+            var deadline = Environment.TickCount64 + 30_000;
+            while (!PathChecks.ExistsOrIsLink(copy))
+            {
+                if (Environment.TickCount64 > deadline)
+                    return;
+            }
+            File.Move(link, copy, overwrite: true);
+        });
+        swap.Start();
+
+        MaskFiles.Write(session.MasksDir, plan);
+
+        Assert.True(swap.Join(TimeSpan.FromSeconds(60)), "hung");
+        Assert.True(PathChecks.IsLink(copy), "the swap didn't happen");
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, ModeOf(victim));
+        Assert.Equal("the user's file", File.ReadAllText(victim));
+    }
+
     [Fact]
     public void AMasksDirThatsThereAlreadyIsRefused()
     {

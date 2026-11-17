@@ -78,17 +78,20 @@ internal static class MaskFiles
     }
 
     /// <summary>Creates <paramref name="path"/> holding <paramref name="bytes"/>, then gives it its mode.</summary>
-    private static void WriteNew(string path, byte[] bytes, UnixFileMode mode)
+    /// <remarks>
+    /// Fails if anything is there, a dangling symlink included. The mode is set through the open file, never by
+    /// path, so a symlink swapped in after the file was created can't pass the mode on to what it leads to.
+    /// </remarks>
+    internal static void WriteNew(string path, byte[] bytes, UnixFileMode mode)
     {
-        using (var stream = new FileStream(path, new FileStreamOptions
+        using var stream = new FileStream(path, new FileStreamOptions
         {
             Mode = FileMode.CreateNew,
             Access = FileAccess.Write,
             UnixCreateMode = Mode600,
-        }))
-        {
-            stream.Write(bytes);
-        }
-        File.SetUnixFileMode(path, mode);
+        });
+        stream.Write(bytes);
+        stream.Flush();
+        File.SetUnixFileMode(stream.SafeFileHandle, mode);
     }
 }
