@@ -266,7 +266,7 @@ public class ProtectedFilesTests
     }
 
     [Fact]
-    public void Save_RefusesAFifoPlantedBeforePrepareMounts_WithoutHanging()
+    public void Save_RefusesAFifoPlantedBeforeMountPlanning_WithoutHanging()
     {
         using var t = new TempDir();
         var (repo, git) = Repo(t);
@@ -657,6 +657,67 @@ public class ProtectedFilesTests
         Assert.NotNull(check.Failure);
         Assert.Contains(check.Moved, q => q.From == config && q is Quarantined.Failed);
         Assert.True(File.Exists(Path.Combine(git, "commondir" + GitQuarantine.Suffix)));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ADamagedCopy_IsntRestoredFrom_AndTheCopiesStay(bool fifo)
+    {
+        using var t = new TempDir();
+        var (repo, git) = Repo(t);
+        var config = Path.Combine(git, "config");
+        var s = Started(t, repo, git);
+        File.AppendAllText(config, "[core]\n fsmonitor = /evil\n");
+        var copy = Path.Combine(s.ProtectedDir, Assert.Single(ProtectedFiles.Read(s)!.Files, f => f.Path == config).Copy);
+        if (fifo)
+        {
+            File.Delete(copy);
+            Mkfifo(copy);
+        }
+        else
+        {
+            File.WriteAllBytes(copy, new byte[1024 * 1024 + 1]);
+        }
+
+        CheckResult? check = null;
+        AssertIn10s(() => check = End(repo, s));
+
+        Assert.NotNull(check!.Failure);
+        Assert.True(check.RestoreIncomplete);
+        var failed = Assert.Single(check.Moved, q => q.From == config);
+        Assert.IsType<Quarantined.Failed>(failed);
+        Assert.Contains("COULD NOT RESTORE IT (pen's copy of it is damaged)", failed.Why);
+        Assert.True(File.Exists(s.ProtectedManifest));
+        Assert.True(PathChecks.ExistsOrIsLink(copy));
+    }
+
+    [Fact]
+    public void AFileWhoseDirectoryNowLeadsSomewhereElse_IsntRestored_AndTheCopiesStay()
+    {
+        using var t = new TempDir();
+        var (repo, git) = Repo(t);
+        var wt = Path.Combine(t.Path, "wt");
+        Git.Run(repo, "worktree", "add", "-q", wt);
+        var s = Started(t, wt, git);
+        var config = Path.Combine(git, "config");
+        File.AppendAllText(config, "[core]\n fsmonitor = /evil\n");
+        // The common git dir is the root the restore checks from, so it isn't moved aside as a symlink on the way.
+        var moved = git + "-moved";
+        Directory.Move(git, moved);
+        File.CreateSymbolicLink(git, moved);
+
+        var check = End(wt, s);
+
+        Assert.NotNull(check.Failure);
+        Assert.True(check.RestoreIncomplete);
+        var failed = Assert.Single(check.Moved, q => q.From == config);
+        Assert.IsType<Quarantined.Failed>(failed);
+        Assert.Contains("COULD NOT RESTORE IT (its directory now leads somewhere else)", failed.Why);
+        Assert.Contains("fsmonitor = /evil", File.ReadAllText(Path.Combine(moved, "config")));
+        Assert.True(File.Exists(s.ProtectedManifest));
+        Assert.True(Directory.Exists(s.ProtectedDir));
+        Assert.NotEmpty(Directory.GetFiles(s.ProtectedDir));
     }
 
     [Theory]

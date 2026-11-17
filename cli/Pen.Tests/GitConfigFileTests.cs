@@ -89,10 +89,13 @@ public class GitConfigFileTests
         Assert.Equal([new GitConfigFile.Entry("core", null, "bare", "false")], TryParseFile(good));
         Assert.Empty(TryParseFile(Path.Combine(t.Path, "missing"))!);
         Assert.Empty(TryParseFile(Path.Combine(t.Path, "no-dir", "config"))!);
-        Assert.Throws<PenException>(() => GitConfigFile.ParseFile(bad));
         Assert.Null(TryParseFile(bad));
-        Assert.Throws<PenException>(() => GitConfigFile.ParseFile(dir));
         Assert.Null(TryParseFile(dir));
+        foreach (var unparseable in new[] { bad, dir })
+        {
+            Assert.False(GitConfigFile.TryParseFile(unparseable, out _, out var error));
+            Assert.Equal(Assert.Throws<PenException>(() => GitConfigFile.ParseFile(unparseable)).Message, error);
+        }
     }
 
     [Fact]

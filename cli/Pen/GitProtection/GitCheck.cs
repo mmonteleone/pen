@@ -420,8 +420,13 @@ internal sealed class GitCheck
             if (gone.Any(quarantined => PathChecks.IsInside(quarantined, repo)))
                 continue;
             if (TryQuarantineModuleRepo(repo, listed))
+            {
                 gone.Add(repo);
-            else if (QuarantineCommondirToKeep(repo))
+                continue;
+            }
+            QuarantineCommondir(repo);
+            // The repo is the project's own only with no commondir left.
+            if (!PathChecks.ExistsOrIsLink(Path.Combine(repo, "commondir")))
                 known.Add(repo);
         }
         foreach (var unreadable in scan.UnreadableDirs)
@@ -479,8 +484,7 @@ internal sealed class GitCheck
     }
 
     /// <summary>Quarantines a commondir in a module repo that stays.</summary>
-    /// <returns>Whether the repo is the project's own: it has no commondir left.</returns>
-    private bool QuarantineCommondirToKeep(string repo)
+    private void QuarantineCommondir(string repo)
     {
         var commondir = Path.Combine(repo, "commondir");
         if (PathChecks.ExistsOrIsLink(commondir))
@@ -488,8 +492,6 @@ internal sealed class GitCheck
             Quarantine(commondir, "a submodule's repo never has one: it " +
                 "makes git read config and hooks from another directory", breakLayout: false);
         }
-
-        return !PathChecks.ExistsOrIsLink(commondir);
     }
 
     /// <summary>Quarantines what a shell prompt would run in <paramref name="git"/>.</summary>
