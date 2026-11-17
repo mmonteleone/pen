@@ -67,6 +67,9 @@ internal static class ConfigEdit
     private static string InsertDomains(string text, string displayPath, string key, List<string> added)
     {
         var newline = text.Contains("\r\n") ? "\r\n" : "\n";
+        // AddToList's Config.Parse already refused this text if it had any syntax error, so the tree is complete:
+        // every array has both brackets, every item a value and every table header its bracket. This method and the
+        // ones it calls rely on that.
         var document = SyntaxParser.Parse(text, displayPath, validate: true);
         var list = document.KeyValues.FirstOrDefault(kv => KeyName(kv) == key);
         if (list is null)

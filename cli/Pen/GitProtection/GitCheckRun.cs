@@ -361,7 +361,7 @@ internal sealed class GitCheckRun
     private void RemoveLink(string link, string why)
     {
         var attempt = GitCheck.RemoveLink(_dir, link, why);
-        if (attempt.Failed && _mayOpen && _changes.TryOpenRecording(Path.GetDirectoryName(link)!, write: true))
+        if (attempt.Failed && _mayOpen && _changes.TryOpenRecording(Paths.GetParent(link), write: true))
             attempt = GitCheck.RemoveLink(_dir, link, why);
         _changes.Moved.Add(attempt);
     }
@@ -567,7 +567,7 @@ internal sealed class GitCheckRun
     private bool TryRenameWithOpening(string path, string why, bool breakLayout)
     {
         var attempt = GitCheck.Move(path, why, breakLayout);
-        if (attempt.Failed && _mayOpen && _changes.TryOpenRecording(Path.GetDirectoryName(path)!, write: true))
+        if (attempt.Failed && _mayOpen && _changes.TryOpenRecording(Paths.GetParent(path), write: true))
             attempt = GitCheck.Move(path, why, breakLayout);
         if (attempt.Failed)
             return false;

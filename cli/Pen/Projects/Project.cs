@@ -72,7 +72,7 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
         if (common is null)
             return (null, dir);
         // A bare repo's worktree has no main checkout; the dir stands in for it.
-        return (common, RepoGuard.IsMainCheckoutGitDir(common) ? Path.GetDirectoryName(common)! : dir);
+        return (common, RepoGuard.IsMainCheckoutGitDir(common) ? Paths.GetParent(common) : dir);
     }
 
     /// <summary>

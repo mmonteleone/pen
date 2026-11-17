@@ -493,7 +493,7 @@ internal static class HooksPath
             // takes the expanded path as written.
             if (GitConfigFile.ExpandPath(value, home).Path is not { } path)
                 return null;
-            return Path.IsPathRooted(path) ? path : Path.Combine(Path.GetDirectoryName(from)!, path);
+            return Path.IsPathRooted(path) ? path : Path.Combine(Paths.GetParent(from), path);
         }
     }
 }

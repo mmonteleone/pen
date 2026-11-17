@@ -207,7 +207,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
     /// <remarks>The mode change is reported; a directory it still can't write in is named in Blocked.</remarks>
     private void OpenParent(string path)
     {
-        var parent = Path.GetDirectoryName(path)!;
+        var parent = Paths.GetParent(path);
         if (Native.CanWriteIn(parent))
             return;
         _changes.TryOpenRecording(parent, write: true);
@@ -228,7 +228,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
     /// </remarks>
     private bool CheckParents(ProtectedFile file, string? root)
     {
-        var parent = Path.GetDirectoryName(file.Path)!;
+        var parent = Paths.GetParent(file.Path);
         foreach (var directory in ListDirectoriesFromRoot(parent, root))
         {
             if (root is not null && directory != root && RepoGuard.IsLink(directory))
@@ -264,7 +264,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
         var directory = parent;
         while (directory != root)
         {
-            directory = Path.GetDirectoryName(directory)!;
+            directory = Paths.GetParent(directory);
             directories.Push(directory);
         }
         return directories;

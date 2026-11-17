@@ -48,6 +48,10 @@ internal static class Proc
     }
 
     /// <summary>Starts a child that shares the terminal; the caller waits on it.</summary>
+    /// <remarks>
+    /// Process.Start returns null only when shell execution reuses a running process, and Pen never turns
+    /// UseShellExecute on (its start infos leave it false).
+    /// </remarks>
     public static Process Start(ProcessStartInfo startInfo) =>
         Guard(startInfo.FileName, () => Process.Start(startInfo)!);
 

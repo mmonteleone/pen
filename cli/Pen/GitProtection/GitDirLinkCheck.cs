@@ -144,7 +144,7 @@ internal sealed class GitDirLinkCheck
         var target = ReadTarget(link);
         if (target is null)
             return Lead.Unknown;
-        var reached = target.StartsWith('/') ? "/" : Native.RealPath(Path.GetDirectoryName(link)!);
+        var reached = target.StartsWith('/') ? "/" : Native.RealPath(Paths.GetParent(link));
         if (reached is null)
             return Lead.Unknown;
         var parts = new List<string>(Split(target));

@@ -348,7 +348,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
         };
 
         if (!Path.IsPathRooted(path))
-            path = Path.Combine(Path.GetDirectoryName(configFile)!, path);
+            path = Path.Combine(Paths.GetParent(configFile), path);
 
         // As the OS walks it: ".." after a symlink is the parent of where that leads.
         var written = Path.GetFullPath(path);
@@ -395,7 +395,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
 
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(real)!);
+            Directory.CreateDirectory(Paths.GetParent(real));
             File.WriteAllText(real, "");
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)

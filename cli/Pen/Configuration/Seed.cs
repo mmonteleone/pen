@@ -33,7 +33,7 @@ internal static class Seed
         {
             var relative = resource[Prefix.Length..];
             var path = Path.Combine(staging, relative);
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            Directory.CreateDirectory(Paths.GetParent(path));
             if (relative == ".gitconfig")
                 File.WriteAllText(path, BuildGitConfig(Embedded.ReadText(resource), identity.Name, identity.Email));
             else

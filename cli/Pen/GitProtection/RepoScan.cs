@@ -274,7 +274,7 @@ internal static class RepoScan
             var repo = ReadGitFileTarget(gitFile, requireReal: true);
             if (repo is null || !moduleRepos.Contains(repo))
                 return null;
-            return HasWorktreeAt(repo, Path.GetDirectoryName(gitFile)!) ? repo : null;
+            return HasWorktreeAt(repo, Paths.GetParent(gitFile)) ? repo : null;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -387,7 +387,7 @@ internal static class RepoScan
         if (gitdir is null)
             return null;
         if (!Path.IsPathRooted(gitdir))
-            gitdir = Path.Combine(Path.GetDirectoryName(gitFile)!, gitdir);
+            gitdir = Path.Combine(Paths.GetParent(gitFile), gitdir);
         var full = Path.GetFullPath(gitdir).TrimEnd('/');
         if (!requireReal)
             return full;
@@ -870,7 +870,7 @@ internal sealed record NestedScan(
 internal sealed record NestedRepo(string Path, NestedKind Kind, GitDirPlace Place = GitDirPlace.Elsewhere)
 {
     /// <summary>Gets the repo's directory, for messages.</summary>
-    public string RepoDir => System.IO.Path.GetDirectoryName(Path)!;
+    public string RepoDir => Paths.GetParent(Path);
 }
 
 /// <summary>What makes a directory below the project root a repo.</summary>

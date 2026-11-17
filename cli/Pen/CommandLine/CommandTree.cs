@@ -63,6 +63,7 @@ internal sealed class CommandTree
         Root.Arguments.Add(RootCommandLine);
 
         Help = new HelpOption("--help", "-h") { Description = "show help and usage information" };
+        // HelpOption always comes with its HelpAction.
         Help.Action = new DetailedHelpAction((HelpAction)Help.Action!, _details);
         Root.Options.Add(Help);
         Version = new VersionOption { Description = "show pen's version", Action = new VersionAction(Help) };
@@ -509,6 +510,7 @@ internal sealed class CommandTree
 
         public override int Invoke(ParseResult parseResult)
         {
+            // CommandTree's constructor set the help option's action to a DetailedHelpAction, which is synchronous.
             if (parseResult.GetResult(help) is not null)
                 return ((SynchronousCommandLineAction)help.Action!).Invoke(parseResult);
             var version = typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
