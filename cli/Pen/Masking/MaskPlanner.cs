@@ -568,17 +568,10 @@ internal sealed class MaskPlanner
 
     /// <summary>Gets the hidden directory that <paramref name="path"/> is inside, if any.</summary>
     /// <returns>The directory, or null.</returns>
-    private string? FindHiddenDir(string path)
-    {
-        for (var parent = Path.GetDirectoryName(path);
-             parent is not null && parent.Length > _projectDir.Length;
-             parent = Path.GetDirectoryName(parent))
-        {
-            if (_dirs.ContainsKey(parent))
-                return parent;
-        }
-        return null;
-    }
+    private string? FindHiddenDir(string path) =>
+        Paths.EnumerateAncestors(path)
+            .TakeWhile(parent => parent.Length > _projectDir.Length)
+            .FirstOrDefault(_dirs.ContainsKey);
 
     /// <summary>Checks each [replace] entry and reads its source.</summary>
     /// <param name="files">The files to hide; a replaced one is taken out, since its replacement covers it.</param>

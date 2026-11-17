@@ -220,17 +220,8 @@ internal sealed class MountPlanner(string dir, string hostHome)
 
     /// <summary>Lists the directories strictly between <paramref name="common"/> and <paramref name="repo"/>.</summary>
     /// <returns>The directories, outermost first.</returns>
-    private static Stack<string> ListDirsBetween(string common, string repo)
-    {
-        var between = new Stack<string>();
-        for (var parent = Path.GetDirectoryName(repo);
-            parent is not null && parent != common && RepoGuard.IsInside(common, parent);
-            parent = Path.GetDirectoryName(parent))
-        {
-            between.Push(parent);
-        }
-        return between;
-    }
+    private static Stack<string> ListDirsBetween(string common, string repo) =>
+        new(Paths.EnumerateAncestors(repo).TakeWhile(parent => parent != common && RepoGuard.IsInside(common, parent)));
 
     /// <summary>Plans a read-only mount over a config.worktree, with its includes.</summary>
     /// <param name="common">The project's git dir.</param>

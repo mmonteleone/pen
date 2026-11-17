@@ -277,9 +277,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
     /// <remarks>Changing that one is what lets Pen get further.</remarks>
     private static string FindTopmostShut(string path)
     {
-        var chain = new Stack<string>();
-        for (var directory = path; directory is not null; directory = Path.GetDirectoryName(directory))
-            chain.Push(directory);
+        var chain = new Stack<string>(Paths.EnumerateAncestors(path).Prepend(path));
         return chain.FirstOrDefault(directory => !Native.CanEnter(directory)) ?? path;
     }
 

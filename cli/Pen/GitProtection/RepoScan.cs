@@ -487,9 +487,8 @@ internal static class RepoScan
         /// <summary>Where <paramref name="dir"/>, in the git dir, is, for the advice about a repo there.</summary>
         private GitDirPlace FindPlace(string dir)
         {
-            for (var at = dir;
-                 at is not null && at != root && RepoGuard.IsInside(root, at);
-                 at = Path.GetDirectoryName(at))
+            var chain = Paths.EnumerateAncestors(dir).Prepend(dir);
+            foreach (var at in chain.TakeWhile(at => at != root && RepoGuard.IsInside(root, at)))
             {
                 var parent = Path.GetDirectoryName(at);
                 if (parent is not null && Path.GetFileName(at) is "refs" or "logs" && IsOwnGitDir(parent))

@@ -333,17 +333,10 @@ internal static class RepoGuard
     /// submodule.*.path.
     /// </summary>
     /// <remarks>Only for the refusal's advice, so a forged entry changes nothing but the wording.</remarks>
-    internal static bool IsSubmodulePath(string dir, string repoDir)
-    {
-        for (var super = Path.GetDirectoryName(repoDir);
-            super is not null && IsInside(dir, super);
-            super = Path.GetDirectoryName(super))
-        {
-            if (ListsSubmodulePath(super, repoDir))
-                return true;
-        }
-        return false;
-    }
+    internal static bool IsSubmodulePath(string dir, string repoDir) =>
+        Paths.EnumerateAncestors(repoDir)
+            .TakeWhile(super => IsInside(dir, super))
+            .Any(super => ListsSubmodulePath(super, repoDir));
 
     /// <summary>
     /// Whether <paramref name="super"/>'s own .gitmodules lists <paramref name="repoDir"/> as a path.
