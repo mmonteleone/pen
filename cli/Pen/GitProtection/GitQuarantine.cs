@@ -19,7 +19,7 @@ internal static class GitQuarantine
     /// Whether it's a .git directory, whose HEAD goes too: renamed, it would still look like a bare repo to git.
     /// </param>
     /// <returns>
-    /// The rename made, or one with an empty <see cref="Quarantined.To"/> whose Why says it couldn't be moved.
+    /// The rename made, or a <see cref="Quarantined.Failed"/> whose Why says it couldn't be moved.
     /// </returns>
     /// <remarks>
     /// Never fatal: the rest still gets checked, and the warning names what couldn't be moved.
@@ -31,7 +31,7 @@ internal static class GitQuarantine
             var to = FreeName(path);
             Native.Rename(path, to);
             var inner = breakLayout ? MoveHeadAside(to) : null;
-            return new(path, to, why, inner);
+            return new Quarantined.Moved(path, to, why, inner);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -39,7 +39,7 @@ internal static class GitQuarantine
             var reason = exception is UnauthorizedAccessException denied
                 ? Out.DescribePermissionDenied(denied)
                 : exception.Message;
-            return new(path, "", $"{why}. COULD NOT MOVE IT ({reason}): " +
+            return new Quarantined.Failed(path, $"{why}. COULD NOT MOVE IT ({reason}): " +
                 "don't run git here until you've dealt with it");
         }
     }
@@ -49,8 +49,7 @@ internal static class GitQuarantine
     /// <param name="path">The symlink.</param>
     /// <param name="why">Why it's removed, for the warning.</param>
     /// <returns>
-    /// The removal made, or one with neither <see cref="Quarantined.To"/> nor <see cref="Quarantined.LinkTarget"/>
-    /// whose Why says it couldn't be removed.
+    /// The removal made, or a <see cref="Quarantined.Failed"/> whose Why says it couldn't be removed.
     /// </returns>
     /// <remarks>
     /// Renamed, a symlink would lead to the same place, so it's removed instead: it holds no data. Only ever a
@@ -65,15 +64,15 @@ internal static class GitQuarantine
         {
             var target = Native.RemoveSymlink(root, path);
             return StrictUtf8.DecodeOrNull(target) is { } text
-                ? new(path, "", why, LinkTarget: text)
-                : new(path, "", why, LinkTarget: EscapeTarget(target), LinkTargetEscaped: true);
+                ? new Quarantined.LinkRemoved(path, why, text)
+                : new Quarantined.LinkRemoved(path, why, EscapeTarget(target), LinkTargetEscaped: true);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             var reason = exception is UnauthorizedAccessException denied
                 ? Out.DescribePermissionDenied(denied)
                 : exception.Message;
-            return new(path, "", $"{why}. COULD NOT REMOVE IT ({reason}): " +
+            return new Quarantined.Failed(path, $"{why}. COULD NOT REMOVE IT ({reason}): " +
                 "don't run git here until you've dealt with it");
         }
     }
@@ -94,7 +93,7 @@ internal static class GitQuarantine
 
     /// <summary>Renames the HEAD inside a .git directory that was just moved to <paramref name="moved"/>.</summary>
     /// <returns>The rename made, or null if it isn't a real directory or has no HEAD.</returns>
-    private static (string From, string To)? MoveHeadAside(string moved)
+    private static InnerRename? MoveHeadAside(string moved)
     {
         if (!Directory.Exists(moved) || PathChecks.IsLink(moved))
             return null;
@@ -103,7 +102,7 @@ internal static class GitQuarantine
             return null;
         var headTo = FreeName(head);
         Native.Rename(head, headTo);
-        return (head, headTo);
+        return new(head, headTo);
     }
 
     /// <summary>Finds a name beside <paramref name="path"/> to quarantine it under.</summary>

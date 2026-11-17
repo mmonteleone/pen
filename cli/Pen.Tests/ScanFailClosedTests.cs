@@ -470,7 +470,7 @@ public class ScanFailClosedTests
         var foo = Path.Combine(t.Sub("repo", ".git", "modules"), "foo");
         File.CreateSymbolicLink(foo, t.Sub("elsewhere"));
 
-        Assert.Equal(foo + GitQuarantine.Suffix, Assert.Single(GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved).To);
+        Assert.Equal(foo + GitQuarantine.Suffix, Assert.IsType<Quarantined.Moved>(Assert.Single(GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved)).To);
 
         Assert.Empty(GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved);
         Assert.Empty(RepoScan.FindModuleRepos(Path.Combine(repo, ".git")));
@@ -509,7 +509,7 @@ public class ScanFailClosedTests
         var check = GitCheck.RunAtSessionEnd(repo, session);
 
         Assert.NotNull(check.Failure);
-        Assert.Contains(check.Moved, q => q.From == foo && q.To.Length == 0);
-        Assert.Contains(check.Moved, q => q.From == Path.Combine(repo, "co", ".git") && q.To.Length > 0);
+        Assert.Contains(check.Moved, q => q.From == foo && q is not Quarantined.Moved);
+        Assert.Contains(check.Moved, q => q.From == Path.Combine(repo, "co", ".git") && q is Quarantined.Moved);
     }
 }

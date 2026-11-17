@@ -329,7 +329,7 @@ public class PausedGitTests
         var quarantined = state + GitQuarantine.Suffix;
         try
         {
-            var moved = Assert.Single(GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved);
+            var moved = Assert.IsType<Quarantined.Moved>(Assert.Single(GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved));
             Assert.Equal(quarantined, moved.To);
             Assert.Contains("can't be read", moved.Why);
         }
@@ -747,7 +747,7 @@ public class PausedGitTests
 
         Assert.Null(check.Failure);
         Assert.False(PathChecks.Exists(path));
-        Assert.Contains(check.Moved, q => q.From == path && q.To.Length > 0);
+        Assert.Contains(check.Moved, q => q.From == path && q is Quarantined.Moved);
         Assert.Contains(check.ModeChanges, c => c.Path == Path.GetDirectoryName(path) && c.Now.HasFlag(UnixFileMode.UserWrite));
     }
 
@@ -831,7 +831,7 @@ public class PausedGitTests
 
         Assert.Null(check.Failure);
         Assert.False(PathChecks.Exists(path));
-        Assert.Contains(check.Moved, q => q.From == path && q.To.Length > 0);
+        Assert.Contains(check.Moved, q => q.From == path && q is Quarantined.Moved);
     }
 
     /// <summary>Modes that list badly but stay searchable, as the sandbox could set them.</summary>
@@ -957,7 +957,7 @@ public class PausedGitTests
         Assert.NotNull(check.Failure);
         Assert.Contains("can't read", check.Failure);
         Assert.False(File.Exists(path));
-        Assert.Contains(check.Moved, q => q.From == path && q.To.Length > 0);
+        Assert.Contains(check.Moved, q => q.From == path && q is Quarantined.Moved);
     }
 
     [Fact]
@@ -1023,7 +1023,7 @@ public class PausedGitTests
         var check = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
 
         Assert.NotNull(check.Failure); // pen sign can't change modes while other sessions run, so it stops here
-        Assert.Contains(check.Moved, q => q.To.Length == 0);
+        Assert.Contains(check.Moved, q => q is not Quarantined.Moved);
         var warning = CapturingStderr(() => GitCheckReport.Print(repo, check));
         Assert.Contains("COULD NOT MOVE IT", warning);
         Assert.Contains("git wasn't checked: don't run git here", warning);
@@ -1228,7 +1228,7 @@ public class PausedGitTests
     [Fact]
     public void ReportPrintsItBetweenTheMovesAndTheFailure()
     {
-        var moved = new List<Quarantined> { new("/p/.git/commondir", "/p/.git/commondir.pen-quarantine", "why") };
+        var moved = new List<Quarantined> { new Quarantined.Moved("/p/.git/commondir", "/p/.git/commondir.pen-quarantine", "why") };
         var paused = new List<PausedOp> { new("/p/.git/rebase-merge", "a paused rebase", []) };
         var output = CapturingStderr(() => GitCheckReport.Print("/p", new CheckResult { Moved = moved, Failure = "reason", Paused = paused }));
         var at = output.IndexOf("a paused rebase", StringComparison.Ordinal);

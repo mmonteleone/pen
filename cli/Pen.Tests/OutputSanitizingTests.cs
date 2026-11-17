@@ -136,7 +136,7 @@ public class OutputSanitizingTests
     public void WarningsShowHostileNamesAsFields()
     {
         const string evil = "/p/x\x1b[2J\npen: all clear";
-        var w = GitCheckWording.Warning("/p", [new(evil + "/.git", evil + "/.git.pen-quarantine", "why")]);
+        var w = GitCheckWording.Warning("/p", [new Quarantined.Moved(evil + "/.git", evil + "/.git.pen-quarantine", "why")]);
         Assert.Contains("  x\\x1b[2J\\npen: all clear/.git → x\\x1b[2J\\npen: all clear/.git.pen-quarantine", w);
         Assert.DoesNotContain("\npen: all clear", w, StringComparison.Ordinal);
         Assert.Equal(w, Out.StripControls(w));
@@ -353,7 +353,7 @@ public class RestoreCommandTests
             var nested = t.Sub("repo", name);
             Git.Run(nested, "init", "-q");
             var moved = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved;
-            var q = Assert.Single(moved);
+            var q = Assert.IsType<Quarantined.Moved>(Assert.Single(moved));
             Assert.Equal(Path.Combine(nested, ".git"), q.From);
             Assert.False(Directory.Exists(q.From));
 

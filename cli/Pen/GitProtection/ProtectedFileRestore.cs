@@ -49,7 +49,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
     /// need to know what this one vouched for.
     /// </para>
     /// <para>
-    /// If not, an entry it added to <see cref="CheckChanges.Moved"/> with no destination fails the check, and the
+    /// If not, a <see cref="Quarantined.Failed"/> it added to <see cref="CheckChanges.Moved"/> fails the check, and the
     /// caller must keep the session's files: they're the only good copies, and a new session would otherwise take
     /// what's on disk as its baseline. Whatever goes wrong, the original goes back before anything that could stop
     /// it, such as keeping the changed version.
@@ -65,8 +65,8 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
         }
         catch (Exception exception) when (ProtectedFiles.IsDamage(exception))
         {
-            _changes.Moved.Add(new(_session.ProtectedManifest, "", "pen's list of protected files couldn't be " +
-                "read, so they weren't compared. COULD NOT RESTORE THEM: " +
+            _changes.Moved.Add(new Quarantined.Failed(_session.ProtectedManifest, "pen's list of protected files " +
+                "couldn't be read, so they weren't compared. COULD NOT RESTORE THEM: " +
                 "don't run git here until you've checked them"));
             return false;
         }
@@ -74,7 +74,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
             return true;
         foreach (var file in manifest.Files.Where(file => !file.Adopted))
             RestoreOrRecord(file);
-        if (_changes.Moved.Skip(firstMoved).Any(quarantined => quarantined.Failed))
+        if (_changes.Moved.Skip(firstMoved).Any(quarantined => quarantined is Quarantined.Failed))
             return false;
         File.Move(_session.ProtectedManifest, _session.RestoredManifest, overwrite: true);
         Directory.Delete(_session.ProtectedDir, recursive: true);
@@ -91,7 +91,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
         catch (Exception exception)
             when (exception is IOException or UnauthorizedAccessException or PenException)
         {
-            _changes.Moved.Add(new(file.Path, "", "a protected file that may have changed. COULD NOT " +
+            _changes.Moved.Add(new Quarantined.Failed(file.Path, "a protected file that may have changed. COULD NOT " +
                 $"RESTORE IT ({Out.Describe(exception)}): don't run git here until you've dealt with it"));
         }
     }
@@ -181,7 +181,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
             "start of the session (a symlink, a directory, or too big or unreadable " +
             "to compare), so it was moved aside and the original put back", breakLayout: false);
         _changes.Moved.Add(quarantined);
-        if (!quarantined.Failed)
+        if (quarantined is not Quarantined.Failed)
             ProtectedFiles.WriteNew(file.Path, original, file.Mode);
     }
 
@@ -193,12 +193,13 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
         try
         {
             ProtectedFiles.WriteNew(to, changed, ProtectedFiles.File600);
-            _changes.Moved.Add(new(file.Path, to, "it changed during the session, so the original was written back " +
-                "and the changed version kept here (git config on this machine during a session does this too)"));
+            _changes.Moved.Add(new Quarantined.Moved(file.Path, to, "it changed during the session, so the original " +
+                "was written back and the changed version kept here (git config on this machine during a session " +
+                "does this too)"));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            _changes.Moved.Add(new(file.Path, "", "it changed during the session. The original was " +
+            _changes.Moved.Add(new Quarantined.Failed(file.Path, "it changed during the session. The original was " +
                 $"written back, but the changed version couldn't be kept ({Out.Describe(exception)})"));
         }
     }

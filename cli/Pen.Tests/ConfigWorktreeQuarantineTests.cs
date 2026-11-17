@@ -97,7 +97,7 @@ public class ConfigWorktreeQuarantineTests
         var check = GitCheck.RunAtSessionEnd(repo, s);
 
         Assert.Null(check.Failure);
-        var q = Assert.Single(check.Moved);
+        var q = Assert.IsType<Quarantined.Moved>(Assert.Single(check.Moved));
         Assert.Equal(file, q.From);
         Assert.Equal(Fsmonitor(hook), File.ReadAllText(q.To));
         Assert.False(File.Exists(file));

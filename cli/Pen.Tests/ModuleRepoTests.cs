@@ -425,7 +425,7 @@ public class ModuleRepoTests
         Assert.Equal(
             [".git/modules/libs/mid/modules/deps/new", ".git/modules/libs/new", "libs/mid/deps/new/.git", "libs/new/.git"],
             moved.Select(q => PathChecks.FormatPath(super, q.From)).Order(StringComparer.Ordinal));
-        Assert.All(moved, q => Assert.NotEqual("", q.To));
+        Assert.All(moved, q => Assert.IsType<Quarantined.Moved>(q));
         Assert.Equal(atStart, RepoScan.FindModuleRepos(Path.Combine(super, ".git")));
         Assert.True(File.Exists(Path.Combine(super, "libs", "mid", ".git")));
         Assert.Empty(GitCheck.RunWithoutSession(super, startedWithGit: true, commonGitDir: null, modulesAtStart: atStart).Moved);

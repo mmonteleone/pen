@@ -118,7 +118,7 @@ public sealed class ModuleBaselineTests : IDisposable
     }
 
     private static void AssertMoved(CheckResult check, string module) =>
-        Assert.Contains(check.Moved, q => q.From == module && q.To.Length > 0);
+        Assert.Contains(check.Moved, q => q.From == module && q is Quarantined.Moved);
 
     // ---- Replays ----
 
@@ -245,7 +245,7 @@ public sealed class ModuleBaselineTests : IDisposable
 
         Assert.DoesNotContain(check.Moved, q => q.From == config);
         Assert.DoesNotContain(check.Restored, r => r.Path == config);
-        var moved = Assert.Single(check.Moved, q => q.From == module).To;
+        var moved = Assert.IsType<Quarantined.Moved>(Assert.Single(check.Moved, q => q.From == module)).To;
         Assert.Equal("[core]\n\tbare = false\n", File.ReadAllText(Path.Combine(moved, "config")));
         AssertDoesntFire(checkout, marker);
     }

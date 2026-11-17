@@ -23,59 +23,81 @@ internal static class GitCheckWording
         var text = new StringBuilder();
         text.AppendLine("pen: WARNING: this session left git files that " +
             "would make git on this machine run code from the sandbox.");
-        text.AppendLine(moved.Any(quarantined => quarantined.Removed)
+        text.AppendLine(moved.Any(quarantined => quarantined is Quarantined.LinkRemoved)
             ? "pen: They've been moved out of git's way, or removed:"
             : "pen: They've been moved out of git's way:");
         foreach (var quarantined in moved)
         {
             text.Append("  ").Append(PathChecks.FormatPath(dir, quarantined.From));
-            if (quarantined.LinkTarget is { } target)
-                text.Append(" (a symlink to ").Append(Out.Field(target)).Append(") removed");
-            else if (!quarantined.Failed)
-                text.Append(" → ").Append(PathChecks.FormatPath(dir, quarantined.To));
+            switch (quarantined)
+            {
+                case Quarantined.LinkRemoved removed:
+                    text.Append(" (a symlink to ").Append(Out.Field(removed.LinkTarget)).Append(") removed");
+                    break;
+                case Quarantined.Moved renamed:
+                    text.Append(" → ").Append(PathChecks.FormatPath(dir, renamed.To));
+                    break;
+            }
             text.AppendLine().Append("      ").AppendLine(quarantined.Why);
         }
-        var restorable = moved.Where(quarantined => !quarantined.Failed).ToList();
+        var restorable = moved.Where(quarantined => quarantined is not Quarantined.Failed).ToList();
         if (restorable.Count > 0)
         {
             text.AppendLine("pen: Inspect each one before putting it back (a hook or a " +
                 "core.* setting in its config runs on this machine). To restore one:");
             foreach (var quarantined in restorable)
-                AppendRestoreCommand(text, quarantined);
+            {
+                switch (quarantined)
+                {
+                    case Quarantined.LinkRemoved removed:
+                        AppendRemakeCommand(text, removed);
+                        break;
+                    case Quarantined.Moved renamed:
+                        AppendMoveBackCommand(text, renamed);
+                        break;
+                }
+            }
         }
         return text.ToString().TrimEnd('\n');
     }
 
-    /// <summary>Appends the line that puts <paramref name="quarantined"/> back, or says why there's none.</summary>
-    private static void AppendRestoreCommand(StringBuilder text, Quarantined quarantined)
+    /// <summary>Appends the line that makes <paramref name="removed"/> again, or says why there's none.</summary>
+    private static void AppendRemakeCommand(StringBuilder text, Quarantined.LinkRemoved removed)
     {
         // Command substitution drops trailing newlines, so no quoting
         // that works in every shell can name this one.
-        if (quarantined.From.EndsWith('\n') || quarantined.LinkTarget?.EndsWith('\n') == true)
+        if (removed.From.EndsWith('\n') || removed.LinkTarget.EndsWith('\n'))
         {
-            text.Append("  pen can't write a command for ").Append(Out.Field(quarantined.From)).AppendLine(
-                quarantined.Removed
-                    ? ", since its name or what it held ends in a newline: make it again by hand"
-                    : ", since the name ends in a newline: rename it back by hand");
+            text.Append("  pen can't write a command for ").Append(Out.Field(removed.From)).AppendLine(
+                ", since its name or what it held ends in a newline: make it again by hand");
             return;
         }
-        if (quarantined.LinkTargetEscaped)
+        if (removed.LinkTargetEscaped)
         {
-            text.Append("  pen can't write a command for ").Append(Out.Field(quarantined.From)).AppendLine(
+            text.Append("  pen can't write a command for ").Append(Out.Field(removed.From)).AppendLine(
                 ", since what it held isn't valid UTF-8 (shown above with octal escapes): make it again by hand");
             return;
         }
-        if (quarantined.LinkTarget is { } target)
+        text.Append("  ln -s ").Append(Shell.Quote(removed.LinkTarget)).Append(' ').Append(Shell.Quote(removed.From))
+            .AppendLine();
+    }
+
+    /// <summary>Appends the line that puts <paramref name="renamed"/> back, or says why there's none.</summary>
+    private static void AppendMoveBackCommand(StringBuilder text, Quarantined.Moved renamed)
+    {
+        // Command substitution drops trailing newlines, so no quoting
+        // that works in every shell can name this one.
+        if (renamed.From.EndsWith('\n'))
         {
-            text.Append("  ln -s ").Append(Shell.Quote(target)).Append(' ').Append(Shell.Quote(quarantined.From))
-                .AppendLine();
+            text.Append("  pen can't write a command for ").Append(Out.Field(renamed.From)).AppendLine(
+                ", since the name ends in a newline: rename it back by hand");
             return;
         }
-        text.Append("  mv ").Append(Shell.Quote(quarantined.To)).Append(' ').Append(Shell.Quote(quarantined.From));
-        if (quarantined.Inner is { } inner)
+        text.Append("  mv ").Append(Shell.Quote(renamed.To)).Append(' ').Append(Shell.Quote(renamed.From));
+        if (renamed.Inner is { } inner)
         {
-            text.Append(" && mv ").Append(Shell.Quote(Path.Combine(quarantined.From, Path.GetFileName(inner.To))))
-                .Append(' ').Append(Shell.Quote(Path.Combine(quarantined.From, Path.GetFileName(inner.From))));
+            text.Append(" && mv ").Append(Shell.Quote(Path.Combine(renamed.From, Path.GetFileName(inner.To))))
+                .Append(' ').Append(Shell.Quote(Path.Combine(renamed.From, Path.GetFileName(inner.From))));
         }
 
         text.AppendLine();

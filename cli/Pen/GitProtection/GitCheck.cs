@@ -171,7 +171,7 @@ internal sealed class GitCheck
                 + "this machine can still enter them and run what's there (shown with octal escapes): "
                 + string.Join(", ", RepoGuard.FormatBadNames(_dir, badNames)));
         }
-        if (_changes.Moved.Any(quarantined => quarantined.Failed))
+        if (_changes.Moved.Any(quarantined => quarantined is Quarantined.Failed))
             failures.Add("a file named above couldn't be moved out of git's way, removed or restored");
         var failure = failures.Count == 0 ? null : string.Join("; ", failures);
         return new() { Moved = _changes.Moved, Failure = failure, Paused = _paused };
@@ -361,8 +361,8 @@ internal sealed class GitCheck
                 var isDir = repo.Kind == NestedKind.GitDir;
                 var moved = GitQuarantine.Move(repo.Path, describe(repo), breakLayout: isDir);
                 _changes.Moved.Add(moved);
-                if (isDir && !moved.Failed)
-                    movedAside.Add(moved.To);
+                if (isDir && moved is Quarantined.Moved { To: var to })
+                    movedAside.Add(to);
             }
             foreach (var link in scan.GitDirLinks)
             {
@@ -389,7 +389,7 @@ internal sealed class GitCheck
     private void RemoveLink(string link, string why)
     {
         var attempt = GitQuarantine.RemoveLink(_dir, link, why);
-        if (attempt.Failed && _mayChangeModes
+        if (attempt is Quarantined.Failed && _mayChangeModes
             && _changes.TryMakeListableRecording(Paths.GetParent(link), write: true))
         {
             attempt = GitQuarantine.RemoveLink(_dir, link, why);
@@ -563,12 +563,12 @@ internal sealed class GitCheck
     private bool TryRenameMakingWritable(string path, string why, bool breakLayout)
     {
         var attempt = GitQuarantine.Move(path, why, breakLayout);
-        if (attempt.Failed && _mayChangeModes
+        if (attempt is Quarantined.Failed && _mayChangeModes
             && _changes.TryMakeListableRecording(Paths.GetParent(path), write: true))
         {
             attempt = GitQuarantine.Move(path, why, breakLayout);
         }
-        if (attempt.Failed)
+        if (attempt is Quarantined.Failed)
             return false;
         _changes.Moved.Add(attempt);
         return true;

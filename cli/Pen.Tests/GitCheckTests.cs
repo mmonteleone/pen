@@ -3,7 +3,7 @@ namespace Pen.Tests;
 public class GitCheckTests
 {
     private static List<(string From, string To)> Check(string dir, bool startedWithGit = true) =>
-        GitCheck.RunWithoutSession(dir, startedWithGit, commonGitDir: null, modulesAtStart: null).Moved.Select(q => (PathChecks.FormatPath(dir, q.From), PathChecks.FormatPath(dir, q.To))).ToList();
+        GitCheck.RunWithoutSession(dir, startedWithGit, commonGitDir: null, modulesAtStart: null).Moved.Select(q => (PathChecks.FormatPath(dir, q.From), PathChecks.FormatPath(dir, q is Quarantined.Moved m ? m.To : ""))).ToList();
 
     [Fact]
     public void NothingFlaggedForCommitsBranchesAndWorktrees()
@@ -53,9 +53,9 @@ public class GitCheckTests
         var x = t.Sub("repo", ".git", "modules", "x");
         Git.Run(x, "init", "-q", "--bare");
         var moved = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved;
-        Assert.Equal([(".git/modules/x", ".git/modules/x.pen-quarantine")], moved.Select(q => (PathChecks.FormatPath(repo, q.From), PathChecks.FormatPath(repo, q.To))));
+        Assert.Equal([(".git/modules/x", ".git/modules/x.pen-quarantine")], moved.Select(q => (PathChecks.FormatPath(repo, q.From), PathChecks.FormatPath(repo, q is Quarantined.Moved m ? m.To : ""))));
         Assert.Equal((".git/modules/x.pen-quarantine/HEAD", ".git/modules/x.pen-quarantine/HEAD.pen-quarantine"),
-            (PathChecks.FormatPath(repo, moved[0].Inner!.Value.From), PathChecks.FormatPath(repo, moved[0].Inner!.Value.To)));
+            (PathChecks.FormatPath(repo, ((Quarantined.Moved)moved[0]).Inner!.From), PathChecks.FormatPath(repo, ((Quarantined.Moved)moved[0]).Inner!.To)));
         // An empty directory in modules/ isn't a repo, and isn't flagged.
         Directory.CreateDirectory(Path.Combine(repo, ".git", "modules", "empty"));
         Assert.Empty(GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved);
@@ -68,9 +68,9 @@ public class GitCheckTests
         var repo = Git.Repo(t.Sub("repo"));
         Git.Run(repo, "init", "-q", "sub");
         var moved = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved;
-        var q = Assert.Single(moved);
+        var q = Assert.IsType<Quarantined.Moved>(Assert.Single(moved));
         Assert.Equal(Path.Combine(repo, "sub", ".git.pen-quarantine"), q.To);
-        Assert.Equal((Path.Combine(q.To, "HEAD"), Path.Combine(q.To, "HEAD.pen-quarantine")), q.Inner);
+        Assert.Equal(new InnerRename(Path.Combine(q.To, "HEAD"), Path.Combine(q.To, "HEAD.pen-quarantine")), q.Inner);
         // The renamed dir no longer looks like a bare repo either.
         Assert.Empty(Check(repo));
         Assert.Empty(NestedScans.Find(repo));
@@ -101,7 +101,7 @@ public class GitCheckTests
         using var t = new TempDir();
         var dir = Git.Repo(t.Sub("proj"));
         var moved = GitCheck.RunWithoutSession(dir, startedWithGit: false, commonGitDir: null, modulesAtStart: null).Moved;
-        Assert.Equal(Path.Combine(dir, ".git.pen-quarantine"), Assert.Single(moved).To);
+        Assert.Equal(Path.Combine(dir, ".git.pen-quarantine"), Assert.IsType<Quarantined.Moved>(Assert.Single(moved)).To);
         Assert.False(Directory.Exists(Path.Combine(dir, ".git")));
         Assert.Empty(NestedScans.Find(dir));
     }

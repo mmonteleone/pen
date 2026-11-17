@@ -411,7 +411,7 @@ public class ProtectedFilesTests
         Assert.Equal(original, File.ReadAllBytes(config));
         Assert.Equal(original, File.ReadAllBytes(pinned));
         Assert.Equal(mode, File.GetUnixFileMode(config));
-        var q = Assert.Single(check.Moved);
+        var q = Assert.IsType<Quarantined.Moved>(Assert.Single(check.Moved));
         Assert.Equal(config, q.From);
         Assert.Equal(config + GitQuarantine.Suffix, q.To);
         Assert.Equal(Binary, File.ReadAllBytes(q.To));
@@ -635,7 +635,7 @@ public class ProtectedFilesTests
         {
             var check = End(repo, s);
             Assert.NotNull(check.Failure);
-            Assert.Contains(check.Moved, q => q.To.Length == 0 && q.Why.Contains("COULD NOT RESTORE", StringComparison.Ordinal));
+            Assert.Contains(check.Moved, q => q is not Quarantined.Moved && q.Why.Contains("COULD NOT RESTORE", StringComparison.Ordinal));
         }
         finally { File.SetUnixFileMode(sub, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
     }
@@ -655,7 +655,7 @@ public class ProtectedFilesTests
         var check = End(repo, s);
 
         Assert.NotNull(check.Failure);
-        Assert.Contains(check.Moved, q => q.From == config && q.To.Length == 0);
+        Assert.Contains(check.Moved, q => q.From == config && q is not Quarantined.Moved);
         Assert.True(File.Exists(Path.Combine(git, "commondir" + GitQuarantine.Suffix)));
     }
 
@@ -746,8 +746,8 @@ public class ProtectedFilesTests
             Assert.Equal(original, File.ReadAllBytes(config));
             // The restore's entry first, then the sweep's; the rest of the check didn't run.
             Assert.Equal([config, msgnum], check.Moved.Select(q => q.From));
-            Assert.Equal(config + GitQuarantine.Suffix, check.Moved[0].To);
-            Assert.Equal(msgnum + GitQuarantine.Suffix, check.Moved[1].To);
+            Assert.Equal(config + GitQuarantine.Suffix, ((Quarantined.Moved)check.Moved[0]).To);
+            Assert.Equal(msgnum + GitQuarantine.Suffix, ((Quarantined.Moved)check.Moved[1]).To);
             Assert.Equal(git, Assert.Single(check.ModeChanges).Path);
             Assert.Empty(check.Restored);
             Assert.Empty(check.RestoreBlocked);
@@ -832,7 +832,7 @@ public class ProtectedFilesTests
         Assert.Null(check.Failure);
         Assert.False(check.RestoreIncomplete);
         Assert.Equal(original, File.ReadAllBytes(config));
-        var q = Assert.Single(check.Moved);
+        var q = Assert.IsType<Quarantined.Moved>(Assert.Single(check.Moved));
         Assert.True(File.Exists(q.To));
         Assert.Contains(check.ModeChanges, o => o.Path == git);
         AssertDoesntRun(repo, marker);
@@ -1130,7 +1130,7 @@ public class ProtectedFilesTests
     public void TheWarningAndReport_NameWhatWasRestored()
     {
         var evil = "/p/.git/\u001b[2Jconfig";
-        var w = GitCheckWording.Warning("/p", [new(evil, evil + GitQuarantine.Suffix, "it changed")]);
+        var w = GitCheckWording.Warning("/p", [new Quarantined.Moved(evil, evil + GitQuarantine.Suffix, "it changed")]);
         Assert.Contains("moved out of git's way", w);
         Assert.DoesNotContain('\u001b', w);
     }

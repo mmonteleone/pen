@@ -4,7 +4,9 @@ namespace Pen.GitProtection;
 /// <remarks>Git is only safe to run in the checked directory if <see cref="Failure"/> is null.</remarks>
 internal sealed record CheckResult
 {
-    /// <summary>Gets what the check renamed before it stopped; an entry with no destination wasn't moved.</summary>
+    /// <summary>
+    /// Gets what the check renamed or removed before it stopped; a <see cref="Quarantined.Failed"/> entry wasn't.
+    /// </summary>
     public required List<Quarantined> Moved { get; init; }
 
     /// <summary>Gets why the check couldn't finish or vouch for the directory, or null if it did.</summary>
@@ -26,35 +28,59 @@ internal sealed record CheckResult
     public List<PausedOp> Paused { get; init; } = [];
 }
 
-/// <summary>One rename the check made, or one it couldn't make, or a symlink it removed.</summary>
-/// <param name="From">What was moved, or removed.</param>
-/// <param name="To">Where it went, or empty if it was removed or couldn't be moved (or restored).</param>
-/// <param name="Why">Why it was moved, and if it couldn't be, why not.</param>
-/// <param name="Inner">A second rename inside the moved item (a .git directory's HEAD), if any.</param>
-/// <param name="LinkTarget">
-/// For a symlink removed rather than renamed (it holds no data, and under any name leads to the same place), what it
-/// held, so it can be made again.
-/// </param>
-/// <param name="LinkTargetEscaped">
-/// Whether what the symlink held isn't valid UTF-8, so <see cref="LinkTarget"/> shows it with octal escapes and
-/// names it only for reading.
-/// </param>
-internal sealed record Quarantined(
-    string From,
-    string To,
-    string Why,
-    (string From, string To)? Inner = null,
-    string? LinkTarget = null,
-    bool LinkTargetEscaped = false)
+/// <summary>
+/// One thing the check renamed or removed, or couldn't: <see cref="Moved"/>, <see cref="LinkRemoved"/> or
+/// <see cref="Failed"/>, which are all there are.
+/// </summary>
+internal abstract record Quarantined
 {
-    /// <summary>Whether it was a symlink that was removed.</summary>
-    public bool Removed => LinkTarget is not null;
+    private Quarantined(string from, string why)
+    {
+        From = from;
+        Why = why;
+    }
+
+    /// <summary>Gets what was moved or removed, or couldn't be (or couldn't be restored).</summary>
+    public string From { get; }
+
+    /// <summary>Gets why it was moved or removed, and if it couldn't be, why not.</summary>
+    public string Why { get; }
+
+    /// <summary>A rename the check made, which renaming <see cref="To"/> back to From undoes.</summary>
+    /// <param name="From">What was moved; for a protected file written back in place, that file.</param>
+    /// <param name="To">
+    /// Where it went; for a protected file written back in place, where its changed version was kept.
+    /// </param>
+    /// <param name="Why">Why it was moved.</param>
+    /// <param name="Inner">A second rename inside the moved item (a .git directory's HEAD), if any.</param>
+    internal sealed record Moved(string From, string To, string Why, InnerRename? Inner = null)
+        : Quarantined(From, Why);
 
     /// <summary>
-    /// Whether it couldn't be moved (or restored, or removed): <see cref="To"/> is empty and it wasn't removed.
+    /// A symlink the check removed rather than renamed: it holds no data, and under any name leads to the same place.
     /// </summary>
-    public bool Failed => To.Length == 0 && !Removed;
+    /// <param name="From">The symlink.</param>
+    /// <param name="Why">Why it was removed.</param>
+    /// <param name="LinkTarget">What it held, so it can be made again.</param>
+    /// <param name="LinkTargetEscaped">
+    /// Whether what it held isn't valid UTF-8, so <paramref name="LinkTarget"/> shows it with octal escapes and names
+    /// it only for reading.
+    /// </param>
+    internal sealed record LinkRemoved(string From, string Why, string LinkTarget, bool LinkTargetEscaped = false)
+        : Quarantined(From, Why);
+
+    /// <summary>
+    /// Something the check couldn't move or remove, or a protected file it couldn't restore: it fails the check.
+    /// </summary>
+    /// <param name="From">What couldn't be moved, removed or restored.</param>
+    /// <param name="Why">Why it was to be, and why it couldn't be.</param>
+    internal sealed record Failed(string From, string Why) : Quarantined(From, Why);
 }
+
+/// <summary>A rename inside an item the check moved.</summary>
+/// <param name="From">The name it had, inside the item's new place.</param>
+/// <param name="To">The name it has now.</param>
+internal sealed record InnerRename(string From, string To);
 
 /// <summary>A protected file that changed with nothing to set aside.</summary>
 /// <param name="Path">The file.</param>

@@ -46,7 +46,7 @@ public class UnreadablePathTests
 
         var moved = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: thereAtStart ? [foo] : []).Moved;
 
-        var q = Assert.Single(moved);
+        var q = Assert.IsType<Quarantined.Moved>(Assert.Single(moved));
         Assert.Equal(foo, q.From);
         Assert.Equal(foo + GitQuarantine.Suffix, q.To);
         Assert.Contains("can't be read", q.Why);
