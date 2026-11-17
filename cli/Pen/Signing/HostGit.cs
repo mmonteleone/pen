@@ -74,29 +74,17 @@ internal sealed class HostGit(string? dir, IReadOnlyList<string> config, IReadOn
     /// <param name="stdin">What to write to git's stdin, or null to close it straight away.</param>
     /// <param name="env">Environment for this call only, or null for none.</param>
     /// <returns>git's exit code and output, whether it succeeded or not.</returns>
+    /// <remarks>
+    /// There's no timeout or limit: git runs to its end, however long it takes and however much it writes (a
+    /// cat-file of a large blob is held whole).
+    /// </remarks>
     public GitResult Run(
         IEnumerable<string> args,
         byte[]? stdin = null,
         IReadOnlyDictionary<string, string>? env = null)
     {
-        using var process = Proc.Start(CreateStartInfo(args, env));
-        var stderr = process.StandardError.ReadToEndAsync();
-        var stdout = new MemoryStream();
-        var copy = process.StandardOutput.BaseStream.CopyToAsync(stdout);
-        try
-        {
-            using var input = process.StandardInput.BaseStream;
-            if (stdin is not null)
-                input.Write(stdin);
-        }
-        catch (IOException)
-        {
-            // git exited without reading it; its exit code says why
-        }
-
-        copy.Wait();
-        process.WaitForExit();
-        return new GitResult(process.ExitCode, stdout.ToArray(), stderr.Result);
+        var output = Proc.CaptureBytes(CreateStartInfo(args, env), stdin);
+        return new GitResult(output.ExitCode, output.Stdout, DecodeStderr(output.Stderr));
     }
 
     /// <summary>Runs git with <paramref name="args"/> and nothing on stdin, capturing its output.</summary>
@@ -166,9 +154,18 @@ internal sealed class HostGit(string? dir, IReadOnlyList<string> config, IReadOn
             startInfo.Environment[name] = "1";
         if (_dir is null)
             startInfo.WorkingDirectory = "/";
-        startInfo.RedirectStandardOutput = startInfo.RedirectStandardError = true;
-        startInfo.RedirectStandardInput = true;
         return startInfo;
+    }
+
+    /// <summary>
+    /// Decodes git's stderr as Process decodes a redirected stream by default on Unix: UTF-8, unless a byte order
+    /// mark at the start says otherwise.
+    /// </summary>
+    private static string DecodeStderr(byte[] stderr)
+    {
+        using var reader = new StreamReader(new MemoryStream(stderr), Encoding.Default,
+            detectEncodingFromByteOrderMarks: true);
+        return reader.ReadToEnd();
     }
 }
 
