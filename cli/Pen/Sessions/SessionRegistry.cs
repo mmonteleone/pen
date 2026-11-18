@@ -37,7 +37,7 @@ internal static class SessionRegistry
         foreach (var path in Directory.EnumerateDirectories(sessions).Order(StringComparer.Ordinal))
         {
             var session = new SessionDir(projectKey, path);
-            if (session.IsOpen)
+            if (session.IsOpen())
                 open.Add(session);
         }
         return open;

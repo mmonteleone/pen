@@ -424,7 +424,7 @@ public class AllowCommandTests
         Assert.Contains($"waiting for another pen allow or pen deny applying to the running session {s.ComposeProject}", err);
         Assert.Equal((1, 1), CountProxyCalls(t));
         // Not one of the files whose presence says what the session is.
-        Assert.True(s.IsOpen);
+        Assert.True(s.IsOpen());
         Session.DeleteSessionFiles(s);
         Assert.False(File.Exists(s.AclLockFile));
     }

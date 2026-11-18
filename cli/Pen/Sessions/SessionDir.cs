@@ -58,12 +58,14 @@ internal sealed class SessionDir(string projectKey, string path)
     /// <summary>Gets the path of the proxy's open-egress ACL file, which matches any name in open egress.</summary>
     public string OpenEgressFile => GetPath("open-egress.txt");
 
-    /// <summary>Gets whether the session's proxy has the deny and open ACLs, as one started by this Pen does.</summary>
-    public bool HasDenyAndOpen => File.Exists(DenylistFile);
+    /// <summary>
+    /// Checks whether the session's proxy has the deny and open ACLs, as one started by this Pen does.
+    /// </summary>
+    public bool HasDenyAndOpen() => File.Exists(DenylistFile);
 
-    /// <summary>Gets whether the session's open-egress.txt opens egress.</summary>
+    /// <summary>Reads whether the session's open-egress.txt opens egress.</summary>
     /// <remarks>False without one, as in a session started by a Pen without open egress.</remarks>
-    public bool HasOpenEgress =>
+    public bool HasOpenEgress() =>
         File.Exists(OpenEgressFile) && Allowlist.IsOpenEgress(File.ReadAllText(OpenEgressFile));
 
     /// <summary>Reads what the session's proxy enforces now, from its ACL files.</summary>
@@ -76,7 +78,7 @@ internal sealed class SessionDir(string projectKey, string path)
         static IEnumerable<string> ReadList(string file) =>
             File.Exists(file) ? Allowlist.ParseList(File.ReadAllText(file)) : [];
         var allow = ReadList(AllowlistFile).ToHashSet(StringComparer.Ordinal);
-        if (HasOpenEgress)
+        if (HasOpenEgress())
             allow.Add(Allowlist.AnyDomain);
         return (allow, ReadList(DenylistFile).ToHashSet(StringComparer.Ordinal));
     }
@@ -178,24 +180,8 @@ internal sealed class SessionDir(string projectKey, string path)
     /// <summary>Gets the path of the file <paramref name="name"/> in the session's directory.</summary>
     public string GetPath(string name) => System.IO.Path.Combine(Path, name);
 
-    /// <summary>Gets whether the session's files are still there, so its stack may be up.</summary>
-    public bool IsOpen => File.Exists(ComposeFile);
-
-    /// <summary>Builds the arguments of a docker compose call on this session's stack.</summary>
-    /// <param name="args">The compose subcommand and its arguments.</param>
-    /// <returns>The arguments for docker, which runs with the env the session started with.</returns>
-    public string[] BuildComposeArgs(params string[] args)
-    {
-        var composeArgs = new List<string> { "compose", "--progress", "quiet" };
-        if (File.Exists(DockerMarker))
-            composeArgs.AddRange(["--profile", "docker"]);
-        composeArgs.AddRange(["-f", ComposeFile]);
-        if (File.Exists(OverrideFile))
-            composeArgs.AddRange(["-f", OverrideFile]);
-        composeArgs.AddRange(["-p", ComposeProject]);
-        composeArgs.AddRange(args);
-        return [.. composeArgs];
-    }
+    /// <summary>Checks whether the session's files are still there, so its stack may be up.</summary>
+    public bool IsOpen() => File.Exists(ComposeFile);
 
     /// <summary>Writes the command run in the sandbox.</summary>
     public void WriteCommand(IReadOnlyList<string> command) =>

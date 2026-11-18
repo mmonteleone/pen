@@ -418,7 +418,7 @@ public class MaskSessionTests
         }));
 
         Assert.Equal("not starting", thrown.Message);
-        Assert.False(session.IsOpen);
+        Assert.False(session.IsOpen());
         Assert.Empty(Directory.EnumerateFileSystemEntries(session.Path));
     }
 
@@ -435,7 +435,7 @@ public class MaskSessionTests
         });
 
         Assert.Equal(7, result);
-        Assert.True(session.IsOpen);
+        Assert.True(session.IsOpen());
     }
 
     // ---- the override ----

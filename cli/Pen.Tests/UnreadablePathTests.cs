@@ -131,7 +131,7 @@ public class UnreadablePathTests
 
         Session.FinishDeadSessions(session.Id, Path.Combine(t.Path, "runtime"), TimeProvider.System);
 
-        Assert.False(session.IsOpen);
+        Assert.False(session.IsOpen());
         Assert.False(Path.Exists(foo));
         Assert.True(Directory.Exists(foo + GitQuarantine.Suffix));
         RepoGuard.CheckAtStart(repo);

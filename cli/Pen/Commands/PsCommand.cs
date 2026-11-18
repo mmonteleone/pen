@@ -64,7 +64,7 @@ internal sealed partial class PsCommand(HostEnv host, TimeProvider clock)
         [
             Out.Field(session.Id),
             File.Exists(session.DockerMarker) ? "docker" : "",
-            session.HasOpenEgress ? "open" : "",
+            session.HasOpenEgress() ? "open" : "",
             string.Join(',', session.ReadPorts()),
             string.Join(',', session.ReadTools().Select(Out.Field)),
             started is { } time ? FormatAge(now - time) : "?",

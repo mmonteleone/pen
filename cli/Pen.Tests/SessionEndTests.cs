@@ -39,7 +39,7 @@ public class SessionEndTests
 
         Assert.ThrowsAny<Exception>(() => Session.DeleteSessionFiles(session));
 
-        Assert.False(session.IsOpen);
+        Assert.False(session.IsOpen());
         Assert.True(Directory.Exists(session.GetPath(record)));
         Assert.True(File.Exists(session.LockFile));
         Assert.False(File.Exists(session.EnvFile));
@@ -76,7 +76,7 @@ public class SessionEndTests
             """);
         var error = Assert.Throws<PenException>(() => Session.End(session));
         Assert.Contains("retained for retry", error.Message);
-        Assert.True(session.IsOpen);
+        Assert.True(session.IsOpen());
         Assert.True(File.Exists(session.EnvFile));
         Assert.True(File.Exists(session.ModulesFile));
         var commondir = Path.Combine(t.Path, "repo", ".git", "commondir");
@@ -90,7 +90,7 @@ public class SessionEndTests
         // no match establishes absence, allowing recovery after a crash.
         File.WriteAllText(Path.Combine(t.Path, "absent"), "");
         Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System);
-        Assert.False(session.IsOpen);
+        Assert.False(session.IsOpen());
         Assert.False(File.Exists(session.EnvFile));
         Assert.False(File.Exists(commondir));
         Assert.True(File.Exists(commondir + ".pen-quarantine"));
@@ -104,7 +104,7 @@ public class SessionEndTests
         var session = Create(t, docker: true);
         using var fake = new FakeDocker(t, "echo 'daemon unavailable' >&2; exit 1\n");
         Assert.Throws<PenException>(() => Session.End(session));
-        Assert.True(session.IsOpen);
+        Assert.True(session.IsOpen());
         Assert.True(File.Exists(Path.Combine(t.Path, "repo", ".git", "commondir")));
     }
 
@@ -132,7 +132,7 @@ public class SessionEndTests
         else
         {
             Session.End(session);
-            Assert.False(session.IsOpen);
+            Assert.False(session.IsOpen());
             Assert.True(File.Exists(Path.Combine(t.Path, "repo", ".git", "commondir.pen-quarantine")));
         }
     }
@@ -188,7 +188,7 @@ public class SessionEndTests
             Assert.DoesNotContain("compose", File.ReadAllText(Path.Combine(t.Path, "calls")));
         }
         Assert.Contains("(it will be retried by the next pen command here)", output);
-        Assert.True(session.IsOpen);
+        Assert.True(session.IsOpen());
         Assert.True(File.Exists(session.EnvFile));
         Assert.True(File.Exists(session.ModulesFile));
         // The check ran before the stack was stopped, now that the agent is gone.
@@ -196,7 +196,7 @@ public class SessionEndTests
 
         File.WriteAllText(docker, working);
         Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System);
-        Assert.False(session.IsOpen);
+        Assert.False(session.IsOpen());
         Assert.False(File.Exists(session.EnvFile));
         Assert.Contains("compose", File.ReadAllText(Path.Combine(t.Path, "calls")));
     }
@@ -219,7 +219,7 @@ public class SessionEndTests
         var output = CapturingStderr(() => Session.End(session));
 
         Assert.Contains("old.example both.example new.example", output);
-        Assert.False(session.IsOpen);
+        Assert.False(session.IsOpen());
         Assert.True(File.Exists(session.ProxyLog));
         Assert.True(File.Exists(session.PreviousProxyLog));
     }
@@ -378,14 +378,14 @@ public class SessionEndTests
             var output = CapturingStderr(() => result = Session.EndAndRemind(session));
             Assert.False(result.CheckFinished);
             Assert.Contains("good copies", output);
-            Assert.True(session.IsOpen);
+            Assert.True(session.IsOpen());
             Assert.True(File.Exists(session.ProtectedManifest));
             Assert.False(Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System));
         }
         finally { File.SetUnixFileMode(git, (UnixFileMode)0b111_101_101); }
 
         Assert.True(Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System));
-        Assert.False(session.IsOpen);
+        Assert.False(session.IsOpen());
         Assert.Equal(original, File.ReadAllText(config));
     }
 
@@ -411,7 +411,7 @@ public class SessionEndTests
         catch { File.SetUnixFileMode(git, (UnixFileMode)0b111_101_101); throw; }
 
         var runtime = Path.Combine(t.Path, "runtime");
-        Assert.True(session.IsOpen);
+        Assert.True(session.IsOpen());
         var marked = "as one line: ";
         var line = output.Split('\n').Single(l => l.Contains(marked, StringComparison.Ordinal));
         var command = line[(line.IndexOf(marked, StringComparison.Ordinal) + marked.Length)..];
@@ -428,7 +428,7 @@ public class SessionEndTests
         Assert.Equal(0, sh.ExitStatus.ExitCode);
         Assert.True(Session.FinishDeadSessions("pen-test-12345678", runtime, TimeProvider.System));
 
-        Assert.False(session.IsOpen);
+        Assert.False(session.IsOpen());
         Assert.Equal(original, File.ReadAllText(config));
         File.Delete(Path.Combine(t.Path, "bin", "git")); // the real one, from here
         Git.Run(repo, "status");
@@ -486,7 +486,7 @@ public class SessionEndTests
         string output;
         try { output = CapturingStderr(() => Session.End(session)); }
         catch { File.SetUnixFileMode(wt, (UnixFileMode)0b111_101_101); throw; }
-        Assert.True(session.IsOpen);
+        Assert.True(session.IsOpen());
 
         const string marked = "as one line: ";
         var line = output.Split('\n').Single(l => l.Contains(marked, StringComparison.Ordinal));
@@ -504,7 +504,7 @@ public class SessionEndTests
         Assert.Equal(key, Project.Resolve(ranIn, host).Key);
         Assert.True(Session.FinishDeadSessions(key, runtime, TimeProvider.System));
         Assert.Equal(original, File.ReadAllText(gitFile));
-        Assert.False(session.IsOpen);
+        Assert.False(session.IsOpen());
     }
 
     [Fact]
@@ -569,7 +569,7 @@ public class SessionEndTests
         CapturingStderr(() => result = Session.End(session));
         Assert.False(result.CheckFinished);
         Assert.True(File.Exists(session.ProtectedManifest));
-        Assert.True(session.IsOpen);
+        Assert.True(session.IsOpen());
     }
 
     [Fact]
@@ -647,8 +647,8 @@ public class SessionEndTests
         Assert.False(ok);
         Assert.Contains("git wasn't checked", output);
         Assert.False(File.Exists(gitCalls));
-        Assert.False(first.IsOpen);
-        Assert.False(second.IsOpen);
+        Assert.False(first.IsOpen());
+        Assert.False(second.IsOpen());
     }
 
     [Fact]
@@ -664,8 +664,8 @@ public class SessionEndTests
         Assert.True(Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System));
 
         Assert.Equal(2, RepoGitCalls(gitCalls).Count);
-        Assert.False(first.IsOpen);
-        Assert.False(second.IsOpen);
+        Assert.False(first.IsOpen());
+        Assert.False(second.IsOpen());
     }
 
     [Fact]
@@ -708,7 +708,7 @@ public class SessionEndTests
         Assert.Contains("permission denied", output);
         Assert.False(File.Exists(gitCalls));
         Assert.Contains("compose", File.ReadAllText(Path.Combine(t.Path, "calls")));
-        Assert.False(session.IsOpen);
+        Assert.False(session.IsOpen());
         Assert.False(File.Exists(session.EnvFile));
     }
 
@@ -728,7 +728,7 @@ public class SessionEndTests
         Assert.False(ok);
         Assert.Contains("git wasn't checked", output);
         Assert.False(File.Exists(gitCalls));
-        Assert.False(session.IsOpen);
+        Assert.False(session.IsOpen());
 
         // Nothing is left to retry, so the next command gets through.
         var calls = File.ReadAllText(Path.Combine(t.Path, "calls"));
@@ -801,7 +801,7 @@ public class SessionEndTests
             Assert.Contains("COULD NOT MOVE", output);
             Assert.Contains("git wasn't checked", output);
             Assert.False(File.Exists(gitCalls));
-            Assert.False(session.IsOpen);
+            Assert.False(session.IsOpen());
         }
         finally { File.SetUnixFileMode(git, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
     }

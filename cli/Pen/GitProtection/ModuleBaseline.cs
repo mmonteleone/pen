@@ -93,7 +93,7 @@ internal static class ModuleBaseline
         {
             if (TryReadList(session, commonGitDir) is { } list)
                 lists.Add(list);
-            else if (session.IsOpen)
+            else if (session.IsOpen())
                 unrecorded.Add(session);
         }
         if (unrecorded.Count > 0)

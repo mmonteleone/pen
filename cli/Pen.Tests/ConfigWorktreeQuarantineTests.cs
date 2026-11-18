@@ -472,7 +472,7 @@ public class ConfigWorktreeQuarantineTests
         var a = StartedAt(t, repo, git, "aaaaaaaa", 10);
         var b = StartedAt(t, repo, git, "bbbbbbbb", 5, a);
         Assert.Empty(GitCheck.RunAtSessionEnd(repo, a).Moved);
-        Assert.True(a.IsOpen);
+        Assert.True(a.IsOpen());
 
         File.AppendAllText(config, Fsmonitor(hook)); // b's agent, by a case variant of the name
         AssertFires(repo, marker);

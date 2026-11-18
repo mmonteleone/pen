@@ -323,21 +323,6 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         }
     }
 
-    /// <summary>
-    /// Removes the host env that would change what compose loads or starts from <paramref name="startInfo"/>.
-    /// </summary>
-    internal static void ScrubComposeEnv(ProcessStartInfo startInfo)
-    {
-        foreach (var name in new[]
-            {
-                "COMPOSE_FILE", "COMPOSE_PROJECT_NAME", "COMPOSE_PROFILES", "COMPOSE_ENV_FILES",
-                "COMPOSE_PATH_SEPARATOR"
-            })
-        {
-            startInfo.Environment.Remove(name);
-        }
-    }
-
     /// <summary>Creates a new session's directory, with a random ID no other session has.</summary>
     private SessionDir CreateSessionDir()
     {
@@ -506,11 +491,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         runArgs.Add("agent");
         runArgs.AddRange(command);
 
-        var startInfo = Proc.CreateStartInfo("docker", session.BuildComposeArgs([.. runArgs]), env);
-        foreach (var (name, value) in secrets)
-            startInfo.Environment[name] = value;
-        ScrubComposeEnv(startInfo);
-        return startInfo;
+        return new ComposeClient(session, env).CreateStartInfo(runArgs, secrets);
     }
 
     /// <summary>Runs the agent and waits for it, trimming the proxy log meanwhile.</summary>
@@ -656,14 +637,10 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
             return;
         }
 
-        var startInfo = Proc.CreateStartInfo("docker",
-            session.BuildComposeArgs("down", "-t", "1", "--remove-orphans"), env);
-        startInfo.RedirectStandardOutput = startInfo.RedirectStandardError = true;
-        ScrubComposeEnv(startInfo);
         string? failure;
         try
         {
-            var down = Proc.CaptureText(startInfo);
+            var down = new ComposeClient(session, env).Capture("down", "-t", "1", "--remove-orphans");
             failure = down.ExitStatus.ExitCode != 0 ? down.StandardError.Trim() : null;
         }
         catch (PenException error)
@@ -760,7 +737,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         foreach (var path in Directory.EnumerateDirectories(sessions))
         {
             var session = new SessionDir(projectKey, path);
-            if (session.IsOpen)
+            if (session.IsOpen())
             {
                 if (TryEndDead(session) is { } result)
                     ended.Add(result);
@@ -782,7 +759,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     private static SessionEndResult? TryEndDead(SessionDir session)
     {
         using var sessionLock = FileLock.TryTake(session.LockFile, exclusive: true);
-        if (sessionLock is null || !session.IsOpen)
+        if (sessionLock is null || !session.IsOpen())
             return null; // running, or ended while we looked
         Out.WriteLine($"ending session {session.Id}, whose pen exited without ending it");
         return End(session);

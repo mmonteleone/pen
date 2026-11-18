@@ -265,7 +265,7 @@ internal static class ProtectedFiles
             {
                 // A session's record is deleted after its compose.yaml, so one that's still open with no record is
                 // from an older Pen or damaged, and its agent could still write.
-                unrecorded |= session.IsOpen;
+                unrecorded |= session.IsOpen();
                 continue;
             }
             readOnly.Add(manifest.ReadOnlyDirs);

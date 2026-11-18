@@ -111,10 +111,9 @@ internal sealed class ProxyLogTrimmer : IDisposable
     {
         // tail reads to the end and truncate follows at once, so only lines squid
         // writes between the two are lost. A tail that fails truncates nothing.
-        var startInfo = Proc.CreateStartInfo("docker", session.BuildComposeArgs("exec", "-T", "proxy", "sh", "-c",
-            $"tail -c {Keep} \"$1\" && truncate -s 0 \"$1\"", "sh", LogInProxy), env);
-        Session.ScrubComposeEnv(startInfo);
-        var output = Proc.CaptureBytes(startInfo, limit: 4 * Keep, timeout: ExecTimeout);
+        var output = new ComposeClient(session, env).ExecInProxyCapturingBytes(
+            ["sh", "-c", $"tail -c {Keep} \"$1\" && truncate -s 0 \"$1\"", "sh", LogInProxy],
+            limit: 4 * Keep, timeout: ExecTimeout);
         return output is { End: CaptureEnd.Exited, ExitCode: 0 } ? output.Stdout : null;
     }
 

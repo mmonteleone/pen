@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text;
@@ -286,7 +285,7 @@ internal sealed class AllowCommand(HostEnv host, StartDir startDir, RecipeCatalo
             using var aclLock = TakeAclLock(session, clock);
             var written = WriteAclFiles(session, MergeEgress(host, session, projectDir, catalog));
             AwaitProxyView(session, env, written.Files);
-            var result = RunInProxy(session, env, "squid", "-k", "reconfigure");
+            var result = new ComposeClient(session, env).ExecInProxy("squid", "-k", "reconfigure");
             if (result.ExitStatus.ExitCode != 0)
             {
                 throw new PenException(
@@ -349,7 +348,7 @@ internal sealed class AllowCommand(HostEnv host, StartDir startDir, RecipeCatalo
         var expected = FormatProxyView(files);
         var seen = Retry.Repeat(ProxyReadAttempts, ProxyReadDelay, () =>
         {
-            var result = RunInProxy(session, env, ["sh", "-c", PrintAclsScript, "sh", .. paths]);
+            var result = new ComposeClient(session, env).ExecInProxy(["sh", "-c", PrintAclsScript, "sh", .. paths]);
             if (result.ExitStatus.ExitCode != 0)
             {
                 throw new PenException(
@@ -368,20 +367,6 @@ internal sealed class AllowCommand(HostEnv host, StartDir startDir, RecipeCatalo
     /// <summary>Formats what the proxy prints for <paramref name="files"/> when it sees what was written.</summary>
     private static string FormatProxyView(IReadOnlyList<AclFile> files) =>
         string.Concat(files.Select(file => $"=== {ProxyAclDir}{file.Name}\n{file.Text}"));
-
-    /// <summary>Runs <paramref name="command"/> in <paramref name="session"/>'s proxy container.</summary>
-    /// <returns>Its exit status and output.</returns>
-    private static ProcessTextOutput RunInProxy(
-        SessionDir session,
-        IReadOnlyDictionary<string, string> env,
-        params string[] command)
-    {
-        var startInfo = Proc.CreateStartInfo("docker",
-            session.BuildComposeArgs(["exec", "-T", "proxy", .. command]), env);
-        startInfo.RedirectStandardOutput = startInfo.RedirectStandardError = true;
-        Session.ScrubComposeEnv(startInfo);
-        return Proc.CaptureText(startInfo);
-    }
 
     /// <summary>What a running session gets now, merged from the config files.</summary>
     /// <param name="Allow">The merged allow list; just <see cref="Allowlist.AnyDomain"/> when a source has it.</param>
@@ -434,7 +419,7 @@ internal sealed class AllowCommand(HostEnv host, StartDir startDir, RecipeCatalo
     /// </remarks>
     internal static AclWrite WriteAclFiles(SessionDir session, Egress egress)
     {
-        if (!session.HasDenyAndOpen)
+        if (!session.HasDenyAndOpen())
         {
             var allowlist = Overwrite(session.AllowlistFile, Allowlist.Render(egress.NamedAllow));
             var open = egress.Allow.Contains(Allowlist.AnyDomain);
