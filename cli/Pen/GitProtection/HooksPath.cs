@@ -342,12 +342,13 @@ internal static class HooksPath
     /// passes through too many links.
     /// </returns>
     internal static string? WalkRealPath(string path, Func<string, bool> canBeReplaced, out bool replaceable) =>
-        WalkRealPath(path, canBeReplaced, out replaceable, out _);
+        WalkRealPath(path, canBeReplaced, out replaceable, out _, out _);
 
     /// <summary>
     /// Resolves the real path of <paramref name="path"/> as <see cref="WalkRealPath(string, Func{string, bool}, out
     /// bool)"/> does, also setting <paramref name="undoesReplaceable"/> if a ".." on the walk came after a name
-    /// <paramref name="canBeReplaced"/> held for.
+    /// <paramref name="canBeReplaced"/> held for, and <paramref name="followsReplaceableLink"/> if the walk followed a
+    /// symlink it held for.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -363,13 +364,15 @@ internal static class HooksPath
         string path,
         Func<string, bool> canBeReplaced,
         out bool replaceable,
-        out bool undoesReplaceable)
+        out bool undoesReplaceable,
+        out bool followsReplaceableLink)
     {
         replaceable = false;
         undoesReplaceable = false;
+        followsReplaceableLink = false;
         try
         {
-            return WalkNames(path, canBeReplaced, ref replaceable, ref undoesReplaceable);
+            return WalkNames(path, canBeReplaced, ref replaceable, ref undoesReplaceable, ref followsReplaceableLink);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
@@ -379,14 +382,15 @@ internal static class HooksPath
 
     /// <summary>
     /// Walks <paramref name="path"/> one name at a time, following symlinks, for
-    /// <see cref="WalkRealPath(string, Func{string, bool}, out bool, out bool)"/>.
+    /// <see cref="WalkRealPath(string, Func{string, bool}, out bool, out bool, out bool)"/>.
     /// </summary>
     /// <returns>The real path, or null if a directory can't be entered or there are too many links.</returns>
     private static string? WalkNames(
         string path,
         Func<string, bool> canBeReplaced,
         ref bool replaceable,
-        ref bool undoesReplaceable)
+        ref bool undoesReplaceable,
+        ref bool followsReplaceableLink)
     {
         var pending = new Stack<string>(path.Split('/').Reverse());
         var current = "/";
@@ -411,7 +415,9 @@ internal static class HooksPath
                 replaceable |= canBeReplaced(PathChecks.ResolveExisting(next));
                 continue;
             }
-            replaceable |= canBeReplaced(Path.Combine(PathChecks.ResolveExisting(current), name));
+            var linkReplaceable = canBeReplaced(Path.Combine(PathChecks.ResolveExisting(current), name));
+            replaceable |= linkReplaceable;
+            followsReplaceableLink |= linkReplaceable;
             if (++links > MaxLinks || target.Contains('\ufffd'))
                 return null;
             if (Path.IsPathRooted(target))

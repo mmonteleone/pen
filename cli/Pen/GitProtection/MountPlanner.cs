@@ -256,7 +256,8 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// (<see cref="CanBeReplaced"/>): the agent could make that directory a symlink, and git would read a file next
     /// to where it leads, which nothing protects. The including file's own directory and its ancestors are pinned
     /// (mount points, or checked for a symlink at the session's end before any host git runs), so "../x" from it is
-    /// fine.
+    /// fine. A path the OS walks through a symlink in the sandbox is refused too, whether it's spelled through that
+    /// symlink or a symlink outside leads to it: the agent could repoint it.
     /// </para>
     /// <para>
     /// The agent can write some of these files, so each is walked only once, and a walk over
@@ -296,14 +297,12 @@ internal sealed class MountPlanner(string dir, string hostHome)
                 continue;
             var location = Locate(configFile, include, path => CanBeReplaced(common, realDir, path));
             var real = SpellInSandbox(common, location.Real);
-            // These two depend on the spelling and on the including file, so they come before a file already
-            // visited is skipped.
-            if (SpellInSandbox(common, location.Written) is { } written && written != (real ?? location.Real))
-            {
-                throw new PenException($"{FormatPath(configFile)} includes {FormatPath(written)} through " +
-                    "a symlink, which pen doesn't support: the agent could redirect the include");
-            }
-
+            var written = SpellInSandbox(common, location.Written);
+            if (written is not null && written != (real ?? location.Real))
+                throw ThroughSymlink(configFile, written);
+            // The walk's two checks depend on the including file, whose directories are pinned, so they come before
+            // a file already visited is skipped. The ".." check comes first for its own message, since a symlink
+            // the sandbox can repoint, followed by "..", fails both.
             if (location.UndoesReplaceable)
             {
                 throw new PenException($"{FormatPath(configFile)} includes {Out.Field(include.Value)}, whose \"..\" " +
@@ -311,6 +310,11 @@ internal sealed class MountPlanner(string dir, string hostHome)
                     "would read a file pen doesn't protect. Write the include's path without that \"..\" or remove " +
                     "the include, then rerun");
             }
+
+            // Spelled from outside, a path can still lead through an outside symlink into the sandbox and then
+            // through a symlink there, which the agent can repoint.
+            if (location.FollowsReplaceableLink)
+                throw ThroughSymlink(configFile, written ?? location.Written);
 
             if (!visited.Add(location.Path))
                 continue;
@@ -345,7 +349,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
 
     /// <summary>
     /// Finds the file an include in <paramref name="configFile"/> names, noting a ".." on the way that comes after a
-    /// name <paramref name="canBeReplaced"/> holds for.
+    /// name <paramref name="canBeReplaced"/> holds for, and a symlink on the way it holds for.
     /// </summary>
     /// <exception cref="PenException">
     /// The path isn't valid UTF-8, is a form Pen can't resolve, or can't be followed.
@@ -374,11 +378,12 @@ internal sealed class MountPlanner(string dir, string hostHome)
 
     /// <summary>
     /// Finds where the file <paramref name="opened"/> names is on disk, walking it as the OS does, and whether a ".."
-    /// on the walk comes after a name <paramref name="canBeReplaced"/> holds for.
+    /// on the walk comes after a name <paramref name="canBeReplaced"/> holds for or the walk follows a symlink it
+    /// holds for.
     /// </summary>
     /// <returns>
     /// Whether the path could be walked (<see cref="HooksPath.WalkRealPath(string, Func{string, bool}, out bool, out
-    /// bool)"/>).
+    /// bool, out bool)"/>).
     /// </returns>
     /// <remarks>
     /// The written and real paths are taken on paper where a name is missing, so "missing/../x" is the x beside it,
@@ -391,13 +396,19 @@ internal sealed class MountPlanner(string dir, string hostHome)
     {
         // As the OS walks it: ".." after a symlink is the parent of where that leads.
         var written = Path.GetFullPath(opened);
-        if (HooksPath.WalkRealPath(opened, canBeReplaced, out _, out var undoesReplaceable) is not { } real)
+        var real = HooksPath.WalkRealPath(
+            opened,
+            canBeReplaced,
+            out _,
+            out var undoesReplaceable,
+            out var followsReplaceableLink);
+        if (real is null)
         {
             location = null;
             return false;
         }
         // No symlink to tell them apart, and a cycle then repeats one name.
-        location = new(real == written ? written : opened, written, real, undoesReplaceable);
+        location = new(real == written ? written : opened, written, real, undoesReplaceable, followsReplaceableLink);
         return true;
     }
 
@@ -414,7 +425,19 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// Whether a ".." on the walk comes after a name the sandbox could replace, so that it could change where the
     /// ".." leads.
     /// </param>
-    private sealed record IncludeLocation(string Path, string Written, string Real, bool UndoesReplaceable);
+    /// <param name="FollowsReplaceableLink">
+    /// Whether the walk follows a symlink the sandbox could repoint, however the path is spelled.
+    /// </param>
+    private sealed record IncludeLocation(
+        string Path,
+        string Written,
+        string Real,
+        bool UndoesReplaceable,
+        bool FollowsReplaceableLink);
+
+    private PenException ThroughSymlink(string configFile, string included) =>
+        new($"{FormatPath(configFile)} includes {FormatPath(included)} through a symlink, which pen doesn't " +
+            "support: the agent could redirect the include");
 
     /// <summary>
     /// Plans a verified read-only mount over an included file the sandbox could write, by its real path spelled from

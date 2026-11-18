@@ -771,6 +771,63 @@ public class RepoGuardTests
             Assert.Throws<PenException>(() => Mounts(repo)).Message);
     }
 
+    // Spelled from outside, the path leads into the sandbox through an outside symlink and then through a symlink
+    // there, which the agent can repoint (ln2 -> ../evil) so that git reads a file nothing protects.
+    [Theory]
+    [InlineData(".git/config", "link", "ln2/x.cfg")]
+    [InlineData(".git/config", "link", "lnf")]
+    [InlineData(".git/config", "link", "ln3/x.cfg")]
+    [InlineData(".git/config", "glink", "lng/x.cfg")]
+    [InlineData(".git/config.worktree", "link", "ln2/x.cfg")]
+    [InlineData(".git/modules/lib/config", "link", "ln2/x.cfg")]
+    public void AnIncludeThroughAnOutsideLink_ThenASymlinkTheSandboxCanRepoint_IsRefused(
+        string including, string outsideLink, string rest)
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        var outside2 = t.Sub("outside2");
+        File.WriteAllText(Path.Combine(outside2, "x.cfg"), "");
+        Directory.CreateDirectory(Path.Combine(repo, "sub"));
+        Directory.CreateDirectory(Path.Combine(repo, "conf"));
+        File.WriteAllText(Path.Combine(repo, "conf", "x.cfg"), "");
+        Directory.CreateSymbolicLink(Path.Combine(repo, "sub", "ln2"), outside2);
+        File.CreateSymbolicLink(Path.Combine(repo, "sub", "lnf"), Path.Combine(outside2, "x.cfg"));
+        // Leads back into the project, where the file would be mounted.
+        Directory.CreateSymbolicLink(Path.Combine(repo, "sub", "ln3"), Path.Combine(repo, "conf"));
+        Directory.CreateSymbolicLink(Path.Combine(repo, ".git", "lng"), outside2);
+        var outside = t.Sub("outside");
+        Directory.CreateSymbolicLink(Path.Combine(outside, "link"), Path.Combine(repo, "sub"));
+        Directory.CreateSymbolicLink(Path.Combine(outside, "glink"), Path.Combine(repo, ".git"));
+        if (including.StartsWith(".git/modules/", StringComparison.Ordinal))
+            Git.Run(t.Sub("repo", ".git", "modules", "lib"), "init", "-q", "--bare");
+        var spelled = $"{outside}/{outsideLink}/{rest}";
+        File.AppendAllText(Path.Combine(repo, including), $"[include]\n\tpath = {spelled}\n");
+        Assert.Equal($"{including} includes {spelled} through a symlink, which pen doesn't support: the agent " +
+            "could redirect the include", Assert.Throws<PenException>(() => Mounts(repo)).Message);
+    }
+
+    // Without a symlink in the sandbox on the way, the file is mounted by its real path, and a symlink put in place
+    // of a directory above it is renamed aside at the session's end before any host git runs.
+    [Theory]
+    [InlineData("link", "x.cfg", "sub/x.cfg")]
+    [InlineData("glink", "x.cfg", ".git/x.cfg")]
+    [InlineData("deep", "sub/x.cfg", "sub/x.cfg")]
+    public void AnIncludeThroughAnOutsideLinkIntoTheSandbox_WithNoSymlinkInIt_IsMounted(
+        string outsideLink, string rest, string shown)
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Directory.CreateDirectory(Path.Combine(repo, "sub"));
+        File.WriteAllText(Path.Combine(repo, "sub", "x.cfg"), "");
+        File.WriteAllText(Path.Combine(repo, ".git", "x.cfg"), "");
+        var outside = t.Sub("outside");
+        Directory.CreateSymbolicLink(Path.Combine(outside, "link"), Path.Combine(repo, "sub"));
+        Directory.CreateSymbolicLink(Path.Combine(outside, "glink"), Path.Combine(repo, ".git"));
+        Directory.CreateSymbolicLink(Path.Combine(outside, "deep"), repo);
+        File.AppendAllText(Path.Combine(repo, ".git", "config"), $"[include]\n\tpath = {outside}/{outsideLink}/{rest}\n");
+        Assert.Contains((shown, true), Mounts(repo));
+    }
+
     [Fact]
     public void AnIncludedFilesInclude_WhoseDotDotLeavesADirectoryTheSandboxCanReplace_IsRefused()
     {
