@@ -83,9 +83,8 @@ public class ToolsTests
     /// <summary>What a pen command line implies, as Session.Run sees its command.</summary>
     private static string? ImpliedBy(params string[] args)
     {
-        var command = CommandParser.Parse(args, () => null, RecipeCatalog.Embedded);
-        Assert.Equal(CommandKind.Run, command.Kind);
-        return ToolSpec.FindImpliedAgent(command.Args, RecipeCatalog.Embedded, command.Tools)?.ToString();
+        var command = Assert.IsType<RunInvocation>(CommandParser.Parse(args, () => null, RecipeCatalog.Embedded));
+        return ToolSpec.FindImpliedAgent(command.Command, RecipeCatalog.Embedded, command.Tools)?.ToString();
     }
 
     [Theory]
@@ -299,13 +298,12 @@ public class ToolsTests
     [Fact]
     public void TheFlagAcceptsWhatTheConfigDoes()
     {
-        var c = CommandParser.Parse(["--tool", "pen-test:1", "--tool=pen-test", "--docker", "--port", "80", "claude", "--tool", "x"], () => null, RecipeCatalog.Embedded);
-        Assert.Equal(CommandKind.Run, c.Kind);
+        var c = Assert.IsType<RunInvocation>(CommandParser.Parse(["--tool", "pen-test:1", "--tool=pen-test", "--docker", "--port", "80", "claude", "--tool", "x"], () => null, RecipeCatalog.Embedded));
         Assert.Equal([new ToolSpec("pen-test", "1")], c.Tools);
         Assert.True(c.Docker);
         Assert.Equal([80], c.Ports);
-        Assert.Equal(["claude", "--tool", "x"], c.Args);
-        Assert.Empty(CommandParser.Parse(["claude"], () => null, RecipeCatalog.Embedded).Tools);
+        Assert.Equal(["claude", "--tool", "x"], c.Command);
+        Assert.Empty(Assert.IsType<RunInvocation>(CommandParser.Parse(["claude"], () => null, RecipeCatalog.Embedded)).Tools);
     }
 
     [Theory]
@@ -328,7 +326,7 @@ public class ToolsTests
     [Fact]
     public void TheListingIsPenTools_AndToolListIsJustAnUnknownTool()
     {
-        Assert.Equal(CommandKind.Tools, CommandParser.Parse(["tools"], () => null, RecipeCatalog.Embedded).Kind);
+        Assert.IsType<ToolsInvocation>(CommandParser.Parse(["tools"], () => null, RecipeCatalog.Embedded));
         var list = Assert.Throws<PenException>(() => CommandParser.Parse(["--tool", "list"], () => null, RecipeCatalog.Embedded)).Message;
         Assert.StartsWith("--tool: unknown tool \"list\"", list);
         Assert.Contains("; pen tools lists them", list);

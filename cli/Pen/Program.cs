@@ -61,61 +61,64 @@ internal static class Program
     /// what it needs: help and listings need only the embedded recipes (no host, config or project),
     /// pen ps and pen clean --stale the host, pen upgrade, pen allow &lt;domain…&gt; and
     /// pen deny &lt;domain…&gt; the user config, the rest the project.
-    /// Only a session, the pen allow and pen deny listings and pen trust load the project config.
+    /// Of the project commands, only a session, the pen allow and pen deny listings and pen trust load the project
+    /// config; pen upgrade, pen allow &lt;domain…&gt; and pen deny &lt;domain…&gt; read it tolerantly or only to
+    /// apply to running sessions.
     /// </remarks>
     private static int Run(string[] args)
     {
         var catalog = RecipeCatalog.Embedded;
         var clock = TimeProvider.System;
-        var command = CommandParser.Parse(args, HostEnv.TryReadWorkingDirectory, catalog);
-        switch (command.Kind)
+        var invocation = CommandParser.Parse(args, HostEnv.TryReadWorkingDirectory, catalog);
+        switch (invocation)
         {
-            case CommandKind.Builtin:
-                CommandTree.InvokeBuiltin(command.ParseResult!, Console.Out);
+            case BuiltinInvocation builtin:
+                CommandTree.InvokeBuiltin(builtin.ParseResult, Console.Out);
                 return 0;
-            case CommandKind.Tools:
+            case ToolsInvocation:
                 Console.Out.Write(catalog.FormatListing());
                 return 0;
-            case CommandKind.Allow when command.Defaults:
+            case ListDefaultDomainsInvocation:
                 Console.Out.Write(AllowCommand.FormatDefaults());
                 return 0;
         }
 
         var host = HostEnv.FromProcess();
         var startDir = new StartDir(host.LeaveWorkingDirectory());
-        switch (command.Kind)
+        switch (invocation)
         {
-            case CommandKind.Ps:
+            case PsInvocation:
                 return new PsCommand(host, clock).Run();
-            case CommandKind.Clean when command.Stale:
+            case CleanStaleInvocation:
                 return new CleanStaleCommand(host, ReadAnswersFromStdin()).Run();
         }
 
         UserConfigInitializer.EnsureExists(host, GitIdentity.ReadFromHost);
         var user = ConfigLoader.LoadUser(host.ConfigDir, host.Display(host.ConfigDir), catalog);
-        switch (command.Kind)
+        switch (invocation)
         {
-            case CommandKind.Upgrade:
-                return new UpgradeCommand(host, user, startDir, catalog, clock).Run(command.NoCache);
-            case CommandKind.Allow when command.Args.Count > 0:
-                return new AllowCommand(host, startDir, catalog, clock).Run(command.Args, command.Global);
-            case CommandKind.Deny when command.Args.Count > 0:
-                return new DenyCommand(host, startDir, catalog, clock).Run(command.Args, command.Global);
+            case UpgradeInvocation upgrade:
+                return new UpgradeCommand(host, user, startDir, catalog, clock).Run(upgrade.NoCache);
+            case AllowDomainsInvocation allow:
+                return new AllowCommand(host, startDir, catalog, clock).Run(allow.Domains, allow.Global);
+            case DenyDomainsInvocation deny:
+                return new DenyCommand(host, startDir, catalog, clock).Run(deny.Domains, deny.Global);
         }
 
         var project = Project.Resolve(startDir.Get(), host);
-        return command.Kind switch
+        return invocation switch
         {
-            CommandKind.Run => RunSession(ProjectContext.Load(host, project, user, catalog), command, catalog, clock),
-            CommandKind.Allow =>
+            RunInvocation run => RunSession(ProjectContext.Load(host, project, user, catalog), run, catalog, clock),
+            ListBlockedInvocation =>
                 ListBlocked(ProjectContext.Load(host, project, user, catalog), startDir, catalog, clock),
-            CommandKind.Deny =>
+            ListDeniedInvocation =>
                 ListDenied(ProjectContext.Load(host, project, user, catalog), startDir, catalog, clock),
-            CommandKind.Trust => RunTrust(ProjectContext.Load(host, project, user, catalog), command, catalog, clock),
-            CommandKind.Init => new InitCommand(host, project, catalog).Run(),
-            CommandKind.Sign => RunSign(host, project, command, clock),
-            CommandKind.Clean => new CleanCommand(host, project, ReadAnswersFromStdin(), clock).Run(),
-            _ => throw new InvalidOperationException($"unhandled command {command.Kind}"),
+            TrustInvocation trust =>
+                RunTrust(ProjectContext.Load(host, project, user, catalog), trust.Mode, catalog, clock),
+            InitInvocation => new InitCommand(host, project, catalog).Run(),
+            SignInvocation sign => new SignCommand(host, project, clock).Run(sign.Base),
+            CleanInvocation => new CleanCommand(host, project, ReadAnswersFromStdin(), clock).Run(),
+            _ => throw new InvalidOperationException($"unhandled invocation {invocation}"),
         };
     }
 
@@ -126,13 +129,14 @@ internal static class Program
     /// --port adds to ports in .pen/config.toml.
     /// --tool adds to tools in both config files.
     /// </remarks>
-    private static int RunSession(ProjectContext context, Command command, RecipeCatalog catalog, TimeProvider clock)
+    private static int RunSession(
+        ProjectContext context, RunInvocation run, RecipeCatalog catalog, TimeProvider clock)
     {
-        var request = new SessionRequest(command.Args)
+        var request = new SessionRequest(run.Command)
         {
-            Docker = command.Docker || context.ProjectConfig.Docker == true,
-            Ports = Port.Merge(context.ProjectConfig.Ports, command.Ports),
-            FlagTools = command.Tools,
+            Docker = run.Docker || context.ProjectConfig.Docker == true,
+            Ports = Port.Merge(context.ProjectConfig.Ports, run.Ports),
+            FlagTools = run.Tools,
         };
         return new Session(context, ReadAnswersFromStdin(), catalog, clock).Run(request);
     }
@@ -151,10 +155,6 @@ internal static class Program
         new DenyCommand(context.Host, startDir, catalog, clock).List(context);
 
     /// <summary>Runs pen trust.</summary>
-    private static int RunTrust(ProjectContext context, Command command, RecipeCatalog catalog, TimeProvider clock) =>
-        new TrustCommand(context, ReadAnswersFromStdin(), catalog, clock).Run(command.Yes, command.List);
-
-    /// <summary>Runs pen sign, against the base given or the default one.</summary>
-    private static int RunSign(HostEnv host, Project project, Command command, TimeProvider clock) =>
-        new SignCommand(host, project, clock).Run(command.Args.Count > 0 ? command.Args[0] : null);
+    private static int RunTrust(ProjectContext context, TrustMode mode, RecipeCatalog catalog, TimeProvider clock) =>
+        new TrustCommand(context, ReadAnswersFromStdin(), catalog, clock).Run(mode);
 }

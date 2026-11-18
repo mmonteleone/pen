@@ -29,9 +29,7 @@ public class InitCommandTests
     [Fact]
     public void ParsesInit_ItsHelp_AndRefusesArguments()
     {
-        var c = CommandParser.Parse(["init"], () => null, RecipeCatalog.Embedded);
-        Assert.Equal(CommandKind.Init, c.Kind);
-        Assert.Empty(c.Args);
+        Assert.IsType<InitInvocation>(CommandParser.Parse(["init"], () => null, RecipeCatalog.Embedded));
 
         var help = CliTests.Render("init", "--help");
         Assert.Contains("Usage:\n  pen init [options]", help);
@@ -42,7 +40,7 @@ public class InitCommandTests
         Assert.Equal(2, Assert.Throws<PenException>(() => CommandParser.Parse(["init", "--force"], () => null, RecipeCatalog.Embedded)).ExitCode);
         var tool = Assert.Throws<PenException>(() => CommandParser.Parse(["--tool", "go", "init"], () => null, RecipeCatalog.Embedded));
         Assert.StartsWith("--tool goes only with a command to run, not pen init", tool.Message);
-        Assert.Equal(["init"], CommandParser.Parse(["run", "init"], () => null, RecipeCatalog.Embedded).Args);
+        Assert.Equal(["init"], Assert.IsType<RunInvocation>(CommandParser.Parse(["run", "init"], () => null, RecipeCatalog.Embedded)).Command);
     }
 
     [Fact]

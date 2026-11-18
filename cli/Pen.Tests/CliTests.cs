@@ -2,15 +2,17 @@ namespace Pen.Tests;
 
 public class CliTests
 {
-    private static Command P(params string[] args) => CommandParser.Parse(args, () => null, RecipeCatalog.Embedded);
+    private static CliInvocation P(params string[] args) => CommandParser.Parse(args, () => null, RecipeCatalog.Embedded);
+
+    /// <summary>Parses <paramref name="args"/>, which must ask to run a command or a shell.</summary>
+    private static RunInvocation R(params string[] args) => Assert.IsType<RunInvocation>(P(args));
 
     /// <summary>Parses <paramref name="args"/>, which must ask for help or the version, and renders it.</summary>
     internal static string Render(params string[] args)
     {
-        var c = P(args);
-        Assert.Equal(CommandKind.Builtin, c.Kind);
+        var c = Assert.IsType<BuiltinInvocation>(P(args));
         var output = new StringWriter();
-        Assert.Equal(0, CommandTree.InvokeBuiltin(c.ParseResult!, output));
+        Assert.Equal(0, CommandTree.InvokeBuiltin(c.ParseResult, output));
         return output.ToString();
     }
 
@@ -39,14 +41,13 @@ public class CliTests
     [Fact]
     public void TrustTakesYesOrList()
     {
-        Assert.Equal(CommandKind.Trust, P("trust").Kind);
-        Assert.False(P("trust").Yes);
-        Assert.True(P("trust", "--yes").Yes);
-        Assert.True(P("trust", "-y").Yes);
-        Assert.True(P("trust", "--list").List);
+        Assert.Equal(new TrustInvocation(TrustMode.Review), P("trust"));
+        Assert.Equal(new TrustInvocation(TrustMode.ApproveAll), P("trust", "--yes"));
+        Assert.Equal(new TrustInvocation(TrustMode.ApproveAll), P("trust", "-y"));
+        Assert.Equal(new TrustInvocation(TrustMode.List), P("trust", "--list"));
         Assert.StartsWith("pen trust: --yes and --list don't go together", Refused("trust", "--yes", "--list").Message);
         Assert.StartsWith("pen trust: unexpected argument \"-n\"", Refused("trust", "-n").Message);
-        Assert.Equal(CommandKind.Run, P("run", "trust").Kind);
+        Assert.IsType<RunInvocation>(P("run", "trust"));
         Assert.Contains("trust", Render("--help"));
         Assert.Contains("-y, --yes", Render("trust", "--help"));
     }
@@ -54,10 +55,9 @@ public class CliTests
     [Fact]
     public void NoArgumentsIsAShell()
     {
-        var c = P();
-        Assert.Equal(CommandKind.Run, c.Kind);
-        Assert.Empty(c.Args);
-        Assert.Empty(P("--").Args);
+        var c = R();
+        Assert.Empty(c.Command);
+        Assert.Empty(R("--").Command);
     }
 
     [Theory]
@@ -71,58 +71,55 @@ public class CliTests
     [InlineData("claude", "allow", "x.com")]
     public void AnythingElseIsTheCommandToRun(params string[] args)
     {
-        var c = P(args);
-        Assert.Equal(CommandKind.Run, c.Kind);
-        Assert.Equal(args, c.Args);
+        var c = R(args);
+        Assert.Equal(args, c.Command);
     }
 
     [Fact]
     public void RunPassesTheRestThrough_EvenASubcommandName()
     {
-        var c = P("run", "upgrade", "--clean");
-        Assert.Equal(CommandKind.Run, c.Kind);
-        Assert.Equal(["upgrade", "--clean"], c.Args);
+        var c = R("run", "upgrade", "--clean");
+        Assert.Equal(["upgrade", "--clean"], c.Command);
     }
 
     [Fact]
     public void RunCleanRunsCleanInTheSandbox()
     {
-        var c = P("run", "clean");
-        Assert.Equal(CommandKind.Run, c.Kind);
-        Assert.Equal(["clean"], c.Args);
+        var c = R("run", "clean");
+        Assert.Equal(["clean"], c.Command);
     }
 
     [Fact]
     public void ACommandNamedLikeAReservedSubcommandNeedsRun()
     {
-        Assert.Equal(CommandKind.Tools, P("tools").Kind);
-        Assert.Equal(CommandKind.Ps, P("ls").Kind);
-        Assert.Equal(["tools"], P("run", "tools").Args);
-        Assert.Equal(["ls", "-la"], P("run", "ls", "-la").Args);
-        Assert.Equal(CommandKind.Run, P("run", "ls").Kind);
-        Assert.Equal(["ps"], P("run", "ps").Args);
+        Assert.IsType<ToolsInvocation>(P("tools"));
+        Assert.IsType<PsInvocation>(P("ls"));
+        Assert.Equal(["tools"], R("run", "tools").Command);
+        Assert.Equal(["ls", "-la"], R("run", "ls", "-la").Command);
+        Assert.IsType<RunInvocation>(P("run", "ls"));
+        Assert.Equal(["ps"], R("run", "ps").Command);
     }
 
     [Fact]
     public void RunAcceptsADoubleDash()
     {
-        Assert.Equal(["-x"], P("run", "--", "-x").Args);
-        Assert.Equal(["ls"], P("--", "ls").Args);
-        var dashed = P("run", "--", "--docker");
-        Assert.Equal(["--docker"], dashed.Args);
+        Assert.Equal(["-x"], R("run", "--", "-x").Command);
+        Assert.Equal(["ls"], R("--", "ls").Command);
+        var dashed = R("run", "--", "--docker");
+        Assert.Equal(["--docker"], dashed.Command);
         Assert.False(dashed.Docker);
-        Assert.Equal(["--docker"], P("--", "--docker").Args);
-        Assert.Equal(["a", "--", "b"], P("run", "--", "a", "--", "b").Args);
-        Assert.Equal(["a", "--", "b"], P("--", "a", "--", "b").Args);
-        Assert.Equal(["run", "x"], P("run", "--", "run", "x").Args);
+        Assert.Equal(["--docker"], R("--", "--docker").Command);
+        Assert.Equal(["a", "--", "b"], R("run", "--", "a", "--", "b").Command);
+        Assert.Equal(["a", "--", "b"], R("--", "a", "--", "b").Command);
+        Assert.Equal(["run", "x"], R("run", "--", "run", "x").Command);
     }
 
     [Fact]
     public void AfterRunAnyOtherDashArgumentIsTheCommand()
     {
-        Assert.Equal(["-x"], P("run", "-x").Args);
-        Assert.Equal(["--version"], P("run", "--version").Args);
-        Assert.Equal(["--dockr", "x"], P("run", "--dockr", "x").Args);
+        Assert.Equal(["-x"], R("run", "-x").Command);
+        Assert.Equal(["--version"], R("run", "--version").Command);
+        Assert.Equal(["--dockr", "x"], R("run", "--dockr", "x").Command);
     }
 
     [Theory]
@@ -134,50 +131,49 @@ public class CliTests
         Assert.Equal("pen run: missing the command to run\nRun 'pen run --help' for usage.", Refused(args).Message);
 
     [Theory]
-    [InlineData("Allow", "allow")]
-    [InlineData("Deny", "deny")]
-    [InlineData("Sign", "sign")]
-    [InlineData("Sign", "sign", "origin/main")]
-    [InlineData("Clean", "clean")]
-    [InlineData("Ps", "ps")]
-    [InlineData("Ps", "ls")]
-    [InlineData("Tools", "tools")]
-    [InlineData("Init", "init")]
-    public void SubcommandsAreRecognized(string kind, params string[] args)
+    [InlineData(typeof(ListBlockedInvocation), "allow")]
+    [InlineData(typeof(ListDeniedInvocation), "deny")]
+    [InlineData(typeof(SignInvocation), "sign")]
+    [InlineData(typeof(SignInvocation), "sign", "origin/main")]
+    [InlineData(typeof(CleanInvocation), "clean")]
+    [InlineData(typeof(PsInvocation), "ps")]
+    [InlineData(typeof(PsInvocation), "ls")]
+    [InlineData(typeof(ToolsInvocation), "tools")]
+    [InlineData(typeof(InitInvocation), "init")]
+    public void SubcommandsAreRecognized(Type kind, params string[] args)
     {
         var c = P(args);
-        Assert.Equal(kind, c.Kind.ToString());
-        Assert.Equal(args.Skip(1), c.Args);
+        Assert.IsType(kind, c);
+        if (c is SignInvocation sign)
+            Assert.Equal(args.ElementAtOrDefault(1), sign.Base);
     }
 
     [Fact]
     public void AllowTakesDomainsAndGlobal_Lowercased_WithoutDuplicates()
     {
-        var c = P("allow", "Example.com", "--global", ".foo.io", "example.com");
-        Assert.Equal(CommandKind.Allow, c.Kind);
+        var c = Assert.IsType<AllowDomainsInvocation>(P("allow", "Example.com", "--global", ".foo.io", "example.com"));
         Assert.True(c.Global);
-        Assert.Equal(["example.com", ".foo.io"], c.Args);
-        Assert.False(P("allow", "a.io").Global);
-        Assert.True(P("allow", "-g", "a.io").Global);
+        Assert.Equal(["example.com", ".foo.io"], c.Domains);
+        Assert.False(Assert.IsType<AllowDomainsInvocation>(P("allow", "a.io")).Global);
+        Assert.True(Assert.IsType<AllowDomainsInvocation>(P("allow", "-g", "a.io")).Global);
     }
 
     [Fact]
     public void DenyTakesDomainsAndGlobal_Lowercased_WithoutDuplicates()
     {
-        var c = P("deny", "Gist.GitHub.com", "--global", ".foo.io", "gist.github.com");
-        Assert.Equal(CommandKind.Deny, c.Kind);
+        var c = Assert.IsType<DenyDomainsInvocation>(P("deny", "Gist.GitHub.com", "--global", ".foo.io", "gist.github.com"));
         Assert.True(c.Global);
-        Assert.Equal(["gist.github.com", ".foo.io"], c.Args);
-        Assert.False(P("deny", "a.io").Global);
-        Assert.True(P("deny", "-g", "a.io").Global);
-        Assert.Empty(P("deny").Args);
+        Assert.Equal(["gist.github.com", ".foo.io"], c.Domains);
+        Assert.False(Assert.IsType<DenyDomainsInvocation>(P("deny", "a.io")).Global);
+        Assert.True(Assert.IsType<DenyDomainsInvocation>(P("deny", "-g", "a.io")).Global);
+        Assert.IsType<ListDeniedInvocation>(P("deny"));
     }
 
     [Fact]
     public void AllowTakesTheStar_DenyRefusesIt()
     {
-        Assert.Equal(["*", "a.io"], P("allow", "*", "a.io").Args);
-        Assert.True(P("allow", "--global", "*").Global);
+        Assert.Equal(["*", "a.io"], Assert.IsType<AllowDomainsInvocation>(P("allow", "*", "a.io")).Domains);
+        Assert.True(Assert.IsType<AllowDomainsInvocation>(P("allow", "--global", "*")).Global);
         var e = Assert.Throws<PenException>(() => P("deny", "a.io", "*"));
         Assert.Equal(2, e.ExitCode);
         Assert.StartsWith("pen deny: \"*\" would block everything; remove the allow entries instead", e.Message);
@@ -300,19 +296,19 @@ public class CliTests
     [Fact]
     public void HelpAndVersionValuesAfterTheCommandBoundaryAreTheCommands()
     {
-        Assert.Equal(["claude", "--help=1"], P("claude", "--help=1").Args);
-        Assert.Equal(["x", "-h:y"], P("run", "x", "-h:y").Args);
-        Assert.Equal(["x", "--version:"], P("x", "--version:").Args);
-        Assert.Equal(["x", "-h:y"], P("--docker", "run", "x", "--", "-h:y").Args.Where(a => a != "--").ToList());
+        Assert.Equal(["claude", "--help=1"], R("claude", "--help=1").Command);
+        Assert.Equal(["x", "-h:y"], R("run", "x", "-h:y").Command);
+        Assert.Equal(["x", "--version:"], R("x", "--version:").Command);
+        Assert.Equal(["x", "-h:y"], R("--docker", "run", "x", "--", "-h:y").Command.Where(a => a != "--").ToList());
     }
 
     [Fact]
     public void AnOnOrOffOptionDoesntTakeTheNextArgument()
     {
-        var c = P("-d", "false", "claude");
+        var c = R("-d", "false", "claude");
         Assert.True(c.Docker);
-        Assert.Equal(["false", "claude"], c.Args);
-        Assert.Equal(["true"], P("--docker", "true").Args);
+        Assert.Equal(["false", "claude"], c.Command);
+        Assert.Equal(["true"], R("--docker", "true").Command);
         Assert.StartsWith("pen allow: \"true\" isn't a domain", Refused("allow", "-g", "true").Message);
     }
 
@@ -370,8 +366,8 @@ public class CliTests
     public void TheCommandToRunTakesUpToTheParsersMostArguments()
     {
         var most = Enumerable.Repeat("x", 100_000).ToArray();
-        Assert.Equal(most, P(most).Args);
-        Assert.Equal(most, P(["run", .. most]).Args);
+        Assert.Equal(most, R(most).Command);
+        Assert.Equal(most, R(["run", .. most]).Command);
         Assert.Equal("too many arguments (at most 100,000)\nRun 'pen --help' for usage.",
             Refused([.. most, "x"]).Message);
         Assert.Equal("pen run: too many arguments (at most 100,000)\nRun 'pen run --help' for usage.",
@@ -393,11 +389,11 @@ public class CliTests
     [Fact]
     public void HelpAfterTheCommandBelongsToTheCommand()
     {
-        Assert.Equal(["claude", "--help"], P("claude", "--help").Args);
-        Assert.Equal(["claude", "--help"], P("run", "claude", "--help").Args);
-        Assert.Equal(["--help"], P("run", "--", "--help").Args);
-        Assert.Equal(CommandKind.Run, P("run", "claude", "-h").Kind);
-        Assert.Equal(["claude", "-h"], P("-d", "claude", "-h").Args);
+        Assert.Equal(["claude", "--help"], R("claude", "--help").Command);
+        Assert.Equal(["claude", "--help"], R("run", "claude", "--help").Command);
+        Assert.Equal(["--help"], R("run", "--", "--help").Command);
+        Assert.IsType<RunInvocation>(P("run", "claude", "-h"));
+        Assert.Equal(["claude", "-h"], R("-d", "claude", "-h").Command);
     }
 
     [Fact]
@@ -405,8 +401,8 @@ public class CliTests
     {
         foreach (var arg in new[] { "-?", "-H", "--Help", "-help" })
             Assert.StartsWith($"unknown option \"{arg}\"", Refused(arg).Message);
-        Assert.Equal(["/?"], P("/?").Args);
-        Assert.Equal(["/h"], P("/h").Args);
+        Assert.Equal(["/?"], R("/?").Command);
+        Assert.Equal(["/h"], R("/h").Command);
     }
 
     [Fact]
@@ -462,11 +458,8 @@ public class CliTests
     [Fact]
     public void AllowDefaults()
     {
-        var c = P("allow", "--defaults");
-        Assert.Equal(CommandKind.Allow, c.Kind);
-        Assert.True(c.Defaults);
-        Assert.Empty(c.Args);
-        Assert.False(P("allow").Defaults);
+        Assert.IsType<ListDefaultDomainsInvocation>(P("allow", "--defaults"));
+        Assert.IsType<ListBlockedInvocation>(P("allow"));
     }
 
     [Theory]
@@ -488,8 +481,8 @@ public class CliTests
     [Fact]
     public void Upgrade()
     {
-        Assert.False(P("upgrade").NoCache);
-        Assert.True(P("upgrade", "--no-cache").NoCache);
+        Assert.Equal(new UpgradeInvocation(NoCache: false), P("upgrade"));
+        Assert.Equal(new UpgradeInvocation(NoCache: true), P("upgrade", "--no-cache"));
         Assert.Throws<PenException>(() => P("upgrade", "--clean"));
         Assert.Throws<PenException>(() => P("upgrade", "--cleen"));
     }
@@ -497,11 +490,8 @@ public class CliTests
     [Fact]
     public void Clean()
     {
-        Assert.False(P("clean").Stale);
-        var stale = P("clean", "--stale");
-        Assert.Equal(CommandKind.Clean, stale.Kind);
-        Assert.True(stale.Stale);
-        Assert.Empty(stale.Args);
+        Assert.IsType<CleanInvocation>(P("clean"));
+        Assert.IsType<CleanStaleInvocation>(P("clean", "--stale"));
         Assert.Throws<PenException>(() => P("clean", "now"));
     }
 
@@ -524,77 +514,73 @@ public class CliTests
     [Fact]
     public void DockerGoesWithACommandToRun()
     {
-        Assert.False(P("claude").Docker);
-        Assert.True(P("run", "--docker", "claude").Docker);
-        Assert.Equal(["claude"], P("run", "--docker", "claude").Args);
-        Assert.Equal(["claude", "--docker"], P("claude", "--docker").Args);
-        Assert.True(P("-d", "claude").Docker);
+        Assert.False(R("claude").Docker);
+        Assert.True(R("run", "--docker", "claude").Docker);
+        Assert.Equal(["claude"], R("run", "--docker", "claude").Command);
+        Assert.Equal(["claude", "--docker"], R("claude", "--docker").Command);
+        Assert.True(R("-d", "claude").Docker);
 
-        var shell = P("--docker");
-        Assert.Equal(CommandKind.Run, shell.Kind);
+        var shell = R("--docker");
         Assert.True(shell.Docker);
-        Assert.Empty(shell.Args);
+        Assert.Empty(shell.Command);
 
-        var c = P("--docker", "codex", "exec", "hi");
+        var c = R("--docker", "codex", "exec", "hi");
         Assert.True(c.Docker);
-        Assert.Equal(["codex", "exec", "hi"], c.Args);
+        Assert.Equal(["codex", "exec", "hi"], c.Command);
 
-        var r = P("--docker", "run", "allow");
+        var r = R("--docker", "run", "allow");
         Assert.True(r.Docker);
-        Assert.Equal(["allow"], r.Args);
-        Assert.True(P("--docker", "--docker", "true").Docker);
-        Assert.Equal(["ls"], P("--docker", "--", "ls").Args);
-        Assert.Equal(["allow", "x.com"], P("-d", "--", "allow", "x.com").Args);
+        Assert.Equal(["allow"], r.Command);
+        Assert.True(R("--docker", "--docker", "true").Docker);
+        Assert.Equal(["ls"], R("--docker", "--", "ls").Command);
+        Assert.Equal(["allow", "x.com"], R("-d", "--", "allow", "x.com").Command);
     }
 
     [Fact]
     public void PortIsRepeatable_InOrder_WithoutDuplicates()
     {
-        Assert.Empty(P("claude").Ports);
-        Assert.Empty(P("--docker", "claude").Ports);
+        Assert.Empty(R("claude").Ports);
+        Assert.Empty(R("--docker", "claude").Ports);
 
-        var c = P("--port", "3000", "--port=5173", "--port", "3000", "claude", "--port", "9");
-        Assert.Equal(CommandKind.Run, c.Kind);
+        var c = R("--port", "3000", "--port=5173", "--port", "3000", "claude", "--port", "9");
         Assert.Equal([3000, 5173], c.Ports);
-        Assert.Equal(["claude", "--port", "9"], c.Args); // after the command, it's the command's
+        Assert.Equal(["claude", "--port", "9"], c.Command); // after the command, it's the command's
         Assert.False(c.Docker);
 
-        var shell = P("--port", "1");
-        Assert.Equal(CommandKind.Run, shell.Kind);
-        Assert.Empty(shell.Args);
+        var shell = R("--port", "1");
+        Assert.Empty(shell.Command);
         Assert.Equal([1], shell.Ports);
 
-        var r = P("--port", "65535", "--docker", "--port", "8080", "run", "--", "ps");
+        var r = R("--port", "65535", "--docker", "--port", "8080", "run", "--", "ps");
         Assert.True(r.Docker);
         Assert.Equal([65535, 8080], r.Ports);
-        Assert.Equal(["ps"], r.Args);
-        Assert.Equal([80], P("--docker", "--port", "80", "--docker", "true").Ports);
-        Assert.Equal([80], P("run", "--port", "80", "x").Ports);
-        Assert.Equal([3000], P("-p", "3000", "claude").Ports);
-        var next = P("-p", "80", "81", "claude"); // one value per --port
+        Assert.Equal(["ps"], r.Command);
+        Assert.Equal([80], R("--docker", "--port", "80", "--docker", "true").Ports);
+        Assert.Equal([80], R("run", "--port", "80", "x").Ports);
+        Assert.Equal([3000], R("-p", "3000", "claude").Ports);
+        var next = R("-p", "80", "81", "claude"); // one value per --port
         Assert.Equal([80], next.Ports);
-        Assert.Equal(["81", "claude"], next.Args);
+        Assert.Equal(["81", "claude"], next.Command);
     }
 
     [Fact]
     public void RunOptionsGoBeforeTheCommandAndAfterRun_AndMerge()
     {
-        var c = P("-d", "run", "-p", "80", "claude");
-        Assert.Equal(CommandKind.Run, c.Kind);
+        var c = R("-d", "run", "-p", "80", "claude");
         Assert.True(c.Docker);
         Assert.Equal([80], c.Ports);
-        Assert.Equal(["claude"], c.Args);
+        Assert.Equal(["claude"], c.Command);
 
-        var merged = P("-p", "80", "-t", "pen-test", "run", "-p", "81", "-p", "80", "--tool=pen-test:1", "--docker", "x");
+        var merged = R("-p", "80", "-t", "pen-test", "run", "-p", "81", "-p", "80", "--tool=pen-test:1", "--docker", "x");
         Assert.Equal([80, 81], merged.Ports);
         Assert.Equal([new ToolSpec("pen-test", "1")], merged.Tools);
         Assert.True(merged.Docker);
-        Assert.Equal(["x"], merged.Args);
+        Assert.Equal(["x"], merged.Command);
 
-        var dashed = P("run", "-d", "-p", "80", "-t", "pen-test", "--", "--docker");
-        Assert.Equal(["--docker"], dashed.Args);
+        var dashed = R("run", "-d", "-p", "80", "-t", "pen-test", "--", "--docker");
+        Assert.Equal(["--docker"], dashed.Command);
         Assert.True(dashed.Docker);
-        Assert.Equal(["allow", "x.com"], P("run", "-d", "allow", "x.com").Args);
+        Assert.Equal(["allow", "x.com"], R("run", "-d", "allow", "x.com").Command);
         Assert.StartsWith("--tool: pen-test:1 and pen-test:2 can't be used together",
             Refused("-t", "pen-test", "run", "-t", "pen-test:2", "claude").Message);
         Assert.Equal("--port: \"0\" isn't a port number (1 to 65535)\nRun 'pen run --help' for usage.",
@@ -622,9 +608,8 @@ public class CliTests
         string[][] lines = [[.. option, .. command], ["run", .. option, .. command], [.. option, "run", .. command]];
         foreach (var args in lines)
         {
-            var c = P(args);
-            Assert.Equal(CommandKind.Run, c.Kind);
-            Assert.Equal(command, c.Args);
+            var c = R(args);
+            Assert.Equal(command, c.Command);
             Assert.True(c.Docker || c.Ports.SequenceEqual([80]) || c.Tools.SequenceEqual([new ToolSpec("pen-test", "1")]));
         }
     }
@@ -743,8 +728,8 @@ public class CliTests
     [Fact]
     public void HelpAndVersion()
     {
-        Assert.Equal(CommandKind.Builtin, P("--help").Kind);
-        Assert.Equal(CommandKind.Builtin, P("-h").Kind);
+        Assert.IsType<BuiltinInvocation>(P("--help"));
+        Assert.IsType<BuiltinInvocation>(P("-h"));
         Assert.Matches("^pen [0-9]+\\.[0-9]+\\.[0-9]+.*\n$", Render("--version"));
         Assert.StartsWith("--version option cannot be combined with other arguments.", Refused("--version", "x").Message);
         Assert.StartsWith("--version option cannot be combined", Refused("--version", "--docker").Message);
@@ -762,9 +747,8 @@ public class CliTests
             ["run", "[diagram]"], ["[x]", "--help"], ["run", "-d", "[diagram]"]];
         foreach (var args in lines)
         {
-            var c = P(args);
-            Assert.Equal(CommandKind.Run, c.Kind);
-            Assert.Equal(args.SkipWhile(a => a is "run" or "--" or "-d"), c.Args);
+            var c = R(args);
+            Assert.Equal(args.SkipWhile(a => a is "run" or "--" or "-d"), c.Command);
         }
         Assert.StartsWith($"pen allow: \"{at}\" isn't a domain", Refused("allow", at).Message);
     }
@@ -773,11 +757,11 @@ public class CliTests
     public void AFirstArgumentNamedLikePenIsntDropped()
     {
         var name = System.CommandLine.RootCommand.ExecutableName;
-        Assert.Equal(["pen", "x"], P("pen", "x").Args);
-        Assert.Equal(["pen", "pen", "x"], P("pen", "pen", "x").Args);
-        Assert.Equal([name, "x"], P(name, "x").Args);
-        Assert.Equal([name, name], P("-d", name, name).Args);
-        Assert.Equal(["./" + name, "--help"], P("./" + name, "--help").Args);
+        Assert.Equal(["pen", "x"], R("pen", "x").Command);
+        Assert.Equal(["pen", "pen", "x"], R("pen", "pen", "x").Command);
+        Assert.Equal([name, "x"], R(name, "x").Command);
+        Assert.Equal([name, name], R("-d", name, name).Command);
+        Assert.Equal(["./" + name, "--help"], R("./" + name, "--help").Command);
         Assert.StartsWith($"unknown option \"-x/{name}\"", Refused("-x/" + name, "claude").Message);
     }
 

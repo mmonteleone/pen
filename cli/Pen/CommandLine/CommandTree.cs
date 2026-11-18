@@ -35,8 +35,6 @@ internal sealed class CommandTree
     /// <summary>The longer help each command has after the sections System.CommandLine writes.</summary>
     private readonly Dictionary<SclCommand, string> _details = [];
 
-    private readonly Dictionary<SclCommand, CommandKind> _kinds = [];
-
     /// <summary>Creates the tree.</summary>
     /// <param name="startDir">
     /// Gets the start directory, or null when it can't be read, for the advice on a domain argument named like a file
@@ -74,8 +72,7 @@ internal sealed class CommandTree
         Version = new VersionOption { Description = "show pen's version", Action = new VersionAction(Help) };
         Root.Options.Add(Version);
 
-        Run = AddCommand("run", CommandKind.Run,
-            "run a command whose name matches a subcommand, e.g. pen run clean", RunDetails);
+        Run = AddCommand("run", "run a command whose name matches a subcommand, e.g. pen run clean", RunDetails);
         RunOptions = CreateRunOptions(
             catalog,
             "give the session its own Docker daemon (one per project at a time); docker = true in " +
@@ -98,13 +95,13 @@ internal sealed class CommandTree
                 result.AddError("pen run: missing the command to run");
         });
 
-        Tools = AddCommand("tools", CommandKind.Tools, "list the agents and tools pen can install", ToolsDetails);
+        Tools = AddCommand("tools", "list the agents and tools pen can install", ToolsDetails);
 
-        Upgrade = AddCommand("upgrade", CommandKind.Upgrade,
-            "rebuild the base image, agents and tools; --no-cache skips the cache", UpgradeDetails);
+        Upgrade = AddCommand(
+            "upgrade", "rebuild the base image, agents and tools; --no-cache skips the cache", UpgradeDetails);
         NoCache = AddFlag(Upgrade, "--no-cache", null, "rebuild without the build cache");
 
-        Allow = AddCommand("allow", CommandKind.Allow,
+        Allow = AddCommand("allow",
             "allow domains, applied to running sessions too; pen allow '*' (quoted) allows any domain; " +
                 "with none, list recently blocked domains", AllowDetails);
         AllowDomains = AddDomains(Allow,
@@ -115,7 +112,7 @@ internal sealed class CommandTree
         AllowDefaults = AddFlag(Allow, "--defaults", null, "list the domains pen allows out of the box");
         Allow.Validators.Add(ValidateAllow);
 
-        Deny = AddCommand("deny", CommandKind.Deny,
+        Deny = AddCommand("deny",
             "deny domains, over every allow, applied to running sessions too; with none, list the denied domains",
             DenyDetails);
         DenyDomains = AddDomains(Deny, "a domain to deny; .example.com also denies its subdomains",
@@ -124,10 +121,9 @@ internal sealed class CommandTree
             "project, and apply them to all running sessions");
         Deny.Validators.Add(result => ValidateGlobal(result, "deny", DenyGlobal, DenyDomains));
 
-        Init = AddCommand("init", CommandKind.Init, "write a starting .pen/config.toml for this project", InitDetails);
+        Init = AddCommand("init", "write a starting .pen/config.toml for this project", InitDetails);
 
-        Trust = AddCommand("trust", CommandKind.Trust, "review and approve what this project's .pen/ asks for",
-            TrustDetails);
+        Trust = AddCommand("trust", "review and approve what this project's .pen/ asks for", TrustDetails);
         TrustYes = AddFlag(Trust, "--yes", "-y", "approve without asking, for scripts");
         TrustList = AddFlag(Trust, "--list", null, "list everything new, however long, and approve nothing");
         Trust.Validators.Add(result =>
@@ -136,11 +132,10 @@ internal sealed class CommandTree
                 result.AddError("pen trust: --yes and --list don't go together");
         });
 
-        Ps = AddCommand("ps", CommandKind.Ps, "list running sessions, in every project", PsDetails);
+        Ps = AddCommand("ps", "list running sessions, in every project", PsDetails);
         Ps.Aliases.Add("ls");
 
-        Sign = AddCommand("sign", CommandKind.Sign, "on the host: re-sign unpushed commits with your key",
-            SignDetails);
+        Sign = AddCommand("sign", "on the host: re-sign unpushed commits with your key", SignDetails);
         SignBase = new Argument<string?>("base")
         {
             Arity = ArgumentArity.ZeroOrOne,
@@ -153,7 +148,7 @@ internal sealed class CommandTree
                 result.AddError($"pen sign: unknown option \"{value}\"");
         });
 
-        Clean = AddCommand("clean", CommandKind.Clean,
+        Clean = AddCommand("clean",
             "start this project's sandbox fresh: logins, caches (asks first); with --stale, remove what moved or " +
                 "deleted projects and old upgrades left behind, in every project (asks first)", CleanDetails);
         CleanStale = AddFlag(Clean, "--stale", null, "instead, across every project, remove what projects you " +
@@ -245,9 +240,6 @@ internal sealed class CommandTree
     /// <summary>Gets pen clean --stale.</summary>
     public Option<bool> CleanStale { get; }
 
-    /// <summary>Gets the kind of command <paramref name="command"/> is, the root's being Run.</summary>
-    public CommandKind GetKind(SclCommand command) => command == Root ? CommandKind.Run : _kinds[command];
-
     /// <summary>Writes what a help or version request asks for to <paramref name="output"/>.</summary>
     /// <returns>The exit code: 0.</returns>
     /// <remarks>
@@ -280,11 +272,10 @@ internal sealed class CommandTree
     /// <summary>Checks whether <paramref name="action"/> shows Pen's version.</summary>
     public static bool IsVersion(CommandLineAction? action) => action is VersionAction;
 
-    private SclCommand AddCommand(string name, CommandKind kind, string description, string details)
+    private SclCommand AddCommand(string name, string description, string details)
     {
         var command = new SclCommand(name, description);
         Root.Subcommands.Add(command);
-        _kinds[command] = kind;
         _details[command] = details;
         return command;
     }

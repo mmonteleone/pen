@@ -1,3 +1,4 @@
+using Pen.CommandLine;
 using Pen.Platform;
 using Pen.Projects;
 using Pen.Tools;
@@ -16,11 +17,9 @@ internal sealed class TrustCommand(ProjectContext context, Answers answers, Reci
 
     private readonly TrustGate _gate = new(context, answers, catalog, clock);
 
-    /// <summary>Lists (<paramref name="list"/>) or approves what .pen/ asks for.</summary>
-    /// <param name="yes">Approve without asking (--yes).</param>
-    /// <param name="list">List everything asked for and approve nothing (--list).</param>
+    /// <summary>Approves what .pen/ asks for, or lists it, as <paramref name="mode"/> says.</summary>
     /// <returns>0, or 1 when the user declines; a refusal throws.</returns>
-    public int Run(bool yes, bool list)
+    public int Run(TrustMode mode)
     {
         ProjectRuntime.EnsureRuntimeDir(context.Host, context.Project);
         var store = TrustStore.For(context.Host, context.Project);
@@ -30,7 +29,9 @@ internal sealed class TrustCommand(ProjectContext context, Answers answers, Reci
             Out.WriteLine(NothingNew);
             return 0;
         }
-        return list ? ListAll(request, store) : Approve(request, store, yes);
+        return mode == TrustMode.List
+            ? ListAll(request, store)
+            : Approve(request, store, yes: mode == TrustMode.ApproveAll);
     }
 
     /// <summary>Writes every item in <paramref name="request"/> to stdout, with no limit.</summary>

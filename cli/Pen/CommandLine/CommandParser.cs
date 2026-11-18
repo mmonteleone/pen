@@ -6,7 +6,7 @@ using SclCommand = System.CommandLine.Command;
 
 namespace Pen.CommandLine;
 
-/// <summary>Parses Pen's command line into a <see cref="Command"/>.</summary>
+/// <summary>Parses Pen's command line into a <see cref="CliInvocation"/>.</summary>
 internal static class CommandParser
 {
     /// <summary>The parser's settings: no POSIX bundling (-dp) and no response files (@file).</summary>
@@ -27,7 +27,7 @@ internal static class CommandParser
     /// there (<see cref="ShellGlob"/>).
     /// </param>
     /// <param name="catalog">The recipes --tool values are parsed against.</param>
-    /// <returns>The command they ask for.</returns>
+    /// <returns>What they ask Pen to do.</returns>
     /// <exception cref="PenException">
     /// The arguments aren't valid; exit code 2, with the help command to run for usage.
     /// </exception>
@@ -36,7 +36,7 @@ internal static class CommandParser
     /// command to run, as is everything after it. Options before the command are Pen's: --docker, --port and
     /// --tool (for running, also right after run), help and version. Any other one is an error.
     /// </remarks>
-    public static Command Parse(IReadOnlyList<string> args, Func<string?> startDir, RecipeCatalog catalog)
+    public static CliInvocation Parse(IReadOnlyList<string> args, Func<string?> startDir, RecipeCatalog catalog)
     {
         var tree = new CommandTree(startDir, catalog);
         var bounded = CommandBoundary.Insert(args, tree);
@@ -52,13 +52,13 @@ internal static class CommandParser
         if (tree.AsksForHelp(result))
         {
             ThrowIfUnknownRootOption(tree, result, help: true);
-            return new(CommandKind.Builtin, []) { ParseResult = result };
+            return new BuiltinInvocation(result);
         }
         if (CommandTree.IsVersion(result.Action))
         {
             if (result.Errors.Count > 0)
                 throw CreateUsageError(result.Errors[0].Message, tree.Root);
-            return new(CommandKind.Builtin, []) { ParseResult = result };
+            return new BuiltinInvocation(result);
         }
 
         ThrowIfAttachedValueInvalid(tree, bounded, result);
@@ -67,7 +67,7 @@ internal static class CommandParser
         ThrowIfInvalid(tree, result);
         if (parsed != tree.Root && parsed != tree.Run)
             ThrowIfRunOptionGiven(tree, result);
-        return CreateCommand(tree, result);
+        return CreateInvocation(tree, result);
     }
 
     /// <summary>Refuses a value attached after : or = to help or version, empty or not.</summary>
@@ -222,51 +222,64 @@ internal static class CommandParser
         }
     }
 
-    /// <summary>Creates the command a valid parse asks for.</summary>
-    private static Command CreateCommand(CommandTree tree, ParseResult result)
+    /// <summary>Creates the invocation a valid parse asks for.</summary>
+    private static CliInvocation CreateInvocation(CommandTree tree, ParseResult result)
     {
         var parsed = result.CommandResult.Command;
-        var command = new Command(tree.GetKind(parsed), ReadArguments(tree, result, parsed));
         if (parsed == tree.Root)
-            return AddRunOptions(command, result, [tree.RootOptions], tree.Root, tree.Catalog);
+            return CreateRun(result, tree.RootCommandLine, [tree.RootOptions], tree.Root, tree.Catalog);
         if (parsed == tree.Run)
-            return AddRunOptions(command, result, [tree.RootOptions, tree.RunOptions], tree.Run, tree.Catalog);
-        return command with
+            return CreateRun(result, tree.RunCommandLine, [tree.RootOptions, tree.RunOptions], tree.Run, tree.Catalog);
+        if (parsed == tree.Allow)
         {
-            NoCache = result.GetValue(tree.NoCache),
-            Stale = result.GetValue(tree.CleanStale),
-            Global = result.GetValue(tree.AllowGlobal) || result.GetValue(tree.DenyGlobal),
-            Defaults = result.GetValue(tree.AllowDefaults),
-            Yes = result.GetValue(tree.TrustYes),
-            List = result.GetValue(tree.TrustList),
-        };
+            if (result.GetValue(tree.AllowDefaults))
+                return new ListDefaultDomainsInvocation();
+            return result.GetValue(tree.AllowDomains) is { Length: > 0 } domains
+                ? new AllowDomainsInvocation([.. domains], result.GetValue(tree.AllowGlobal))
+                : new ListBlockedInvocation();
+        }
+        if (parsed == tree.Deny)
+        {
+            return result.GetValue(tree.DenyDomains) is { Length: > 0 } domains
+                ? new DenyDomainsInvocation([.. domains], result.GetValue(tree.DenyGlobal))
+                : new ListDeniedInvocation();
+        }
+        if (parsed == tree.Trust)
+            return new TrustInvocation(ReadTrustMode(tree, result));
+        if (parsed == tree.Clean)
+            return result.GetValue(tree.CleanStale) ? new CleanStaleInvocation() : new CleanInvocation();
+        if (parsed == tree.Sign)
+            return new SignInvocation(ReadTokens(result, tree.SignBase) is [var given] ? given : null);
+        if (parsed == tree.Upgrade)
+            return new UpgradeInvocation(result.GetValue(tree.NoCache));
+        if (parsed == tree.Ps)
+            return new PsInvocation();
+        if (parsed == tree.Tools)
+            return new ToolsInvocation();
+        if (parsed == tree.Init)
+            return new InitInvocation();
+        throw new InvalidOperationException($"unhandled command \"{parsed.Name}\"");
     }
 
-    /// <summary>Reads the arguments of the command that was parsed, as <see cref="Command.Args"/> holds them.</summary>
-    private static IReadOnlyList<string> ReadArguments(CommandTree tree, ParseResult result, SclCommand parsed)
+    /// <summary>Reads pen trust's mode; --yes and --list together were refused already.</summary>
+    private static TrustMode ReadTrustMode(CommandTree tree, ParseResult result)
     {
-        if (parsed == tree.Root)
-            return ReadTokens(result, tree.RootCommandLine);
-        if (parsed == tree.Run)
-            return ReadTokens(result, tree.RunCommandLine);
-        if (parsed == tree.Allow)
-            return result.GetValue(tree.AllowDomains) ?? [];
-        if (parsed == tree.Deny)
-            return result.GetValue(tree.DenyDomains) ?? [];
-        if (parsed == tree.Sign)
-            return ReadTokens(result, tree.SignBase);
-        return [];
+        if (result.GetValue(tree.TrustYes))
+            return TrustMode.ApproveAll;
+        return result.GetValue(tree.TrustList) ? TrustMode.List : TrustMode.Review;
     }
 
     /// <summary>Reads an argument's values exactly as given.</summary>
-    private static List<string> ReadTokens(ParseResult result, Argument argument) =>
-        result.GetResult(argument)?.Tokens.Select(token => token.Value).ToList() ?? [];
+    private static IReadOnlyList<string> ReadTokens(ParseResult result, Argument argument) =>
+        result.GetResult(argument)?.Tokens.Select(token => token.Value).ToArray() ?? [];
 
-    /// <summary>Adds the options for running from each place they were given (before and after run) to
-    /// <paramref name="command"/>.</summary>
-    private static Command AddRunOptions(
-        Command command,
+    /// <summary>
+    /// Creates the run of <paramref name="commandLine"/>, with the options for running from each place they were
+    /// given (before and after run).
+    /// </summary>
+    private static RunInvocation CreateRun(
         ParseResult result,
+        Argument commandLine,
         RunOptionSet[] places,
         SclCommand owner,
         RecipeCatalog catalog)
@@ -280,12 +293,11 @@ internal static class CommandParser
         var tools = places.SelectMany(place => result.GetValue(place.Tool) ?? []);
         if (!ToolSpec.TryCanonicalize(tools, catalog, out var canonical, out var conflict))
             throw CreateUsageError($"--tool: {conflict}", owner);
-        return command with
-        {
-            Docker = places.Any(place => result.GetValue(place.Docker)),
-            Ports = ports,
-            Tools = canonical,
-        };
+        return new(
+            ReadTokens(result, commandLine),
+            Docker: places.Any(place => result.GetValue(place.Docker)),
+            Ports: ports,
+            Tools: canonical);
     }
 
     /// <summary>Finds the option of <paramref name="options"/> that the parser read <paramref name="token"/> as.

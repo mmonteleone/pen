@@ -296,7 +296,7 @@ public class TrustTests
             var stderr = Console.Error;
             var captured = new StringWriter();
             Console.SetError(captured);
-            try { Assert.Equal(exitCode, new TrustCommand(new ProjectContext(f.Host, f.Project, user, project), answers, RecipeCatalog.Embedded, TimeProvider.System).Run(yes: yes, list: false)); }
+            try { Assert.Equal(exitCode, new TrustCommand(new ProjectContext(f.Host, f.Project, user, project), answers, RecipeCatalog.Embedded, TimeProvider.System).Run(yes ? TrustMode.ApproveAll : TrustMode.Review)); }
             finally { Console.SetError(stderr); }
             return System.Text.RegularExpressions.Regex.Replace(captured.ToString().Replace(f.RuntimeDir, "<runtime>"), "-review-[0-9a-f]{8}/", "-review-<id>/");
         }
