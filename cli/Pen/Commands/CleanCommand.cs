@@ -24,7 +24,9 @@ internal sealed class CleanCommand(HostEnv host, Project project, Answers answer
     {
         ProjectRuntime.EnsureRuntimeDir(host, project);
         using var projectLock = SessionRegistry.TakeForClean(host, project);
-        SessionRecovery.FinishAbandoned(project.Key, host.GetRuntimeDir(project.Key), clock);
+        // pen clean runs no git, and a session kept for a retry needs nothing it removes (only containers use the
+        // volumes, and one whose writers couldn't be removed throws here), so a check that didn't finish only warns.
+        _ = SessionRecovery.FinishAbandoned(project.Key, host.GetRuntimeDir(project.Key), clock);
 
         var volumes = FindVolumes();
         if (volumes.Count == 0)

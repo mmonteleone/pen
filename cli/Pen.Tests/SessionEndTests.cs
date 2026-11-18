@@ -318,6 +318,211 @@ public class SessionEndTests
     }
 
     /// <summary>
+    /// pen clean, pen allow, pen deny (also with --global) and the blocked listing run no git, so an abandoned
+    /// session's check that didn't finish only warns: the session ends, no git runs, and the command does its work.
+    /// </summary>
+    [Theory]
+    [InlineData("clean")]
+    [InlineData("allow")]
+    [InlineData("allow --global")]
+    [InlineData("deny")]
+    [InlineData("deny --global")]
+    [InlineData("listing")]
+    public void AFailedCheckInAnAbandonedSession_OnlyWarns_InCommandsThatRunNoGit(string command)
+    {
+        using var t = new TempDir();
+        var (host, project, dead) = AbandonedInProject(t);
+        BreakCheck(dead);
+        var (docker, gitCalls) = FakeHost(t, """
+            case "$1" in
+              rm|compose) exit 0 ;;
+              volume)
+                case "$2" in
+                  inspect) case "$3" in *_home) exit 0 ;; *) exit 1 ;; esac ;;
+                  rm) exit 0 ;;
+                  *) exit 99 ;;
+                esac ;;
+              *) exit 99 ;;
+            esac
+
+            """);
+        using var _ = docker;
+
+        var exit = -1;
+        var stdout = "";
+        var output = CapturingStderr(() => stdout = CapturingStdout(() => exit = RunCommandWithoutGit(command, host, project)));
+
+        Assert.Equal(0, exit);
+        Assert.Contains("git wasn't checked", output);
+        Assert.False(dead.IsOpen());
+        Assert.False(File.Exists(gitCalls));
+        switch (command)
+        {
+            case "clean":
+                Assert.Contains($"volume rm {project.Key}_home", File.ReadAllLines(Path.Combine(t.Path, "calls")));
+                Assert.Contains($"removed {project.Key}_home", output);
+                break;
+            case "listing":
+                Assert.Contains("blocked.example", stdout);
+                break;
+            default:
+                Assert.Contains("added.example", File.ReadAllText(EgressConfigPath(command, host, project)));
+                break;
+        }
+    }
+
+    /// <summary>
+    /// An abandoned session whose writers can't be removed stops pen clean, pen allow, pen deny and the blocked
+    /// listing before they change anything, keeping the session for a retry, and no git runs.
+    /// </summary>
+    [Theory]
+    [InlineData("clean")]
+    [InlineData("allow")]
+    [InlineData("allow --global")]
+    [InlineData("deny")]
+    [InlineData("deny --global")]
+    [InlineData("listing")]
+    public void AFailedRemovalInAnAbandonedSession_StopsCommandsThatRunNoGit_BeforeTheyChangeAnything(string command)
+    {
+        using var t = new TempDir();
+        var (host, project, dead) = AbandonedInProject(t);
+        var (docker, gitCalls) = FakeHost(t, """
+            case "$1" in
+              rm) exit 1 ;;
+              ps) echo still-present ;;
+              *) exit 99 ;;
+            esac
+
+            """);
+        using var _ = docker;
+
+        var stdout = "";
+        PenException? error = null;
+        CapturingStderr(() => stdout = CapturingStdout(() =>
+            error = Assert.Throws<PenException>(() => RunCommandWithoutGit(command, host, project))));
+
+        Assert.Contains($"session {dead.Id} is retained for retry", error!.Message);
+        Assert.True(dead.IsOpen());
+        Assert.False(File.Exists(gitCalls));
+        Assert.All(File.ReadAllLines(Path.Combine(t.Path, "calls")),
+            call => Assert.True(call.StartsWith("rm ", StringComparison.Ordinal) || call.StartsWith("ps ", StringComparison.Ordinal), call));
+        Assert.Equal("", stdout);
+        if (command is not "clean" and not "listing")
+            Assert.False(File.Exists(EgressConfigPath(command, host, project)));
+    }
+
+    /// <summary>
+    /// An abandoned session whose protected files can't all be restored keeps its files, the good copies among them,
+    /// through pen clean, pen allow, pen deny and the blocked listing, and no git runs; the next recovery, once the
+    /// way is clear, restores them.
+    /// </summary>
+    [Theory]
+    [InlineData("clean")]
+    [InlineData("allow")]
+    [InlineData("allow --global")]
+    [InlineData("deny")]
+    [InlineData("deny --global")]
+    [InlineData("listing")]
+    public void AnIncompleteRestoreInAnAbandonedSession_KeepsItsFiles_InCommandsThatRunNoGit(string command)
+    {
+        using var t = new TempDir();
+        var (host, project, dead) = AbandonedInProject(t);
+        ProtectedFiles.Save(dead, RepoGuard.EnsureMountTargetsAndPlan(project.Dir, "/nonexistent-home"), project.Dir, [], []);
+        var config = Path.Combine(project.Dir, ".git", "config");
+        var original = File.ReadAllText(config);
+        File.AppendAllText(config, "[core]\n fsmonitor = /evil\n");
+        var git = Path.GetDirectoryName(config)!;
+        var runtime = host.GetRuntimeDir(project.Key);
+        var (docker, gitCalls) = FakeHost(t, """
+            case "$1" in
+              rm|compose) exit 0 ;;
+              volume)
+                case "$2" in
+                  inspect) case "$3" in *_home) exit 0 ;; *) exit 1 ;; esac ;;
+                  rm) exit 0 ;;
+                  *) exit 99 ;;
+                esac ;;
+              *) exit 99 ;;
+            esac
+
+            """);
+        using var _ = docker;
+
+        File.SetUnixFileMode(git, UnixFileMode.None);
+        try
+        {
+            var exit = -1;
+            var output = CapturingStderr(() => CapturingStdout(() => exit = RunCommandWithoutGit(command, host, project)));
+
+            Assert.Equal(0, exit);
+            Assert.Contains("good copies", output);
+            Assert.True(dead.IsOpen());
+            Assert.True(File.Exists(dead.ProtectedManifest));
+            Assert.True(Directory.Exists(dead.ProtectedDir));
+            Assert.False(File.Exists(gitCalls));
+            CapturingStderr(() =>
+                Assert.False(SessionRecovery.FinishAbandoned(project.Key, runtime, TimeProvider.System).EveryCheckFinished));
+        }
+        finally { File.SetUnixFileMode(git, (UnixFileMode)0b111_101_101); }
+
+        CapturingStderr(() =>
+            Assert.True(SessionRecovery.FinishAbandoned(project.Key, runtime, TimeProvider.System).EveryCheckFinished));
+        Assert.False(dead.IsOpen());
+        Assert.Equal(original, File.ReadAllText(config));
+        Assert.DoesNotContain("fsmonitor", File.ReadAllText(config));
+    }
+
+    /// <summary>
+    /// A repo with an abandoned session in its runtime dir, which blocked blocked.example; no user config.toml yet.
+    /// </summary>
+    private static (HostEnv Host, Project Project, SessionDir Dead) AbandonedInProject(TempDir t)
+    {
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        var repo = Git.Repo(t.Sub("repo"));
+        var project = Project.Resolve(repo, host);
+        var dead = new SessionDir(project.Key, Path.Combine(host.GetRuntimeDir(project.Key), "sessions", "12345678"));
+        Directory.CreateDirectory(dead.Path);
+        File.WriteAllText(dead.ComposeFile, "stack");
+        File.WriteAllText(dead.EnvFile, $"PROJECT_DIR={repo}\n");
+        File.WriteAllText(dead.StartedWithGit, Path.Combine(repo, ".git") + "\n");
+        File.WriteAllText(dead.ModulesFile, "");
+        File.WriteAllText(dead.ProxyLog, "2026-11-01T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT blocked.example:443 -\n");
+        return (host, project, dead);
+    }
+
+    private static int RunCommandWithoutGit(string command, HostEnv host, Project project)
+    {
+        var startDir = new StartDir(project.Dir);
+        var catalog = RecipeCatalog.Embedded;
+        var clock = TimeProvider.System;
+        return command switch
+        {
+            "clean" => new CleanCommand(host, project, new Answers(new StringReader("y\n"), IsTerminal: true), clock).Run(),
+            "allow" => new AllowCommand(host, startDir, catalog, clock).Run(["added.example"], global: false),
+            "allow --global" => new AllowCommand(host, startDir, catalog, clock).Run(["added.example"], global: true),
+            "deny" => new DenyCommand(host, startDir, catalog, clock).Run(["added.example"], global: false),
+            "deny --global" => new DenyCommand(host, startDir, catalog, clock).Run(["added.example"], global: true),
+            "listing" => new AllowCommand(host, startDir, catalog, clock).ListBlocked(
+                new ProjectContext(host, project, UserConfiguration.Empty, ProjectConfiguration.Empty)),
+            _ => throw new ArgumentOutOfRangeException(nameof(command)),
+        };
+    }
+
+    private static string EgressConfigPath(string command, HostEnv host, Project project) =>
+        command.EndsWith("--global", StringComparison.Ordinal) ? host.UserConfigPath : project.ProjectConfigPath;
+
+    private static string CapturingStdout(Action action)
+    {
+        var stdout = Console.Out;
+        var captured = new StringWriter();
+        Console.SetOut(captured);
+        try { action(); }
+        finally { Console.SetOut(stdout); }
+        return captured.ToString();
+    }
+
+    /// <summary>
     /// A session an older Pen wrote, without the tools, tool-domains, denylist.txt, open-egress.txt or modules records,
     /// still ends: checked, reminded, its files deleted, and what it blocked reported against its allowlist alone.
     /// </summary>

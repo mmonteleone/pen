@@ -126,7 +126,8 @@ internal sealed class AllowCommand(HostEnv host, StartDir startDir, RecipeCatalo
         var project = context.Project;
         var runtimeDir = host.GetRuntimeDir(project.Key);
         ProjectRuntime.EnsureRuntimeDir(host, project);
-        SessionRecovery.FinishAbandoned(project.Key, runtimeDir, clock);
+        // The listing only reads proxy logs and runs no git, so a check that didn't finish only warns.
+        _ = SessionRecovery.FinishAbandoned(project.Key, runtimeDir, clock);
 
         var policy = EgressPolicyResolver.ForListing(context, catalog);
         var found = BlockedDomainQuery.Find(project.Key, runtimeDir, policy);

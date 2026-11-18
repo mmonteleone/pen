@@ -64,7 +64,9 @@ internal abstract record EgressTarget
         if (CurrentProject is not { } project)
             return;
         ProjectRuntime.EnsureRuntimeDir(host, project);
-        SessionRecovery.FinishAbandoned(project.Key, host.GetRuntimeDir(project.Key), clock);
+        // pen allow and pen deny run no git: they edit a config file and running sessions' ACL files, so a check
+        // that didn't finish only warns.
+        _ = SessionRecovery.FinishAbandoned(project.Key, host.GetRuntimeDir(project.Key), clock);
     }
 
     /// <summary>Finds the running sessions a domain added here (allowed or denied) applies to.</summary>
