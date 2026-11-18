@@ -109,7 +109,11 @@ internal static class ConfigEdit
     /// Tells whether <paramref name="after"/> is <paramref name="before"/> with only the domains added to
     /// <paramref name="key"/>'s list.
     /// </summary>
-    private static bool IsOnlyAdded(Config before, Config after, ConfigListKey key, List<string> added) =>
+    /// <remarks>
+    /// Every property of <see cref="Config"/> is compared, by contents and in order (tools in canonical order, the
+    /// tokens by owner), so a new property has to be added here too.
+    /// </remarks>
+    internal static bool IsOnlyAdded(Config before, Config after, ConfigListKey key, List<string> added) =>
         after.Allow.SequenceEqual(key == ConfigListKey.Allow ? before.Allow.Concat(added) : before.Allow)
             && after.Deny.SequenceEqual(key == ConfigListKey.Deny ? before.Deny.Concat(added) : before.Deny)
             && after.Tools.SequenceEqual(before.Tools)
@@ -117,7 +121,11 @@ internal static class ConfigEdit
             && after.Docker == before.Docker
             && after.Ports.SequenceEqual(before.Ports)
             && after.Env.SequenceEqual(before.Env)
-            && after.GitHubTokens.OrderBy(kv => kv.Key).SequenceEqual(before.GitHubTokens.OrderBy(kv => kv.Key));
+            && after.GitHubTokens.Count == before.GitHubTokens.Count
+            && before.GitHubTokens.All(token =>
+                after.GitHubTokens.TryGetValue(token.Key, out var value) && value == token.Value)
+            && after.Hide.Select(pattern => pattern.Text).SequenceEqual(before.Hide.Select(pattern => pattern.Text))
+            && after.Replace.SequenceEqual(before.Replace);
 
     /// <summary>Gets a key-value's key, if it's a single (undotted) bare or quoted key.</summary>
     private static string? KeyName(KeyValueSyntax keyValue)
