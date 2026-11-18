@@ -2,6 +2,7 @@ using Pen.Configuration;
 using Pen.GitProtection;
 using Pen.Platform;
 using Pen.Projects;
+using Pen.Proxy;
 using Pen.Sessions;
 using Pen.Tools;
 
@@ -64,6 +65,34 @@ internal abstract record EgressTarget
             return;
         ProjectRuntime.EnsureRuntimeDir(host, project);
         Session.FinishDeadSessions(project.Key, host.GetRuntimeDir(project.Key), clock);
+    }
+
+    /// <summary>Finds the running sessions a domain added here (allowed or denied) applies to.</summary>
+    /// <returns>
+    /// For a project's .pen/, only those started in its dir; with --global, every project's.
+    /// </returns>
+    /// <remarks>.pen/ is per worktree: a session in another worktree of the repo reads its own.</remarks>
+    public List<SessionDir> FindRunningSessions(HostEnv host) =>
+        this is InProject { Project: var project }
+            ? SessionRegistry.FindRunningIn(project.Key, host.GetRuntimeDir(project.Key), project.Dir)
+            : SessionRegistry.FindRunningEverywhere(host);
+
+    /// <summary>
+    /// Applies the config files to each running session a change here is for, saying how each went and then how
+    /// many took it.
+    /// </summary>
+    /// <returns>Each session's result, in order: one failing doesn't stop the rest.</returns>
+    public IReadOnlyList<AclUpdateResult> ApplyToRunningSessions(HostEnv host, SessionAclUpdater updater)
+    {
+        var results = new List<AclUpdateResult>();
+        foreach (var session in FindRunningSessions(host))
+        {
+            var result = updater.Update(session);
+            EgressMessages.WriteUpdate(session, result);
+            results.Add(result);
+        }
+        EgressMessages.WriteApplied(results.Count(result => result is AclUpdateResult.Applied), this);
+        return results;
     }
 
     /// <summary>

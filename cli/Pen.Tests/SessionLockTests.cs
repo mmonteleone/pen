@@ -164,10 +164,10 @@ public sealed class SessionLockTests : IDisposable
         File.WriteAllText(other.ComposeFile, "");
         using var so = FileLock.TryTake(other.LockFile, exclusive: true)!;
 
-        Assert.Equal(["aaaa0001"], AllowCommand.FindTargets(_host, new EgressTarget.InProject(_main)).Select(s => s.Id));
-        Assert.Equal(["aaaa0002", "aaaa0003"], AllowCommand.FindTargets(_host, new EgressTarget.InProject(_wt)).Select(s => s.Id));
+        Assert.Equal(["aaaa0001"], new EgressTarget.InProject(_main).FindRunningSessions(_host).Select(s => s.Id));
+        Assert.Equal(["aaaa0002", "aaaa0003"], new EgressTarget.InProject(_wt).FindRunningSessions(_host).Select(s => s.Id));
         Assert.Equal(["aaaa0001", "aaaa0002", "aaaa0003", "bbbb0001"],
-            AllowCommand.FindTargets(_host, new EgressTarget.Global(_wt)).Select(s => s.Id).Order(StringComparer.Ordinal));
-        Assert.Equal(4, AllowCommand.FindTargets(_host, new EgressTarget.Global(null)).Count);
+            new EgressTarget.Global(_wt).FindRunningSessions(_host).Select(s => s.Id).Order(StringComparer.Ordinal));
+        Assert.Equal(4, new EgressTarget.Global(null).FindRunningSessions(_host).Count);
     }
 }

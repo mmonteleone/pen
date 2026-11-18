@@ -20,6 +20,9 @@ internal static class Retry
         }
     }
 
+    /// <summary>Waits <paramref name="delay"/> between two tries of a loop that decides itself when to stop.</summary>
+    public static void Wait(TimeSpan delay) => Thread.Sleep(delay);
+
     /// <summary>
     /// Calls <paramref name="attempt"/> until it returns a value, giving up once <paramref name="limit"/> has passed
     /// on <paramref name="clock"/> since the first call.

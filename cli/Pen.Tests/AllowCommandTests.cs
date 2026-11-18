@@ -171,18 +171,18 @@ public class AllowCommandTests
         using var t = new TempDir();
         var s = AclSession(t, old: false);
         var inodes = new[] { s.AllowlistFile, s.DenylistFile, s.OpenEgressFile }.Select(path => Native.Stat(path, follow: false)!.Value.Inode).ToList();
-        var written = AllowCommand.WriteAclFiles(s, Egress(["github.com", "*"], ["gist.github.com"]));
+        var written = SessionAclUpdater.WriteAclFiles(s, Egress(["github.com", "*"], ["gist.github.com"]));
         Assert.Null(written.Pending);
         // What the proxy is checked to see before it reloads: all three, deny first.
         Assert.Equal([new("denylist.txt", "gist.github.com\n"), new("allowlist.txt", "github.com\n"),
-            new AllowCommand.AclFile("open-egress.txt", ".\n")], written.Files);
+            new SessionAclUpdater.AclFile("open-egress.txt", ".\n")], written.Files);
         // In open egress too, a domain allowed by name stays in the allowlist: it may resolve privately.
         Assert.Equal("github.com\n", File.ReadAllText(s.AllowlistFile));
         Assert.Equal("gist.github.com\n", File.ReadAllText(s.DenylistFile));
         Assert.Equal(".\n", File.ReadAllText(s.OpenEgressFile));
         Assert.Equal(inodes, new[] { s.AllowlistFile, s.DenylistFile, s.OpenEgressFile }.Select(path => Native.Stat(path, follow: false)!.Value.Inode).ToList());
 
-        Assert.Null(AllowCommand.WriteAclFiles(s, Egress(["github.com"], [])).Pending);
+        Assert.Null(SessionAclUpdater.WriteAclFiles(s, Egress(["github.com"], [])).Pending);
         Assert.Equal("github.com\n", File.ReadAllText(s.AllowlistFile));
         Assert.Equal("", File.ReadAllText(s.DenylistFile));
         Assert.Equal("", File.ReadAllText(s.OpenEgressFile));
@@ -193,17 +193,17 @@ public class AllowCommandTests
     {
         using var t = new TempDir();
         var s = AclSession(t, old: true);
-        var written = AllowCommand.WriteAclFiles(s, Egress(["github.com", "new.example", "*"], ["gist.github.com"]));
+        var written = SessionAclUpdater.WriteAclFiles(s, Egress(["github.com", "new.example", "*"], ["gist.github.com"]));
         Assert.Equal("deny and allow = [\"*\"] apply", written.Pending);
-        Assert.Equal([new AllowCommand.AclFile("allowlist.txt", "github.com\nnew.example\n")], written.Files);
+        Assert.Equal([new SessionAclUpdater.AclFile("allowlist.txt", "github.com\nnew.example\n")], written.Files);
         Assert.Equal("github.com\nnew.example\n", File.ReadAllText(s.AllowlistFile));
         Assert.False(File.Exists(s.DenylistFile));
         Assert.False(File.Exists(s.OpenEgressFile));
 
-        Assert.Equal("allow = [\"*\"] applies", AllowCommand.WriteAclFiles(s, Egress(["*"], [])).Pending);
+        Assert.Equal("allow = [\"*\"] applies", SessionAclUpdater.WriteAclFiles(s, Egress(["*"], [])).Pending);
         Assert.DoesNotContain("*", File.ReadAllText(s.AllowlistFile));
-        Assert.Equal("deny applies", AllowCommand.WriteAclFiles(s, Egress(["github.com"], ["x.example"])).Pending);
-        Assert.Null(AllowCommand.WriteAclFiles(s, Egress(["github.com"], [])).Pending);
+        Assert.Equal("deny applies", SessionAclUpdater.WriteAclFiles(s, Egress(["github.com"], ["x.example"])).Pending);
+        Assert.Null(SessionAclUpdater.WriteAclFiles(s, Egress(["github.com"], [])).Pending);
         Assert.Equal("github.com\n", File.ReadAllText(s.AllowlistFile));
     }
 
@@ -213,7 +213,7 @@ public class AllowCommandTests
         using var t = new TempDir();
         var s = AclSession(t, old: false);
         File.Delete(s.OpenEgressFile);
-        Assert.ThrowsAny<IOException>(() => AllowCommand.WriteAclFiles(s, Egress(["*"], [])));
+        Assert.ThrowsAny<IOException>(() => SessionAclUpdater.WriteAclFiles(s, Egress(["*"], [])));
         Assert.False(File.Exists(s.OpenEgressFile));
     }
 
@@ -232,6 +232,15 @@ public class AllowCommandTests
             File.WriteAllText(s.OpenEgressFile, "");
         }
         return (s, FileLock.TryTake(s.LockFile, exclusive: true)!);
+    }
+
+    /// <summary>Applies the config files to one session and says how it went, as pen allow and pen deny do.</summary>
+    /// <returns>Whether its Squid took them.</returns>
+    private static bool Apply(HostEnv host, SessionDir s)
+    {
+        var result = new SessionAclUpdater(host, RecipeCatalog.Embedded, TimeProvider.System).Update(s);
+        EgressMessages.WriteUpdate(s, result);
+        return result is AclUpdateResult.Applied;
     }
 
     private static string CapturingStderr(Action action)
@@ -257,7 +266,7 @@ public class AllowCommandTests
         var (s, l) = Running(t, host, project, old: false);
         using var _ = l;
         using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
-        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s, RecipeCatalog.Embedded, TimeProvider.System)));
+        var err = CapturingStderr(() => Assert.True(Apply(host, s)));
         Assert.Equal("", err);
         var calls = File.ReadAllLines(Path.Combine(t.Path, "calls"));
         Assert.Equal(2, calls.Length);
@@ -285,7 +294,7 @@ public class AllowCommandTests
         var (s, l) = Running(t, host, project, old: true);
         using var _ = l;
         using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
-        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s, RecipeCatalog.Embedded, TimeProvider.System)));
+        var err = CapturingStderr(() => Assert.True(Apply(host, s)));
         // Its proxy has only the allowlist to check.
         var calls = File.ReadAllLines(Path.Combine(t.Path, "calls"));
         Assert.Equal(2, calls.Length);
@@ -327,7 +336,7 @@ public class AllowCommandTests
             exit 0
 
             """);
-        var err = CapturingStderr(() => Assert.False(AllowCommand.Apply(host, s, RecipeCatalog.Embedded, TimeProvider.System)));
+        var err = CapturingStderr(() => Assert.False(Apply(host, s)));
         Assert.Contains($"couldn't apply it to the running session {s.ComposeProject}: its proxy still sees other ACL files than were written, so Squid wasn't reloaded; run this again", err);
         Assert.Equal((5, 0), CountProxyCalls(t));
         Assert.Equal("pastebin.com\n", File.ReadAllText(s.DenylistFile));
@@ -352,7 +361,7 @@ public class AllowCommandTests
             esac
 
             """ + FakeDocker.ServingAclFiles + "exit 0\n");
-        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s, RecipeCatalog.Embedded, TimeProvider.System)));
+        var err = CapturingStderr(() => Assert.True(Apply(host, s)));
         Assert.Equal("", err);
         Assert.Equal((3, 1), CountProxyCalls(t));
         Assert.EndsWith(" squid -k reconfigure", File.ReadAllLines(Path.Combine(t.Path, "calls"))[^1]);
@@ -372,13 +381,13 @@ public class AllowCommandTests
             exit 0
 
             """);
-        var err = CapturingStderr(() => Assert.False(AllowCommand.Apply(host, s, RecipeCatalog.Embedded, TimeProvider.System)));
+        var err = CapturingStderr(() => Assert.False(Apply(host, s)));
         Assert.Contains($"couldn't apply it to the running session {s.ComposeProject}: couldn't read its proxy's ACL files, so Squid wasn't reloaded; run this again: cat: /etc/squid/allowlist.txt: Permission denied", err);
         Assert.Equal((1, 0), CountProxyCalls(t));
     }
 
     [Fact]
-    public void ApplyToRunning_WhenDockerCantStart_ReportsEachSessionAndTriesThemAll()
+    public void ApplyToRunningSessions_WhenDockerCantStart_ReportsEachSessionAndTriesThemAll()
     {
         using var t = new TempDir();
         var host = t.Host();
@@ -393,8 +402,11 @@ public class AllowCommandTests
         Environment.SetEnvironmentVariable("PATH", t.Sub("no-docker"));
         try
         {
-            var err = CapturingStderr(() =>
-                Assert.False(AllowCommand.ApplyToRunning(host, new EgressTarget.InProject(project), RecipeCatalog.Embedded, TimeProvider.System)));
+            IReadOnlyList<AclUpdateResult> results = [];
+            var err = CapturingStderr(() => results = new EgressTarget.InProject(project)
+                .ApplyToRunningSessions(host, new SessionAclUpdater(host, RecipeCatalog.Embedded, TimeProvider.System)));
+            Assert.Equal(2, results.Count);
+            Assert.All(results, result => Assert.IsType<AclUpdateResult.Failed>(result));
             foreach (var s in new[] { first, second })
             {
                 Assert.Contains($"couldn't apply it to the running session {s.ComposeProject}: docker not found: is it installed and on PATH?", err);
@@ -420,7 +432,7 @@ public class AllowCommandTests
         using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
         var other = FileLock.TryTake(s.AclLockFile, exclusive: true)!;
         using var release = new Timer(_ => other.Dispose(), null, 500, Timeout.Infinite);
-        var err = CapturingStderr(() => Assert.True(AllowCommand.Apply(host, s, RecipeCatalog.Embedded, TimeProvider.System)));
+        var err = CapturingStderr(() => Assert.True(Apply(host, s)));
         Assert.Contains($"waiting for another pen allow or pen deny applying to the running session {s.ComposeProject}", err);
         Assert.Equal((1, 1), CountProxyCalls(t));
         // Not one of the files whose presence says what the session is.
@@ -441,7 +453,7 @@ public class AllowCommandTests
         using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
         var other = FileLock.TryTake(s.AclLockFile, exclusive: true)!;
         bool applied = false;
-        var apply = new Thread(() => CapturingStderr(() => applied = AllowCommand.Apply(host, s, RecipeCatalog.Embedded, TimeProvider.System)));
+        var apply = new Thread(() => CapturingStderr(() => applied = Apply(host, s)));
         apply.Start();
         Thread.Sleep(500);
         File.WriteAllText(host.UserConfigPath, "deny = [\"pastebin.com\"]\n");
@@ -449,6 +461,233 @@ public class AllowCommandTests
         apply.Join();
         Assert.True(applied);
         Assert.Contains("pastebin.com", File.ReadAllText(s.DenylistFile));
+    }
+
+    [Theory]
+    [InlineData("exec -T proxy sh -c")]
+    [InlineData("squid -k reconfigure")]
+    public void Apply_HoldsTheSessionsAclLockThroughTheReadBackAndTheReconfigure(string call)
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        var project = Project.Resolve(t.Sub("repo"), host);
+        var (s, l) = Running(t, host, project, old: false);
+        using var _ = l;
+        // The call says it has started, then waits (up to 10 seconds) for the test to let it go on.
+        var pause = $$"""
+            case "$*" in *" {{call}}"*)
+              : > started
+              i=0
+              while [ ! -f go ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+              ;;
+            esac
+
+            """;
+        using var fake = new FakeDocker(t, call == "squid -k reconfigure"
+            ? FakeDocker.ServingAclFiles + pause + "exit 0\n"
+            : pause + FakeDocker.ServingAclFiles + "exit 0\n");
+        var applied = false;
+        var apply = new Thread(() => CapturingStderr(() => applied = Apply(host, s)));
+        apply.Start();
+        var started = Path.Combine(t.Path, "started");
+        for (var waited = 0; !File.Exists(started) && waited < 200; waited++)
+            Thread.Sleep(50);
+        try
+        {
+            Assert.True(File.Exists(started));
+            using var other = FileLock.TryTake(s.AclLockFile, exclusive: true);
+            Assert.Null(other);
+        }
+        finally
+        {
+            File.WriteAllText(Path.Combine(t.Path, "go"), "");
+            apply.Join();
+        }
+        Assert.True(applied);
+        Assert.Equal((1, 1), CountProxyCalls(t));
+        using var after = FileLock.TryTake(s.AclLockFile, exclusive: true);
+        Assert.NotNull(after);
+    }
+
+    // Live apply through the commands, so the batch, its messages and the exit code are pinned together.
+
+    /// <summary>
+    /// <see cref="FakeDocker.ServingAclFiles"/>, except that the proxy sees <paramref name="stale"/> as just
+    /// truncated, as a lagging bind mount would show it.
+    /// </summary>
+    private static string ServingAclFilesWithStale(string stale)
+    {
+        const string cat = """cat() { command cat -- "$PROXY_ACL_DIR/${2#/etc/squid/}"; }; """;
+        Assert.Contains(cat, FakeDocker.ServingAclFiles);
+        return FakeDocker.ServingAclFiles.Replace(cat,
+            $$"""cat() { [ "$2" = /etc/squid/{{stale}} ] || command cat -- "$PROXY_ACL_DIR/${2#/etc/squid/}"; }; """);
+    }
+
+    [Theory]
+    [InlineData("deny", "pastebin.com", "denylist.txt", "pastebin.com\n")]
+    [InlineData("allow", "*", "open-egress.txt", ".\n")]
+    [InlineData("allow", "typed.example", "allowlist.txt", "typed.example\n")]
+    public void Run_WhenTheProxySeesJustOneFileStale_DoesntReconfigure_AndFails(
+        string command, string domain, string stale, string written)
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        var project = Project.Resolve(t.Sub("repo"), host);
+        var (s, l) = Running(t, host, project, old: false);
+        using var _ = l;
+        using var fake = new FakeDocker(t, ServingAclFilesWithStale(stale) + "exit 0\n");
+        var exit = 0;
+        var err = CapturingStderr(() => exit = command == "deny"
+            ? new DenyCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).Run([domain], global: true)
+            : new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).Run([domain], global: true));
+        Assert.Equal(1, exit);
+        Assert.Equal($"pen: added to {host.Display(host.UserConfigPath)}: {domain}\n" +
+            $"pen: couldn't apply it to the running session {s.ComposeProject}: its proxy still sees other ACL files than were written, so Squid wasn't reloaded; run this again\n", err);
+        Assert.Equal((5, 0), CountProxyCalls(t));
+        // The session dir's file holds what was written; only the proxy's view of it lags.
+        Assert.Contains(written, File.ReadAllText(s.GetPath(stale)));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Run_ToASessionWithoutToolsOrToolDomains_GivesItNoToolDomains(bool old)
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        // The user's tools now are not what the session started with: a live update never reads them.
+        File.WriteAllText(host.UserConfigPath, "tools = [\"claude\"]\nallow = [\"typed.example\"]\n");
+        var project = Project.Resolve(t.Sub("repo"), host);
+        var (s, l) = Running(t, host, project, old);
+        using var _ = l;
+        Assert.False(File.Exists(s.ToolsFile));
+        Assert.False(File.Exists(s.ToolDomainsFile));
+        using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
+        var err = CapturingStderr(() => Assert.Equal(0,
+            new DenyCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).Run(["pastebin.com"], global: true)));
+        Assert.Equal($"pen: added to {host.Display(host.UserConfigPath)}: pastebin.com\n" +
+            (old ? $"pen: the running session {s.ComposeProject} was started by an older Pen: deny applies only to sessions started from now on\n" : "") +
+            "pen: applied to 1 running session\n", err);
+        Assert.Equal(Allowlist.Render(Allowlist.MergeNamed(
+                Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")), ["typed.example"])),
+            File.ReadAllText(s.AllowlistFile));
+        Assert.DoesNotContain("anthropic", File.ReadAllText(s.AllowlistFile));
+        Assert.Equal(old ? null : "pastebin.com\n", File.Exists(s.DenylistFile) ? File.ReadAllText(s.DenylistFile) : null);
+        Assert.Equal(old ? null : "", File.Exists(s.OpenEgressFile) ? File.ReadAllText(s.OpenEgressFile) : null);
+        Assert.False(File.Exists(s.ToolsFile));
+        Assert.False(File.Exists(s.ToolDomainsFile));
+        Assert.Equal((1, 1), CountProxyCalls(t));
+    }
+
+    [Theory]
+    [InlineData("allow")]
+    [InlineData("deny")]
+    public void Run_WhenOneSessionFails_AppliesToTheRest_ReportsEachInOrder_AndFails(string command)
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        var dir = t.Sub("repo");
+        var project = Project.Resolve(dir, host);
+        var (first, firstLock) = Running(t, host, project, old: false, id: "11111111");
+        using var _ = firstLock;
+        var (second, secondLock) = Running(t, host, project, old: false, id: "22222222");
+        using var __ = secondLock;
+        var (third, thirdLock) = Running(t, host, project, old: false, id: "33333333");
+        using var ___ = thirdLock;
+        // A file that's gone fails the write rather than being made.
+        File.Delete(second.OpenEgressFile);
+        using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
+        var exit = 0;
+        var err = CapturingStderr(() => exit = command == "deny"
+            ? new DenyCommand(host, new StartDir(dir), RecipeCatalog.Embedded, TimeProvider.System).Run(["pastebin.com"], global: false)
+            : new AllowCommand(host, new StartDir(dir), RecipeCatalog.Embedded, TimeProvider.System).Run(["pastebin.com"], global: false));
+        Assert.Equal(1, exit);
+        Assert.Equal("pen: added to .pen/config.toml: pastebin.com\n" +
+            $"pen: couldn't apply it to the running session {second.ComposeProject}: FileNotFoundException\n" +
+            "pen: applied to 2 running sessions in this directory\n", err);
+        Assert.False(File.Exists(second.OpenEgressFile));
+        Assert.Equal((2, 2), CountProxyCalls(t));
+        foreach (var s in new[] { first, third })
+        {
+            Assert.Equal(command == "deny" ? "pastebin.com\n" : "", File.ReadAllText(s.DenylistFile));
+            Assert.Equal(command == "allow", File.ReadAllText(s.AllowlistFile).Contains("pastebin.com\n"));
+        }
+    }
+
+    [Fact]
+    public void Run_ToASessionWhoseEnvHasNoProjectDir_ReportsIt_AndTouchesNothing()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        var project = Project.Resolve(t.Sub("repo"), host);
+        var (s, l) = Running(t, host, project, old: false);
+        using var _ = l;
+        File.WriteAllText(s.EnvFile, "OTHER=1\n");
+        using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
+        var err = CapturingStderr(() => Assert.Equal(1,
+            new DenyCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).Run(["pastebin.com"], global: true)));
+        Assert.Equal($"pen: added to {host.Display(host.UserConfigPath)}: pastebin.com\n" +
+            $"pen: couldn't apply it to the running session {s.ComposeProject}: its session.env is missing\n", err);
+        Assert.Equal("", File.ReadAllText(s.DenylistFile));
+        Assert.False(File.Exists(Path.Combine(t.Path, "calls")));
+        Assert.False(File.Exists(s.AclLockFile));
+    }
+
+    /// <summary>A clock whose every timestamp read is <c>step</c> later than the one before.</summary>
+    private sealed class SteppingClock(TimeSpan step) : TimeProvider
+    {
+        public int Reads { get; private set; }
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp() => step.Ticks * Reads++;
+    }
+
+    [Fact]
+    public void Run_WhenAnotherKeepsHoldingTheSessionsAclLock_GivesUpAfterAMinute_WithoutWriting()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        var project = Project.Resolve(t.Sub("repo"), host);
+        var (s, l) = Running(t, host, project, old: false);
+        using var _ = l;
+        using var other = FileLock.TryTake(s.AclLockFile, exclusive: true)!;
+        using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
+        var clock = new SteppingClock(TimeSpan.FromSeconds(1));
+        var err = CapturingStderr(() => Assert.Equal(1,
+            new DenyCommand(host, new StartDir(null), RecipeCatalog.Embedded, clock).Run(["pastebin.com"], global: true)));
+        Assert.Equal($"pen: added to {host.Display(host.UserConfigPath)}: pastebin.com\n" +
+            $"pen: waiting for another pen allow or pen deny applying to the running session {s.ComposeProject}\n" +
+            $"pen: couldn't apply it to the running session {s.ComposeProject}: another pen allow or pen deny is still applying to it; run this again\n", err);
+        // Read at the start, then after each try: at 0, 1, ... 61 seconds. 60 is a minute, not past it, so it gives up at
+        // 61, the first read past a minute.
+        Assert.Equal(62, clock.Reads);
+        Assert.Equal("", File.ReadAllText(s.DenylistFile));
+        Assert.False(File.Exists(Path.Combine(t.Path, "calls")));
+    }
+
+    [Fact]
+    public void Run_WhenTheReconfigureFails_ReportsSquidsOutput_AndFails()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        var project = Project.Resolve(t.Sub("repo"), host);
+        var (s, l) = Running(t, host, project, old: true);
+        using var _ = l;
+        using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "printf 'FATAL: bad acl' >&2\necho ' and more '\nexit 1\n");
+        var err = CapturingStderr(() => Assert.Equal(1,
+            new DenyCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).Run(["pastebin.com"], global: true)));
+        // The older Pen's notice is for a reload that worked, so it isn't given.
+        Assert.Equal($"pen: added to {host.Display(host.UserConfigPath)}: pastebin.com\n" +
+            $"pen: couldn't apply it to the running session {s.ComposeProject}: squid -k reconfigure failed: FATAL: bad acl and more\n", err);
+        Assert.Equal((1, 1), CountProxyCalls(t));
     }
 
     [Fact]

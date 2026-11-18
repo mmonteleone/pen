@@ -687,7 +687,7 @@ public class TrustGateTests
         File.WriteAllText(s.DenylistFile, "");
         File.WriteAllText(s.OpenEgressFile, "");
         TrustStore.For(f.Host, f.Project).ApproveDomains(["*"]);
-        Assert.True(AllowCommand.Apply(f.Host, s, RecipeCatalog.Embedded, TimeProvider.System));
+        Assert.IsType<AclUpdateResult.Applied>(new SessionAclUpdater(f.Host, RecipeCatalog.Embedded, TimeProvider.System).Update(s));
         Assert.Equal(".\n", File.ReadAllText(s.OpenEgressFile));
         var list = File.ReadAllText(s.AllowlistFile);
         Assert.DoesNotContain("internal.example", list);
@@ -728,7 +728,7 @@ public class TrustGateTests
         using var _ = l;
         File.WriteAllText(s.DenylistFile, "");
         File.WriteAllText(s.OpenEgressFile, "");
-        Assert.True(AllowCommand.Apply(f.Host, s, RecipeCatalog.Embedded, TimeProvider.System));
+        Assert.IsType<AclUpdateResult.Applied>(new SessionAclUpdater(f.Host, RecipeCatalog.Embedded, TimeProvider.System).Update(s));
         Assert.Equal(".\n", File.ReadAllText(s.OpenEgressFile));
         Assert.DoesNotContain("internal.example", File.ReadAllText(s.AllowlistFile));
     }
@@ -751,7 +751,7 @@ public class TrustGateTests
         using var _ = l;
         File.WriteAllText(s.DenylistFile, "");
         File.WriteAllText(s.OpenEgressFile, "");
-        Assert.True(AllowCommand.Apply(f.Host, s, RecipeCatalog.Embedded, TimeProvider.System));
+        Assert.IsType<AclUpdateResult.Applied>(new SessionAclUpdater(f.Host, RecipeCatalog.Embedded, TimeProvider.System).Update(s));
         Assert.Equal(started, (File.ReadAllText(s.AllowlistFile), File.ReadAllText(s.DenylistFile), File.ReadAllText(s.OpenEgressFile)));
     }
 
@@ -894,7 +894,7 @@ public class TrustGateTests
         var (s, l) = RunningSession(f);
         using var _ = l;
         TrustStore.For(f.Host, f.Project).ApproveDomains(["ok.example"]);
-        Assert.True(AllowCommand.Apply(f.Host, s, RecipeCatalog.Embedded, TimeProvider.System));
+        Assert.IsType<AclUpdateResult.Applied>(new SessionAclUpdater(f.Host, RecipeCatalog.Embedded, TimeProvider.System).Update(s));
         var list = File.ReadAllText(s.GetPath("allowlist.txt"));
         Assert.Contains("ok.example", list);
         Assert.DoesNotContain("evil.example", list);
@@ -908,7 +908,7 @@ public class TrustGateTests
         using var _ = l;
         TrustStore.For(f.Host, f.Project).ApproveDomains(["ok.example"]);
         File.WriteAllText(TrustStore.GetPath(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir), "garbage\n");
-        Assert.True(AllowCommand.Apply(f.Host, s, RecipeCatalog.Embedded, TimeProvider.System));
+        Assert.IsType<AclUpdateResult.Applied>(new SessionAclUpdater(f.Host, RecipeCatalog.Embedded, TimeProvider.System).Update(s));
         Assert.DoesNotContain("ok.example", File.ReadAllText(s.GetPath("allowlist.txt")));
     }
 
@@ -1154,7 +1154,7 @@ public class TrustGateTests
         s.WriteTools([], ["recorded.example"]);
         // pen-test brings example.org: named in the user's config after the session started, it's for later sessions.
         File.WriteAllText(f.Host.UserConfigPath, "tools = [\"pen-test\"]\n");
-        Assert.True(AllowCommand.Apply(f.Host, s, RecipeCatalog.Embedded, TimeProvider.System));
+        Assert.IsType<AclUpdateResult.Applied>(new SessionAclUpdater(f.Host, RecipeCatalog.Embedded, TimeProvider.System).Update(s));
         var list = File.ReadAllText(s.GetPath("allowlist.txt")).Split('\n');
         Assert.Contains("recorded.example", list);
         Assert.DoesNotContain("example.org", list);
@@ -1166,12 +1166,12 @@ public class TrustGateTests
         using var f = ToolsFixture();
         var (s, l) = RunningSession(f);
         using var _ = l;
-        Assert.True(AllowCommand.Apply(f.Host, s, RecipeCatalog.Embedded, TimeProvider.System));
+        Assert.IsType<AclUpdateResult.Applied>(new SessionAclUpdater(f.Host, RecipeCatalog.Embedded, TimeProvider.System).Update(s));
         Assert.DoesNotContain("example.org", File.ReadAllText(s.GetPath("allowlist.txt")));
 
         // Approved after this session started: it's for sessions that start with the tool.
         new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded, TimeProvider.System).Run(yes: true, list: false);
-        Assert.True(AllowCommand.Apply(f.Host, s, RecipeCatalog.Embedded, TimeProvider.System));
+        Assert.IsType<AclUpdateResult.Applied>(new SessionAclUpdater(f.Host, RecipeCatalog.Embedded, TimeProvider.System).Update(s));
         Assert.DoesNotContain("example.org", File.ReadAllText(s.GetPath("allowlist.txt")));
     }
 

@@ -32,7 +32,8 @@ internal sealed class DenyCommand(HostEnv host, StartDir startDir, RecipeCatalog
         var addition = AddDenied(host, target, domains, catalog);
         EgressMessages.WriteAdded(addition, domains);
         EgressMessages.WriteGlobHint("deny", startDir, addition);
-        return AllowCommand.ApplyToRunning(host, target, catalog, clock) ? 0 : 1;
+        var results = target.ApplyToRunningSessions(host, new SessionAclUpdater(host, catalog, clock));
+        return results.Any(result => result is AclUpdateResult.Failed) ? 1 : 0;
     }
 
     /// <summary>Adds <paramref name="domains"/> to deny, as <see cref="EgressTarget.AddToConfig"/> does.</summary>
