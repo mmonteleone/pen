@@ -117,12 +117,12 @@ public class LockAndProcessTests
         var live = t.Sub("runtime", "sessions", "aaaa0003");
         File.WriteAllText(Path.Combine(live, "compose.yaml"), "");
 
-        var old = DateTime.UtcNow - Session.KeepEndedSessions - TimeSpan.FromHours(1);
+        var old = DateTime.UtcNow - SessionRecovery.KeepEndedSessions - TimeSpan.FromHours(1);
         File.SetLastWriteTimeUtc(Path.Combine(oldEnded, "proxy.log"), old);
         Directory.SetLastWriteTimeUtc(oldEnded, old);
 
         using (FileLock.TryTake(Path.Combine(live, "session.lock"), exclusive: true))
-            Session.FinishDeadSessions("pen-x-00000000", runtime, TimeProvider.System);
+            SessionRecovery.FinishAbandoned("pen-x-00000000", runtime, TimeProvider.System);
 
         Assert.False(Directory.Exists(oldEnded));
         Assert.True(Directory.Exists(recentEnded));

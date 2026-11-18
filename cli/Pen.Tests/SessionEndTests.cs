@@ -37,7 +37,7 @@ public class SessionEndTests
         File.Delete(session.GetPath(record));
         Directory.CreateDirectory(Path.Combine(session.GetPath(record), "keep"));
 
-        Assert.ThrowsAny<Exception>(() => Session.DeleteSessionFiles(session));
+        Assert.ThrowsAny<Exception>(() => SessionTeardown.DeleteSessionFiles(session));
 
         Assert.False(session.IsOpen());
         Assert.True(Directory.Exists(session.GetPath(record)));
@@ -54,7 +54,7 @@ public class SessionEndTests
         File.WriteAllText(session.LockFile, "");
         File.WriteAllText(session.RestoredManifest, "{}");
 
-        Session.DeleteSessionFiles(session);
+        SessionTeardown.DeleteSessionFiles(session);
 
         Assert.Equal([session.ProxyLog], Directory.EnumerateFileSystemEntries(session.Path));
     }
@@ -74,7 +74,7 @@ public class SessionEndTests
               *) exit 99 ;;
             esac
             """);
-        var error = Assert.Throws<PenException>(() => Session.End(session));
+        var error = Assert.Throws<PenException>(() => SessionTeardown.End(session));
         Assert.Contains("retained for retry", error.Message);
         Assert.True(session.IsOpen());
         Assert.True(File.Exists(session.EnvFile));
@@ -89,7 +89,7 @@ public class SessionEndTests
         // rm also fails for already-absent containers. A successful ps with
         // no match establishes absence, allowing recovery after a crash.
         File.WriteAllText(Path.Combine(t.Path, "absent"), "");
-        Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System);
+        SessionRecovery.FinishAbandoned("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System);
         Assert.False(session.IsOpen());
         Assert.False(File.Exists(session.EnvFile));
         Assert.False(File.Exists(commondir));
@@ -103,38 +103,283 @@ public class SessionEndTests
         using var t = new TempDir();
         var session = Create(t, docker: true);
         using var fake = new FakeDocker(t, "echo 'daemon unavailable' >&2; exit 1\n");
-        Assert.Throws<PenException>(() => Session.End(session));
+        Assert.Throws<PenException>(() => SessionTeardown.End(session));
         Assert.True(session.IsOpen());
         Assert.True(File.Exists(Path.Combine(t.Path, "repo", ".git", "commondir")));
     }
 
+    /// <summary>
+    /// Both removals are tried whichever fails, the agent's first; one that fails (and whose absence ps doesn't
+    /// establish) throws once both were tried, naming only it, before Git is checked or the stack stopped.
+    /// </summary>
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void BothWritersMustStopBeforeGitCheck(bool failDind)
+    [InlineData("none")]
+    [InlineData("dind")]
+    [InlineData("agent")]
+    public void BothWritersMustStopBeforeGitCheck(string fail)
     {
         using var t = new TempDir();
         var session = Create(t, docker: true);
-        using var fake = new FakeDocker(t, failDind ? """
-            case "$1" in
-              rm) case "$3" in *-dind) exit 1 ;; *) exit 0 ;; esac ;;
-              ps) echo dind-still-present ;;
-              *) exit 99 ;;
-            esac
-            """ : """
-            case "$1" in rm|compose) exit 0 ;; *) exit 99 ;; esac
-            """);
-        if (failDind)
+        using var fake = new FakeDocker(t, fail switch
         {
-            Assert.Throws<PenException>(() => Session.End(session));
+            "dind" => """
+                case "$1" in
+                  rm) case "$3" in *-dind) exit 1 ;; *) exit 0 ;; esac ;;
+                  ps) echo dind-still-present ;;
+                  *) exit 99 ;;
+                esac
+                """,
+            "agent" => """
+                case "$1" in
+                  rm) case "$3" in *-agent) exit 1 ;; *) exit 0 ;; esac ;;
+                  ps) echo agent-still-present ;;
+                  *) exit 99 ;;
+                esac
+                """,
+            _ => """
+                case "$1" in rm|compose) exit 0 ;; *) exit 99 ;; esac
+                """,
+        });
+        if (fail != "none")
+        {
+            var error = Assert.Throws<PenException>(() => SessionTeardown.End(session));
             Assert.True(File.Exists(Path.Combine(t.Path, "repo", ".git", "commondir")));
+            var (failed, removed) = fail == "dind"
+                ? (session.DindContainer, session.Container)
+                : (session.Container, session.DindContainer);
+            Assert.Contains($"can't establish that {failed} has stopped", error.Message);
+            Assert.DoesNotContain(removed, error.Message);
+            Assert.EndsWith($"session {session.Id} is retained for retry by the next pen command here; " +
+                "Git has not been checked", error.Message);
+            Assert.True(session.IsOpen());
+            Assert.True(File.Exists(session.EnvFile));
         }
         else
         {
-            Session.End(session);
+            SessionTeardown.End(session);
             Assert.False(session.IsOpen());
             Assert.True(File.Exists(Path.Combine(t.Path, "repo", ".git", "commondir.pen-quarantine")));
         }
+        var removals = File.ReadAllLines(Path.Combine(t.Path, "calls"))
+            .Where(call => call.StartsWith("rm ", StringComparison.Ordinal)).ToList();
+        Assert.Equal(["rm -f " + session.Container, "rm -f " + session.DindContainer], removals);
+        Assert.Equal(fail == "none",
+            File.ReadAllLines(Path.Combine(t.Path, "calls")).Any(call => call.StartsWith("compose ", StringComparison.Ordinal)));
+    }
+
+    /// <summary>
+    /// A fake docker that succeeds at everything, and at each writer removal, compose run and compose down records
+    /// whether another process could take each lock: lines "phase lock mode held|free" in probes, the phase being
+    /// "rm:container" or "run:project"/"down:project".
+    /// </summary>
+    private static string ProbingLocks(string runtime, string worktreeLock) => $$"""
+        probe() {
+          set -- "$1" project ex '{{runtime}}/project.lock' project sh '{{runtime}}/project.lock' \
+            worktree ex '{{worktreeLock}}' worktree sh '{{worktreeLock}}' dind ex '{{runtime}}/dind.lock'
+          for lock in '{{runtime}}'/sessions/*/session.lock; do
+            [ ! -e "$lock" ] || set -- "$@" "session:$(basename -- "$(dirname -- "$lock")")" sh "$lock"
+          done
+          python3 -c '
+        import fcntl, sys
+        args = sys.argv[2:]
+        for i in range(0, len(args), 3):
+            name, mode, path = args[i:i + 3]
+            with open(path, "a") as f:
+                try:
+                    fcntl.flock(f, (fcntl.LOCK_EX if mode == "ex" else fcntl.LOCK_SH) | fcntl.LOCK_NB)
+                    state = "free"
+                except OSError:
+                    state = "held"
+            print(sys.argv[1], name, mode, state)
+        ' "$@" >> probes
+        }
+        case "$1" in
+          rm) probe "rm:$3" ;;
+          compose)
+            project=; previous=; sub=
+            for arg; do
+              if [ "$previous" = -p ]; then project=$arg; fi
+              case "$arg" in run|down) [ -n "$sub" ] || sub=$arg ;; esac
+              previous=$arg
+            done
+            [ -z "$sub" ] || probe "$sub:$project"
+            ;;
+        esac
+        exit 0
+
+        """;
+
+    private static List<string> ReadProbes(TempDir t, string phase) =>
+        [.. File.ReadAllLines(Path.Combine(t.Path, "probes"))
+            .Where(line => line.StartsWith(phase + " ", StringComparison.Ordinal))
+            .Select(line => line[(phase.Length + 1)..])];
+
+    /// <summary>
+    /// The live session's project and worktree locks (shared), its dind lock and its own session lock are all held
+    /// while it runs, at each writer removal, and at compose down, which comes after the .git check; then released.
+    /// </summary>
+    [Fact]
+    public void ALiveSessionsLocksAreHeldThroughItsTeardownAndCheck()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        var repo = Git.Repo(t.Sub("repo"));
+        var project = Project.Resolve(repo, host);
+        var runtime = host.GetRuntimeDir(project.Key);
+        var worktreeLock = SessionRegistry.GetWorktreeLockFile(runtime, project.Dir);
+        using var docker = new FakeDocker(t, ProbingLocks(runtime, worktreeLock));
+        var run = new Session(new ProjectContext(host, project, UserConfiguration.Empty, ProjectConfiguration.Empty),
+            new Answers(new StringReader(""), IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System);
+
+        Assert.Equal(0, run.Run(new(["true"]) { Docker = true }));
+
+        var session = new SessionDir(project.Key, Assert.Single(Directory.GetDirectories(Path.Combine(runtime, "sessions"))));
+        var phases = File.ReadAllLines(Path.Combine(t.Path, "probes")).Select(line => line.Split(' ')[0]).Distinct().ToList();
+        Assert.Equal(["run:" + session.ComposeProject, "rm:" + session.Container, "rm:" + session.DindContainer,
+            "down:" + session.ComposeProject], phases);
+        foreach (var phase in phases)
+        {
+            Assert.Equal([
+                "project ex held", "project sh free", "worktree ex held", "worktree sh free", "dind ex held",
+                $"session:{session.Id} sh held",
+            ], ReadProbes(t, phase));
+        }
+        Assert.False(session.IsOpen());
+        foreach (var path in new[] { SessionRegistry.GetProjectLockFile(runtime), worktreeLock, Path.Combine(runtime, "dind.lock") })
+        {
+            using var free = FileLock.TryTake(path, exclusive: true);
+            Assert.NotNull(free);
+        }
+    }
+
+    /// <summary>
+    /// An abandoned session is ended holding its session lock, under the locks the command holds at the time: a run's
+    /// project and worktree locks shared, pen sign's worktree lock exclusive, pen clean's project lock exclusive.
+    /// </summary>
+    [Theory]
+    [InlineData("run")]
+    [InlineData("sign")]
+    [InlineData("clean")]
+    [InlineData("allow")]
+    public void AnAbandonedSessionIsEndedUnderTheCommandsLocks(string command)
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        var repo = Git.Repo(t.Sub("repo"));
+        var project = Project.Resolve(repo, host);
+        var runtime = host.GetRuntimeDir(project.Key);
+        var worktreeLock = SessionRegistry.GetWorktreeLockFile(runtime, project.Dir);
+        var dead = new SessionDir(project.Key, Path.Combine(runtime, "sessions", "12345678"));
+        Directory.CreateDirectory(dead.Path);
+        File.WriteAllText(dead.ComposeFile, "stack");
+        File.WriteAllText(dead.EnvFile, $"PROJECT_DIR={repo}\n");
+        File.WriteAllText(dead.StartedWithGit, Path.Combine(repo, ".git") + "\n");
+        File.WriteAllText(dead.ModulesFile, "");
+        File.WriteAllText(dead.ProxyLog, "");
+        using var docker = new FakeDocker(t, ProbingLocks(runtime, worktreeLock));
+        var answers = new Answers(new StringReader("n\n"), IsTerminal: true);
+
+        var output = CapturingStderr(() => Record.Exception(() =>
+        {
+            switch (command)
+            {
+                case "run":
+                    new Session(new ProjectContext(host, project, UserConfiguration.Empty, ProjectConfiguration.Empty),
+                        answers, RecipeCatalog.Embedded, TimeProvider.System).Run(new(["true"]));
+                    break;
+                case "sign":
+                    new SignCommand(host, project, TimeProvider.System).Run(null);
+                    break;
+                case "clean":
+                    new CleanCommand(host, project, answers, TimeProvider.System).Run();
+                    break;
+                default:
+                    EgressTarget.Resolve(host, new StartDir(repo), global: false).PrepareCurrentProject(host, TimeProvider.System);
+                    break;
+            }
+        }));
+
+        Assert.Contains($"ending session {dead.Id}, whose pen exited without ending it", output);
+        Assert.False(dead.IsOpen());
+        var expected = command switch
+        {
+            "run" => new[] { "project ex held", "project sh free", "worktree ex held", "worktree sh free" },
+            "sign" => ["project ex held", "project sh free", "worktree ex held", "worktree sh held"],
+            "clean" => ["project ex held", "project sh held", "worktree ex free", "worktree sh free"],
+            _ => [],
+        };
+        foreach (var phase in new[] { "rm:" + dead.Container, "down:" + dead.ComposeProject })
+        {
+            var probes = ReadProbes(t, phase);
+            Assert.Contains($"session:{dead.Id} sh held", probes);
+            foreach (var line in expected)
+                Assert.Contains(line, probes);
+        }
+    }
+
+    /// <summary>
+    /// A session an older Pen wrote, without the tools, tool-domains, denylist.txt, open-egress.txt or modules records,
+    /// still ends: checked, reminded, its files deleted, and what it blocked reported against its allowlist alone.
+    /// </summary>
+    [Fact]
+    public void AnOlderSessionWithoutToolOrEgressRecords_Ends()
+    {
+        using var t = new TempDir();
+        var session = Create(t, docker: false);
+        var repo = Path.Combine(t.Path, "repo");
+        File.Delete(Path.Combine(repo, ".git", "commondir"));
+        File.Delete(session.ModulesFile);
+        foreach (var record in new[] { session.ToolsFile, session.ToolDomainsFile, session.DenylistFile, session.OpenEgressFile })
+            Assert.False(File.Exists(record));
+        File.WriteAllText(session.ProxyLog,
+            "2026-11-02T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT blocked.example:443 -\n" +
+            "2026-11-02T10:00:01Z 172.18.0.3 TCP_DENIED/403 CONNECT github.com:443 -\n");
+        var (docker, gitCalls) = FakeHost(t);
+        using var _ = docker;
+
+        var result = default(SessionEndResult);
+        var output = CapturingStderr(() => result = Session.EndAndRemind(session));
+
+        Assert.True(result.CheckFinished);
+        Assert.Equal(repo, result.ReminderDir);
+        Assert.Single(RepoGitCalls(gitCalls));
+        var blocked = Assert.Single(output.Split('\n'), line => line.Contains("blocked.example", StringComparison.Ordinal));
+        Assert.Contains("pen allow", blocked);
+        Assert.DoesNotContain("github.com", blocked);
+        Assert.False(session.IsOpen());
+        Assert.Equal([session.ProxyLog], Directory.EnumerateFileSystemEntries(session.Path));
+    }
+
+    /// <summary>
+    /// A writer removal that fails in one abandoned session stops the batch, with that session retained, before any
+    /// reminder: whichever order the sessions are listed in.
+    /// </summary>
+    [Theory]
+    [InlineData("12345678")]
+    [InlineData("99999999")]
+    public void AFailedRemovalInOneAbandonedSession_StopsTheBatchBeforeAnyReminder(string failing)
+    {
+        using var t = new TempDir();
+        var first = Create(t, docker: false);
+        File.Delete(Path.Combine(t.Path, "repo", ".git", "commondir"));
+        var second = Another(t, "99999999");
+        var (docker, gitCalls) = FakeHost(t, $$"""
+            case "$1" in
+              rm) case "$3" in *-{{failing}}-agent) exit 1 ;; *) exit 0 ;; esac ;;
+              ps) echo still-present ;;
+              compose) exit 0 ;;
+              *) exit 99 ;;
+            esac
+
+            """);
+        using var _ = docker;
+
+        var error = Assert.Throws<PenException>(() =>
+            SessionRecovery.FinishAbandoned("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System));
+
+        Assert.Contains($"session {failing} is retained for retry", error.Message);
+        Assert.True((failing == first.Id ? first : second).IsOpen());
+        Assert.False(File.Exists(gitCalls));
     }
 
     /// <summary>
@@ -176,7 +421,7 @@ public class SessionEndTests
             """);
         var working = File.ReadAllText(docker);
 
-        var output = CapturingStderr(() => Session.End(session));
+        var output = CapturingStderr(() => SessionTeardown.End(session));
 
         if (startsButExitsNonZero)
         {
@@ -195,7 +440,7 @@ public class SessionEndTests
         Assert.True(File.Exists(Path.Combine(t.Path, "repo", ".git", "commondir.pen-quarantine")));
 
         File.WriteAllText(docker, working);
-        Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System);
+        SessionRecovery.FinishAbandoned("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System);
         Assert.False(session.IsOpen());
         Assert.False(File.Exists(session.EnvFile));
         Assert.Contains("compose", File.ReadAllText(Path.Combine(t.Path, "calls")));
@@ -216,7 +461,7 @@ public class SessionEndTests
         var (docker, _) = FakeHost(t);
         using var _ = docker;
 
-        var output = CapturingStderr(() => Session.End(session));
+        var output = CapturingStderr(() => SessionTeardown.End(session));
 
         Assert.Contains("old.example both.example new.example", output);
         Assert.False(session.IsOpen());
@@ -240,7 +485,7 @@ public class SessionEndTests
         var (docker, _) = FakeHost(t);
         using var _ = docker;
 
-        var output = CapturingStderr(() => Session.End(session));
+        var output = CapturingStderr(() => SessionTeardown.End(session));
 
         Assert.Contains("pen: denied by config: gist.github.com\n", output);
         Assert.Contains("pen: blocked (raw IP, private address, unresolvable name, another port or blocked earlier): 1.1.1.1\n",
@@ -281,7 +526,7 @@ public class SessionEndTests
         var (docker, _) = FakeHost(t);
         using var _ = docker;
 
-        var output = CapturingStderr(() => Session.End(session));
+        var output = CapturingStderr(() => SessionTeardown.End(session));
 
         // Without the open-egress read, this would be the plain blocked line offering pen allow.
         Assert.Contains(
@@ -291,10 +536,10 @@ public class SessionEndTests
         Assert.DoesNotContain("nip.io", output);
     }
 
-    /// <summary>Docker that succeeds, and a git that logs its calls and says commit.gpgsign is on, so a reminder goes on to call git in the repo.</summary>
-    private static (FakeDocker Docker, string GitCalls) FakeHost(TempDir t)
+    /// <summary>Docker that succeeds (or runs <paramref name="dockerBody"/>), and a git that logs its calls and says commit.gpgsign is on, so a reminder goes on to call git in the repo.</summary>
+    private static (FakeDocker Docker, string GitCalls) FakeHost(TempDir t, string? dockerBody = null)
     {
-        var fake = new FakeDocker(t, """case "$1" in rm|compose) exit 0 ;; *) exit 99 ;; esac""" + "\n");
+        var fake = new FakeDocker(t, dockerBody ?? """case "$1" in rm|compose) exit 0 ;; *) exit 99 ;; esac""" + "\n");
         var git = Path.Combine(t.Path, "bin", "git");
         var calls = Path.Combine(t.Path, "git-calls");
         File.WriteAllText(git, $"#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{calls}'\ncase \"$*\" in *commit.gpgsign*) echo true; exit 0 ;; esac\nexit 1\n");
@@ -380,11 +625,11 @@ public class SessionEndTests
             Assert.Contains("good copies", output);
             Assert.True(session.IsOpen());
             Assert.True(File.Exists(session.ProtectedManifest));
-            Assert.False(Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System));
+            Assert.False(SessionRecovery.FinishAbandoned("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System).EveryCheckFinished);
         }
         finally { File.SetUnixFileMode(git, (UnixFileMode)0b111_101_101); }
 
-        Assert.True(Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System));
+        Assert.True(SessionRecovery.FinishAbandoned("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System).EveryCheckFinished);
         Assert.False(session.IsOpen());
         Assert.Equal(original, File.ReadAllText(config));
     }
@@ -407,7 +652,7 @@ public class SessionEndTests
         var (docker, _) = FakeHost(t);
         using var _d = docker;
         string output;
-        try { output = CapturingStderr(() => Session.End(session)); }
+        try { output = CapturingStderr(() => SessionTeardown.End(session)); }
         catch { File.SetUnixFileMode(git, (UnixFileMode)0b111_101_101); throw; }
 
         var runtime = Path.Combine(t.Path, "runtime");
@@ -426,7 +671,7 @@ public class SessionEndTests
         File.SetUnixFileMode(pen, (UnixFileMode)0b111_101_101);
         var sh = Process.RunAndCaptureText(new ProcessStartInfo("sh", ["-c", command]) { WorkingDirectory = repo, RedirectStandardOutput = true, RedirectStandardError = true });
         Assert.Equal(0, sh.ExitStatus.ExitCode);
-        Assert.True(Session.FinishDeadSessions("pen-test-12345678", runtime, TimeProvider.System));
+        Assert.True(SessionRecovery.FinishAbandoned("pen-test-12345678", runtime, TimeProvider.System).EveryCheckFinished);
 
         Assert.False(session.IsOpen());
         Assert.Equal(original, File.ReadAllText(config));
@@ -484,7 +729,7 @@ public class SessionEndTests
         var (docker, _) = FakeHost(t);
         using var _d = docker;
         string output;
-        try { output = CapturingStderr(() => Session.End(session)); }
+        try { output = CapturingStderr(() => SessionTeardown.End(session)); }
         catch { File.SetUnixFileMode(wt, (UnixFileMode)0b111_101_101); throw; }
         Assert.True(session.IsOpen());
 
@@ -502,7 +747,7 @@ public class SessionEndTests
         var ranIn = File.ReadAllText(where).TrimEnd('\n');
         Assert.Equal(repo, ranIn);
         Assert.Equal(key, Project.Resolve(ranIn, host).Key);
-        Assert.True(Session.FinishDeadSessions(key, runtime, TimeProvider.System));
+        Assert.True(SessionRecovery.FinishAbandoned(key, runtime, TimeProvider.System).EveryCheckFinished);
         Assert.Equal(original, File.ReadAllText(gitFile));
         Assert.False(session.IsOpen());
     }
@@ -566,7 +811,7 @@ public class SessionEndTests
         using var __ = docker;
         BreakCheck(session);
         var result = default(SessionEndResult);
-        CapturingStderr(() => result = Session.End(session));
+        CapturingStderr(() => result = SessionTeardown.End(session));
         Assert.False(result.CheckFinished);
         Assert.True(File.Exists(session.ProtectedManifest));
         Assert.True(session.IsOpen());
@@ -581,7 +826,7 @@ public class SessionEndTests
         var (docker, _) = FakeHost(t);
         using var __ = docker;
         var result = default(SessionEndResult);
-        var output = CapturingStderr(() => result = Session.End(session));
+        var output = CapturingStderr(() => result = SessionTeardown.End(session));
         Assert.False(result.CheckFinished);
         Assert.Contains("good copies", output);
         Assert.True(File.Exists(session.ProtectedManifest));
@@ -642,7 +887,7 @@ public class SessionEndTests
         using var _ = docker;
 
         var ok = true;
-        var output = CapturingStderr(() => ok = Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System));
+        var output = CapturingStderr(() => ok = SessionRecovery.FinishAbandoned("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System).EveryCheckFinished);
 
         Assert.False(ok);
         Assert.Contains("git wasn't checked", output);
@@ -661,7 +906,7 @@ public class SessionEndTests
         var (docker, gitCalls) = FakeHost(t);
         using var _ = docker;
 
-        Assert.True(Session.FinishDeadSessions("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System));
+        Assert.True(SessionRecovery.FinishAbandoned("pen-test-12345678", Path.Combine(t.Path, "runtime"), TimeProvider.System).EveryCheckFinished);
 
         Assert.Equal(2, RepoGitCalls(gitCalls).Count);
         Assert.False(first.IsOpen());
@@ -723,7 +968,7 @@ public class SessionEndTests
         var runtime = Path.Combine(t.Path, "runtime");
 
         var ok = true;
-        var output = CapturingStderr(() => ok = Session.FinishDeadSessions("pen-test-12345678", runtime, TimeProvider.System));
+        var output = CapturingStderr(() => ok = SessionRecovery.FinishAbandoned("pen-test-12345678", runtime, TimeProvider.System).EveryCheckFinished);
 
         Assert.False(ok);
         Assert.Contains("git wasn't checked", output);
@@ -732,7 +977,7 @@ public class SessionEndTests
 
         // Nothing is left to retry, so the next command gets through.
         var calls = File.ReadAllText(Path.Combine(t.Path, "calls"));
-        Assert.True(Session.FinishDeadSessions("pen-test-12345678", runtime, TimeProvider.System));
+        Assert.True(SessionRecovery.FinishAbandoned("pen-test-12345678", runtime, TimeProvider.System).EveryCheckFinished);
         Assert.Equal(calls, File.ReadAllText(Path.Combine(t.Path, "calls")));
     }
 

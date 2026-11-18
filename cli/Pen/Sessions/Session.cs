@@ -7,7 +7,6 @@ using Pen.Masking;
 using Pen.Platform;
 using Pen.Projects;
 using Pen.Proxy;
-using Pen.Signing;
 using Pen.Tools;
 using Pen.Trust;
 
@@ -20,9 +19,6 @@ namespace Pen.Sessions;
 /// <param name="clock">The clock for the start time, waits and how long ended sessions' files are kept.</param>
 internal sealed class Session(ProjectContext context, Answers answers, RecipeCatalog catalog, TimeProvider clock)
 {
-    /// <summary>How long an ended session's directory (and so its proxy.log) is kept after its last activity.</summary>
-    internal static readonly TimeSpan KeepEndedSessions = TimeSpan.FromDays(7);
-
     private const UnixFileMode Dir700 = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
 
     private Project Project => context.Project;
@@ -46,7 +42,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         // A check that didn't finish vouches for nothing: starting now would take
         // the module repos there as this session's baseline, and its end would
         // run git in the directory just warned about.
-        if (!FinishDeadSessions(Project.Key, RuntimeDir, clock))
+        if (!SessionRecovery.FinishAbandoned(Project.Key, RuntimeDir, clock).EveryCheckFinished)
             throw new PenException("not starting: deal with the warning above first");
 
         var prepared = Prepare(request);
@@ -363,11 +359,11 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         {
             try
             {
-                DeleteSessionFiles(session);
+                SessionTeardown.DeleteSessionFiles(session);
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
-                // Not open, so the next run here deletes what's left once it's old (FinishDeadSessions).
+                // Not open, so the next run here deletes what's left once it's old (SessionRecovery).
             }
             throw;
         }
@@ -510,267 +506,13 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         return exitCode;
     }
 
-    /// <summary>How the session-end .git check went, and whether the session's files must stay.</summary>
-    /// <param name="Result">What the end path returns.</param>
-    /// <param name="KeepFiles">
-    /// Whether the session's files stay, for a retry, since putting files back didn't finish.
-    /// </param>
-    private sealed record EndCheck(SessionEndResult Result, bool KeepFiles);
-
-    /// <summary>
-    /// Ends a live or dead session: stops what could write, checks .git, stops the stack and cleans up.
-    /// </summary>
-    /// <returns>Whether the check finished, and the dir for the signing reminder.</returns>
-    /// <remarks>
-    /// <para>The agent container goes first (after a hangup compose may have left it running), and in a docker
-    /// session dind with it, since containers inside dind can write to the project until it's gone. If that fails,
-    /// the session's files are kept for a retry and this throws, before Git is checked. Then the .git check, then
-    /// the stack, then the session's files except proxy.log.</para>
-    /// <para>The caller holds the session's lock and releases it after. A check that can't finish doesn't stop
-    /// any of this: it warns, and the session ends. End never runs git itself: whether that's safe can depend on
-    /// other sessions' checks in the same repo, so the caller decides.</para>
-    /// </remarks>
-    internal static SessionEndResult End(SessionDir session)
-    {
-        var env = session.ReadEnv();
-        RemoveWriters(session);
-        // The .git check, now that the agent is gone and before anything runs git.
-        var check = CheckGit(session, env);
-        // What the session ended up allowing and denying (pen allow may have
-        // changed it), so the blocked line doesn't suggest a domain that's
-        // allowed by now, and says which hosts deny blocked.
-        var egress = session.ReadEgress();
-        StopStack(session, env, check.KeepFiles);
-        ReportBlocked(session, egress.Allow, egress.Deny);
-        return check.Result;
-    }
-
-    /// <summary>Removes the agent's container and, in a docker session, dind's.</summary>
-    /// <remarks>
-    /// Any failure throws once both were tried: the session is kept for a retry, and Git isn't checked.
-    /// </remarks>
-    private static void RemoveWriters(SessionDir session)
-    {
-        var containers = new List<string> { session.Container };
-        if (File.Exists(session.DockerMarker))
-            containers.Add(session.DindContainer);
-        var failures = new List<string>();
-        foreach (var container in containers)
-        {
-            try
-            {
-                Docker.RemoveWriter(container);
-            }
-            catch (PenException error)
-            {
-                failures.Add(error.Message);
-            }
-        }
-        if (failures.Count > 0)
-        {
-            throw new PenException($"{string.Join("\n", failures)}\nsession {session.Id} is " +
-                "retained for retry by the next pen command here; Git has not been checked");
-        }
-    }
-
-    /// <summary>Runs the session-end .git check and reports it.</summary>
-    /// <param name="session">The session.</param>
-    /// <param name="env">The env the session started with, which names its project dir.</param>
-    /// <returns>
-    /// The end result (no reminder unless the check finished, moved nothing and put nothing back), and whether the
-    /// session's files must stay.
-    /// </returns>
-    /// <remarks>
-    /// Without a project dir there's nothing to check, unless the session saved protected files: then its record
-    /// is damaged, so they weren't compared, and its files stay.
-    /// </remarks>
-    private static EndCheck CheckGit(SessionDir session, Dictionary<string, string> env)
-    {
-        if (env.TryGetValue("PROJECT_DIR", out var projectDir))
-        {
-            var check = GitCheck.RunAtSessionEnd(projectDir, session);
-            GitCheckReport.Print(projectDir, check);
-            var isClean = check.Failure is null && check.Moved.Count == 0 && check.Restored.Count == 0;
-            var result = new SessionEndResult(check.Failure is null, isClean ? projectDir : null);
-            if (check.RestoreIncomplete)
-                Out.WriteRaw(GitCheckWording.KeptCopiesAdvice(session, check.RestoreBlocked));
-            return new(result, check.RestoreIncomplete);
-        }
-
-        if (File.Exists(session.ProtectedManifest))
-        {
-            Out.WriteRaw(GitCheckWording.NotCheckedWarning(session.Path, "the session's record " +
-                "of its project is damaged, so its protected files weren't compared"));
-            Out.WriteRaw(GitCheckWording.KeptCopiesAdvice(session, null));
-            return new(new(false, null), KeepFiles: true);
-        }
-        return new(new(true, null), KeepFiles: false);
-    }
-
-    /// <summary>Stops the session's stack, then deletes its files unless <paramref name="keepFiles"/>.</summary>
-    /// <remarks>
-    /// A stack that won't stop, or whose compose down can't start, keeps the files, for a retry by the next pen
-    /// command.
-    /// </remarks>
-    private static void StopStack(SessionDir session, Dictionary<string, string> env, bool keepFiles)
-    {
-        if (env.Count == 0)
-        {
-            if (!keepFiles)
-                DeleteSessionFiles(session);
-            return;
-        }
-
-        string? failure;
-        try
-        {
-            var down = new ComposeClient(session, env).Capture("down", "-t", "1", "--remove-orphans");
-            failure = down.ExitStatus.ExitCode != 0 ? down.StandardError.Trim() : null;
-        }
-        catch (PenException error)
-        {
-            failure = error.Message;
-        }
-        if (failure is not null)
-        {
-            Out.WriteLine($"stopping session {session.Id}'s stack failed: " +
-                $"{failure} (it will be retried by the next pen command here)");
-        }
-        else if (!keepFiles)
-        {
-            DeleteSessionFiles(session);
-        }
-    }
-
-    /// <summary>
-    /// Writes the lines about what the proxy blocked and isn't in <paramref name="allowed"/>, if anything, with the
-    /// hosts <paramref name="denied"/> covers apart (<see cref="Allowlist.FormatBlockedLines"/>).
-    /// </summary>
-    private static void ReportBlocked(SessionDir session, IReadOnlySet<string> allowed, IReadOnlySet<string> denied)
-    {
-        if (!File.Exists(session.ProxyLog) && !File.Exists(session.PreviousProxyLog))
-            return;
-        var blocked = Allowlist.FindBlockedHosts(session.ReadProxyLogLines());
-        foreach (var line in Allowlist.FormatBlockedLines(blocked, allowed, denied))
-            Out.WriteLine(line);
-    }
-
     /// <summary>Ends a session that's the only one this command is ending, and gives the signing reminder.</summary>
     /// <returns>How ending it went.</returns>
+    /// <remarks>No other session's check is waiting on this one, so its own result decides the reminder.</remarks>
     internal static SessionEndResult EndAndRemind(SessionDir session)
     {
-        var result = End(session);
-        Remind(result);
+        var result = SessionTeardown.End(session);
+        SessionRecovery.WriteSigningReminder(result);
         return result;
-    }
-
-    /// <summary>Writes the signing reminder for <paramref name="result"/>'s dir, if it has one.</summary>
-    /// <remarks>It runs Pen's own git call (the unsigned-commit count), so only once no check has failed.</remarks>
-    private static void Remind(SessionEndResult result)
-    {
-        if (result.ReminderDir is null)
-            return;
-        var reminder = BranchSigner.FormatReminderIn(result.ReminderDir);
-        if (reminder is not null)
-            Out.WriteLine(reminder);
-    }
-
-    /// <summary>Deletes an ended session's files, except proxy.log and proxy.log.1.</summary>
-    internal static void DeleteSessionFiles(SessionDir session)
-    {
-        foreach (var entry in Directory.EnumerateFileSystemEntries(session.Path))
-        {
-            if (entry == session.ProxyLog || entry == session.PreviousProxyLog || entry == session.LockFile
-                || entry == session.ComposeFile || entry == session.RestoredManifest
-                || entry == session.StartedWithGit || entry == session.ModulesFile)
-            {
-                continue;
-            }
-
-            if (Directory.Exists(entry))
-                Directory.Delete(entry, recursive: true);
-            else
-                File.Delete(entry);
-        }
-        // compose.yaml marks the session open, so it goes last but for the lock and the records of what it vouched
-        // for and the module repos it listed: an open session always has those records.
-        File.Delete(session.ComposeFile);
-        File.Delete(session.RestoredManifest);
-        File.Delete(session.StartedWithGit);
-        File.Delete(session.ModulesFile);
-        File.Delete(session.LockFile);
-    }
-
-    /// <summary>
-    /// Ends every session whose Pen crashed or was killed, and deletes ended sessions' dirs after
-    /// <see cref="KeepEndedSessions"/>.
-    /// </summary>
-    /// <returns>
-    /// False if one's .git check didn't finish: the caller must not run git then, and neither does this.
-    /// </returns>
-    /// <remarks>
-    /// A dead session still has a compose.yaml, but nobody holds its lock. These sessions may share a repo, so
-    /// their reminders wait until every check has finished.
-    /// </remarks>
-    internal static bool FinishDeadSessions(string projectKey, string runtimeDir, TimeProvider clock)
-    {
-        var sessions = Path.Combine(runtimeDir, "sessions");
-        if (!Directory.Exists(sessions))
-            return true;
-        var ended = new List<SessionEndResult>();
-        foreach (var path in Directory.EnumerateDirectories(sessions))
-        {
-            var session = new SessionDir(projectKey, path);
-            if (session.IsOpen())
-            {
-                if (TryEndDead(session) is { } result)
-                    ended.Add(result);
-            }
-            else if (clock.GetUtcNow().UtcDateTime - ReadLastActivity(path) > KeepEndedSessions)
-            {
-                DeleteEnded(path);
-            }
-        }
-        if (ended.Any(result => !result.CheckFinished))
-            return false;
-        foreach (var result in ended)
-            Remind(result);
-        return true;
-    }
-
-    /// <summary>Ends <paramref name="session"/> if its Pen is gone, holding its lock meanwhile.</summary>
-    /// <returns>How ending it went, or null if it's running or ended while this looked.</returns>
-    private static SessionEndResult? TryEndDead(SessionDir session)
-    {
-        using var sessionLock = FileLock.TryTake(session.LockFile, exclusive: true);
-        if (sessionLock is null || !session.IsOpen())
-            return null; // running, or ended while we looked
-        Out.WriteLine($"ending session {session.Id}, whose pen exited without ending it");
-        return End(session);
-    }
-
-    /// <summary>Deletes an ended session's directory, leaving it to the next run if that fails.</summary>
-    private static void DeleteEnded(string path)
-    {
-        try
-        {
-            Directory.Delete(path, recursive: true);
-        }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
-    }
-
-    /// <summary>Reads when a session's directory, or its proxy.log, last changed.</summary>
-    private static DateTime ReadLastActivity(string dir)
-    {
-        var latest = Directory.GetLastWriteTimeUtc(dir);
-        var log = Path.Combine(dir, "proxy.log");
-        if (File.Exists(log))
-        {
-            var logTime = File.GetLastWriteTimeUtc(log);
-            if (logTime > latest)
-                latest = logTime;
-        }
-        return latest;
     }
 }

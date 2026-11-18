@@ -32,7 +32,7 @@ internal sealed class SignCommand(HostEnv host, Project project, TimeProvider cl
         using var locks = SessionRegistry.TakeForSign(host, project);
         // This command's own check below takes the module repos there now, so
         // it can't stand in for an ended session's that didn't finish.
-        if (!Session.FinishDeadSessions(project.Key, host.GetRuntimeDir(project.Key), clock))
+        if (!SessionRecovery.FinishAbandoned(project.Key, host.GetRuntimeDir(project.Key), clock).EveryCheckFinished)
             throw new PenException("not signing: deal with the warning above first");
         CheckGitDir();
         var git = new HostGit(project.Dir);

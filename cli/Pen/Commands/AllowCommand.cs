@@ -126,7 +126,7 @@ internal sealed class AllowCommand(HostEnv host, StartDir startDir, RecipeCatalo
         var project = context.Project;
         var runtimeDir = host.GetRuntimeDir(project.Key);
         ProjectRuntime.EnsureRuntimeDir(host, project);
-        Session.FinishDeadSessions(project.Key, runtimeDir, clock);
+        SessionRecovery.FinishAbandoned(project.Key, runtimeDir, clock);
 
         var policy = EgressPolicyResolver.ForListing(context, catalog);
         var found = BlockedDomainQuery.Find(project.Key, runtimeDir, policy);

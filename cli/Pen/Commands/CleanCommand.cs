@@ -24,7 +24,7 @@ internal sealed class CleanCommand(HostEnv host, Project project, Answers answer
     {
         ProjectRuntime.EnsureRuntimeDir(host, project);
         using var projectLock = SessionRegistry.TakeForClean(host, project);
-        Session.FinishDeadSessions(project.Key, host.GetRuntimeDir(project.Key), clock);
+        SessionRecovery.FinishAbandoned(project.Key, host.GetRuntimeDir(project.Key), clock);
 
         var volumes = FindVolumes();
         if (volumes.Count == 0)

@@ -506,7 +506,7 @@ public class MaskSessionTests
         using var t = new TempDir();
         var session = OpenSessionWithMasks(t);
 
-        Session.DeleteSessionFiles(session);
+        SessionTeardown.DeleteSessionFiles(session);
 
         Assert.Equal([session.ProxyLog], Directory.EnumerateFileSystemEntries(session.Path));
     }
@@ -520,11 +520,11 @@ public class MaskSessionTests
         // Ended with its files kept, as for a retry that later gave up: only the masks and the log are left.
         File.Delete(session.ComposeFile);
         File.Delete(session.LockFile);
-        var old = DateTime.UtcNow - Session.KeepEndedSessions - TimeSpan.FromHours(1);
+        var old = DateTime.UtcNow - SessionRecovery.KeepEndedSessions - TimeSpan.FromHours(1);
         File.SetLastWriteTimeUtc(session.ProxyLog, old);
         Directory.SetLastWriteTimeUtc(session.Path, old);
 
-        Assert.True(Session.FinishDeadSessions(session.ProjectKey, Path.Combine(t.Path, "runtime"), TimeProvider.System));
+        Assert.True(SessionRecovery.FinishAbandoned(session.ProjectKey, Path.Combine(t.Path, "runtime"), TimeProvider.System).EveryCheckFinished);
 
         Assert.False(Directory.Exists(session.Path));
     }

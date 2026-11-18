@@ -46,7 +46,7 @@ public sealed class ModuleBaselineTests : IDisposable
         var check = GitCheck.RunAtSessionEnd(dir, s);
         Assert.Null(check.Failure);
         Assert.False(check.RestoreIncomplete);
-        Session.DeleteSessionFiles(s);
+        SessionTeardown.DeleteSessionFiles(s);
         Die(s);
         return check;
     }

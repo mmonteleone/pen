@@ -64,7 +64,7 @@ internal abstract record EgressTarget
         if (CurrentProject is not { } project)
             return;
         ProjectRuntime.EnsureRuntimeDir(host, project);
-        Session.FinishDeadSessions(project.Key, host.GetRuntimeDir(project.Key), clock);
+        SessionRecovery.FinishAbandoned(project.Key, host.GetRuntimeDir(project.Key), clock);
     }
 
     /// <summary>Finds the running sessions a domain added here (allowed or denied) applies to.</summary>
