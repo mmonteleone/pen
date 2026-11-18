@@ -244,11 +244,12 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// <remarks>
     /// <para>
     /// The project and the project's git dir are what the sandbox can write, whichever repo in the git dir the
-    /// including file belongs to. The agent could write a file there and host git would read it as config, so each is
-    /// mounted read-only too. A missing one inside the git dir is created empty; a missing one in the working tree is
-    /// refused, since creating it would add a file to the project. A directory there is refused: it isn't mounted, so
-    /// the agent could replace it with a file. A path that wasn't valid UTF-8 is refused: decoded, it has U+FFFD where
-    /// git has other bytes, so Pen would protect a different file from the one git reads.
+    /// including file belongs to, however a path into them is spelled (<see cref="SpellInSandbox"/>). The agent could
+    /// write a file there and host git would read it as config, so each is mounted read-only too, by the path spelled
+    /// from the project or git dir. A missing one inside the git dir is created empty; a missing one in the working
+    /// tree is refused, since creating it would add a file to the project. A directory there is refused: it isn't
+    /// mounted, so the agent could replace it with a file. A path that wasn't valid UTF-8 is refused: decoded, it has
+    /// U+FFFD where git has other bytes, so Pen would protect a different file from the one git reads.
     /// </para>
     /// <para>
     /// A path with a ".." that leaves a directory the sandbox can replace is refused
@@ -274,7 +275,8 @@ internal sealed class MountPlanner(string dir, string hostHome)
 
     /// <summary>
     /// Follows <paramref name="configFile"/>'s includes, within one walk, whose config files met so far are in
-    /// <paramref name="visited"/>. <paramref name="realDir"/> is the real directory the file is in.
+    /// <paramref name="visited"/>. <paramref name="realDir"/> is the directory the file really is in, spelled from the
+    /// project or git dir if it's in one (<see cref="SpellInSandbox"/>).
     /// </summary>
     /// <returns>Whether it or any file it leads to sets extensions.worktreeConfig.</returns>
     /// <remarks>
@@ -293,11 +295,12 @@ internal sealed class MountPlanner(string dir, string hostHome)
             if (include is null)
                 continue;
             var location = Locate(configFile, include, path => CanBeReplaced(common, realDir, path));
+            var real = SpellInSandbox(common, location.Real);
             // These two depend on the spelling and on the including file, so they come before a file already
             // visited is skipped.
-            if (location.Written != location.Real && IsWritable(common, location.Written))
+            if (SpellInSandbox(common, location.Written) is { } written && written != (real ?? location.Real))
             {
-                throw new PenException($"{FormatPath(configFile)} includes {FormatPath(location.Written)} through " +
+                throw new PenException($"{FormatPath(configFile)} includes {FormatPath(written)} through " +
                     "a symlink, which pen doesn't support: the agent could redirect the include");
             }
 
@@ -323,18 +326,19 @@ internal sealed class MountPlanner(string dir, string hostHome)
                 // Git fails on a directory when it reaches the include, so one outside the sandbox is left alone. One
                 // the sandbox can write isn't mounted, so the agent could replace it with a file git would read: for a
                 // conditional include, once the agent makes the condition hold (by switching branch, say).
-                if (IsWritable(common, location.Real))
+                if (real is not null)
                 {
-                    throw new PenException($"{FormatPath(configFile)} includes {FormatPath(location.Real)}, " +
+                    throw new PenException($"{FormatPath(configFile)} includes {FormatPath(real)}, " +
                         "which is a directory: git can't read it as config, and the agent could replace it with a " +
                         "file that git on this machine would read. Point the include at a file or remove it, then " +
                         "rerun");
                 }
                 continue;
             }
-            ProtectIncludedFile(common, configFile, location.Real);
+            if (real is not null)
+                ProtectIncludedFile(common, configFile, real);
             // Even host-only includes can enable worktreeConfig or include another file that the sandbox can write.
-            worktreeConfig |= FollowIncludes(common, location.Path, Paths.GetParent(location.Real), visited);
+            worktreeConfig |= FollowIncludes(common, location.Path, Paths.GetParent(real ?? location.Real), visited);
         }
         return worktreeConfig;
     }
@@ -413,13 +417,11 @@ internal sealed class MountPlanner(string dir, string hostHome)
     private sealed record IncludeLocation(string Path, string Written, string Real, bool UndoesReplaceable);
 
     /// <summary>
-    /// Plans a verified read-only mount over an included file, by its real path, if the sandbox could write it,
-    /// creating it first if it's missing from the git dir.
+    /// Plans a verified read-only mount over an included file the sandbox could write, by its real path spelled from
+    /// the project or git dir (<see cref="SpellInSandbox"/>), creating it first if it's missing from the git dir.
     /// </summary>
     private void ProtectIncludedFile(string common, string configFile, string real)
     {
-        if (!IsWritable(common, real))
-            return;
         if (!File.Exists(real))
             CreateIncludedFile(common, configFile, real);
         RequireNotLink(dir, real);
@@ -427,16 +429,52 @@ internal sealed class MountPlanner(string dir, string hostHome)
     }
 
     /// <summary>
-    /// Whether the sandbox can write <paramref name="path"/>: it's in the project or <paramref name="common"/>, the
-    /// project's git dir.
+    /// Spells <paramref name="path"/> from the sandbox directory it's at or inside, the project or
+    /// <paramref name="common"/> (the project's git dir), which the sandbox can write.
     /// </summary>
-    private bool IsWritable(string common, string path) =>
-        PathChecks.IsInside(dir, path) || PathChecks.IsInside(common, path);
+    /// <returns>The path from that directory, or null if it's in neither.</returns>
+    /// <remarks>
+    /// <para>
+    /// A path spelled inside one is taken as it's spelled. Any other is compared by identity
+    /// (<see cref="GitDirLinkCheck.Identify"/>): each directory on its way down, as far as the first one that's
+    /// missing, a symlink or not a directory, and the deepest that is the project or git dir gives the spelling,
+    /// followed by the rest of the path as written. realpath(3) leaves a macOS firmlink as written, so
+    /// /System/Volumes/Data/Users/x is /Users/x, and a file system that folds case takes another case of a name for
+    /// the same directory; on Linux, without either, only a bind mount differs from the spelling.
+    /// </para>
+    /// <para>
+    /// Nothing past a symlink is compared: a path spelled outside that a symlink outside leads in is outside, as
+    /// its spelling says. Where it leads is its real path, which callers look at too.
+    /// </para>
+    /// </remarks>
+    private string? SpellInSandbox(string common, string path)
+    {
+        if (PathChecks.IsInside(dir, path) || PathChecks.IsInside(common, path))
+            return path;
+        var roots = new[] { dir, common }
+            .Select(root => (Root: root, Id: GitDirLinkCheck.Identify(root)))
+            .Where(root => root.Id is not null)
+            .ToList();
+        var names = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        string? spelled = null;
+        var prefix = "";
+        for (var i = 0; i < names.Length; i++)
+        {
+            prefix += "/" + names[i];
+            if (!Directory.Exists(prefix) || PathChecks.IsLink(prefix))
+                break;
+            var id = GitDirLinkCheck.Identify(prefix);
+            if (roots.FirstOrDefault(root => root.Id == id).Root is { } root)
+                spelled = string.Join('/', [root, .. names[(i + 1)..]]);
+        }
+        return spelled;
+    }
 
     /// <summary>
     /// Whether the sandbox could replace what's at <paramref name="path"/>, a name looked up on the walk to an
-    /// included file: it's inside the project or <paramref name="common"/>, and not either of those (mount points) or
-    /// <paramref name="includingDir"/>, the including file's real directory, or one of its ancestors.
+    /// included file: it's inside the project or <paramref name="common"/> however it's spelled
+    /// (<see cref="SpellInSandbox"/>), and not either of those (mount points) or <paramref name="includingDir"/>, the
+    /// including file's real directory spelled the same way, or one of its ancestors.
     /// </summary>
     /// <remarks>
     /// The including file's directory and the ones above it inside the sandbox are pinned. The file is a verified
@@ -447,7 +485,8 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// config.worktree nothing vouches for).
     /// </remarks>
     private bool CanBeReplaced(string common, string includingDir, string path) =>
-        IsWritable(common, path) && path != dir && path != common && !PathChecks.IsInside(path, includingDir);
+        SpellInSandbox(common, path) is { } inside && inside != dir && inside != common &&
+        !PathChecks.IsInside(inside, includingDir);
 
     /// <summary>Creates a missing included file in the git dir empty, so that it can be mounted.</summary>
     /// <exception cref="PenException">

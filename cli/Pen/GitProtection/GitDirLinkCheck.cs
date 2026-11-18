@@ -223,7 +223,7 @@ internal sealed class GitDirLinkCheck
     /// can't be called (<see cref="Native.CanStat"/>), the real path stands in, which is the same on Linux except
     /// across bind mounts.
     /// </remarks>
-    private static string? Identify(string path)
+    internal static string? Identify(string path)
     {
         if (!Native.CanStat)
             return Native.RealPath(path);
