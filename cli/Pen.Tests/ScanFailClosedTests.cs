@@ -289,13 +289,13 @@ public class ScanFailClosedTests
         using var t = new TempDir();
         var fifo = Path.Combine(t.Path, "fifo");
         MkFifo(fifo);
-        var e = Within10s(() => Assert.Throws<PenException>(() => Config.ReadText(fifo, ".pen/config.toml")));
+        var e = Within10s(() => Assert.Throws<PenException>(() => ConfigLoader.ReadText(fifo, ".pen/config.toml")));
         Assert.Contains(".pen/config.toml isn't a regular file", e.Message);
         var viaAllow = Within10s(() => Assert.Throws<PenException>(() => ConfigFileEditor.AddToList(new(fifo, ".pen/config.toml", ConfigKind.Project, ""), ConfigListKey.Allow, ["a.example"], RecipeCatalog.Embedded)));
         Assert.Contains(".pen/config.toml isn't a regular file", viaAllow.Message);
         var huge = Path.Combine(t.Path, "huge");
         Sparse(huge, ThreeGb);
-        Assert.Throws<PenException>(() => Config.ReadText(huge, ".pen/config.toml"));
+        Assert.Throws<PenException>(() => ConfigLoader.ReadText(huge, ".pen/config.toml"));
     }
 
     [Fact]
@@ -459,7 +459,7 @@ public class ScanFailClosedTests
     public void AConfigThatsGoneReadsAsNone()
     {
         using var t = new TempDir();
-        Assert.Null(Config.ReadText(Path.Combine(t.Path, "config.toml"), ".pen/config.toml"));
+        Assert.Null(ConfigLoader.ReadText(Path.Combine(t.Path, "config.toml"), ".pen/config.toml"));
     }
 
     [Fact]

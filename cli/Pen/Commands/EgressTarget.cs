@@ -113,7 +113,7 @@ internal abstract record EgressTarget
             return new(userPath, ConfigFileEditor.AddToList(user, key, domains, catalog));
         }
 
-        var where = ".pen/" + Config.FileName;
+        var where = ".pen/" + ConfigLoader.FileName;
         MountPlanner.EnsureDirectory(project.Dir, project.PenDir);
         MountPlanner.RequireNotLink(project.Dir, project.ProjectConfigPath);
         var target = new ConfigTarget(project.ProjectConfigPath, where, ConfigKind.Project,

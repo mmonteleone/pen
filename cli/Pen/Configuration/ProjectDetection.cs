@@ -555,7 +555,7 @@ internal sealed partial record ProjectDetection
         {
             try
             {
-                var table = Config.ParseToml(text, displayPath);
+                var table = TomlReader.ParseToml(text, displayPath);
                 if (table.TryGetValue("toolchain", out var toolchain) && toolchain is TomlTable toolchainTable
                     && toolchainTable.TryGetValue("channel", out var channel) && channel is string channelText)
                 {

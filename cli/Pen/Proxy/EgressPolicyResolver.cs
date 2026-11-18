@@ -73,9 +73,9 @@ internal static class EgressPolicyResolver
         string projectDir,
         RecipeCatalog catalog)
     {
-        var user = Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User, catalog);
-        var projectConfig = Config.Load(Path.Combine(projectDir, ".pen"),
-            Out.Field(Path.Combine(projectDir, ".pen")), ConfigKind.Project, catalog);
+        var user = ConfigLoader.LoadUser(host.ConfigDir, host.Display(host.ConfigDir), catalog);
+        var projectConfig = ConfigLoader.LoadProject(Path.Combine(projectDir, ".pen"),
+            Out.Field(Path.Combine(projectDir, ".pen")), catalog);
         var approved = TrustGate.SelectAllowedDomains(user, projectConfig,
             TrustStore.Load(host.GetRuntimeDir(session.ProjectKey), projectDir));
         return Merge(user, projectConfig, approved, session.ReadToolDomains());

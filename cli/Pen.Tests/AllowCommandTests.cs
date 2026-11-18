@@ -72,7 +72,7 @@ public class AllowCommandTests
         var text = Embedded.ReadText("templates/config.toml");
         var result = Add(text, "b.io");
         Assert.Contains("  # \".example.org\",\n  \"b.io\",\n]", result);
-        Assert.Equal(["b.io"], Config.Parse(result, "x", ConfigKind.User, RecipeCatalog.Embedded).Allow);
+        Assert.Equal(["b.io"], ConfigParser.ParseUser(result, "x", RecipeCatalog.Embedded).Allow);
     }
 
     [Fact]
@@ -97,7 +97,7 @@ public class AllowCommandTests
         var text = "github_owner = \"acme\"\ndocker = true\nports = [3000, 5173]\nallow = [\"a.io\"]\n";
         var result = ConfigEdit.AddToList(text, ".pen/config.toml", ConfigKind.Project, ConfigListKey.Allow, ["b.io"], RecipeCatalog.Embedded).Text;
         Assert.Equal(text.Replace("[\"a.io\"]", "[\n  \"a.io\",\n  \"b.io\",\n]"), result);
-        Assert.Equal([3000, 5173], Config.Parse(result, "x", ConfigKind.Project, RecipeCatalog.Embedded).Ports);
+        Assert.Equal([3000, 5173], ConfigParser.ParseProject(result, "x", RecipeCatalog.Embedded).Ports);
     }
 
     [Fact]
@@ -704,8 +704,8 @@ public class AllowCommandTests
             "2026-11-01T10:00:01Z 172.18.0.3 TCP_DENIED/403 CONNECT example.com:443 -\n" +
             "2026-11-01T10:00:02Z 172.18.0.3 TCP_DENIED/403 CONNECT 1.2.3.4:443 -\n" +
             "2026-11-01T10:00:03Z 172.18.0.3 TCP_DENIED/403 CONNECT github.com:443 -\n");
-        var user = Config.Parse("allow = [\"*\"]\n", "u", ConfigKind.User, RecipeCatalog.Embedded);
-        var projectConfig = Config.Parse("deny = [\"gist.github.com\"]\n", "p", ConfigKind.Project, RecipeCatalog.Embedded);
+        var user = ConfigParser.ParseUser("allow = [\"*\"]\n", "u", RecipeCatalog.Embedded);
+        var projectConfig = ConfigParser.ParseProject("deny = [\"gist.github.com\"]\n", "p", RecipeCatalog.Embedded);
         var stdout = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
@@ -734,7 +734,7 @@ public class AllowCommandTests
         File.WriteAllText(Path.Combine(dir, "proxy.log"),
             "2026-11-01T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT 1.2.3.4:443 -\n" +
             "2026-11-01T10:00:01Z 172.18.0.3 TCP_DENIED/403 CONNECT example.com:443 -\n");
-        var user = Config.Parse("deny = [\"pastebin.com\"]\n", "u", ConfigKind.User, RecipeCatalog.Embedded);
+        var user = ConfigParser.ParseUser("deny = [\"pastebin.com\"]\n", "u", RecipeCatalog.Embedded);
         var stdout = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
@@ -761,7 +761,7 @@ public class AllowCommandTests
         File.WriteAllText(Path.Combine(dir, "proxy.log"),
             "2026-11-01T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT api.github.com:443 -\n" +
             "2026-11-01T10:00:01Z 172.18.0.3 TCP_DENIED/403 CONNECT example.com:443 -\n");
-        var user = Config.Parse("deny = [\"api.github.com\"]\n", "u", ConfigKind.User, RecipeCatalog.Embedded);
+        var user = ConfigParser.ParseUser("deny = [\"api.github.com\"]\n", "u", RecipeCatalog.Embedded);
         var stdout = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
@@ -784,7 +784,7 @@ public class AllowCommandTests
         var dir = t.Sub("home", ".local", "state", "pen", project.Key, "sessions", "12345678");
         File.WriteAllText(Path.Combine(dir, "proxy.log"),
             "2026-11-01T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT pastebin.com:443 -\n");
-        var user = Config.Parse("deny = [\"pastebin.com\"]\n", "u", ConfigKind.User, RecipeCatalog.Embedded);
+        var user = ConfigParser.ParseUser("deny = [\"pastebin.com\"]\n", "u", RecipeCatalog.Embedded);
         var stdout = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
@@ -808,7 +808,7 @@ public class AllowCommandTests
         var text = "allow = [\"a.io\"]\n\n[github]\nacme = \"t\"\n";
         var result = AddDeny(text, "gist.github.com");
         Assert.Equal("allow = [\"a.io\"]\n\ndeny = [\n  \"gist.github.com\",\n]\n\n[github]\nacme = \"t\"\n", result);
-        var config = Config.Parse(result, "x", ConfigKind.User, RecipeCatalog.Embedded);
+        var config = ConfigParser.ParseUser(result, "x", RecipeCatalog.Embedded);
         Assert.Equal(["a.io"], config.Allow);
         Assert.Equal(["gist.github.com"], config.Deny);
     }
@@ -828,7 +828,7 @@ public class AllowCommandTests
     {
         var result = Add("allow = [\"a.io\"]\n", "*");
         Assert.Equal("allow = [\n  \"a.io\",\n  \"*\",\n]\n", result);
-        Assert.Equal(["a.io", "*"], Config.Parse(result, "x", ConfigKind.User, RecipeCatalog.Embedded).Allow);
+        Assert.Equal(["a.io", "*"], ConfigParser.ParseUser(result, "x", RecipeCatalog.Embedded).Allow);
     }
 
     [Fact]
@@ -868,7 +868,7 @@ public class AllowCommandTests
         var err = CapturingStderr(() => Assert.Equal(0, new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).Run(["api.pastebin.com", "ok.example"], global: true)));
         Assert.Contains($"pen: api.pastebin.com is also denied by {host.Display(host.UserConfigPath)}; deny wins\n", err);
         Assert.DoesNotContain("ok.example is also", err);
-        Assert.Equal(["api.pastebin.com", "ok.example"], Config.Load(host.ConfigDir, "x", ConfigKind.User, RecipeCatalog.Embedded).Allow);
+        Assert.Equal(["api.pastebin.com", "ok.example"], ConfigLoader.LoadUser(host.ConfigDir, "x", RecipeCatalog.Embedded).Allow);
     }
 
     [Fact]
@@ -885,7 +885,7 @@ public class AllowCommandTests
         Assert.Equal($"pen: added to {host.Display(host.UserConfigPath)}: x.example\n" +
             "pen: x.example is also denied by .pen/config.toml; deny wins\n", err);
         Assert.Equal(project.RepoDir + "\n", File.ReadAllText(Path.Combine(host.GetRuntimeDir(project.Key), ProjectRuntime.ProjectDirFile)));
-        Assert.Equal(["x.example"], Config.Load(host.ConfigDir, "x", ConfigKind.User, RecipeCatalog.Embedded).Allow);
+        Assert.Equal(["x.example"], ConfigLoader.LoadUser(host.ConfigDir, "x", RecipeCatalog.Embedded).Allow);
         Assert.Equal("deny = [\"x.example\"]\n", File.ReadAllText(project.ProjectConfigPath));
         Assert.False(TrustStore.For(host, project).CoversDomain("x.example"));
     }
@@ -932,7 +932,7 @@ public class AllowCommandTests
         var addition = AllowCommand.AddAllowed(host, new EgressTarget.InProject(project), ["*"], RecipeCatalog.Embedded);
         Assert.Equal(".pen/config.toml", addition.Where);
         Assert.Equal(["*"], addition.Added);
-        Assert.Equal(["*"], Config.Load(project.PenDir, ".pen", ConfigKind.Project, RecipeCatalog.Embedded).Allow);
+        Assert.Equal(["*"], ConfigLoader.LoadProject(project.PenDir, ".pen", RecipeCatalog.Embedded).Allow);
         Assert.True(TrustStore.For(host, project).CoversDomain("*"));
     }
 

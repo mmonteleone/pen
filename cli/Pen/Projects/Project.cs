@@ -32,7 +32,7 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
     /// <summary>The dir's .pen/ path.</summary>
     public string PenDir => Path.Combine(Dir, ".pen");
     /// <summary>The dir's .pen/config.toml path.</summary>
-    public string ProjectConfigPath => Path.Combine(PenDir, Config.FileName);
+    public string ProjectConfigPath => Path.Combine(PenDir, ConfigLoader.FileName);
 
     /// <summary>Resolves <paramref name="cwd"/> to the project, applying the directory refusals.</summary>
     /// <returns>The project at <paramref name="cwd"/>'s real path, keyed by its main checkout.</returns>

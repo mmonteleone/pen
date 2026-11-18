@@ -139,7 +139,7 @@ internal sealed class TrustStore
     }
 
     private static bool IsOwner(string value) =>
-        Config.OwnerRegex().IsMatch(value) && value == value.ToLowerInvariant();
+        TomlReader.OwnerRegex().IsMatch(value) && value == value.ToLowerInvariant();
 
     private static bool IsToolDomain(string value) =>
         value.Split(' ') is [var tool, var domain] && ToolSpec.IsCanonicalText(tool) && IsDomain(domain);

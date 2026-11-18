@@ -91,8 +91,8 @@ internal static class Program
                 return new CleanStaleCommand(host, ReadAnswersFromStdin()).Run();
         }
 
-        Config.EnsureUserConfig(host, GitIdentity.ReadFromHost);
-        var user = Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User, catalog);
+        UserConfigInitializer.EnsureExists(host, GitIdentity.ReadFromHost);
+        var user = ConfigLoader.LoadUser(host.ConfigDir, host.Display(host.ConfigDir), catalog);
         switch (command.Kind)
         {
             case CommandKind.Upgrade:

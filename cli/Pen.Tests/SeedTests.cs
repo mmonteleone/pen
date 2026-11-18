@@ -22,7 +22,7 @@ public class SeedTests
     {
         using var t = new TempDir();
         var host = t.Host();
-        Config.EnsureUserConfig(host, () => new GitIdentity("Ann \"A\" O'Neil", @"ann\x@example.com"));
+        UserConfigInitializer.EnsureExists(host, () => new GitIdentity("Ann \"A\" O'Neil", @"ann\x@example.com"));
 
         foreach (var rel in Expected) Assert.True(File.Exists(Path.Combine(host.SeedDir, rel)), rel);
         var gitconfig = File.ReadAllText(Path.Combine(host.SeedDir, ".gitconfig"));
@@ -50,13 +50,13 @@ public class SeedTests
         var host = t.Host();
         Directory.CreateDirectory(host.ConfigDir);
         File.WriteAllText(host.UserConfigPath, "# mine\n");
-        Config.EnsureUserConfig(host, () => new GitIdentity("N", "e@x.io"));
+        UserConfigInitializer.EnsureExists(host, () => new GitIdentity("N", "e@x.io"));
         Assert.True(File.Exists(Path.Combine(host.SeedDir, ".claude", "settings.json")));
         Assert.Equal("# mine\n", File.ReadAllText(host.UserConfigPath));
 
         File.WriteAllText(Path.Combine(host.SeedDir, ".gitconfig"), "mine");
         File.Delete(Path.Combine(host.SeedDir, ".codex", "config.toml"));
-        Config.EnsureUserConfig(host, () => throw new InvalidOperationException("not asked again"));
+        UserConfigInitializer.EnsureExists(host, () => throw new InvalidOperationException("not asked again"));
         Assert.Equal("mine", File.ReadAllText(Path.Combine(host.SeedDir, ".gitconfig")));
         Assert.False(File.Exists(Path.Combine(host.SeedDir, ".codex", "config.toml")));
     }

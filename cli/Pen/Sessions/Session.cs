@@ -204,7 +204,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         if (user.Allow.Contains(Allowlist.AnyDomain))
             openIn.Add(userConfigPath);
         if (projectConfig.Allow.Contains(Allowlist.AnyDomain))
-            openIn.Add(".pen/" + Config.FileName);
+            openIn.Add(".pen/" + ConfigLoader.FileName);
         if (openIn.Count > 0)
             warnings.Add($"egress is open: any domain is allowed (allow = [\"*\"] in {string.Join(" and ", openIn)})");
 

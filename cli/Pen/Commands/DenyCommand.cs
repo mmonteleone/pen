@@ -72,7 +72,8 @@ internal sealed class DenyCommand(HostEnv host, StartDir startDir, RecipeCatalog
         RecipeCatalog catalog)
     {
         var entries = user.Deny.Distinct().Select(domain => (Domain: domain, Where: userConfigPath))
-            .Concat(projectConfig.Deny.Distinct().Select(domain => (Domain: domain, Where: ".pen/" + Config.FileName)))
+            .Concat(projectConfig.Deny.Distinct()
+                .Select(domain => (Domain: domain, Where: ".pen/" + ConfigLoader.FileName)))
             .ToList();
         if (entries.Count == 0)
             return "nothing denied; pen deny <domain…> [--global] adds to deny\n";

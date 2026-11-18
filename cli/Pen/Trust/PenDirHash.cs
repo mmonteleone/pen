@@ -157,7 +157,7 @@ internal sealed class PenDirHash : IDisposable
     /// <summary>Hashes, and copies, one <paramref name="entry"/> of a directory at <paramref name="depth"/>.</summary>
     private void HashEntry(string relativePath, FileSystemInfo entry, int depth)
     {
-        if (relativePath == Config.FileName)
+        if (relativePath == ConfigLoader.FileName)
         {
             // Left out of the hash, so it must really be the file that's meant:
             // a directory or a link by this name would be an unhashed way in.
@@ -276,7 +276,7 @@ internal sealed class PenDirHash : IDisposable
                 throw refused;
         }
         // config.toml isn't hashed, so a link to it (ignoring case, for macOS) could change unseen.
-        if (at.Count == 1 && at[0].Equals(Config.FileName, StringComparison.OrdinalIgnoreCase))
+        if (at.Count == 1 && at[0].Equals(ConfigLoader.FileName, StringComparison.OrdinalIgnoreCase))
             throw refused;
     }
 

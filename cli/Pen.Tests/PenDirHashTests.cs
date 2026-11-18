@@ -130,9 +130,9 @@ public class PenDirHashTests
 
         var before = Hash(a);
         File.SetLastWriteTimeUtc(Path.Combine(a, "x"), DateTime.UnixEpoch);
-        File.WriteAllText(Path.Combine(a, Config.FileName), "allow = [\"a.example\"]\n");
+        File.WriteAllText(Path.Combine(a, ConfigLoader.FileName), "allow = [\"a.example\"]\n");
         Assert.Equal(before, Hash(a));
-        File.WriteAllText(Path.Combine(a, Config.FileName), "# edited\n");
+        File.WriteAllText(Path.Combine(a, ConfigLoader.FileName), "# edited\n");
         Assert.Equal(before, Hash(a));
     }
 
@@ -267,8 +267,8 @@ public class PenDirHashTests
         try { Refused(pen); }
         finally { File.SetUnixFileMode(d, Rwx); }
 
-        File.WriteAllText(Path.Combine(pen, Config.FileName), "");
-        File.SetUnixFileMode(Path.Combine(pen, Config.FileName), UnixFileMode.None);
+        File.WriteAllText(Path.Combine(pen, ConfigLoader.FileName), "");
+        File.SetUnixFileMode(Path.Combine(pen, ConfigLoader.FileName), UnixFileMode.None);
         Refused(pen);
     }
 

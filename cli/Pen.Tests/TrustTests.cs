@@ -26,7 +26,7 @@ public class TrustTests
         public TrustStore Store => TrustStore.For(Host, Project);
 
         public TrustRequest Requested(string projectToml, string userToml = "") =>
-            new TrustGate(new ProjectContext(Host, Project, Config.Parse(userToml, "u", ConfigKind.User, RecipeCatalog.Embedded), Config.Parse(projectToml, "p", ConfigKind.Project, RecipeCatalog.Embedded)), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System).FindUnapproved(Store, []);
+            new TrustGate(new ProjectContext(Host, Project, ConfigParser.ParseUser(userToml, "u", RecipeCatalog.Embedded), ConfigParser.ParseProject(projectToml, "p", RecipeCatalog.Embedded)), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System).FindUnapproved(Store, []);
 
         public void Dockerfile(string text = "FROM pen:latest\n")
         {
@@ -95,7 +95,7 @@ public class TrustTests
         Assert.True(f.Requested("allow = [\"*\"]\n").IsEmpty);
         // Named, a domain can reach private addresses, which "*" can't: it needs its own approval.
         Assert.Equal(["internal.example"], f.Requested("allow = [\"*\", \"internal.example\"]\n").Domains);
-        var both = Config.Parse("allow = [\"*\", \"internal.example\"]\n", "p", ConfigKind.Project, RecipeCatalog.Embedded);
+        var both = ConfigParser.ParseProject("allow = [\"*\", \"internal.example\"]\n", "p", RecipeCatalog.Embedded);
         Assert.Equal(["*"], TrustGate.SelectAllowedDomains(Config.Empty, both, f.Store));
     }
 
@@ -133,8 +133,8 @@ public class TrustTests
     {
         using var f = new Fixture();
         f.Store.ApproveDomains(["approved.example"]);
-        var user = Config.Parse(userToml, "u", ConfigKind.User, RecipeCatalog.Embedded);
-        var project = Config.Parse("allow = [\"*\", \"internal.example\", \"a.corp.example\", \"api.github.com\", \"approved.example\"]\n", "p", ConfigKind.Project, RecipeCatalog.Embedded);
+        var user = ConfigParser.ParseUser(userToml, "u", RecipeCatalog.Embedded);
+        var project = ConfigParser.ParseProject("allow = [\"*\", \"internal.example\", \"a.corp.example\", \"api.github.com\", \"approved.example\"]\n", "p", RecipeCatalog.Embedded);
         Assert.Equal(expected, TrustGate.SelectAllowedDomains(user, project, f.Store));
         // What it leaves out is what the gate asks for.
         var asked = new TrustGate(new ProjectContext(f.Host, f.Project, user, project), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System).FindUnapproved(f.Store, []).Domains;
@@ -340,7 +340,7 @@ public class TrustTests
     [InlineData("allow = [\"evil.example\\ndocker\"]\n")]
     [InlineData("github_owner = \"evil\\n\"\n")]
     public void ConfigRefusesANewlineInAValue_EvenATrailingOne(string toml) =>
-        Assert.Throws<PenException>(() => Config.Parse(toml, "p", ConfigKind.Project, RecipeCatalog.Embedded));
+        Assert.Throws<PenException>(() => ConfigParser.ParseProject(toml, "p", RecipeCatalog.Embedded));
 
     public static TheoryData<string> Corrupt => new()
     {
@@ -494,7 +494,7 @@ public class TrustTests
     {
         using var f = new Fixture();
         f.Store.ApproveDomains(["a.example", ".wild.example"]);
-        var project = Config.Parse("allow = [\"a.example\", \"b.example\", \"x.wild.example\"]\n", "p", ConfigKind.Project, RecipeCatalog.Embedded);
+        var project = ConfigParser.ParseProject("allow = [\"a.example\", \"b.example\", \"x.wild.example\"]\n", "p", RecipeCatalog.Embedded);
         Assert.Equal(["a.example", "x.wild.example"],
             TrustGate.SelectAllowedDomains(Config.Empty, project, f.Store));
     }
@@ -589,7 +589,7 @@ public class TrustTests
     public void AFloodOfDomainsTakesTimeInProportion()
     {
         using var f = new Fixture();
-        var toml = Config.Parse("allow = [" + string.Join(',', ManyDomains(30_000).Select(d => $"\"{d}\"")) + "]\n", "p", ConfigKind.Project, RecipeCatalog.Embedded);
+        var toml = ConfigParser.ParseProject("allow = [" + string.Join(',', ManyDomains(30_000).Select(d => $"\"{d}\"")) + "]\n", "p", RecipeCatalog.Embedded);
         var watch = System.Diagnostics.Stopwatch.StartNew();
         var request = new TrustGate(new ProjectContext(f.Host, f.Project, Config.Empty, toml), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System).FindUnapproved(f.Store, []);
         Assert.Equal(30_000, request.Domains.Count);
@@ -643,7 +643,7 @@ public class TrustTests
         const string toml = "tools = [\"pen-test:1\"]\n";
         Assert.True(f.Requested(toml, toml).IsEmpty);
         Assert.True(f.Requested("", toml).IsEmpty);
-        var project = Config.Parse(toml, "p", ConfigKind.Project, RecipeCatalog.Embedded);
+        var project = ConfigParser.ParseProject(toml, "p", RecipeCatalog.Embedded);
         Assert.True(new TrustGate(new ProjectContext(f.Host, f.Project, Config.Empty, project), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System).FindUnapproved(f.Store, [Tool1]).IsEmpty);
 
         Assert.False(f.Store.CoversTool(Tool1));
@@ -716,7 +716,7 @@ public class TrustTests
     });
 
     private TrustRequest RequestedWith(Fixture f, string projectToml, RecipeCatalog catalog) =>
-        new TrustGate(new ProjectContext(f.Host, f.Project, Config.Empty, Config.Parse(projectToml, "p", ConfigKind.Project, RecipeCatalog.Embedded)), new Answers(TextReader.Null, IsTerminal: false), catalog, TimeProvider.System).FindUnapproved(f.Store, []);
+        new TrustGate(new ProjectContext(f.Host, f.Project, Config.Empty, ConfigParser.ParseProject(projectToml, "p", RecipeCatalog.Embedded)), new Answers(TextReader.Null, IsTerminal: false), catalog, TimeProvider.System).FindUnapproved(f.Store, []);
 
     private const string ToolToml = "tools = [\"pen-test:1\"]\n";
 

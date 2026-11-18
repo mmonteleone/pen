@@ -56,7 +56,7 @@ public class InitCommandTests
         var err = CapturingStderr(() => Assert.Equal(0, Init(host, project)));
 
         var text = File.ReadAllText(project.ProjectConfigPath);
-        var config = Config.Parse(text, ".pen/config.toml", ConfigKind.Project, RecipeCatalog.Embedded);
+        var config = ConfigParser.ParseProject(text, ".pen/config.toml", RecipeCatalog.Embedded);
         Assert.Equal(["go"], config.Tools.Select(tool => tool.Name));
         Assert.Equal([".env"], config.Hide.Select(pattern => pattern.Text));
         Assert.Null(config.Docker);

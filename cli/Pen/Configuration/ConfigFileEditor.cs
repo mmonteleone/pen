@@ -26,7 +26,7 @@ internal static class ConfigFileEditor
         IReadOnlyList<string> domains,
         RecipeCatalog catalog)
     {
-        var existing = Config.ReadText(target.Path, target.DisplayPath);
+        var existing = ConfigLoader.ReadText(target.Path, target.DisplayPath);
         var exists = existing is not null;
         var edit = ConfigEdit.AddToList(existing ?? target.Stub, target.DisplayPath, target.Kind, key, domains,
             catalog);

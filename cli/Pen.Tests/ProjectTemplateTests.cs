@@ -13,7 +13,7 @@ public class ProjectTemplateTests
     private static readonly string[] ProjectKeys =
         ["tools", "allow", "deny", "hide", "replace", "ports", "docker", "github_owner"];
 
-    private static Config Parse(string text) => Config.Parse(text, Display, ConfigKind.Project, RecipeCatalog.Embedded);
+    private static Config Parse(string text) => ConfigParser.ParseProject(text, Display, RecipeCatalog.Embedded);
 
     private static string[] ActiveLines(string text) =>
         text.Split('\n').Where(line => line.Trim().Length > 0 && !line.TrimStart().StartsWith('#')).ToArray();
@@ -208,7 +208,7 @@ public class ProjectTemplateTests
     public void Quote_WritesATomlBasicString(string value, string expected)
     {
         Assert.Equal(expected, ProjectTemplate.Quote(value));
-        Assert.Equal(value, Config.ParseToml($"k = {expected}\n", "x")["k"]);
+        Assert.Equal(value, TomlReader.ParseToml($"k = {expected}\n", "x")["k"]);
     }
 
     [Fact]
@@ -224,6 +224,6 @@ public class ProjectTemplateTests
         const string value = "a\U0001F600b";
         var quoted = ProjectTemplate.Quote(value);
         Assert.Equal("\"" + value + "\"", quoted);
-        Assert.Equal(value, Config.ParseToml($"k = {quoted}\n", "x")["k"]);
+        Assert.Equal(value, TomlReader.ParseToml($"k = {quoted}\n", "x")["k"]);
     }
 }

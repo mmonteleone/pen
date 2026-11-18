@@ -35,7 +35,7 @@ internal static class ConfigEdit
         IReadOnlyList<string> domains,
         RecipeCatalog catalog)
     {
-        var before = Config.Parse(text, displayPath, kind, catalog);
+        var before = Parse(text, displayPath, kind, catalog);
         var added = domains.Select(domain => domain.ToLowerInvariant())
             .Distinct()
             .Where(domain => !SelectList(before, key).Contains(domain))
@@ -67,7 +67,7 @@ internal static class ConfigEdit
     private static string InsertDomains(string text, string displayPath, ConfigListKey key, List<string> added)
     {
         var newline = text.Contains("\r\n") ? "\r\n" : "\n";
-        // AddToList's Config.Parse already refused this text if it had any syntax error, so the tree is complete:
+        // AddToList's Parse already refused this text if it had any syntax error, so the tree is complete:
         // every array has both brackets, every item a value and every table header its bracket. This method and the
         // ones it calls rely on that.
         var document = SyntaxParser.Parse(text, displayPath, validate: true);
@@ -92,13 +92,18 @@ internal static class ConfigEdit
     {
         try
         {
-            return Config.Parse(text, displayPath, kind, catalog);
+            return Parse(text, displayPath, kind, catalog);
         }
         catch (PenException)
         {
             return new();
         }
     }
+
+    private static Config Parse(string text, string displayPath, ConfigKind kind, RecipeCatalog catalog) =>
+        kind == ConfigKind.User
+            ? ConfigParser.ParseUser(text, displayPath, catalog)
+            : ConfigParser.ParseProject(text, displayPath, catalog);
 
     /// <summary>
     /// Tells whether <paramref name="after"/> is <paramref name="before"/> with only the domains added to

@@ -55,13 +55,13 @@ public class TrustGateTests
             Directory.CreateDirectory(Project.PenDir);
             File.WriteAllText(Project.ProjectConfigPath, projectToml);
             if (dockerfile.Length > 0) File.WriteAllText(Path.Combine(Project.PenDir, "Dockerfile"), dockerfile);
-            User = Config.Parse("[github]\nattacker = \"tok_attacker\"\nacme = \"tok_acme\"\n", "u", ConfigKind.User, RecipeCatalog.Embedded);
+            User = ConfigParser.ParseUser("[github]\nattacker = \"tok_attacker\"\nacme = \"tok_acme\"\n", "u", RecipeCatalog.Embedded);
             Directory.CreateDirectory(Host.ConfigDir);
             File.WriteAllText(Host.UserConfigPath, "[github]\nattacker = \"tok_attacker\"\nacme = \"tok_acme\"\n");
             _docker = new FakeDocker(T, dockerBody);
         }
 
-        public Config ProjectConfig => Config.Load(Project.PenDir, ".pen", ConfigKind.Project, RecipeCatalog.Embedded);
+        public Config ProjectConfig => ConfigLoader.LoadProject(Project.PenDir, ".pen", RecipeCatalog.Embedded);
         public string CallsFile => Path.Combine(T.Path, "calls");
         public string[] Calls => File.Exists(CallsFile) ? File.ReadAllLines(CallsFile) : [];
         public string Seen(string name) => File.ReadAllText(Path.Combine(T.Path, name));
@@ -697,7 +697,7 @@ public class TrustGateTests
     private static int RunAs(Fixture f, string userToml, Answers answers)
     {
         File.WriteAllText(f.Host.UserConfigPath, userToml); // what pen allow reads live
-        var user = Config.Parse(userToml, "u", ConfigKind.User, RecipeCatalog.Embedded);
+        var user = ConfigParser.ParseUser(userToml, "u", RecipeCatalog.Embedded);
         return new Session(new ProjectContext(f.Host, f.Project, user, f.ProjectConfig), answers, RecipeCatalog.Embedded, TimeProvider.System).Run(new(["true"]));
     }
 
@@ -759,7 +759,7 @@ public class TrustGateTests
     public void AUsersStarMeansTheProjectsStarDoesntAsk_AndApprovesNothing()
     {
         using var f = new Fixture(projectToml: StarToml, dockerfile: "");
-        var user = Config.Parse("allow = [\"*\"]\n", "u", ConfigKind.User, RecipeCatalog.Embedded);
+        var user = ConfigParser.ParseUser("allow = [\"*\"]\n", "u", RecipeCatalog.Embedded);
         Assert.Equal(0, new Session(new ProjectContext(f.Host, f.Project, user, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded, TimeProvider.System).Run(new(["true"])));
         Assert.Equal(".\n", f.Seen("open-egress-seen"));
         Assert.False(TrustStore.For(f.Host, f.Project).CoversDomain("*"));
@@ -1059,7 +1059,7 @@ public class TrustGateTests
     public void AToolFromUserConfigDoesntAsk_AndDoesntApproveTheProjectsEntry()
     {
         using var f = ToolsFixture();
-        var user = Config.Parse(ProjectTool, "u", ConfigKind.User, RecipeCatalog.Embedded);
+        var user = ConfigParser.ParseUser(ProjectTool, "u", RecipeCatalog.Embedded);
         Assert.Equal(0, new Session(new ProjectContext(f.Host, f.Project, user, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded, TimeProvider.System).Run(new(["true"])));
         Assert.Contains("example.org", f.Seen("allowlist-seen").Split('\n'));
         Assert.False(TrustStore.For(f.Host, f.Project).CoversTool(PenTest));
@@ -1226,7 +1226,7 @@ public class TrustGateTests
             return captured.ToString();
         }
         Assert.Contains("pen allow example.org", Listed(Config.Empty));
-        Assert.DoesNotContain("example.org", Listed(Config.Parse("tools = [\"pen-test\"]\n", "u", ConfigKind.User, RecipeCatalog.Embedded)));
+        Assert.DoesNotContain("example.org", Listed(ConfigParser.ParseUser("tools = [\"pen-test\"]\n", "u", RecipeCatalog.Embedded)));
     }
 
     // pen upgrade's tools
@@ -1236,7 +1236,7 @@ public class TrustGateTests
     {
         using var f = ToolsFixture();
         ProjectRuntime.EnsureRuntimeDir(f.Host, f.Project);
-        var user = Config.Parse("tools = [\"pen-test-b:1\"]\n", "u", ConfigKind.User, RecipeCatalog.Embedded);
+        var user = ConfigParser.ParseUser("tools = [\"pen-test-b:1\"]\n", "u", RecipeCatalog.Embedded);
         ToolSpec userTool = new("pen-test-b", "1");
         Assert.Equal([userTool], new UpgradeCommand(f.Host, user, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).SelectTools(f.Project));
         Assert.Equal([userTool], new UpgradeCommand(f.Host, user, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).SelectTools(null));
@@ -1251,7 +1251,7 @@ public class TrustGateTests
     {
         using var f = ToolsFixture();
         ProjectRuntime.EnsureRuntimeDir(f.Host, f.Project);
-        var user = Config.Parse("tools = [\"pen-test:2\"]\n", "u", ConfigKind.User, RecipeCatalog.Embedded);
+        var user = ConfigParser.ParseUser("tools = [\"pen-test:2\"]\n", "u", RecipeCatalog.Embedded);
         TrustStore.For(f.Host, f.Project).Approve(new TrustRequest([], false, null, null, null) { Tools = [new(PenTest, true, ["example.org"])] });
         Assert.Equal([new ToolSpec("pen-test", "2")], new UpgradeCommand(f.Host, user, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).SelectTools(f.Project));
 

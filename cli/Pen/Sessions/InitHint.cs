@@ -34,8 +34,11 @@ internal static class InitHint
         try
         {
             // pen init refuses beside a legacy config, so it isn't suggested there.
-            if (IsPresent(Path.Combine(penDir, Config.FileName)) || IsPresent(Path.Combine(penDir, Config.LegacyName)))
+            if (IsPresent(Path.Combine(penDir, ConfigLoader.FileName))
+                || IsPresent(Path.Combine(penDir, ConfigLoader.LegacyName)))
+            {
                 return false;
+            }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

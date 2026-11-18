@@ -4,8 +4,8 @@ public class ConfigTests
 {
     private const string UserFile = "~/.config/pen/config.toml";
     private const string ProjFile = ".pen/config.toml";
-    private static Config User(string text) => Config.Parse(text, UserFile, ConfigKind.User, RecipeCatalog.Embedded);
-    private static Config Proj(string text) => Config.Parse(text, ProjFile, ConfigKind.Project, RecipeCatalog.Embedded);
+    private static Config User(string text) => ConfigParser.ParseUser(text, UserFile, RecipeCatalog.Embedded);
+    private static Config Proj(string text) => ConfigParser.ParseProject(text, ProjFile, RecipeCatalog.Embedded);
 
     private static string Error(Func<object> f) => Assert.Throws<PenException>(() => f()).Message;
 
@@ -336,16 +336,16 @@ public class ConfigTests
     public void LoadReadsConfigToml_WhichMayBeMissing()
     {
         using var t = new TempDir();
-        Assert.Empty(Config.Load(t.Path, ".pen", ConfigKind.Project, RecipeCatalog.Embedded).Allow);
+        Assert.Empty(ConfigLoader.LoadProject(t.Path, ".pen", RecipeCatalog.Embedded).Allow);
 
         File.WriteAllText(Path.Combine(t.Path, "config.toml"), "docker = true\nallow = [\"a.com\"]\nports = [3000]\n");
-        var c = Config.Load(t.Path, ".pen", ConfigKind.Project, RecipeCatalog.Embedded);
+        var c = ConfigLoader.LoadProject(t.Path, ".pen", RecipeCatalog.Embedded);
         Assert.Equal(["a.com"], c.Allow);
         Assert.True(c.Docker);
         Assert.Equal([3000], c.Ports);
 
         File.WriteAllText(Path.Combine(t.Path, "config.toml"), "docker = 1\n");
-        Assert.StartsWith(".pen/config.toml: docker", Error(() => Config.Load(t.Path, ".pen", ConfigKind.Project, RecipeCatalog.Embedded)));
+        Assert.StartsWith(".pen/config.toml: docker", Error(() => ConfigLoader.LoadProject(t.Path, ".pen", RecipeCatalog.Embedded)));
     }
 
     [Fact]
@@ -353,7 +353,7 @@ public class ConfigTests
     {
         using var t = new TempDir();
         File.WriteAllText(Path.Combine(t.Path, "config"), "allow = a.com\n");
-        var msg = Error(() => Config.Load(t.Path, ".pen", ConfigKind.Project, RecipeCatalog.Embedded));
+        var msg = Error(() => ConfigLoader.LoadProject(t.Path, ".pen", RecipeCatalog.Embedded));
         Assert.StartsWith(".pen/config is pen's old config format", msg);
         Assert.Contains(".pen/config.toml", msg);
     }
@@ -384,21 +384,21 @@ public class ConfigTests
     {
         using var t = new TempDir();
         var host = t.Host();
-        Config.EnsureUserConfig(host, () => new GitIdentity("T", "t@example.invalid"));
+        UserConfigInitializer.EnsureExists(host, () => new GitIdentity("T", "t@example.invalid"));
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(host.UserConfigPath));
         Assert.Equal(Embedded.ReadText("templates/config.toml"), File.ReadAllText(host.UserConfigPath));
 
         File.WriteAllText(host.UserConfigPath, "[env]\nX = \"mine\"\n");
-        Config.EnsureUserConfig(host, () => new GitIdentity("T", "t@example.invalid"));
+        UserConfigInitializer.EnsureExists(host, () => new GitIdentity("T", "t@example.invalid"));
         Assert.Equal("[env]\nX = \"mine\"\n", File.ReadAllText(host.UserConfigPath));
 
         // A missing config.toml is recreated in an existing dir, but not next to a legacy config.
         File.Delete(host.UserConfigPath);
-        Config.EnsureUserConfig(host, () => new GitIdentity("T", "t@example.invalid"));
+        UserConfigInitializer.EnsureExists(host, () => new GitIdentity("T", "t@example.invalid"));
         Assert.True(File.Exists(host.UserConfigPath));
         File.Delete(host.UserConfigPath);
         File.WriteAllText(Path.Combine(host.ConfigDir, "config"), "");
-        Config.EnsureUserConfig(host, () => new GitIdentity("T", "t@example.invalid"));
+        UserConfigInitializer.EnsureExists(host, () => new GitIdentity("T", "t@example.invalid"));
         Assert.False(File.Exists(host.UserConfigPath));
     }
 }

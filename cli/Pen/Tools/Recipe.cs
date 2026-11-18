@@ -70,7 +70,7 @@ internal sealed class Recipe
         return match.Success && match.Index == 0 && match.Length == version.Length;
     }
 
-    /// <summary>Parses a tool.toml, the way <see cref="Config.Parse"/> does a config.toml.</summary>
+    /// <summary>Parses a tool.toml, the way <see cref="ConfigParser"/> does a config.toml.</summary>
     /// <param name="name">The recipe's name.</param>
     /// <param name="text">The text of its tool.toml.</param>
     /// <param name="script">The text of its install.sh.</param>
@@ -79,12 +79,12 @@ internal sealed class Recipe
     {
         var display = $"{RecipeCatalog.Root}{name}/{RecipeCatalog.SettingsFile}";
         PenException Error(string message) => new($"{display}: {Out.Field(message)}");
-        var table = Config.ParseToml(text, display);
+        var table = TomlReader.ParseToml(text, display);
 
         CheckKeys(table, Error);
         var isAgent = ReadIsAgent(table, Error);
         var regex = ReadVersionRegex(table, Error);
-        var defaultVersion = Config.RequireString(Require(table, "default", Error), "default", Error);
+        var defaultVersion = TomlReader.RequireString(Require(table, "default", Error), "default", Error);
         var multiple = ReadFlag(table, "multiple", Error);
         var hidden = ReadFlag(table, "hidden", Error);
         if (!ToolSpec.IsVersionSyntax(defaultVersion) || !MatchesAll(regex, defaultVersion))
@@ -133,7 +133,7 @@ internal sealed class Recipe
     {
         if (!table.TryGetValue("kind", out var kind))
             return false;
-        if (Config.RequireString(kind, "kind", error) != "agent")
+        if (TomlReader.RequireString(kind, "kind", error) != "agent")
             throw error("kind must be \"agent\" or left out");
         return true;
     }
@@ -141,7 +141,7 @@ internal sealed class Recipe
     /// <summary>Reads version, the regex that versions of the tool have to match.</summary>
     private static Regex ReadVersionRegex(TomlTable table, Func<string, PenException> error)
     {
-        var pattern = Config.RequireString(Require(table, "version", error), "version", error);
+        var pattern = TomlReader.RequireString(Require(table, "version", error), "version", error);
         try
         {
             // Only ever a recipe's own pattern, on a short version: interpreted, so AOT-safe.
@@ -176,13 +176,13 @@ internal sealed class Recipe
         var settings = new List<KeyValuePair<string, string>>();
         if (!table.TryGetValue("env", out var env))
             return settings;
-        foreach (var (variable, value) in Config.RequireTable(env, "env", error))
+        foreach (var (variable, value) in TomlReader.RequireTable(env, "env", error))
         {
-            if (!Config.EnvNameRegex().IsMatch(variable))
+            if (!TomlReader.EnvNameRegex().IsMatch(variable))
                 throw error($"env.{variable} isn't a valid environment variable name");
-            if (Config.IsReservedEnv(variable))
+            if (TomlReader.IsReservedEnv(variable))
                 throw error($"env.{variable} is set by pen");
-            var setting = Config.RequireString(value, $"env.{variable}", error);
+            var setting = TomlReader.RequireString(value, $"env.{variable}", error);
             if (setting.Any(char.IsControl))
                 throw error($"env.{variable} can't hold a line break or control character");
             settings.Add(new(variable, setting));

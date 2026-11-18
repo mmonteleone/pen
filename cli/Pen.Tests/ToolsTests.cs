@@ -267,7 +267,12 @@ public class ToolsTests
 
     // The embedded test recipe: multiple = false, default 1.
     private static PenException ConfigError(string text, ConfigKind kind) =>
-        Assert.Throws<PenException>(() => Config.Parse(text, "f.toml", kind, RecipeCatalog.Embedded));
+        Assert.Throws<PenException>(() => ParseConfig(text, kind));
+
+    private static Config ParseConfig(string text, ConfigKind kind) =>
+        kind == ConfigKind.User
+            ? ConfigParser.ParseUser(text, "f.toml", RecipeCatalog.Embedded)
+            : ConfigParser.ParseProject(text, "f.toml", RecipeCatalog.Embedded);
 
     [Theory]
     [InlineData(true)]
@@ -275,9 +280,9 @@ public class ToolsTests
     public void ToolsAreValidInBothConfigFiles(bool user)
     {
         var kind = user ? ConfigKind.User : ConfigKind.Project;
-        var c = Config.Parse("tools = [\"pen-test\", \"pen-test:1\"]\n", "f.toml", kind, RecipeCatalog.Embedded);
+        var c = ParseConfig("tools = [\"pen-test\", \"pen-test:1\"]\n", kind);
         Assert.Equal([new ToolSpec("pen-test", "1")], c.Tools);
-        Assert.Empty(Config.Parse("", "f.toml", kind, RecipeCatalog.Embedded).Tools);
+        Assert.Empty(ParseConfig("", kind).Tools);
 
         Assert.StartsWith("f.toml: tools: unknown tool \"nope\"", ConfigError("tools = [\"nope\"]", kind).Message);
         Assert.Equal("f.toml: tools: \"01\" isn't a valid version of pen-test", ConfigError("tools = [\"pen-test:01\"]", kind).Message);

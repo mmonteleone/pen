@@ -33,11 +33,11 @@ public class InitHintTests
         using var t = new TempDir();
         var (pen, runtime) = Setup(t);
         Directory.CreateDirectory(pen);
-        File.WriteAllText(Path.Combine(pen, Config.FileName), "");
+        File.WriteAllText(Path.Combine(pen, ConfigLoader.FileName), "");
         Assert.False(InitHint.TryClaim(pen, runtime));
         Assert.False(File.Exists(Path.Combine(runtime, InitHint.MarkerName)));
         // Once it's gone, the hint is still to come.
-        File.Delete(Path.Combine(pen, Config.FileName));
+        File.Delete(Path.Combine(pen, ConfigLoader.FileName));
         Assert.True(InitHint.TryClaim(pen, runtime));
     }
 
@@ -47,7 +47,7 @@ public class InitHintTests
         using var t = new TempDir();
         var (pen, runtime) = Setup(t);
         Directory.CreateDirectory(pen);
-        File.WriteAllText(Path.Combine(pen, Config.LegacyName), "");
+        File.WriteAllText(Path.Combine(pen, ConfigLoader.LegacyName), "");
         Assert.False(InitHint.TryClaim(pen, runtime));
     }
 
@@ -60,7 +60,7 @@ public class InitHintTests
         using var t = new TempDir();
         var (pen, runtime) = Setup(t);
         Directory.CreateDirectory(pen);
-        var config = Path.Combine(pen, Config.FileName);
+        var config = Path.Combine(pen, ConfigLoader.FileName);
         switch (kind)
         {
             case "dangling":

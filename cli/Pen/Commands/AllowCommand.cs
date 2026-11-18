@@ -68,11 +68,11 @@ internal sealed class AllowCommand(HostEnv host, StartDir startDir, RecipeCatalo
         try
         {
             denies.Add(new(host.Display(host.UserConfigPath),
-                Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User, catalog).Deny));
+                ConfigLoader.LoadUser(host.ConfigDir, host.Display(host.ConfigDir), catalog).Deny));
             if (project is not null)
             {
-                denies.Add(new(".pen/" + Config.FileName,
-                    Config.Load(project.PenDir, ".pen", ConfigKind.Project, catalog).Deny));
+                denies.Add(new(".pen/" + ConfigLoader.FileName,
+                    ConfigLoader.LoadProject(project.PenDir, ".pen", catalog).Deny));
             }
         }
         catch (PenException)

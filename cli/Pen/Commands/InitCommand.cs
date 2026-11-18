@@ -20,7 +20,7 @@ namespace Pen.Commands;
 /// </remarks>
 internal sealed class InitCommand(HostEnv host, Project project, RecipeCatalog catalog)
 {
-    private const string Where = ".pen/" + Config.FileName;
+    private const string Where = ".pen/" + ConfigLoader.FileName;
 
     /// <summary>Writes .pen/config.toml unless it or a legacy .pen/config exists, and says what it turned on.</summary>
     /// <returns>0; a refusal throws.</returns>
@@ -53,10 +53,10 @@ internal sealed class InitCommand(HostEnv host, Project project, RecipeCatalog c
     /// <summary>Refuses when .pen/config.toml or the legacy .pen/config exists.</summary>
     private void ThrowIfExists()
     {
-        if (File.Exists(Path.Combine(project.PenDir, Config.LegacyName)))
+        if (File.Exists(Path.Combine(project.PenDir, ConfigLoader.LegacyName)))
         {
-            throw new PenException($".pen/{Config.LegacyName}, pen's old config format, already exists: move its " +
-                $"settings to {Where} (docs/usage.md#project-settings), then delete it");
+            throw new PenException($".pen/{ConfigLoader.LegacyName}, pen's old config format, already exists: " +
+                $"move its settings to {Where} (docs/usage.md#project-settings), then delete it");
         }
         if (Path.Exists(project.ProjectConfigPath))
             throw CreateExistsError();
@@ -71,7 +71,7 @@ internal sealed class InitCommand(HostEnv host, Project project, RecipeCatalog c
     {
         try
         {
-            Config.Parse(text, Where, ConfigKind.Project, catalog);
+            ConfigParser.ParseProject(text, Where, catalog);
         }
         catch (PenException exception)
         {

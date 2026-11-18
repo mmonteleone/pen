@@ -24,7 +24,7 @@ internal sealed record HostEnv(string Home, uint Uid, uint Gid, string NuGetPack
     public string ConfigDir => System.IO.Path.Combine(Home, ".config", "pen");
 
     /// <summary>Gets the path of the user's config.toml.</summary>
-    public string UserConfigPath => System.IO.Path.Combine(ConfigDir, Config.FileName);
+    public string UserConfigPath => System.IO.Path.Combine(ConfigDir, ConfigLoader.FileName);
 
     /// <summary>Gets the home seed dir, ~/.config/pen/home.</summary>
     public string SeedDir => System.IO.Path.Combine(ConfigDir, "home");
