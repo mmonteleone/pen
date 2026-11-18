@@ -92,7 +92,7 @@ public class ProjectTemplateTests
 
         // A list pen allow adds at the end stays top-level, after the uncommented replace too.
         var edit = ConfigEdit.AddToList(uncommented.Replace("allow = ", "# allow = "), Display, ConfigKind.Project,
-            ConfigEdit.AllowKey, ["example.com"], RecipeCatalog.Embedded);
+            ConfigListKey.Allow, ["example.com"], RecipeCatalog.Embedded);
         Assert.Equal(["example.com"], Parse(edit.Text).Allow);
         Assert.Single(Parse(edit.Text).Replace);
     }
@@ -101,10 +101,10 @@ public class ProjectTemplateTests
     public void None_AddToListAddsAllowAndDeny()
     {
         var text = ProjectTemplate.Render(ProjectDetection.None);
-        var allowed = ConfigEdit.AddToList(text, Display, ConfigKind.Project, ConfigEdit.AllowKey,
+        var allowed = ConfigEdit.AddToList(text, Display, ConfigKind.Project, ConfigListKey.Allow,
             ["example.com", ".example.org"], RecipeCatalog.Embedded);
         Assert.StartsWith(text, allowed.Text);
-        var denied = ConfigEdit.AddToList(allowed.Text, Display, ConfigKind.Project, ConfigEdit.DenyKey,
+        var denied = ConfigEdit.AddToList(allowed.Text, Display, ConfigKind.Project, ConfigListKey.Deny,
             ["gist.github.com"], RecipeCatalog.Embedded);
         var config = Parse(denied.Text);
         Assert.Equal(["example.com", ".example.org"], config.Allow);
@@ -194,7 +194,7 @@ public class ProjectTemplateTests
     public void AddToList_AddsToAFullRender()
     {
         var text = ProjectTemplate.Render(Full());
-        var edit = ConfigEdit.AddToList(text, Display, ConfigKind.Project, ConfigEdit.DenyKey, ["pastebin.com"], RecipeCatalog.Embedded);
+        var edit = ConfigEdit.AddToList(text, Display, ConfigKind.Project, ConfigListKey.Deny, ["pastebin.com"], RecipeCatalog.Embedded);
         var config = Parse(edit.Text);
         Assert.Equal(["pastebin.com"], config.Deny);
         Assert.Equal(6, config.Hide.Count);

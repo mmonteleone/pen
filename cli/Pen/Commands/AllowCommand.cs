@@ -78,7 +78,7 @@ internal sealed class AllowCommand(HostEnv host, StartDir startDir, RecipeCatalo
         IReadOnlyList<string> domains,
         RecipeCatalog catalog)
     {
-        var addition = AddToConfig(host, project, global, ConfigEdit.AllowKey, domains, catalog);
+        var addition = AddToConfig(host, project, global, ConfigListKey.Allow, domains, catalog);
         if (!global)
             TrustStore.For(host, project!).ApproveDomains(domains);
         return addition;
@@ -94,7 +94,7 @@ internal sealed class AllowCommand(HostEnv host, StartDir startDir, RecipeCatalo
         HostEnv host,
         Project? project,
         bool global,
-        string key,
+        ConfigListKey key,
         IReadOnlyList<string> domains,
         RecipeCatalog catalog)
     {
@@ -102,7 +102,7 @@ internal sealed class AllowCommand(HostEnv host, StartDir startDir, RecipeCatalo
         {
             var userPath = host.Display(host.UserConfigPath);
             var user = new ConfigTarget(host.UserConfigPath, userPath, ConfigKind.User, Stub: "");
-            return new(userPath, Append(user, key, domains, catalog));
+            return new(userPath, ConfigFileEditor.AddToList(user, key, domains, catalog));
         }
 
         var where = ".pen/" + Config.FileName;
@@ -110,7 +110,7 @@ internal sealed class AllowCommand(HostEnv host, StartDir startDir, RecipeCatalo
         MountPlanner.RequireNotLink(project.Dir, project.ProjectConfigPath);
         var target = new ConfigTarget(project.ProjectConfigPath, where, ConfigKind.Project,
             ProjectTemplate.Render(ProjectDetection.None));
-        return new(where, Append(target, key, domains, catalog));
+        return new(where, ConfigFileEditor.AddToList(target, key, domains, catalog));
     }
 
     /// <summary>Says which of <paramref name="domains"/> were added, and which were there already.</summary>
@@ -228,78 +228,6 @@ internal sealed class AllowCommand(HostEnv host, StartDir startDir, RecipeCatalo
         }
 
         return failed == 0;
-    }
-
-    /// <summary>
-    /// Adds the domains not already in <paramref name="key"/> to the config.toml <paramref name="target"/>, creating
-    /// it from its stub if it's missing.
-    /// </summary>
-    /// <param name="target">The config.toml to change.</param>
-    /// <param name="key">The list to add to: allow or deny.</param>
-    /// <param name="domains">The domains to add.</param>
-    /// <param name="catalog">The recipes the file's tools come from.</param>
-    /// <returns>The domains added, lowercased, in order; none when the file is left alone.</returns>
-    /// <remarks>
-    /// The edit is <see cref="ConfigEdit.AddToList"/>'s, and the file is replaced by rename, keeping its mode.
-    /// </remarks>
-    public static IReadOnlyList<string> Append(
-        ConfigTarget target,
-        string key,
-        IReadOnlyList<string> domains,
-        RecipeCatalog catalog)
-    {
-        var existing = Config.ReadText(target.Path, target.DisplayPath);
-        var exists = existing is not null;
-        var edit = ConfigEdit.AddToList(existing ?? target.Stub, target.DisplayPath, target.Kind, key, domains,
-            catalog);
-        if (edit.Added.Count == 0)
-            return edit.Added;
-
-        ReplaceFile(target.Path, edit.Text, ChooseMode(target.Path, exists, target.Kind));
-        return edit.Added;
-    }
-
-    /// <summary>Chooses the mode for the config.toml at <paramref name="path"/>.</summary>
-    /// <returns>
-    /// The file's own mode when it <paramref name="exists"/>; otherwise 600 for the user's (it may hold secrets)
-    /// and 644 for a project's.
-    /// </returns>
-    private static UnixFileMode ChooseMode(string path, bool exists, ConfigKind kind)
-    {
-        if (exists)
-            return File.GetUnixFileMode(path);
-        if (kind == ConfigKind.User)
-            return UnixFileMode.UserRead | UnixFileMode.UserWrite;
-        return UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead;
-    }
-
-    /// <summary>
-    /// Replaces the file at <paramref name="path"/> with <paramref name="text"/>, in mode <paramref name="mode"/>,
-    /// by writing a temp file and renaming it over.
-    /// </summary>
-    private static void ReplaceFile(string path, string text, UnixFileMode mode)
-    {
-        var tmp = $"{path}.tmp-{Environment.ProcessId}";
-        try
-        {
-            var options = new FileStreamOptions
-            {
-                Mode = FileMode.Create,
-                Access = FileAccess.Write,
-                UnixCreateMode = mode,
-            };
-            using (var file = new FileStream(tmp, options))
-            {
-                file.Write(Encoding.UTF8.GetBytes(text));
-            }
-
-            File.SetUnixFileMode(tmp, mode); // in case a stale tmp existed with another mode
-            File.Move(tmp, path, overwrite: true);
-        }
-        finally
-        {
-            File.Delete(tmp);
-        }
     }
 
     /// <summary>Finds the running sessions an added domain (allowed or denied) applies to.</summary>
@@ -684,13 +612,6 @@ internal sealed class AllowCommand(HostEnv host, StartDir startDir, RecipeCatalo
         return shown;
     }
 }
-
-/// <summary>A config.toml <see cref="AllowCommand.Append"/> adds to.</summary>
-/// <param name="Path">The file.</param>
-/// <param name="DisplayPath">Names the file in messages.</param>
-/// <param name="Kind">Which keys the file may hold.</param>
-/// <param name="Stub">The text the file starts from when it's missing.</param>
-internal sealed record ConfigTarget(string Path, string DisplayPath, ConfigKind Kind, string Stub);
 
 /// <summary>What <see cref="AllowCommand.AddToConfig"/> changed.</summary>
 /// <param name="Where">The config.toml, as messages name it.</param>

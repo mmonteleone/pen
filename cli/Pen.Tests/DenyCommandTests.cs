@@ -62,7 +62,7 @@ public class DenyCommandTests
         Directory.CreateDirectory(host.ConfigDir);
         var project = Project.Resolve(t.Sub("repo"), host);
         ProjectRuntime.EnsureRuntimeDir(host, project);
-        var addition = AllowCommand.AddToConfig(host, project, global: false, "deny", ["pastebin.com"], RecipeCatalog.Embedded);
+        var addition = AllowCommand.AddToConfig(host, project, global: false, ConfigListKey.Deny, ["pastebin.com"], RecipeCatalog.Embedded);
         Assert.Equal(".pen/config.toml", addition.Where);
         Assert.Equal(["pastebin.com"], addition.Added);
         var text = File.ReadAllText(project.ProjectConfigPath);

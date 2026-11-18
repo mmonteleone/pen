@@ -28,7 +28,7 @@ internal sealed class DenyCommand(HostEnv host, StartDir startDir, RecipeCatalog
     public int Run(IReadOnlyList<string> domains, bool global)
     {
         var project = AllowCommand.PrepareProject(host, startDir, global, clock);
-        var addition = AllowCommand.AddToConfig(host, project, global, ConfigEdit.DenyKey, domains, catalog);
+        var addition = AllowCommand.AddToConfig(host, project, global, ConfigListKey.Deny, domains, catalog);
         AllowCommand.WriteAdded(addition, domains);
         AllowCommand.WriteGlobHint("deny", startDir, addition);
         return AllowCommand.ApplyToRunning(host, project, global, catalog, clock) ? 0 : 1;

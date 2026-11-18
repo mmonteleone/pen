@@ -16,16 +16,11 @@ namespace Pen.Configuration;
 /// </remarks>
 internal static class ConfigEdit
 {
-    /// <summary>The lists <see cref="AddToList"/> can add to.</summary>
-    public const string AllowKey = "allow";
-    /// <inheritdoc cref="AllowKey"/>
-    public const string DenyKey = "deny";
-
     /// <summary>Adds the domains not already in <paramref name="key"/> to <paramref name="text"/>'s array.</summary>
     /// <param name="text">The config.toml text.</param>
     /// <param name="displayPath">Names the file in errors.</param>
     /// <param name="kind">Which keys the file may hold.</param>
-    /// <param name="key">The list to add to: <see cref="AllowKey"/> or <see cref="DenyKey"/>.</param>
+    /// <param name="key">The list to add to.</param>
     /// <param name="domains">The domains to add.</param>
     /// <param name="catalog">The recipes the file's tools come from.</param>
     /// <returns>
@@ -36,12 +31,10 @@ internal static class ConfigEdit
         string text,
         string displayPath,
         ConfigKind kind,
-        string key,
+        ConfigListKey key,
         IReadOnlyList<string> domains,
         RecipeCatalog catalog)
     {
-        if (key is not (AllowKey or DenyKey))
-            throw new ArgumentException($"no list {key} to add to.", nameof(key));
         var before = Config.Parse(text, displayPath, kind, catalog);
         var added = domains.Select(domain => domain.ToLowerInvariant())
             .Distinct()
@@ -54,7 +47,7 @@ internal static class ConfigEdit
         // Belt and braces: the edit must change nothing but that list.
         if (!IsOnlyAdded(before, Reparse(result, displayPath, kind, catalog), key, added))
         {
-            throw new PenException($"{displayPath}: couldn't add to {key} " +
+            throw new PenException($"{displayPath}: couldn't add to {Name(key)} " +
                 $"automatically; add {string.Join(", ", added.Select(Quote))} by hand");
         }
 
@@ -62,21 +55,26 @@ internal static class ConfigEdit
     }
 
     /// <summary>Gets the list <paramref name="key"/> names in <paramref name="config"/>.</summary>
-    private static List<string> SelectList(Config config, string key) => key == AllowKey ? config.Allow : config.Deny;
+    private static List<string> SelectList(Config config, ConfigListKey key) =>
+        key == ConfigListKey.Allow ? config.Allow : config.Deny;
+
+    /// <summary>Gets the key <paramref name="key"/> is written as in config.toml.</summary>
+    private static string Name(ConfigListKey key) => key == ConfigListKey.Allow ? "allow" : "deny";
 
     /// <summary>
     /// Inserts <paramref name="added"/> into the text's top-level <paramref name="key"/> array, or adds one.
     /// </summary>
-    private static string InsertDomains(string text, string displayPath, string key, List<string> added)
+    private static string InsertDomains(string text, string displayPath, ConfigListKey key, List<string> added)
     {
         var newline = text.Contains("\r\n") ? "\r\n" : "\n";
         // AddToList's Config.Parse already refused this text if it had any syntax error, so the tree is complete:
         // every array has both brackets, every item a value and every table header its bracket. This method and the
         // ones it calls rely on that.
         var document = SyntaxParser.Parse(text, displayPath, validate: true);
-        var list = document.KeyValues.FirstOrDefault(kv => KeyName(kv) == key);
+        var name = Name(key);
+        var list = document.KeyValues.FirstOrDefault(kv => KeyName(kv) == name);
         if (list is null)
-            return Insert(text, NewArrayOffset(text, document), Block(key, added, "  ", newline) + newline);
+            return Insert(text, NewArrayOffset(text, document), Block(name, added, "  ", newline) + newline);
         if (list.Value is ArraySyntax array)
         {
             return array.OpenBracket!.Span.Start.Line == array.CloseBracket!.Span.Start.Line
@@ -84,7 +82,7 @@ internal static class ConfigEdit
                 : InsertBeforeClose(text, array, added, newline);
         }
 
-        throw new PenException($"{displayPath}: {key} isn't written as a list pen " +
+        throw new PenException($"{displayPath}: {name} isn't written as a list pen " +
             $"can add to; add {string.Join(", ", added.Select(Quote))} by hand");
     }
 
@@ -106,9 +104,9 @@ internal static class ConfigEdit
     /// Tells whether <paramref name="after"/> is <paramref name="before"/> with only the domains added to
     /// <paramref name="key"/>'s list.
     /// </summary>
-    private static bool IsOnlyAdded(Config before, Config after, string key, List<string> added) =>
-        after.Allow.SequenceEqual(key == AllowKey ? before.Allow.Concat(added) : before.Allow)
-            && after.Deny.SequenceEqual(key == DenyKey ? before.Deny.Concat(added) : before.Deny)
+    private static bool IsOnlyAdded(Config before, Config after, ConfigListKey key, List<string> added) =>
+        after.Allow.SequenceEqual(key == ConfigListKey.Allow ? before.Allow.Concat(added) : before.Allow)
+            && after.Deny.SequenceEqual(key == ConfigListKey.Deny ? before.Deny.Concat(added) : before.Deny)
             && after.Tools.SequenceEqual(before.Tools)
             && after.GitHubOwner == before.GitHubOwner
             && after.Docker == before.Docker
@@ -225,4 +223,11 @@ internal static class ConfigEdit
         var before = text[start..offset];
         return before.Trim().Length == 0 ? before : "";
     }
+}
+
+/// <summary>The top-level lists <see cref="ConfigEdit.AddToList"/> can add to.</summary>
+internal enum ConfigListKey
+{
+    Allow,
+    Deny,
 }

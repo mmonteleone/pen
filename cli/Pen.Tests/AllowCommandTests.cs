@@ -30,7 +30,7 @@ public class AllowCommandTests
     }
 
     private static string Add(string text, params string[] domains) =>
-        ConfigEdit.AddToList(text, "x.toml", ConfigKind.User, "allow", domains, RecipeCatalog.Embedded).Text;
+        ConfigEdit.AddToList(text, "x.toml", ConfigKind.User, ConfigListKey.Allow, domains, RecipeCatalog.Embedded).Text;
 
     [Fact]
     public void AddsToAMultiLineArray_KeepingCommentsAndIndent()
@@ -95,7 +95,7 @@ public class AllowCommandTests
     public void KeepsAProjectFilesOtherKeys_PortsIncluded()
     {
         var text = "github_owner = \"acme\"\ndocker = true\nports = [3000, 5173]\nallow = [\"a.io\"]\n";
-        var result = ConfigEdit.AddToList(text, ".pen/config.toml", ConfigKind.Project, "allow", ["b.io"], RecipeCatalog.Embedded).Text;
+        var result = ConfigEdit.AddToList(text, ".pen/config.toml", ConfigKind.Project, ConfigListKey.Allow, ["b.io"], RecipeCatalog.Embedded).Text;
         Assert.Equal(text.Replace("[\"a.io\"]", "[\n  \"a.io\",\n  \"b.io\",\n]"), result);
         Assert.Equal([3000, 5173], Config.Parse(result, "x", ConfigKind.Project, RecipeCatalog.Embedded).Ports);
     }
@@ -108,7 +108,7 @@ public class AllowCommandTests
     public void SkipsWhatsAllowed_AndRefusesABrokenFile()
     {
         var text = "allow = [\"a.io\"]\n";
-        var edit = ConfigEdit.AddToList(text, "x", ConfigKind.User, "allow", ["A.io", "a.io"], RecipeCatalog.Embedded);
+        var edit = ConfigEdit.AddToList(text, "x", ConfigKind.User, ConfigListKey.Allow, ["A.io", "a.io"], RecipeCatalog.Embedded);
         Assert.Same(text, edit.Text);
         Assert.Empty(edit.Added);
         Assert.StartsWith("x.toml: unknown key", Assert.Throws<PenException>(() => Add("allw = 1\n", "b.io")).Message);
@@ -117,34 +117,6 @@ public class AllowCommandTests
     [Fact]
     public void AnAllowThatIsntAListIsReported_NotEdited() =>
         Assert.StartsWith("x.toml: allow must be a list", Assert.Throws<PenException>(() => Add("allow = \"a.io\"\n", "b.io")).Message);
-
-    [Fact]
-    public void AppendCreatesTheProjectStub_AndKeepsAnExistingFilesMode()
-    {
-        using var t = new TempDir();
-        var path = Path.Combine(t.Path, "config.toml");
-        Assert.Equal(["example.com", ".foo.io"], AllowCommand.Append(new(path, ".pen/config.toml", ConfigKind.Project, ProjectTemplate.Render(ProjectDetection.None)), "allow", ["example.com", ".foo.io"], RecipeCatalog.Embedded));
-        var text = File.ReadAllText(path);
-        Assert.StartsWith(ProjectTemplate.Render(ProjectDetection.None), text);
-        Assert.Equal(["example.com", ".foo.io"], Config.Parse(text, "x", ConfigKind.Project, RecipeCatalog.Embedded).Allow);
-        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead, File.GetUnixFileMode(path));
-
-        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        Assert.Equal(["b.io"], AllowCommand.Append(new(path, "x", ConfigKind.Project, ""), "allow", ["b.io", "example.com"], RecipeCatalog.Embedded));
-        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path));
-        Assert.Equal(["example.com", ".foo.io", "b.io"], Config.Load(t.Path, ".pen", ConfigKind.Project, RecipeCatalog.Embedded).Allow);
-        Assert.Single(Directory.GetFiles(t.Path)); // no temp file left
-    }
-
-    [Fact]
-    public void AppendLeavesABrokenFileAlone()
-    {
-        using var t = new TempDir();
-        var path = Path.Combine(t.Path, "config.toml");
-        File.WriteAllText(path, "allw = 1\n");
-        Assert.Throws<PenException>(() => AllowCommand.Append(new(path, ".pen/config.toml", ConfigKind.Project, ProjectTemplate.Render(ProjectDetection.None)), "allow", ["b.io"], RecipeCatalog.Embedded));
-        Assert.Equal("allw = 1\n", File.ReadAllText(path));
-    }
 
     [Fact]
     public void DefaultsListsEveryDefaultDomain_WithSectionComments_WithoutTheFileHeader()
@@ -589,7 +561,7 @@ public class AllowCommandTests
     // Adding to deny, and what pen allow adds.
 
     private static string AddDeny(string text, params string[] domains) =>
-        ConfigEdit.AddToList(text, "x.toml", ConfigKind.User, "deny", domains, RecipeCatalog.Embedded).Text;
+        ConfigEdit.AddToList(text, "x.toml", ConfigKind.User, ConfigListKey.Deny, domains, RecipeCatalog.Embedded).Text;
 
     [Fact]
     public void AddToList_CreatesADenyArray_LeavingAllowAlone()
@@ -606,10 +578,10 @@ public class AllowCommandTests
     public void AddToList_AddsToAnExistingDenyArray_SkippingWhatsDenied_NotWhatsAllowed()
     {
         var text = "allow = [\"b.io\"]\ndeny = [\"a.io\"]\n";
-        var edit = ConfigEdit.AddToList(text, "x", ConfigKind.Project, "deny", ["A.io", "b.io"], RecipeCatalog.Embedded);
+        var edit = ConfigEdit.AddToList(text, "x", ConfigKind.Project, ConfigListKey.Deny, ["A.io", "b.io"], RecipeCatalog.Embedded);
         Assert.Equal(["b.io"], edit.Added);
         Assert.Equal("allow = [\"b.io\"]\ndeny = [\n  \"a.io\",\n  \"b.io\",\n]\n", edit.Text);
-        Assert.Same(text, ConfigEdit.AddToList(text, "x", ConfigKind.Project, "deny", ["a.io"], RecipeCatalog.Embedded).Text);
+        Assert.Same(text, ConfigEdit.AddToList(text, "x", ConfigKind.Project, ConfigListKey.Deny, ["a.io"], RecipeCatalog.Embedded).Text);
     }
 
     [Fact]
@@ -627,7 +599,6 @@ public class AllowCommandTests
         // A domain the file can't hold makes the re-parse fail, which the check reports for that key.
         Assert.Equal("x.toml: couldn't add to deny automatically; add \"*\" by hand",
             Assert.Throws<PenException>(() => AddDeny("", "*")).Message);
-        Assert.Throws<ArgumentException>(() => ConfigEdit.AddToList("", "x", ConfigKind.User, "tools", ["a.io"], RecipeCatalog.Embedded));
     }
 
     [Fact]
