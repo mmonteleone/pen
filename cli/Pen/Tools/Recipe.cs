@@ -171,6 +171,10 @@ internal sealed class Recipe
     }
 
     /// <summary>Reads [env], the sessions' environment, for <see cref="Env"/>, in file order.</summary>
+    /// <remarks>
+    /// Control characters are refused because each value becomes a Dockerfile <c>ENV</c> line, where a line break
+    /// would inject an instruction.
+    /// </remarks>
     private static List<KeyValuePair<string, string>> ReadEnv(TomlTable table, Func<string, PenException> error)
     {
         var settings = new List<KeyValuePair<string, string>>();

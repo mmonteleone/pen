@@ -145,6 +145,12 @@ internal static class ConfigParser
         }
     }
 
+    /// <summary>Reads [env], the user's environment variables for sessions.</summary>
+    /// <remarks>
+    /// Values may hold line breaks and other control characters, because they reach only the environment of the
+    /// session's <c>docker compose run</c>, which names them with <c>-e NAME</c>, and never a line-based file such as
+    /// session.env or a Dockerfile.
+    /// </remarks>
     private static void ReadEnv(Config config, object value, Func<string, PenException> error)
     {
         foreach (var (name, setting) in TomlReader.RequireTable(value, "env", error))
