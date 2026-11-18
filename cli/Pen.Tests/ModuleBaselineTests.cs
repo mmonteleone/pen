@@ -216,7 +216,11 @@ public sealed class ModuleBaselineTests : IDisposable
         var (repo, git) = Repo();
         var a = Start(repo, git, "aaaaaaaa");
         Die(a);
-        Assert.Empty(SessionRegistry.FindRunning(Key, Runtime));
+        // On macOS, Process.Start forks: a parallel test's child, until it execs, shares the lock's open file
+        // description and keeps the flock held for a moment after the release.
+        var released = Retry.Repeat(250, TimeSpan.FromMilliseconds(20),
+            () => SessionRegistry.FindRunning(Key, Runtime).Count == 0);
+        Assert.True(released, "the released session still looks running");
         var (module, checkout) = Plant(git, Path.Combine(repo, "evil"), hook);
         AssertFires(checkout, marker);
 

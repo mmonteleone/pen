@@ -1299,7 +1299,11 @@ public class ProtectedFilesTests
             File.AppendAllText(config, $"[core]\n fsmonitor = {hook}\n"); // its agent, past its mount
         }
         // Its Pen has died: not running, still open.
-        Assert.Empty(SessionRegistry.FindRunning(Key, runtime));
+        // On macOS, Process.Start forks: a parallel test's child, until it execs, shares the lock's open file
+        // description and keeps the flock held for a moment after the release.
+        var released = Retry.Repeat(250, TimeSpan.FromMilliseconds(20),
+            () => SessionRegistry.FindRunning(Key, runtime).Count == 0);
+        Assert.True(released, "the released session still looks running");
         Assert.Equal([first.Id], SessionRegistry.FindOpen(Key, runtime).Select(s => s.Id));
         AssertRuns(repo, marker);
 
