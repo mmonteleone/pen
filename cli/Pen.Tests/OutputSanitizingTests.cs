@@ -215,7 +215,7 @@ public class OutputSanitizingTests
         var host = t.Host();
         Directory.CreateDirectory(host.ConfigDir);
         var project = Project.Resolve(t.Sub("repo"), host);
-        Session.EnsureRuntimeDir(host, project);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
         var dir = t.Sub("home", ".local", "state", "pen", project.Key, "sessions", "12345678");
         File.WriteAllText(Path.Combine(dir, "proxy.log"), $"2026-01-01T00:00:00Z 1.1.1.1 TCP_DENIED/403 CONNECT evil{Esc}[2J.com:443 -\n");
         var (_, stdout) = Capture(() => new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, new Config(), new Config())));
@@ -231,7 +231,7 @@ public class OutputSanitizingTests
         var host = t.Host();
         Directory.CreateDirectory(host.ConfigDir);
         var project = Project.Resolve(t.Sub("repo"), host);
-        Session.EnsureRuntimeDir(host, project);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
         var dir = t.Sub("home", ".local", "state", "pen", project.Key, "sessions", "12345678");
         var start = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         File.WriteAllLines(Path.Combine(dir, "proxy.log"), Enumerable.Range(0, 5000).Select(i =>

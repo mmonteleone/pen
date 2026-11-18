@@ -18,7 +18,7 @@ public class TrustTests
             var repo = Git.Repo(T.Sub("repo"));
             if (origin != null) Git.Run(repo, "remote", "add", "origin", origin);
             Project = Project.Resolve(repo, Host);
-            Session.EnsureRuntimeDir(Host, Project);
+            ProjectRuntime.EnsureRuntimeDir(Host, Project);
         }
 
         public string RuntimeDir => Host.GetRuntimeDir(Project.Key);

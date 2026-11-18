@@ -469,7 +469,7 @@ public class SessionEndTests
         var original = File.ReadAllText(gitFile);
         var key = Project.ComputeKey(repo);
         var runtime = t.Sub("runtime");
-        Session.WriteProjectDir(runtime, repo);
+        ProjectRuntime.WriteProjectDir(runtime, repo);
         var session = new SessionDir(key, t.Sub("runtime", "sessions", "12345678"));
         File.WriteAllText(session.ComposeFile, "stack");
         File.WriteAllText(session.EnvFile, $"PROJECT_DIR={wt}\n");

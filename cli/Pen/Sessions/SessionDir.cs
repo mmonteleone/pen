@@ -1,5 +1,6 @@
 using System.Globalization;
 using Pen.GitProtection;
+using Pen.Projects;
 using Pen.Proxy;
 using Pen.Tools;
 
@@ -272,7 +273,7 @@ internal sealed class SessionDir(string projectKey, string path)
             return null;
         try
         {
-            return File.ReadAllText(System.IO.Path.Combine(runtime, Session.ProjectDirFile)).TrimEnd('\n');
+            return File.ReadAllText(System.IO.Path.Combine(runtime, ProjectRuntime.ProjectDirFile)).TrimEnd('\n');
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {

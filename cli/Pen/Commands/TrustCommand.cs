@@ -1,6 +1,5 @@
 using Pen.Platform;
 using Pen.Projects;
-using Pen.Sessions;
 using Pen.Tools;
 using Pen.Trust;
 
@@ -23,7 +22,7 @@ internal sealed class TrustCommand(ProjectContext context, Answers answers, Reci
     /// <returns>0, or 1 when the user declines; a refusal throws.</returns>
     public int Run(bool yes, bool list)
     {
-        Session.EnsureRuntimeDir(context.Host, context.Project);
+        ProjectRuntime.EnsureRuntimeDir(context.Host, context.Project);
         var store = TrustStore.For(context.Host, context.Project);
         var request = _gate.FindUnapproved(store, []);
         if (request.IsEmpty)

@@ -29,7 +29,7 @@ public class DenyCommandTests
         Directory.CreateDirectory(host.ConfigDir);
         File.WriteAllText(host.UserConfigPath, "allow = [\"typed.example\"]\n");
         var project = Project.Resolve(t.Sub("repo"), host);
-        Session.EnsureRuntimeDir(host, project);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
         var s = new SessionDir(project.Key, t.Sub("home", ".local", "state", "pen", project.Key, "sessions", "12345678"));
         File.WriteAllText(s.ComposeFile, "");
         File.WriteAllText(s.EnvFile, $"PROJECT_DIR={project.Dir}\n");
@@ -61,7 +61,7 @@ public class DenyCommandTests
         var host = t.Host();
         Directory.CreateDirectory(host.ConfigDir);
         var project = Project.Resolve(t.Sub("repo"), host);
-        Session.EnsureRuntimeDir(host, project);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
         var addition = AllowCommand.AddToConfig(host, project, global: false, "deny", ["pastebin.com"], RecipeCatalog.Embedded);
         Assert.Equal(".pen/config.toml", addition.Where);
         Assert.Equal(["pastebin.com"], addition.Added);

@@ -4,7 +4,7 @@ namespace Pen.Tests;
 public class RuntimeDirTests
 {
     private static string ProjectDirOf(HostEnv host, Project p) =>
-        File.ReadAllText(Path.Combine(host.GetRuntimeDir(p.Key), Session.ProjectDirFile));
+        File.ReadAllText(Path.Combine(host.GetRuntimeDir(p.Key), ProjectRuntime.ProjectDirFile));
 
     [Fact]
     public void WritesTheRepoDir_WithTheRuntimeDirs()
@@ -12,7 +12,7 @@ public class RuntimeDirTests
         using var t = new TempDir();
         var host = t.Host();
         var p = Project.Resolve(Git.Repo(t.Sub("repo")), host);
-        Session.EnsureRuntimeDir(host, p);
+        ProjectRuntime.EnsureRuntimeDir(host, p);
         Assert.Equal(p.Dir + "\n", ProjectDirOf(host, p));
         Assert.True(Directory.Exists(Path.Combine(host.GetRuntimeDir(p.Key), "sessions")));
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
@@ -28,10 +28,10 @@ public class RuntimeDirTests
         var wt = Path.Combine(t.Path, "wt");
         Git.Run(repo, "worktree", "add", "-q", wt);
         var p = Project.Resolve(wt, host);
-        Session.EnsureRuntimeDir(host, p);
+        ProjectRuntime.EnsureRuntimeDir(host, p);
         Assert.Equal(repo + "\n", ProjectDirOf(host, p));
         // ...and the main checkout, sharing the key, agrees.
-        Session.EnsureRuntimeDir(host, Project.Resolve(repo, host));
+        ProjectRuntime.EnsureRuntimeDir(host, Project.Resolve(repo, host));
         Assert.Equal(repo + "\n", ProjectDirOf(host, p));
     }
 
@@ -44,7 +44,7 @@ public class RuntimeDirTests
         var link = Path.Combine(t.Path, "link");
         File.CreateSymbolicLink(link, real);
         var p = Project.Resolve(link, host);
-        Session.EnsureRuntimeDir(host, p);
+        ProjectRuntime.EnsureRuntimeDir(host, p);
         Assert.Equal(real + "\n", ProjectDirOf(host, p));
     }
 
@@ -56,10 +56,10 @@ public class RuntimeDirTests
         var p = Project.Resolve(t.Sub("plain"), host);
         var runtime = host.GetRuntimeDir(p.Key);
         Directory.CreateDirectory(runtime);
-        File.WriteAllText(Path.Combine(runtime, Session.ProjectDirFile), "/somewhere/else\n");
-        Session.EnsureRuntimeDir(host, p);
+        File.WriteAllText(Path.Combine(runtime, ProjectRuntime.ProjectDirFile), "/somewhere/else\n");
+        ProjectRuntime.EnsureRuntimeDir(host, p);
         Assert.Equal(p.Dir + "\n", ProjectDirOf(host, p));
-        Session.EnsureRuntimeDir(host, p);
+        ProjectRuntime.EnsureRuntimeDir(host, p);
         Assert.Equal(p.Dir + "\n", ProjectDirOf(host, p));
         Assert.Empty(Directory.EnumerateFiles(runtime, "*.tmp"));
     }

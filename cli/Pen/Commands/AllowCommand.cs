@@ -57,7 +57,7 @@ internal sealed class AllowCommand(HostEnv host, StartDir startDir, RecipeCatalo
             return null;
         }
 
-        Session.EnsureRuntimeDir(host, project);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
         Session.FinishDeadSessions(project.Key, host.GetRuntimeDir(project.Key), clock);
         return project;
     }
@@ -595,7 +595,7 @@ internal sealed class AllowCommand(HostEnv host, StartDir startDir, RecipeCatalo
     {
         var project = context.Project;
         var runtimeDir = host.GetRuntimeDir(project.Key);
-        Session.EnsureRuntimeDir(host, project);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
         Session.FinishDeadSessions(project.Key, runtimeDir, clock);
 
         var logs = Directory.EnumerateDirectories(Path.Combine(runtimeDir, "sessions"))

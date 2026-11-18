@@ -22,7 +22,7 @@ internal sealed class CleanCommand(HostEnv host, Project project, Answers answer
     /// <returns>0 once removed, or when there are none; 1 when the user declines; a failure throws.</returns>
     public int Run()
     {
-        Session.EnsureRuntimeDir(host, project);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
         using var projectLock = SessionRegistry.TakeForClean(host, project);
         Session.FinishDeadSessions(project.Key, host.GetRuntimeDir(project.Key), clock);
 

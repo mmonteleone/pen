@@ -13,7 +13,7 @@ public class CleanStaleTests
     private static string Record(HostEnv host, string dir)
     {
         var p = Project.Resolve(dir, host);
-        Session.EnsureRuntimeDir(host, p);
+        ProjectRuntime.EnsureRuntimeDir(host, p);
         return p.Key;
     }
 
@@ -123,7 +123,7 @@ public class CleanStaleTests
         using var t = new TempDir();
         var host = t.Host();
         var key = Record(host, t.Sub("plain"));
-        File.Delete(Path.Combine(host.GetRuntimeDir(key), Session.ProjectDirFile));
+        File.Delete(Path.Combine(host.GetRuntimeDir(key), ProjectRuntime.ProjectDirFile));
         var e = Only(CleanStaleCommand.Find(host, [$"{key}_home"], []), key);
         Assert.Equal(CleanStaleCommand.Status.Unknown, e.Status);
         Assert.False(e.Removable);

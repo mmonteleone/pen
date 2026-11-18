@@ -124,7 +124,7 @@ public class InitHintTests
         Git.Run(repo, "worktree", "add", "-q", worktree);
         var main = Project.Resolve(repo, host);
         var linked = Project.Resolve(worktree, host);
-        Session.EnsureRuntimeDir(host, main);
+        ProjectRuntime.EnsureRuntimeDir(host, main);
         Assert.True(InitHint.TryClaim(main.PenDir, host.GetRuntimeDir(main.Key)));
         Assert.False(InitHint.TryClaim(linked.PenDir, host.GetRuntimeDir(linked.Key)));
     }

@@ -3,7 +3,6 @@ using Pen.Configuration;
 using Pen.GitProtection;
 using Pen.Platform;
 using Pen.Projects;
-using Pen.Sessions;
 using Pen.Tools;
 
 namespace Pen.Commands;
@@ -30,7 +29,7 @@ internal sealed class InitCommand(HostEnv host, Project project, RecipeCatalog c
     /// </exception>
     public int Run()
     {
-        Session.EnsureRuntimeDir(host, project);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
         // A symlink is refused as such, dangling or not, rather than as a file that exists.
         MountPlanner.RequireNotLink(project.Dir, project.PenDir);
         MountPlanner.RequireNotLink(project.Dir, project.ProjectConfigPath);

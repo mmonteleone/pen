@@ -10,7 +10,7 @@ public class AllowCommandTests
         var host = t.Host();
         Directory.CreateDirectory(host.ConfigDir);
         var project = Project.Resolve(t.Sub("repo"), host);
-        Session.EnsureRuntimeDir(host, project);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
         var s = new SessionDir(project.Key, t.Sub("home", ".local", "state", "pen", project.Key, "sessions", "12345678"));
         File.WriteAllText(s.ComposeFile, "");
         File.WriteAllText(s.EnvFile, $"PROJECT_DIR={project.Dir}\n");
@@ -249,7 +249,7 @@ public class AllowCommandTests
     private static (SessionDir Session, FileLock Lock) Running(TempDir t, HostEnv host, Project project, bool old,
         string id = "12345678")
     {
-        Session.EnsureRuntimeDir(host, project);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
         var s = new SessionDir(project.Key, t.Sub("home", ".local", "state", "pen", project.Key, "sessions", id));
         File.WriteAllText(s.ComposeFile, "");
         File.WriteAllText(s.EnvFile, $"PROJECT_DIR={project.Dir}\n");
@@ -486,7 +486,7 @@ public class AllowCommandTests
         var host = t.Host();
         Directory.CreateDirectory(host.ConfigDir);
         var project = Project.Resolve(t.Sub("repo"), host);
-        Session.EnsureRuntimeDir(host, project);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
         var dir = t.Sub("home", ".local", "state", "pen", project.Key, "sessions", "12345678");
         File.WriteAllText(Path.Combine(dir, "proxy.log"),
             "2026-11-01T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT gist.github.com:443 -\n" +
@@ -518,7 +518,7 @@ public class AllowCommandTests
         var host = t.Host();
         Directory.CreateDirectory(host.ConfigDir);
         var project = Project.Resolve(t.Sub("repo"), host);
-        Session.EnsureRuntimeDir(host, project);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
         var dir = t.Sub("home", ".local", "state", "pen", project.Key, "sessions", "12345678");
         File.WriteAllText(Path.Combine(dir, "proxy.log"),
             "2026-11-01T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT 1.2.3.4:443 -\n" +
@@ -545,7 +545,7 @@ public class AllowCommandTests
         var host = t.Host();
         Directory.CreateDirectory(host.ConfigDir);
         var project = Project.Resolve(t.Sub("repo"), host);
-        Session.EnsureRuntimeDir(host, project);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
         var dir = t.Sub("home", ".local", "state", "pen", project.Key, "sessions", "12345678");
         File.WriteAllText(Path.Combine(dir, "proxy.log"),
             "2026-11-01T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT api.github.com:443 -\n" +
@@ -569,7 +569,7 @@ public class AllowCommandTests
         var host = t.Host();
         Directory.CreateDirectory(host.ConfigDir);
         var project = Project.Resolve(t.Sub("repo"), host);
-        Session.EnsureRuntimeDir(host, project);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
         var dir = t.Sub("home", ".local", "state", "pen", project.Key, "sessions", "12345678");
         File.WriteAllText(Path.Combine(dir, "proxy.log"),
             "2026-11-01T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT pastebin.com:443 -\n");
@@ -668,7 +668,7 @@ public class AllowCommandTests
         var host = t.Host();
         Directory.CreateDirectory(host.ConfigDir);
         var project = Project.Resolve(t.Sub("repo"), host);
-        Session.EnsureRuntimeDir(host, project);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
         Assert.False(TrustStore.For(host, project).CoversDomain("*"));
         var addition = AllowCommand.AddAllowed(host, project, global: false, ["*"], RecipeCatalog.Embedded);
         Assert.Equal(".pen/config.toml", addition.Where);

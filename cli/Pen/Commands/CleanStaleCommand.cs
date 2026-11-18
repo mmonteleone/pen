@@ -15,7 +15,8 @@ namespace Pen.Commands;
 /// <param name="host">The host user's environment.</param>
 /// <param name="answers">Where the confirmation is read from.</param>
 /// <remarks>
-/// A key's project is known from the project-dir file its runtime dir holds (<see cref="Session.EnsureRuntimeDir"/>).
+/// A key's project is known from the project-dir file its runtime dir holds
+/// (<see cref="ProjectRuntime.EnsureRuntimeDir"/>).
 /// </remarks>
 internal sealed partial class CleanStaleCommand(HostEnv host, Answers answers)
 {
@@ -277,7 +278,7 @@ internal sealed partial class CleanStaleCommand(HostEnv host, Answers answers)
     {
         try
         {
-            var dir = File.ReadAllText(Path.Combine(runtimeDir, Session.ProjectDirFile)).TrimEnd('\n');
+            var dir = File.ReadAllText(Path.Combine(runtimeDir, ProjectRuntime.ProjectDirFile)).TrimEnd('\n');
             return dir.StartsWith('/') ? dir : null;
         }
         catch (FileNotFoundException)

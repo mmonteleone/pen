@@ -28,7 +28,7 @@ internal sealed class SignCommand(HostEnv host, Project project, TimeProvider cl
     {
         if (!project.IsRepo)
             throw new PenException($"{Out.Field(project.Dir)} isn't a git repo");
-        Session.EnsureRuntimeDir(host, project);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
         using var locks = SessionRegistry.TakeForSign(host, project);
         // This command's own check below takes the module repos there now, so
         // it can't stand in for an ended session's that didn't finish.

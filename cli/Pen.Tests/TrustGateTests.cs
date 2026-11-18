@@ -350,7 +350,7 @@ public class TrustGateTests
     /// <summary>What a Pen that died mid-build leaves, read-only directory and all.</summary>
     private static string StaleContext(Fixture f)
     {
-        Session.EnsureRuntimeDir(f.Host, f.Project);
+        ProjectRuntime.EnsureRuntimeDir(f.Host, f.Project);
         var parent = Path.Combine(f.Host.GetRuntimeDir(f.Project.Key), "layer-" + Project.HashPath(f.Project.Dir));
         var ro = Directory.CreateDirectory(Path.Combine(parent, "context", "ro")).FullName;
         File.WriteAllText(Path.Combine(ro, "stale"), "x");
@@ -535,7 +535,7 @@ public class TrustGateTests
     public void AReviewAbandonedByAKilledPenGoesOnceOld_AndAFreshOneStays()
     {
         using var f = new Fixture(projectToml: "");
-        Session.EnsureRuntimeDir(f.Host, f.Project);
+        ProjectRuntime.EnsureRuntimeDir(f.Host, f.Project);
         var prefix = Path.Combine(f.Host.GetRuntimeDir(f.Project.Key), $"layer-{Project.HashPath(f.Project.Dir)}-review-");
         var (old, fresh) = (prefix + "old", prefix + "fresh");
         Directory.CreateDirectory(Path.Combine(old, "context"));
@@ -741,7 +741,7 @@ public class TrustGateTests
     public void SessionStartAndLiveApplyGiveTheSameAclFiles(string userToml, string projectToml)
     {
         using var f = new Fixture(projectToml: projectToml, dockerfile: "");
-        Session.EnsureRuntimeDir(f.Host, f.Project);
+        ProjectRuntime.EnsureRuntimeDir(f.Host, f.Project);
         TrustStore.For(f.Host, f.Project).ApproveDomains(["approved.example", "zz.example", ".wild.example"]);
         Assert.Equal(0, RunAs(f, userToml, NoTerminal));
         var started = (Allow: f.Seen("allowlist-seen"), Deny: f.Seen("denylist-seen"), Open: f.Seen("open-egress-seen"));
@@ -867,7 +867,7 @@ public class TrustGateTests
     /// <summary>A session running in the project, whose allowlist a live update rewrites.</summary>
     private static (SessionDir Session, FileLock Lock) RunningSession(Fixture f)
     {
-        Session.EnsureRuntimeDir(f.Host, f.Project);
+        ProjectRuntime.EnsureRuntimeDir(f.Host, f.Project);
         var s = new SessionDir(f.Project.Key, f.T.Sub("home", ".local", "state", "pen", f.Project.Key, "sessions", "12345678"));
         File.WriteAllText(s.ComposeFile, "");
         File.WriteAllText(s.EnvFile, $"PROJECT_DIR={f.Project.Dir}\n");
@@ -1199,7 +1199,7 @@ public class TrustGateTests
     public void UpgradeTakesTheUsersAndApprovedProjectTools_AndSkipsTheRest()
     {
         using var f = ToolsFixture();
-        Session.EnsureRuntimeDir(f.Host, f.Project);
+        ProjectRuntime.EnsureRuntimeDir(f.Host, f.Project);
         var user = Config.Parse("tools = [\"pen-test-b:1\"]\n", "u", ConfigKind.User, RecipeCatalog.Embedded);
         ToolSpec userTool = new("pen-test-b", "1");
         Assert.Equal([userTool], new UpgradeCommand(f.Host, user, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).SelectTools(f.Project));
@@ -1214,7 +1214,7 @@ public class TrustGateTests
     public void UpgradeStillRunsWhenTheProjectsToolsCantBeUsed()
     {
         using var f = ToolsFixture();
-        Session.EnsureRuntimeDir(f.Host, f.Project);
+        ProjectRuntime.EnsureRuntimeDir(f.Host, f.Project);
         var user = Config.Parse("tools = [\"pen-test:2\"]\n", "u", ConfigKind.User, RecipeCatalog.Embedded);
         TrustStore.For(f.Host, f.Project).Approve(new TrustRequest([], false, null, null, null) { Tools = [new(PenTest, true, ["example.org"])] });
         Assert.Equal([new ToolSpec("pen-test", "2")], new UpgradeCommand(f.Host, user, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).SelectTools(f.Project));

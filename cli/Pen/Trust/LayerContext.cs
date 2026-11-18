@@ -1,7 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using Pen.Platform;
 using Pen.Projects;
-using Pen.Sessions;
 
 namespace Pen.Trust;
 
@@ -44,7 +43,7 @@ internal sealed class LayerContext : IDisposable
     /// <returns>The copy, which holds the directory's build lock until disposed.</returns>
     public static LayerContext Take(HostEnv host, Project project, TimeProvider clock)
     {
-        Session.EnsureRuntimeDir(host, project);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
         var runtimeDir = host.GetRuntimeDir(project.Key);
         var parent = Path.Combine(runtimeDir, Prefix + Project.HashPath(project.Dir));
         var heldLock = WaitForLock(parent + ".lock", clock);
@@ -70,7 +69,7 @@ internal sealed class LayerContext : IDisposable
     /// </remarks>
     public static LayerContext Review(HostEnv host, Project project, TimeProvider clock)
     {
-        Session.EnsureRuntimeDir(host, project);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
         var runtimeDir = host.GetRuntimeDir(project.Key);
         var prefix = $"{Prefix}{Project.HashPath(project.Dir)}-review-";
         foreach (var old in Directory.GetDirectories(runtimeDir, prefix + "*"))
