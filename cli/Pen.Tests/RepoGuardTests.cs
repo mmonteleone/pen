@@ -717,6 +717,131 @@ public class RepoGuardTests
         Assert.True(Directory.Exists(mainTree));
     }
 
+    // A ".." after a directory the sandbox can replace (missing or not) goes wherever the agent points that
+    // directory with a symlink, so git would read a file nothing protects.
+    [Theory]
+    [InlineData("[include]\n\tpath = missing/../x\n", "missing/../x")]
+    [InlineData("[include]\n\tpath = logs/../x\n", "logs/../x")]
+    [InlineData("[include]\n\tpath = ../sub/../x\n", "../sub/../x")]
+    [InlineData("[include]\n\tpath = ../sub/deep/../../x\n", "../sub/deep/../../x")]
+    [InlineData("[include]\n\tpath = ../missing/../x\n", "../missing/../x")]
+    [InlineData("[includeIf \"onbranch:feature\"]\n\tpath = missing/../x\n", "missing/../x")]
+    [InlineData("[include \"x\"]\n\tpath = logs/../x\n", "logs/../x")]
+    [InlineData("[include]\n\tpath = x\n[include]\n\tpath = missing/../x\n", "missing/../x")]
+    [InlineData("[include]\n\tpath = hooks/../x\n", "hooks/../x")]
+    public void AnIncludeWhoseDotDotLeavesADirectoryTheSandboxCanReplace_IsRefused(string text, string shown)
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Directory.CreateDirectory(Path.Combine(repo, ".git", "logs"));
+        Directory.CreateDirectory(Path.Combine(repo, "sub", "deep"));
+        File.WriteAllText(Path.Combine(repo, ".git", "x"), "");
+        File.WriteAllText(Path.Combine(repo, "x"), "");
+        File.AppendAllText(Path.Combine(repo, ".git", "config"), text);
+        var msg = Assert.Throws<PenException>(() => Mounts(repo)).Message;
+        Assert.Equal($".git/config includes {shown}, whose \"..\" passes through a directory the agent could " +
+            "replace with a symlink, so that git on this machine would read a file pen doesn't protect. Write the " +
+            "include's path without that \"..\" or remove the include, then rerun", msg);
+        Assert.False(Directory.Exists(Path.Combine(repo, ".git", "missing")));
+    }
+
+    [Fact]
+    public void AnAbsoluteIncludeWhoseDotDotLeavesAWorkingTreeDirectory_IsRefused()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Directory.CreateDirectory(Path.Combine(repo, "sub"));
+        File.WriteAllText(Path.Combine(repo, "x"), "");
+        Git.Run(repo, "config", "include.path", $"{repo}/sub/../x");
+        Assert.Contains($"includes {repo}/sub/../x, whose \"..\" passes through a directory",
+            Assert.Throws<PenException>(() => Mounts(repo)).Message);
+    }
+
+    // Both as written and as the OS finds it now, the file is outside the sandbox, but the symlink is the sandbox's
+    // to repoint: at repo/sub/deep/deeper, the same path leads to repo/x.
+    [Fact]
+    public void AnIncludeWhoseDotDotComesAfterASymlinkTheSandboxCanRepoint_IsRefused()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Directory.CreateSymbolicLink(Path.Combine(repo, ".git", "ln"), t.Sub("outside", "b"));
+        File.WriteAllText(Path.Combine(t.Path, "x"), "");
+        File.AppendAllText(Path.Combine(repo, ".git", "config"), "[include]\n\tpath = ln/../../../x\n");
+        Assert.Contains("includes ln/../../../x, whose \"..\" passes through a directory",
+            Assert.Throws<PenException>(() => Mounts(repo)).Message);
+    }
+
+    [Fact]
+    public void AnIncludedFilesInclude_WhoseDotDotLeavesADirectoryTheSandboxCanReplace_IsRefused()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        File.WriteAllText(Path.Combine(repo, ".git", "first.inc"), "[include]\n\tpath = missing/../x\n");
+        File.AppendAllText(Path.Combine(repo, ".git", "config"), "[include]\n\tpath = first.inc\n");
+        Assert.Contains(".git/first.inc includes missing/../x, whose \"..\" passes through a directory",
+            Assert.Throws<PenException>(() => Mounts(repo)).Message);
+    }
+
+    [Fact]
+    public void ALinkedWorktreesInclude_WhoseDotDotLeavesADirectoryInItsWorkingTree_IsRefused()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        var wt = Path.Combine(t.Path, "wt");
+        Git.Run(repo, "worktree", "add", "-q", wt);
+        Directory.CreateDirectory(Path.Combine(wt, "sub"));
+        Git.Run(repo, "config", "includeIf.onbranch:feature.path", $"{wt}/sub/../x");
+        Assert.Contains($"includes {wt}/sub/../x, whose \"..\" passes through a directory",
+            Assert.Throws<PenException>(() => Mounts(wt)).Message);
+    }
+
+    [Fact]
+    public void AModuleReposInclude_WhoseDotDotLeavesAGitDirDirectory_IsRefused()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        var module = t.Sub("repo", ".git", "modules", "lib");
+        Git.Run(module, "init", "-q", "--bare");
+        File.AppendAllText(Path.Combine(module, "config"), "[include]\n\tpath = ../../objects/../x.cfg\n");
+        Assert.Contains(".git/modules/lib/config includes ../../objects/../x.cfg, whose \"..\" passes through",
+            Assert.Throws<PenException>(() => Mounts(repo)).Message);
+    }
+
+    // The including file's directory and those above it are pinned: verified mounts' directories are checked for a
+    // symlink at the session's end, and git dirs are mount points.
+    [Fact]
+    public void AnIncludesDotDot_ThatLeavesOnlyTheIncludingFilesDirectories_IsAllowed()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Directory.CreateDirectory(Path.Combine(repo, "conf", "sub"));
+        File.WriteAllText(Path.Combine(repo, "conf", "sub", "a.cfg"), "[include]\n\tpath = ../../b.cfg\n");
+        File.WriteAllText(Path.Combine(repo, "b.cfg"), "");
+        File.WriteAllText(Path.Combine(repo, ".gitconfig"), "");
+        var module = t.Sub("repo", ".git", "modules", "lib");
+        Git.Run(module, "init", "-q", "--bare");
+        File.AppendAllText(Path.Combine(module, "config"), "[include]\n\tpath = ../../../.gitconfig\n");
+        File.AppendAllText(Path.Combine(repo, ".git", "config"),
+            "[include]\n\tpath = ../conf/sub/a.cfg\n\tpath = ../.git/../.gitconfig\n");
+        var m = Mounts(repo, t.Sub("home"));
+        Assert.Contains(("conf/sub/a.cfg", true), m);
+        Assert.Contains(("b.cfg", true), m);
+        Assert.Contains((".gitconfig", true), m);
+    }
+
+    [Fact]
+    public void AnIncludeThroughHomesDotDot_IsAllowed()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        var home = t.Sub("home");
+        File.WriteAllText(Path.Combine(repo, "inc"), "");
+        File.AppendAllText(Path.Combine(repo, ".git", "config"), "[include]\n\tpath = ~/../repo/inc\n");
+        Assert.Equal(
+            [(".git", false), (".git/config", true), (".git/hooks", true), ("inc", true), (".pen", true)],
+            Mounts(repo, home));
+    }
+
     [Fact]
     public void ComposeOverrideQuotesPathsAndEscapesDollars()
     {

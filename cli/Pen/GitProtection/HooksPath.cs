@@ -341,16 +341,35 @@ internal static class HooksPath
     /// The real path, or null if a directory on the way can't be entered, so what's in it can't be seen, or the path
     /// passes through too many links.
     /// </returns>
+    internal static string? WalkRealPath(string path, Func<string, bool> canBeReplaced, out bool replaceable) =>
+        WalkRealPath(path, canBeReplaced, out replaceable, out _);
+
+    /// <summary>
+    /// Resolves the real path of <paramref name="path"/> as <see cref="WalkRealPath(string, Func{string, bool}, out
+    /// bool)"/> does, also setting <paramref name="undoesReplaceable"/> if a ".." on the walk came after a name
+    /// <paramref name="canBeReplaced"/> held for.
+    /// </summary>
     /// <remarks>
+    /// <para>
     /// The walk matches the OS's: ".." after a symlink is the parent of where it leads. A missing name is taken as it
     /// reads, since the sandbox may be able to create it; a dangling symlink is followed for the same reason.
+    /// </para>
+    /// <para>
+    /// A ".." after a name the sandbox can replace goes wherever the sandbox likes: it can make that name a symlink,
+    /// or point it elsewhere if it is one, and the ".." then leaves where that leads.
+    /// </para>
     /// </remarks>
-    internal static string? WalkRealPath(string path, Func<string, bool> canBeReplaced, out bool replaceable)
+    internal static string? WalkRealPath(
+        string path,
+        Func<string, bool> canBeReplaced,
+        out bool replaceable,
+        out bool undoesReplaceable)
     {
         replaceable = false;
+        undoesReplaceable = false;
         try
         {
-            return WalkNames(path, canBeReplaced, ref replaceable);
+            return WalkNames(path, canBeReplaced, ref replaceable, ref undoesReplaceable);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
@@ -360,10 +379,14 @@ internal static class HooksPath
 
     /// <summary>
     /// Walks <paramref name="path"/> one name at a time, following symlinks, for
-    /// <see cref="WalkRealPath(string, Func{string, bool}, out bool)"/>.
+    /// <see cref="WalkRealPath(string, Func{string, bool}, out bool, out bool)"/>.
     /// </summary>
     /// <returns>The real path, or null if a directory can't be entered or there are too many links.</returns>
-    private static string? WalkNames(string path, Func<string, bool> canBeReplaced, ref bool replaceable)
+    private static string? WalkNames(
+        string path,
+        Func<string, bool> canBeReplaced,
+        ref bool replaceable,
+        ref bool undoesReplaceable)
     {
         var pending = new Stack<string>(path.Split('/').Reverse());
         var current = "/";
@@ -374,6 +397,7 @@ internal static class HooksPath
                 continue;
             if (name == "..")
             {
+                undoesReplaceable |= replaceable;
                 current = Path.GetDirectoryName(current) ?? "/";
                 continue;
             }

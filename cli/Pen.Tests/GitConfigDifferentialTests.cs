@@ -239,8 +239,9 @@ public class GitConfigDifferentialTests
         Assert.Throws<PenException>(() => RepoGuard.EnsureMountTargetsAndPlan(dir, t.Sub("home")));
     }
 
+    // The OS takes the ".." from where link leads, project/sub, which the agent could replace with a symlink.
     [Fact]
-    public void AnIncludeThroughAnOutsideLink_DotDot_IsTheOneTheOsFinds()
+    public void AnIncludeThroughAnOutsideLink_DotDotIntoTheProject_IsRefused()
     {
         using var t = new TempDir();
         var dir = Git.Repo(t.Sub("project"));
@@ -249,8 +250,37 @@ public class GitConfigDifferentialTests
         Directory.CreateDirectory(Path.Combine(dir, "sub"));
         File.WriteAllText(Path.Combine(dir, "inc"), "");
         File.AppendAllText(Path.Combine(dir, ".git", "config"), $"[include]\n\tpath = {outside}/link/../inc\n");
+        var e = Assert.Throws<PenException>(() => RepoGuard.EnsureMountTargetsAndPlan(dir, t.Sub("home")));
+        Assert.Contains($"includes {outside}/link/../inc, whose \"..\" passes through a directory", e.Message);
+    }
+
+    // What git reads through a ".." that leaves only the including file's own directory or the ones above it is
+    // the file Pen protects.
+    [Theory]
+    [InlineData("../.gitconfig")]
+    [InlineData("../../project/.gitconfig")]
+    [InlineData("./../.git/../.gitconfig")]
+    public void AnIncludesDotDot_ThatLeavesOnlyTheIncludingFilesDirectories_IsWhatGitReads(string value)
+    {
+        using var t = new TempDir();
+        var dir = Git.Repo(t.Sub("project"));
+        var mounted = Path.Combine(dir, ".gitconfig");
+        File.WriteAllText(mounted, "[pen]\n\tprobe = here\n");
+        File.AppendAllText(Path.Combine(dir, ".git", "config"), $"[include]\n\tpath = {value}\n");
         var mounts = RepoGuard.EnsureMountTargetsAndPlan(dir, t.Sub("home"));
-        Assert.Contains(mounts, m => m.Path == Path.Combine(dir, "inc") && m.ReadOnly);
+        Assert.Contains(mounts, m => m.Path == mounted && m.ReadOnly && m.Verify);
+        var psi = new ProcessStartInfo("git", ["config", "--includes", "--show-origin", "--get", "pen.probe"])
+        {
+            WorkingDirectory = dir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        psi.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
+        psi.Environment["GIT_CONFIG_GLOBAL"] = "/dev/null";
+        var r = Process.RunAndCaptureText(psi);
+        Assert.Equal(0, r.ExitStatus.ExitCode);
+        var origin = r.StandardOutput.Split('\t')[0]["file:".Length..];
+        Assert.Equal(mounted, Native.RealPath(Path.Combine(dir, origin)));
     }
 
     [Fact]

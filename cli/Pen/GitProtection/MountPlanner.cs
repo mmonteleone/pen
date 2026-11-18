@@ -251,6 +251,13 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// git has other bytes, so Pen would protect a different file from the one git reads.
     /// </para>
     /// <para>
+    /// A path with a ".." that leaves a directory the sandbox can replace is refused
+    /// (<see cref="CanBeReplaced"/>): the agent could make that directory a symlink, and git would read a file next
+    /// to where it leads, which nothing protects. The including file's own directory and its ancestors are pinned
+    /// (mount points, or checked for a symlink at the session's end before any host git runs), so "../x" from it is
+    /// fine.
+    /// </para>
+    /// <para>
     /// The agent can write some of these files, so each is walked only once, and a walk over
     /// <see cref="GitConfigIncludes.MaxFiles"/> files is refused. Depth itself isn't limited, since a file first met
     /// deep down mustn't lose what it includes when it's met again higher up. Files are keyed by path as written, not
@@ -262,19 +269,19 @@ internal sealed class MountPlanner(string dir, string hostHome)
     {
         // Each walk starts afresh: a file seen in another walk is followed again in this one.
         var visited = new HashSet<string>(StringComparer.Ordinal) { configFile };
-        return FollowIncludes(common, configFile, visited);
+        return FollowIncludes(common, configFile, Paths.GetParent(configFile), visited);
     }
 
     /// <summary>
     /// Follows <paramref name="configFile"/>'s includes, within one walk, whose config files met so far are in
-    /// <paramref name="visited"/>.
+    /// <paramref name="visited"/>. <paramref name="realDir"/> is the real directory the file is in.
     /// </summary>
     /// <returns>Whether it or any file it leads to sets extensions.worktreeConfig.</returns>
     /// <remarks>
     /// Every include is followed, whatever its <see cref="IncludeReading"/>: conditional includes for every worktree
     /// and branch, and the forms git ignores too, conservatively.
     /// </remarks>
-    private bool FollowIncludes(string common, string configFile, HashSet<string> visited)
+    private bool FollowIncludes(string common, string configFile, string realDir, HashSet<string> visited)
     {
         if (!_includes.TryRead(configFile, out var lines, out var error))
             throw new PenException(error);
@@ -285,7 +292,23 @@ internal sealed class MountPlanner(string dir, string hostHome)
                 worktreeConfig = true;
             if (include is null)
                 continue;
-            var location = Locate(configFile, include);
+            var location = Locate(configFile, include, path => CanBeReplaced(common, realDir, path));
+            // These two depend on the spelling and on the including file, so they come before a file already
+            // visited is skipped.
+            if (location.Written != location.Real && IsWritable(common, location.Written))
+            {
+                throw new PenException($"{FormatPath(configFile)} includes {FormatPath(location.Written)} through " +
+                    "a symlink, which pen doesn't support: the agent could redirect the include");
+            }
+
+            if (location.UndoesReplaceable)
+            {
+                throw new PenException($"{FormatPath(configFile)} includes {Out.Field(include.Value)}, whose \"..\" " +
+                    "passes through a directory the agent could replace with a symlink, so that git on this machine " +
+                    "would read a file pen doesn't protect. Write the include's path without that \"..\" or remove " +
+                    "the include, then rerun");
+            }
+
             if (!visited.Add(location.Path))
                 continue;
             if (visited.Count > GitConfigIncludes.MaxFiles)
@@ -293,12 +316,6 @@ internal sealed class MountPlanner(string dir, string hostHome)
                 throw new PenException($"{FormatPath(configFile)} takes git config includes past " +
                     $"{GitConfigIncludes.MaxFiles} files, more than pen will follow: remove it or the includes in " +
                     "it, then rerun");
-            }
-
-            if (location.Written != location.Real && IsWritable(common, location.Written))
-            {
-                throw new PenException($"{FormatPath(configFile)} includes {FormatPath(location.Written)} through " +
-                    "a symlink, which pen doesn't support: the agent could redirect the include");
             }
 
             if (Directory.Exists(location.Real))
@@ -317,16 +334,19 @@ internal sealed class MountPlanner(string dir, string hostHome)
             }
             ProtectIncludedFile(common, configFile, location.Real);
             // Even host-only includes can enable worktreeConfig or include another file that the sandbox can write.
-            worktreeConfig |= FollowIncludes(common, location.Path, visited);
+            worktreeConfig |= FollowIncludes(common, location.Path, Paths.GetParent(location.Real), visited);
         }
         return worktreeConfig;
     }
 
-    /// <summary>Finds the file an include in <paramref name="configFile"/> names.</summary>
+    /// <summary>
+    /// Finds the file an include in <paramref name="configFile"/> names, noting a ".." on the way that comes after a
+    /// name <paramref name="canBeReplaced"/> holds for.
+    /// </summary>
     /// <exception cref="PenException">
     /// The path isn't valid UTF-8, is a form Pen can't resolve, or can't be followed.
     /// </exception>
-    private IncludeLocation Locate(string configFile, ConfigInclude include)
+    private IncludeLocation Locate(string configFile, ConfigInclude include, Func<string, bool> canBeReplaced)
     {
         var opened = include.Target switch
         {
@@ -339,7 +359,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
                 "would read: write the path out in full or remove the include, then rerun"),
         };
 
-        if (!TryLocate(opened, out var location))
+        if (!TryLocate(opened, canBeReplaced, out var location))
         {
             throw new PenException($"{FormatPath(configFile)} includes " +
                 $"{FormatPath(Path.GetFullPath(opened))}, and pen can't follow that path to the file git " +
@@ -349,24 +369,31 @@ internal sealed class MountPlanner(string dir, string hostHome)
     }
 
     /// <summary>
-    /// Finds where the file <paramref name="opened"/> names is on disk, walking it as the OS does.
+    /// Finds where the file <paramref name="opened"/> names is on disk, walking it as the OS does, and whether a ".."
+    /// on the walk comes after a name <paramref name="canBeReplaced"/> holds for.
     /// </summary>
-    /// <returns>Whether the path could be walked (<see cref="HooksPath.WalkRealPath(string)"/>).</returns>
+    /// <returns>
+    /// Whether the path could be walked (<see cref="HooksPath.WalkRealPath(string, Func{string, bool}, out bool, out
+    /// bool)"/>).
+    /// </returns>
     /// <remarks>
     /// The written and real paths are taken on paper where a name is missing, so "missing/../x" is the x beside it,
     /// though the OS can't open that path until missing exists.
     /// </remarks>
-    private static bool TryLocate(string opened, [NotNullWhen(true)] out IncludeLocation? location)
+    private static bool TryLocate(
+        string opened,
+        Func<string, bool> canBeReplaced,
+        [NotNullWhen(true)] out IncludeLocation? location)
     {
         // As the OS walks it: ".." after a symlink is the parent of where that leads.
         var written = Path.GetFullPath(opened);
-        if (HooksPath.WalkRealPath(opened) is not { } real)
+        if (HooksPath.WalkRealPath(opened, canBeReplaced, out _, out var undoesReplaceable) is not { } real)
         {
             location = null;
             return false;
         }
         // No symlink to tell them apart, and a cycle then repeats one name.
-        location = new(real == written ? written : opened, written, real);
+        location = new(real == written ? written : opened, written, real, undoesReplaceable);
         return true;
     }
 
@@ -379,7 +406,11 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// </param>
     /// <param name="Written">The full path as written, with "." and ".." taken lexically.</param>
     /// <param name="Real">The real path, as the OS walks it.</param>
-    private sealed record IncludeLocation(string Path, string Written, string Real);
+    /// <param name="UndoesReplaceable">
+    /// Whether a ".." on the walk comes after a name the sandbox could replace, so that it could change where the
+    /// ".." leads.
+    /// </param>
+    private sealed record IncludeLocation(string Path, string Written, string Real, bool UndoesReplaceable);
 
     /// <summary>
     /// Plans a verified read-only mount over an included file, by its real path, if the sandbox could write it,
@@ -401,6 +432,22 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// </summary>
     private bool IsWritable(string common, string path) =>
         PathChecks.IsInside(dir, path) || PathChecks.IsInside(common, path);
+
+    /// <summary>
+    /// Whether the sandbox could replace what's at <paramref name="path"/>, a name looked up on the walk to an
+    /// included file: it's inside the project or <paramref name="common"/>, and not either of those (mount points) or
+    /// <paramref name="includingDir"/>, the including file's real directory, or one of its ancestors.
+    /// </summary>
+    /// <remarks>
+    /// The including file's directory and the ones above it inside the sandbox are pinned. The file is a verified
+    /// mount, and the session-end check renames aside a symlink in place of any directory from the project or git
+    /// dir down to it before any host git runs (<see cref="ProtectedFileRestore"/>); or its directories are mount
+    /// points (git dirs, module repos and the directories between them and the git dir, worktrees/, an external
+    /// worktree's read-only entry); or the end check quarantines it (a module repo no session listed, a
+    /// config.worktree nothing vouches for).
+    /// </remarks>
+    private bool CanBeReplaced(string common, string includingDir, string path) =>
+        IsWritable(common, path) && path != dir && path != common && !PathChecks.IsInside(path, includingDir);
 
     /// <summary>Creates a missing included file in the git dir empty, so that it can be mounted.</summary>
     /// <exception cref="PenException">
