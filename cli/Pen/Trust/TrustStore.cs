@@ -177,14 +177,20 @@ internal sealed class TrustStore
     /// <exception cref="PenException">When its layer has a problem, so it can't be approved.</exception>
     public TrustStore Approve(TrustRequest request)
     {
-        if (request.Layer is { Hash: null, Problem: var problem })
+        if (request.Layer is LayerRequest.Uncheckable(var problem))
             throw new PenException($"can't approve .pen/: {problem}");
-        return SaveWith(request.Domains, request.GitHubOwner, request.Docker, request.Layer?.Hash, request.Tools);
+        return SaveWith(
+            domains: request.Domains,
+            owner: request.GitHubOwner,
+            docker: request.Docker,
+            layerHash: (request.Layer as LayerRequest.Unapproved)?.Hash,
+            tools: request.Tools);
     }
 
     /// <summary>Records domains the user typed.</summary>
     /// <returns>The store as written.</returns>
-    public TrustStore ApproveDomains(IEnumerable<string> domains) => SaveWith(domains, null, false, null, []);
+    public TrustStore ApproveDomains(IEnumerable<string> domains) =>
+        SaveWith(domains: domains, owner: null, docker: false, layerHash: null, tools: []);
 
     /// <summary>Saves the file's current approvals together with these.</summary>
     /// <returns>The store as written.</returns>

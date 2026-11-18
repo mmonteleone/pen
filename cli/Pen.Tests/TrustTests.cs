@@ -209,7 +209,7 @@ public class TrustTests
 
         f.Dockerfile();
         var first = f.Requested("").Layer;
-        Assert.NotNull(first?.Hash);
+        Assert.NotNull(HashIn(first));
         f.Store.Approve(f.Requested(""));
         Assert.True(f.Requested("").IsEmpty);
 
@@ -218,8 +218,8 @@ public class TrustTests
 
         f.Dockerfile("FROM pen:latest\nRUN evil\n");
         var changed = f.Requested("").Layer;
-        Assert.NotNull(changed?.Hash);
-        Assert.NotEqual(first!.Hash, changed!.Hash);
+        Assert.NotNull(HashIn(changed));
+        Assert.NotEqual(HashIn(first), HashIn(changed));
 
         // Back to the approved Dockerfile, but with a changed file COPY could read.
         f.Dockerfile();
@@ -247,11 +247,114 @@ public class TrustTests
         f.Dockerfile();
         File.CreateSymbolicLink(Path.Combine(f.Project.PenDir, "loop"), "loop");
         var r = f.Requested("docker = true\n");
-        Assert.NotNull(r.Layer?.Problem);
-        Assert.Null(r.Layer!.Hash);
+        Assert.NotNull(ProblemIn(r.Layer));
+        Assert.Null(HashIn(r.Layer));
         Assert.Throws<PenException>(() => f.Store.Approve(r));
         Assert.False(File.Exists(f.StorePath));
     }
+
+    private static string? HashIn(LayerRequest? layer) => (layer as LayerRequest.Unapproved)?.Hash;
+
+    private static string? ProblemIn(LayerRequest? layer) => (layer as LayerRequest.Uncheckable)?.Problem;
+
+    private static string? LayerHashOf(TrustRequest request) => HashIn(request.Layer);
+
+    private static string? HashOf(string penDir) => (PenDirHash.Compute(penDir) as PenDirHashResult.Hashed)?.Hash;
+
+    /// <summary>
+    /// Pins, for everything .pen/ can ask for at once: what's asked, the prompt's text in order, and the store's lines
+    /// once approved.
+    /// </summary>
+    [Fact]
+    public void EverythingAskedFor_ThePromptsText_AndTheStoresLinesArePinned()
+    {
+        using var f = new Fixture(); // origin's owner is Acme
+        f.Dockerfile("FROM pen:latest\nRUN \x1b[2Jx\n");
+        const string toml = "allow = [\"b.example\", \"*\", \".a.example\", \"api.github.com\", \"u.example\", \"b.example\"]\n"
+            + "tools = [\"pen-test\", \"pen-test-b\"]\ndocker = true\ngithub_owner = \"Fork\"\n";
+        const string userToml = "allow = [\"u.example\"]\ntools = [\"pen-test-b\"]\n";
+        var user = ConfigParser.ParseUser(userToml, "u", RecipeCatalog.Embedded);
+        var project = ConfigParser.ParseProject(toml, "p", RecipeCatalog.Embedded);
+
+        var r = f.Requested(toml, userToml);
+        Assert.Equal(["b.example", "*", ".a.example"], r.Domains);
+        Assert.True(r.Docker);
+        Assert.Equal("Fork", r.GitHubOwner);
+        Assert.Equal("Acme", r.OriginOwner);
+        var tool = Assert.Single(r.Tools);
+        Assert.Equal((Tool1, true), (tool.Tool, tool.IsNew));
+        Assert.Equal(["example.org"], tool.Domains);
+        var hash = HashOf(f.Project.PenDir);
+        Assert.NotNull(hash);
+        Assert.Equal(hash, LayerHashOf(r));
+        Assert.Equal(PinnedLines, string.Join('\n', r.FormatLines()));
+        Assert.Equal("approve these?", r.Question);
+        Assert.Equal(["api.github.com", "u.example"], TrustGate.SelectAllowedDomains(user, project, f.Store));
+
+        string Trust(bool yes, Answers answers, int exitCode)
+        {
+            var stderr = Console.Error;
+            var captured = new StringWriter();
+            Console.SetError(captured);
+            try { Assert.Equal(exitCode, new TrustCommand(new ProjectContext(f.Host, f.Project, user, project), answers, RecipeCatalog.Embedded, TimeProvider.System).Run(yes: yes, list: false)); }
+            finally { Console.SetError(stderr); }
+            return System.Text.RegularExpressions.Regex.Replace(captured.ToString().Replace(f.RuntimeDir, "<runtime>"), "-review-[0-9a-f]{8}/", "-review-<id>/");
+        }
+        var declined = Trust(yes: false, new Answers(new StringReader("n\n"), IsTerminal: true), exitCode: 1);
+        Assert.Equal(PinnedDeclined.Replace("<pen-dir-hash>", Project.HashPath(f.Project.Dir)), declined);
+        Assert.False(File.Exists(f.StorePath));
+        var approval = Trust(yes: true, new Answers(TextReader.Null, IsTerminal: false), exitCode: 0);
+        Assert.Equal(PinnedApproval, approval);
+
+        Assert.Equal($"pen-trust 1\ndir {f.Project.Dir}\nallow *\nallow .a.example\nallow b.example\ngithub_owner fork\n"
+            + $"tool pen-test:1\ntool-allow pen-test:1 example.org\ndocker\nlayer {hash}\n", File.ReadAllText(f.StorePath));
+        Assert.True(f.Requested(toml, userToml).IsEmpty);
+        Assert.Equal(["b.example", "*", ".a.example", "api.github.com", "u.example", "b.example"], TrustGate.SelectAllowedDomains(user, project, f.Store));
+        // Without the user naming it, the project's other tool asks; the user's allow no longer covers u.example.
+        var later = f.Requested(toml);
+        Assert.Equal(["u.example"], later.Domains);
+        Assert.Equal(new ToolSpec("pen-test-b", "1"), Assert.Single(later.Tools).Tool);
+        Assert.Equal((false, null, null), (later.Docker, later.GitHubOwner, LayerHashOf(later)));
+    }
+
+    private const string PinnedLines =
+        "  allow *: open egress. * allows ANY domain for this project's sessions (raw IPs and names that resolve to private addresses stay blocked)\n"
+            + "  .pen/Dockerfile (new or changed): sessions run in the image it builds, and its build steps can use everything in .pen/ except config.toml and reach the network directly, past the proxy. pen trust shows it.\n"
+            + "  docker = true: sessions get their own Docker daemon, running privileged\n"
+            + "  github_owner = Fork: sessions get this owner's GitHub token (origin's owner is Acme)\n"
+            + "  tool pen-test:1: sessions run with it installed, and the sandbox can reach example.org\n"
+            + "  allow b.example: the sandbox can reach it\n"
+            + "  allow .a.example: the sandbox can reach it\n"
+            + "  domains allowed by name reach private addresses too, which * alone doesn't";
+
+    private const string PinnedApproval =
+        "pen: .pen/ asks for things you haven't approved:\n"
+            + "  allow *: open egress. * allows ANY domain for this project's sessions (raw IPs and names that resolve to private addresses stay blocked)\n"
+            + "  .pen/Dockerfile (new or changed): sessions run in the image it builds, and its build steps can use everything in .pen/ except config.toml and reach the network directly, past the proxy.\n"
+            + "    | FROM pen:latest\n"
+            + "    | RUN \\x1b[2Jx\n"
+            + "  docker = true: sessions get their own Docker daemon, running privileged\n"
+            + "  github_owner = Fork: sessions get this owner's GitHub token (origin's owner is Acme)\n"
+            + "  tool pen-test:1: sessions run with it installed, and the sandbox can reach example.org\n"
+            + "  allow b.example: the sandbox can reach it\n"
+            + "  allow .a.example: the sandbox can reach it\n"
+            + "  domains allowed by name reach private addresses too, which * alone doesn't\n"
+            + "pen: approved\n";
+
+    private const string PinnedDeclined =
+        "pen: .pen/ asks for things you haven't approved:\n"
+            + "  allow *: open egress. * allows ANY domain for this project's sessions (raw IPs and names that resolve to private addresses stay blocked)\n"
+            + "  .pen/Dockerfile (new or changed): sessions run in the image it builds, and its build steps can use everything in .pen/ except config.toml and reach the network directly, past the proxy.\n"
+            + "    The rest of what's being approved is in <runtime>/layer-<pen-dir-hash>-review-<id>/context until you answer, a copy made with this hash. Read that, not .pen/, which may have changed since.\n"
+            + "    | FROM pen:latest\n"
+            + "    | RUN \\x1b[2Jx\n"
+            + "  docker = true: sessions get their own Docker daemon, running privileged\n"
+            + "  github_owner = Fork: sessions get this owner's GitHub token (origin's owner is Acme)\n"
+            + "  tool pen-test:1: sessions run with it installed, and the sandbox can reach example.org\n"
+            + "  allow b.example: the sandbox can reach it\n"
+            + "  allow .a.example: the sandbox can reach it\n"
+            + "  domains allowed by name reach private addresses too, which * alone doesn't\n"
+            + "pen: approve these? [y/N] pen: nothing approved\n";
 
     [Fact]
     public void ADanglingDockerfileSymlinkIsStillADockerfile()
@@ -259,7 +362,7 @@ public class TrustTests
         using var f = new Fixture();
         Directory.CreateDirectory(f.Project.PenDir);
         File.CreateSymbolicLink(Path.Combine(f.Project.PenDir, "Dockerfile"), "/nonexistent");
-        Assert.NotNull(f.Requested("").Layer?.Problem);
+        Assert.NotNull(ProblemIn(f.Requested("").Layer));
     }
 
     [Fact]
@@ -331,7 +434,7 @@ public class TrustTests
         var empty = new List<string>();
         Assert.Throws<PenException>(() => f.Store.Approve(new TrustRequest(empty, false, "evil\ndocker", null, null)));
         Assert.Throws<PenException>(() => f.Store.Approve(new TrustRequest(empty, false, "evil\n", null, null)));
-        Assert.Throws<PenException>(() => f.Store.Approve(new TrustRequest(empty, false, null, null, new($"{Hex}\ndocker", null))));
+        Assert.Throws<PenException>(() => f.Store.Approve(new TrustRequest(empty, false, null, null, new LayerRequest.Unapproved($"{Hex}\ndocker"))));
         Assert.False(File.Exists(f.StorePath));
     }
 
@@ -502,7 +605,7 @@ public class TrustTests
     [Fact]
     public void TheListEscapesWhatItShows()
     {
-        var r = new TrustRequest(["a.example\x1b[2J\nb"], true, "own\x1b]er", "ori\ngin", new(Hex, null));
+        var r = new TrustRequest(["a.example\x1b[2J\nb"], true, "own\x1b]er", "ori\ngin", new LayerRequest.Unapproved(Hex));
         var text = string.Join('\n', r.FormatLines());
         Assert.DoesNotContain('\x1b', text);
         Assert.Equal(4, r.FormatLines().Count());
@@ -513,7 +616,7 @@ public class TrustTests
     [Fact]
     public void EachItemSaysWhatItGrants()
     {
-        var text = string.Join('\n', new TrustRequest(["a.example"], true, "other", "acme", new(Hex, null)).FormatLines());
+        var text = string.Join('\n', new TrustRequest(["a.example"], true, "other", "acme", new LayerRequest.Unapproved(Hex)).FormatLines());
         Assert.Contains("privileged", text);
         Assert.Contains("past the proxy", text);
         Assert.Contains("pen trust shows it", text);
@@ -570,7 +673,7 @@ public class TrustTests
     [Fact]
     public void AFloodOfDomainsIsCapped_AndCantPushOtherItemsOutOfSight()
     {
-        var r = new TrustRequest(ManyDomains(30_000), true, "other", "acme", new(Hex, null));
+        var r = new TrustRequest(ManyDomains(30_000), true, "other", "acme", new LayerRequest.Unapproved(Hex));
         var lines = r.FormatLines().ToList();
         Assert.Equal(3 + TrustRequest.MaxListedDomains + 1, lines.Count);
         Assert.Contains(".pen/Dockerfile", lines[0]);

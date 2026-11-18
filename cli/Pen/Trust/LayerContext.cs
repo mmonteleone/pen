@@ -61,13 +61,16 @@ internal sealed class LayerContext : IDisposable
         }
     }
 
-    /// <summary>Takes a copy of <paramref name="project"/>'s .pen/ to show the user and approve the hash of.</summary>
+    /// <summary>
+    /// Takes a copy of <paramref name="project"/>'s .pen/ to show the user and approve the hash of, first deleting
+    /// review copies of its directory abandoned a day or more ago.
+    /// </summary>
     /// <returns>The copy, kept until disposed, once the user has answered.</returns>
     /// <remarks>
     /// It isn't locked, since a prompt can wait for hours, and has a path of its own. One abandoned by a
     /// killed Pen goes when the next review finds it old, or by pen clean --stale.
     /// </remarks>
-    public static LayerContext Review(HostEnv host, Project project, TimeProvider clock)
+    public static LayerContext TakeForReviewRemovingAbandoned(HostEnv host, Project project, TimeProvider clock)
     {
         ProjectRuntime.EnsureRuntimeDir(host, project);
         var runtimeDir = host.GetRuntimeDir(project.Key);

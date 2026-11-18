@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Pen.Configuration;
 using Pen.Platform;
 using Pen.Projects;
@@ -66,7 +67,10 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     /// Those approved in <paramref name="store"/>, or covered by the defaults and the user's allow without
     /// asking, in order; the rest are what a prompt asks for. Session start and live apply both take these.
     /// </returns>
-    internal static List<string> SelectAllowedDomains(Config user, Config projectConfig, TrustStore store) =>
+    internal static List<string> SelectAllowedDomains(
+        UserConfiguration user,
+        ProjectConfiguration projectConfig,
+        TrustStore store) =>
         [.. projectConfig.Allow.Where(CoversProjectDomain(user, store))];
 
     /// <summary>Tells whether a project allow entry needs no approval now.</summary>
@@ -77,7 +81,7 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     /// <para>The project's "*" counts when the user's allow has it too, or it's approved; an approved one covers
     /// no other entry (<see cref="TrustStore.CoversDomain"/>).</para>
     /// </remarks>
-    private static Func<string, bool> CoversProjectDomain(Config user, TrustStore store)
+    private static Func<string, bool> CoversProjectDomain(UserConfiguration user, TrustStore store)
     {
         var named = Allowlist.MergeNamed(DefaultDomains, user.Allow).ToHashSet(StringComparer.Ordinal);
         var userOpen = Allowlist.Merge(user.Allow).Contains(Allowlist.AnyDomain);
@@ -115,7 +119,7 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     /// domain doesn't.
     /// </remarks>
     public static List<ToolRequest> FindUnapprovedTools(
-        Config projectConfig,
+        ProjectConfiguration projectConfig,
         IEnumerable<ToolSpec> namedByUser,
         TrustStore store,
         RecipeCatalog catalog)
@@ -146,10 +150,13 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     {
         if (!HasDockerfile(project))
             return null;
-        var (hash, problem) = PenDirHash.Compute(project.PenDir);
-        if (hash is null)
-            return new(null, problem);
-        return hash == store.LayerHash ? null : new(hash, null);
+        return PenDirHash.Compute(project.PenDir) switch
+        {
+            PenDirHashResult.NoHash(var problem) => new LayerRequest.Uncheckable(problem),
+            PenDirHashResult.Hashed(var hash) when hash == store.LayerHash => null,
+            PenDirHashResult.Hashed(var hash) => new LayerRequest.Unapproved(hash),
+            _ => throw new UnreachableException(),
+        };
     }
 
     /// <summary>Whether <paramref name="project"/> has a .pen/Dockerfile, or a symlink by that name.</summary>
@@ -193,7 +200,7 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
         }
 
         using var review = request.Layer is not null
-            ? LayerContext.Review(context.Host, context.Project, clock)
+            ? LayerContext.TakeForReviewRemovingAbandoned(context.Host, context.Project, clock)
             : null;
         if (review is not null)
             request = WithReviewedLayer(request, review, store, showCopy: true);
@@ -239,13 +246,18 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     /// <returns>Null when its hash is the approved one; otherwise its hash and Dockerfile, or its problem.</returns>
     private static LayerRequest? FindUnapprovedCopy(LayerContext review, TrustStore store, bool showCopy)
     {
-        var (hash, problem) = review.Result;
-        if (hash is null)
-            return new(null, problem);
-        if (hash == store.LayerHash)
-            return null;
-        var dockerfile = FormatDockerfile(Path.Combine(review.Dir, "Dockerfile"));
-        return new(hash, null, dockerfile, showCopy ? review.Dir : null);
+        switch (review.Result)
+        {
+            case PenDirHashResult.NoHash(var problem):
+                return new LayerRequest.Uncheckable(problem);
+            case PenDirHashResult.Hashed(var hash) when hash == store.LayerHash:
+                return null;
+            case PenDirHashResult.Hashed(var hash):
+                var dockerfile = FormatDockerfile(Path.Combine(review.Dir, "Dockerfile"));
+                return new LayerRequest.Unapproved(hash, dockerfile, showCopy ? review.Dir : null);
+            default:
+                throw new UnreachableException();
+        }
     }
 
     /// <summary>Formats the Dockerfile at <paramref name="path"/> for the prompt, cut short.</summary>
@@ -287,7 +299,7 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     /// <exception cref="PenException">When .pen/ has no hash, saying why.</exception>
     internal static void RequireCheckable(TrustRequest request)
     {
-        if (request.Layer is { Problem: { } problem })
+        if (request.Layer is LayerRequest.Uncheckable(var problem))
         {
             throw new PenException("can't approve .pen/, which a .pen/Dockerfile " +
                 $"would build from: {problem}. Fix that, then rerun");

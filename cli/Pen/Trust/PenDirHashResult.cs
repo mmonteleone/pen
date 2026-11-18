@@ -1,6 +1,15 @@
 namespace Pen.Trust;
 
 /// <summary>The hash of .pen/, or why there can't be one.</summary>
-/// <param name="Hash">The hash, or null when there's a problem.</param>
-/// <param name="Problem">Why there's no hash, or null; then nothing can match an approval.</param>
-internal readonly record struct PenDirHashResult(string? Hash, string? Problem);
+internal abstract record PenDirHashResult
+{
+    private PenDirHashResult()
+    {
+    }
+
+    /// <summary>The hash of .pen/.</summary>
+    internal sealed record Hashed(string Hash) : PenDirHashResult;
+
+    /// <summary>Why .pen/ has no hash; then nothing can match an approval.</summary>
+    internal sealed record NoHash(string Problem) : PenDirHashResult;
+}

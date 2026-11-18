@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace Pen.Tests;
 
 /// <summary>
@@ -123,6 +125,27 @@ public class TrustGateTests
         Assert.Contains("can't approve .pen/", e.Message);
         f.AssertNothingReached();
         Assert.Throws<PenException>(() => new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded, TimeProvider.System).Run(yes: true, list: false));
+    }
+
+    /// <summary>
+    /// An empty symlink target hashes on the live .pen/ but can't be copied, so only the review copy has no hash:
+    /// that copy is what would be approved, so nothing is.
+    /// </summary>
+    [Fact]
+    public void AReviewCopyWithNoHashIsRefused_ThoughTheLivePenDirHashes()
+    {
+        using var f = new Fixture(projectToml: "");
+        var r = Process.RunAndCaptureText(new ProcessStartInfo("ln", ["-s", "", "empty"]) { WorkingDirectory = f.Project.PenDir, RedirectStandardOutput = true, RedirectStandardError = true });
+        Assert.SkipWhen(r.ExitStatus.ExitCode != 0, "the file system refuses an empty symlink target");
+        Assert.IsType<PenDirHashResult.Hashed>(PenDirHash.Compute(f.Project.PenDir));
+        const string Refusal = "can't approve .pen/, which a .pen/Dockerfile would build from: part of .pen/ can't be read. Fix that, then rerun";
+
+        var e = Assert.Throws<PenException>(() => new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded, TimeProvider.System).Run(yes: true, list: false));
+        Assert.Equal((Refusal, 1), (e.Message, e.ExitCode));
+
+        Assert.Null(TrustStore.For(f.Host, f.Project).LayerHash);
+        Assert.Empty(Reviews(f));
+        f.AssertNothingReached();
     }
 
     [Fact]
@@ -518,14 +541,14 @@ public class TrustGateTests
         Assert.SkipWhen(Native.GetUid() == 0, "root reads everything");
         using var f = new Fixture(projectToml: "");
         var store = TrustStore.For(f.Host, f.Project);
-        using var review = LayerContext.Review(f.Host, f.Project, TimeProvider.System);
-        var hash = review.Result.Hash;
+        using var review = LayerContext.TakeForReviewRemovingAbandoned(f.Host, f.Project, TimeProvider.System);
+        var hash = (review.Result as PenDirHashResult.Hashed)?.Hash;
         Assert.NotNull(hash);
         File.SetUnixFileMode(Path.Combine(review.Dir, "Dockerfile"), UnixFileMode.None);
 
-        var request = TrustGate.WithReviewedLayer(new TrustRequest([], false, null, null, new(hash, null)), review, store, showCopy: true);
+        var request = TrustGate.WithReviewedLayer(new TrustRequest([], false, null, null, new LayerRequest.Unapproved(hash)), review, store, showCopy: true);
 
-        Assert.Equal(hash, request.Layer?.Hash);
+        Assert.Equal(hash, (request.Layer as LayerRequest.Unapproved)?.Hash);
         var shown = string.Join('\n', request.FormatLines());
         Assert.Contains("can't be read to show here: permission denied", shown);
         Assert.DoesNotContain("too large", shown);
@@ -541,7 +564,7 @@ public class TrustGateTests
         Directory.CreateDirectory(Path.Combine(old, "context"));
         Directory.CreateDirectory(Path.Combine(fresh, "context"));
         Directory.SetLastWriteTimeUtc(old, DateTime.UtcNow.AddDays(-2));
-        using (LayerContext.Review(f.Host, f.Project, TimeProvider.System)) { }
+        using (LayerContext.TakeForReviewRemovingAbandoned(f.Host, f.Project, TimeProvider.System)) { }
         Assert.False(Directory.Exists(old));
         Assert.True(Directory.Exists(fresh));
     }

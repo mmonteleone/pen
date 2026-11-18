@@ -34,7 +34,7 @@ internal static partial class GitHub
     /// Finds the owner whose token the project uses: github_owner from .pen/config.toml, else origin's.
     /// </summary>
     /// <returns>The owner, or null if neither names one.</returns>
-    public static string? FindProjectOwner(Project project, Config projectConfig) =>
+    public static string? FindProjectOwner(Project project, ProjectConfiguration projectConfig) =>
         projectConfig.GitHubOwner ?? ReadOriginOwner(project);
 
     /// <summary>Reads the owner in origin's URL from the repo's git config.</summary>
@@ -51,13 +51,20 @@ internal static partial class GitHub
         return url is null ? null : ParseOwner(url);
     }
 
-    /// <summary>Selects the user's token for <paramref name="owner"/>, noticing once when there's none.</summary>
+    /// <summary>
+    /// Selects the user's token for <paramref name="owner"/>, and updates the notice that there's none: printing it
+    /// and writing its marker, or deleting the marker when there's a token.
+    /// </summary>
     /// <returns>The token, or null if there's no owner or the user has no token for it.</returns>
     /// <remarks>
     /// The notice is printed once per project, recorded by a marker in its runtime dir; having a token clears the
-    /// marker, so removing the token later notices again.
+    /// marker, so removing the token later notices again. With no owner, nothing is printed or changed.
     /// </remarks>
-    public static string? SelectToken(string? owner, Config userConfig, string runtimeDir, HostEnv host)
+    public static string? SelectTokenAndUpdateNotice(
+        string? owner,
+        UserConfiguration userConfig,
+        string runtimeDir,
+        HostEnv host)
     {
         if (owner is null)
             return null;

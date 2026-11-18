@@ -66,9 +66,9 @@ internal sealed class DenyCommand(HostEnv host, StartDir startDir, RecipeCatalog
     /// whole or in part; a note when nothing is denied.
     /// </returns>
     internal static string FormatListing(
-        Config user,
+        UserConfiguration user,
         string userConfigPath,
-        Config projectConfig,
+        ProjectConfiguration projectConfig,
         RecipeCatalog catalog)
     {
         var entries = user.Deny.Distinct().Select(domain => (Domain: domain, Where: userConfigPath))

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Pen.Platform;
 using Pen.Proxy;
 
@@ -147,24 +148,30 @@ internal sealed record TrustRequest(
     /// <summary>Describes what approving <paramref name="layer"/> grants, with its Dockerfile if known.</summary>
     private static string DescribeLayer(LayerRequest layer)
     {
-        if (layer.Hash is null)
-            return $"  .pen/Dockerfile can't be approved: {Out.Field(layer.Problem ?? "")}";
-        var grant = "  .pen/Dockerfile (new or changed): sessions run in " +
-            "the image it builds, and its build steps can use "
-            + "everything in .pen/ except config.toml and reach the network directly, past the proxy.";
-        if (layer.Dockerfile is null)
-            return grant + " pen trust shows it.";
-        return grant + "\n" + FormatLayerBody(layer);
+        switch (layer)
+        {
+            case LayerRequest.Uncheckable(var problem):
+                return $"  .pen/Dockerfile can't be approved: {Out.Field(problem)}";
+            case LayerRequest.Unapproved unapproved:
+                var grant = "  .pen/Dockerfile (new or changed): sessions run in " +
+                    "the image it builds, and its build steps can use "
+                    + "everything in .pen/ except config.toml and reach the network directly, past the proxy.";
+                if (unapproved.Dockerfile is null)
+                    return grant + " pen trust shows it.";
+                return grant + "\n" + FormatLayerBody(unapproved.Dockerfile, unapproved.CopyDir);
+            default:
+                throw new UnreachableException();
+        }
     }
 
-    /// <summary>Formats what's being approved, as it was hashed.</summary>
+    /// <summary>Formats what's being approved, as it was hashed: the Dockerfile, after where its copy is.</summary>
     /// <remarks>The live .pen/ may already say something else.</remarks>
-    private static string FormatLayerBody(LayerRequest layer)
+    private static string FormatLayerBody(string dockerfile, string? copyDir)
     {
-        if (layer.CopyDir is null)
-            return layer.Dockerfile!;
-        return $"    The rest of what's being approved is in {Out.Field(layer.CopyDir)} " +
+        if (copyDir is null)
+            return dockerfile;
+        return $"    The rest of what's being approved is in {Out.Field(copyDir)} " +
             "until you answer, a copy made with this hash. "
-            + "Read that, not .pen/, which may have changed since.\n" + layer.Dockerfile;
+            + "Read that, not .pen/, which may have changed since.\n" + dockerfile;
     }
 }

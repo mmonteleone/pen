@@ -87,8 +87,8 @@ internal static class EgressPolicyResolver
     /// <param name="projectAllow">The project's allow entries a session may take.</param>
     /// <param name="toolDomains">The tools' domains, from the entry point's own source.</param>
     private static EgressPolicy Merge(
-        Config user,
-        Config projectConfig,
+        UserConfiguration user,
+        ProjectConfiguration projectConfig,
         IReadOnlyList<string> projectAllow,
         IReadOnlyList<string> toolDomains)
     {

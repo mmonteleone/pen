@@ -160,7 +160,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         // runs as UID 0 (with no capabilities) on a read-only root filesystem.
         var rootless = Docker.IsRootless();
         var owner = GitHub.FindProjectOwner(Project, context.ProjectConfig);
-        var token = GitHub.SelectToken(owner, context.User, RuntimeDir, context.Host);
+        var token = GitHub.SelectTokenAndUpdateNotice(owner, context.User, RuntimeDir, context.Host);
         var egress = EgressPolicyResolver.ForSessionStart(context, trust, tools, catalog);
         return new()
         {
@@ -195,9 +195,9 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     /// needs that deny covers, in part or whole, naming the narrower of the two and the tools.
     /// </returns>
     internal static List<string> FormatEgressWarnings(
-        Config user,
+        UserConfiguration user,
         string userConfigPath,
-        Config projectConfig,
+        ProjectConfiguration projectConfig,
         IReadOnlyList<string> deny,
         IEnumerable<(string Tool, IReadOnlyList<string> Domains)> toolDomains)
     {

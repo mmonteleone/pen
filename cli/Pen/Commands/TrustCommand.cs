@@ -41,8 +41,8 @@ internal sealed class TrustCommand(ProjectContext context, Answers answers, Reci
     /// </remarks>
     private int ListAll(TrustRequest request, TrustStore store)
     {
-        using var look = request.Layer is { Hash: not null }
-            ? LayerContext.Review(context.Host, context.Project, clock)
+        using var look = request.Layer is LayerRequest.Unapproved
+            ? LayerContext.TakeForReviewRemovingAbandoned(context.Host, context.Project, clock)
             : null;
         if (look is not null)
             request = TrustGate.WithReviewedLayer(request, look, store, showCopy: false);
@@ -67,7 +67,7 @@ internal sealed class TrustCommand(ProjectContext context, Answers answers, Reci
         }
 
         using var review = request.Layer is not null
-            ? LayerContext.Review(context.Host, context.Project, clock)
+            ? LayerContext.TakeForReviewRemovingAbandoned(context.Host, context.Project, clock)
             : null;
         if (review is not null)
             request = TrustGate.WithReviewedLayer(request, review, store, showCopy: !yes);

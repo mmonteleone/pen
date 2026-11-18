@@ -97,7 +97,8 @@ internal static partial class Allowlist
     /// <summary>Merges the deny lists of the user's and the project's config.</summary>
     /// <returns>The merged list, lowercased, as <see cref="Merge"/> gives it.</returns>
     /// <remarks>The project's deny needs no approval: it can only take egress away.</remarks>
-    public static List<string> MergeDeny(Config user, Config project) => Merge(user.Deny, project.Deny);
+    public static List<string> MergeDeny(UserConfiguration user, ProjectConfiguration project) =>
+        Merge(user.Deny, project.Deny);
 
     /// <summary>
     /// Tells whether <paramref name="host"/> is allowed by a merged list (exact, under a wildcard, or by
@@ -178,7 +179,7 @@ internal static partial class Allowlist
     /// </returns>
     public static AclFiles RenderFiles(IReadOnlyList<string> namedAllow, bool open, IReadOnlyList<string> deny)
     {
-        // A "*" in either would render as a domain to squid. Config rejects it in deny, and a merged allow list
+        // A "*" in either would render as a domain to squid. ConfigParser rejects it in deny, and a merged allow list
         // that has it holds nothing else, so passing one here is a caller's mistake, not a list to cut down.
         if (deny.Any(domain => domain.Trim() == AnyDomain))
             throw new ArgumentException($"deny can't contain {AnyDomain}.", nameof(deny));

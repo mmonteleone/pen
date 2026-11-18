@@ -57,7 +57,7 @@ internal sealed class MaskPlanner
     /// <see cref="MountPlanner.EnsureTargetsAndPlan"/> returns); only those inside the project are looked at.
     /// </param>
     /// <param name="hide">The hide patterns: the user's, then the project's.</param>
-    /// <param name="replace">The project's [replace] entries (target, source), as checked by Config.</param>
+    /// <param name="replace">The project's [replace] entries (target, source), as checked by ConfigParser.</param>
     public MaskPlanner(
         string projectDir,
         string? commonGitDir,

@@ -116,12 +116,17 @@ internal static class Image
     /// <summary>Throws unless the private copy of .pen/ in <paramref name="context"/> is the approved one.</summary>
     private static void RequireApproved(LayerContext context, HostEnv host, Project project)
     {
-        if (context.Result.Hash is null)
-            throw new PenException($"can't build from .pen/: {context.Result.Problem}");
-        if (context.Result.Hash != TrustStore.For(host, project).LayerHash)
+        switch (context.Result)
         {
-            throw new PenException(".pen/ isn't what was approved (it may " +
-                "have just changed): review it with pen trust, then rerun");
+            case PenDirHashResult.NoHash(var problem):
+                throw new PenException($"can't build from .pen/: {problem}");
+            case PenDirHashResult.Hashed(var hash) when hash != TrustStore.For(host, project).LayerHash:
+                throw new PenException(".pen/ isn't what was approved (it may " +
+                    "have just changed): review it with pen trust, then rerun");
+            case PenDirHashResult.Hashed:
+                return;
+            default:
+                throw new UnreachableException();
         }
     }
 
