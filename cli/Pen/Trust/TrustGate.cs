@@ -67,7 +67,7 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     /// Those approved in <paramref name="store"/>, or covered by the defaults and the user's allow without
     /// asking, in order; the rest are what a prompt asks for. Session start and live apply both take these.
     /// </returns>
-    internal static List<string> SelectAllowedDomains(
+    internal static IReadOnlyList<string> SelectAllowedDomains(
         UserConfiguration user,
         ProjectConfiguration projectConfig,
         TrustStore store) =>
@@ -118,7 +118,7 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     /// store's allow domains, so a recipe that later brings another domain asks again, and one that drops a
     /// domain doesn't.
     /// </remarks>
-    public static List<ToolRequest> FindUnapprovedTools(
+    public static IReadOnlyList<ToolRequest> FindUnapprovedTools(
         ProjectConfiguration projectConfig,
         IEnumerable<ToolSpec> namedByUser,
         TrustStore store,

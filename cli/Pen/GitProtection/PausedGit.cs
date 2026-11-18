@@ -144,7 +144,7 @@ internal static class PausedGit
 
     /// <summary>Creates a note listing the first lines, each made safe to print.</summary>
     /// <returns>The note, or null if there are no lines.</returns>
-    private static PausedNote? CreateLinesNote(string heading, List<string> lines) =>
+    private static PausedNote? CreateLinesNote(string heading, IReadOnlyList<string> lines) =>
         lines.Count == 0 ? null
             : new(heading, lines.Take(MaxLines).Select(FormatLine).ToList(), Math.Max(0, lines.Count - MaxLines));
 
@@ -212,7 +212,7 @@ internal static class PausedGit
     /// need no case of their own, whatever core.commentChar says, since git tries the commands first. git stops at a
     /// NUL and this doesn't, which only lists more.
     /// </remarks>
-    internal static List<string> ExecLines(string text)
+    internal static IReadOnlyList<string> ExecLines(string text)
     {
         var found = new List<string>();
         foreach (var raw in text.Split('\n'))
@@ -235,7 +235,7 @@ internal static class PausedGit
     /// Only the plain form git writes passes. Anything else is listed, comments and other spellings included, rather
     /// than parsed the way git might not. A key can't span lines, so each mention is on the line shown.
     /// </remarks>
-    internal static List<string> StrategyLines(string text)
+    internal static IReadOnlyList<string> StrategyLines(string text)
     {
         var found = new List<string>();
         foreach (var raw in text.Split('\n'))

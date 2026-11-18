@@ -17,7 +17,7 @@ internal readonly record struct Port(int Number, bool FromFlag)
     /// <summary>Merges the config's ports and the flag's.</summary>
     /// <returns>The config's ports, then the flag's, without duplicates (lists append).</returns>
     /// <remarks>A port in both counts as from the flag.</remarks>
-    public static List<Port> Merge(IEnumerable<int> config, IEnumerable<int> flag)
+    public static IReadOnlyList<Port> Merge(IEnumerable<int> config, IEnumerable<int> flag)
     {
         var fromFlag = flag.ToHashSet();
         var merged = new List<Port>();
@@ -38,7 +38,7 @@ internal readonly record struct Port(int Number, bool FromFlag)
     /// A taken config port is skipped with a warning (another session of the project usually forwards it
     /// already). Ports are never remapped.
     /// </remarks>
-    public static List<int> Choose(IReadOnlyList<Port> ports, Func<int, bool> isTaken, Action<string> warn)
+    public static IReadOnlyList<int> Choose(IReadOnlyList<Port> ports, Func<int, bool> isTaken, Action<string> warn)
     {
         var taken = ports.Where(port => isTaken(port.Number)).ToList();
         var flagTaken = taken.Where(port => port.FromFlag).Select(port => port.Number).ToList();

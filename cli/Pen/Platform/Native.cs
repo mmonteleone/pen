@@ -117,7 +117,7 @@ internal static partial class Native
     /// layout isn't known).
     /// </returns>
     /// <remarks>Only readdir(3) sees the real bytes: .NET's listing has U+FFFD in place of the bad ones.</remarks>
-    public static List<UndecodableEntry>? ListUndecodable(string dir)
+    public static IReadOnlyList<UndecodableEntry>? ListUndecodable(string dir)
     {
         if (GetDirentLayout() is not { } layout)
             return null;

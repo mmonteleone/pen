@@ -383,7 +383,7 @@ public class AllowlistTests
 
     // The session-start warnings about egress.
 
-    private static List<string> EgressWarnings(string user, string project, string[] deny,
+    private static IReadOnlyList<string> EgressWarnings(string user, string project, string[] deny,
         params (string Tool, IReadOnlyList<string> Domains)[] tools) =>
         Session.FormatEgressWarnings(ConfigParser.ParseUser(user, "u", RecipeCatalog.Embedded), "~/.config/pen/config.toml",
             ConfigParser.ParseProject(project, "p", RecipeCatalog.Embedded), deny, tools);

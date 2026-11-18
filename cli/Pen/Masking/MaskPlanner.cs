@@ -1,3 +1,4 @@
+using Pen.Configuration;
 using Pen.GitProtection;
 using Pen.Platform;
 
@@ -27,7 +28,7 @@ internal sealed class MaskPlanner
     private readonly List<string> _protected;
 
     private readonly IReadOnlyList<HidePattern> _hide;
-    private readonly IReadOnlyList<KeyValuePair<string, string>> _replace;
+    private readonly IReadOnlyList<FileReplacement> _replace;
 
     /// <summary>The files to hide found so far, by real path, with what matched them.</summary>
     private readonly Dictionary<string, Found> _files = new(StringComparer.Ordinal);
@@ -57,13 +58,13 @@ internal sealed class MaskPlanner
     /// <see cref="MountPlanner.EnsureTargetsAndPlan"/> returns); only those inside the project are looked at.
     /// </param>
     /// <param name="hide">The hide patterns: the user's, then the project's.</param>
-    /// <param name="replace">The project's [replace] entries (target, source), as checked by ConfigParser.</param>
+    /// <param name="replace">The project's [replace] entries, as checked by ConfigParser.</param>
     public MaskPlanner(
         string projectDir,
         string? commonGitDir,
         IReadOnlyCollection<string> protectedPaths,
         IReadOnlyList<HidePattern> hide,
-        IReadOnlyList<KeyValuePair<string, string>> replace)
+        IReadOnlyList<FileReplacement> replace)
     {
         _projectDir = projectDir;
         _commonGitDir = commonGitDir is null ? null : Native.RealPath(commonGitDir) ?? commonGitDir;
@@ -518,7 +519,7 @@ internal sealed class MaskPlanner
             Warn($"couldn't look in {Name(dir.Relative)} for files to hide");
             return null;
         }
-        var entries = listed.ConvertAll(entry => new Entry(entry.Name, entry.IsDirectory, entry.IsLink));
+        var entries = listed.Select(entry => new Entry(entry.Name, entry.IsDirectory, entry.IsLink)).ToList();
         if (!IsUnchanged(dir))
         {
             WarnChangedDir(dir.Relative);

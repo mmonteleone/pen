@@ -41,7 +41,7 @@ internal sealed class MountPlanner(string dir, string hostHome)
     /// The mounts in the order first planned, one per path. A path planned more than once keeps its first mount,
     /// verified if any of its mounts was.
     /// </returns>
-    public List<Mount> EnsureTargetsAndPlan()
+    public IReadOnlyList<Mount> EnsureTargetsAndPlan()
     {
         var git = Path.Combine(dir, ".git");
         if (Directory.Exists(git))

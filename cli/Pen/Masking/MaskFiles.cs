@@ -41,7 +41,7 @@ internal static class MaskFiles
     /// copy of each replacement's bytes, with its mode, named by <see cref="ReplacementPrefix"/> and its place in
     /// [replace].
     /// </remarks>
-    public static List<Mount> Write(string dir, MaskPlan plan)
+    public static IReadOnlyList<Mount> Write(string dir, MaskPlan plan)
     {
         if (plan.IsEmpty)
             return [];

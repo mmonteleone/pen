@@ -174,6 +174,13 @@ dotnet_diagnostic.IDE0049.severity = warning
 # Undisposed IDisposables; everything here is internal, so check all of it
 dotnet_code_quality.api_surface = all
 dotnet_diagnostic.CA2000.severity = warning
+# Exposed mutable collections: results and models hand out read-only snapshots. A private builder's own lists
+# may stay List<T>, so CA1002 looks at every non-private member (internal ones included) and skips private ones.
+dotnet_diagnostic.CA1002.severity = warning
+dotnet_code_quality.CA1002.api_surface = public, internal
+# CA2227 only checks public types, so it has nothing to check in this internal-only assembly today; settable
+# collection properties are kept out by review.
+dotnet_diagnostic.CA2227.severity = warning
 
 # APIs with one owner each (cli/Pen/BannedSymbols.txt): only their owners may use them.
 dotnet_diagnostic.RS0030.severity = warning

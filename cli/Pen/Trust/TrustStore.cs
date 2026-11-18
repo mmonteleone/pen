@@ -168,7 +168,7 @@ internal sealed class TrustStore
     public bool CoversToolDomain(ToolSpec tool, string domain) => _toolDomains.Contains($"{tool} {domain}");
 
     /// <summary>Selects the project tools approved along with every domain they bring.</summary>
-    public List<ToolSpec> SelectApprovedTools(IEnumerable<ToolSpec> tools, RecipeCatalog catalog) =>
+    public IReadOnlyList<ToolSpec> SelectApprovedTools(IEnumerable<ToolSpec> tools, RecipeCatalog catalog) =>
         [.. tools.Where(tool => CoversTool(tool)
                 && ToolSpec.ListDomains([tool], catalog).All(domain => CoversToolDomain(tool, domain)))];
 

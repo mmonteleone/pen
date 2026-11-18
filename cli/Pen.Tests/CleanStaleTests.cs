@@ -17,7 +17,7 @@ public class CleanStaleTests
         return p.Key;
     }
 
-    private static CleanStaleCommand.Entry Only(List<CleanStaleCommand.Entry> entries, string key) => Assert.Single(entries, e => e.Key == key);
+    private static CleanStaleCommand.Entry Only(IReadOnlyList<CleanStaleCommand.Entry> entries, string key) => Assert.Single(entries, e => e.Key == key);
 
     [Fact]
     public void ARepoThatsStillThereIsLive()

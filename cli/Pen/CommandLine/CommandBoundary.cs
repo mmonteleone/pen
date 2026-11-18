@@ -20,7 +20,7 @@ internal static class CommandBoundary
 
     /// <summary>Inserts -- before the command to run in <paramref name="args"/>, if there's one to mark.</summary>
     /// <returns>The arguments to parse.</returns>
-    public static List<string> Insert(IReadOnlyList<string> args, CommandTree tree)
+    public static IReadOnlyList<string> Insert(IReadOnlyList<string> args, CommandTree tree)
     {
         var result = args.ToList();
         var index = SkipRunOptions(args, 0, tree.RootOptions);

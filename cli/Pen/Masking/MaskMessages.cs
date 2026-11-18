@@ -68,7 +68,7 @@ internal static class MaskMessages
     /// the same mount. .pen is Pen's own dir, which always exists by now, so probing it adds nothing to the user's
     /// tree.
     /// </remarks>
-    public static List<string> ListWarnings(MaskPlan plan, string penDir, bool docker, bool isMacOS,
+    public static IReadOnlyList<string> ListWarnings(MaskPlan plan, string penDir, bool docker, bool isMacOS,
         Func<string, bool> probe)
     {
         var warnings = new List<string>();

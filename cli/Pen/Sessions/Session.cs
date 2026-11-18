@@ -147,7 +147,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         // A hide or [replace] that can't be used stops the session here, before anything is made for it.
         var masks = new MaskPlanner(Project.Dir, Project.CommonGitDir, [.. mounts.Select(mount => mount.Path)],
             [.. context.User.Hide, .. context.ProjectConfig.Hide],
-            [.. context.ProjectConfig.Replacements.Select(entry => KeyValuePair.Create(entry.Target, entry.Source))])
+            context.ProjectConfig.Replacements)
             .Plan();
         // The mounts protect every module repo; the session-end check takes as the submodules' own only those
         // listed. The open sessions are found just before the module scan.
@@ -176,7 +176,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     }
 
     /// <summary>Lists the warnings about the session's egress: open egress, and deny taking what tools need.</summary>
-    private List<string> ListEgressWarnings(IReadOnlyList<ToolSpec> tools, IReadOnlyList<string> deny)
+    private IReadOnlyList<string> ListEgressWarnings(IReadOnlyList<ToolSpec> tools, IReadOnlyList<string> deny)
     {
         var needs = tools.Select(tool => tool.Name).Distinct(StringComparer.Ordinal)
             .Select(name => (name, catalog.TryGet(name, out var recipe) ? recipe.Allow : []));
@@ -194,7 +194,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     /// One line when allow has <see cref="Allowlist.AnyDomain"/>, naming the files; then one per domain a tool
     /// needs that deny covers, in part or whole, naming the narrower of the two and the tools.
     /// </returns>
-    internal static List<string> FormatEgressWarnings(
+    internal static IReadOnlyList<string> FormatEgressWarnings(
         UserConfiguration user,
         string userConfigPath,
         ProjectConfiguration projectConfig,
@@ -443,7 +443,10 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     /// <param name="protection">The git-protection mounts.</param>
     /// <param name="masks">What the session hides and replaces.</param>
     /// <returns><paramref name="protection"/>, then the mask mounts (<see cref="MaskFiles.Write"/>).</returns>
-    internal static List<Mount> WriteMasks(SessionDir session, IReadOnlyList<Mount> protection, MaskPlan masks) =>
+    internal static IReadOnlyList<Mount> WriteMasks(
+        SessionDir session,
+        IReadOnlyList<Mount> protection,
+        MaskPlan masks) =>
         [.. protection, .. MaskFiles.Write(session.MasksDir, masks)];
 
     /// <summary>Creates the docker compose run of the agent, with the secrets in its env.</summary>
@@ -643,7 +646,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     /// Writes the lines about what the proxy blocked and isn't in <paramref name="allowed"/>, if anything, with the
     /// hosts <paramref name="denied"/> covers apart (<see cref="Allowlist.FormatBlockedLines"/>).
     /// </summary>
-    private static void ReportBlocked(SessionDir session, HashSet<string> allowed, HashSet<string> denied)
+    private static void ReportBlocked(SessionDir session, IReadOnlySet<string> allowed, IReadOnlySet<string> denied)
     {
         if (!File.Exists(session.ProxyLog) && !File.Exists(session.PreviousProxyLog))
             return;

@@ -9,7 +9,7 @@ internal static class CappedList
     /// are.
     /// </summary>
     /// <returns>One line per item listed, without indent, then "… and N more" if any weren't.</returns>
-    public static List<string> FormatLines<T>(IReadOnlyCollection<T> items, int max, Func<T, string> format)
+    public static IReadOnlyList<string> FormatLines<T>(IReadOnlyCollection<T> items, int max, Func<T, string> format)
     {
         var lines = items.Take(max).Select(format).ToList();
         if (items.Count > max)

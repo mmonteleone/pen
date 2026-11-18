@@ -38,7 +38,7 @@ internal static class BlockedDomainQuery
     /// <summary>Finds the denied hosts across <paramref name="logs"/>.</summary>
     /// <returns>Each host once, newest last denial first.</returns>
     /// <remarks>Lines are in squid.conf's "pen" format, whose first field is the UTC time.</remarks>
-    internal static List<BlockedHost> FindBlockedAcross(IEnumerable<IEnumerable<string>> logs)
+    internal static IReadOnlyList<BlockedHost> FindBlockedAcross(IEnumerable<IEnumerable<string>> logs)
     {
         var last = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
         foreach (var line in logs.SelectMany(log => log))

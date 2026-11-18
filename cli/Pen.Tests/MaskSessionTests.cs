@@ -594,7 +594,7 @@ public class MaskSessionTests
 
     // ---- the warnings ----
 
-    private static List<string> Warnings(MaskPlan plan, bool docker, bool folds, List<string> probed,
+    private static IReadOnlyList<string> Warnings(MaskPlan plan, bool docker, bool folds, List<string> probed,
         bool isMacOS = false) =>
         MaskMessages.ListWarnings(plan, "/p/.pen", docker, isMacOS, dir =>
         {

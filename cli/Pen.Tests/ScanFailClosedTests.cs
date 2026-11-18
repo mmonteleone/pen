@@ -338,10 +338,10 @@ public class ScanFailClosedTests
 
     private static string Inc(params string[] paths) => string.Concat(paths.Select(p => $"[include]\n\tpath = {p}\n"));
 
-    private static List<Mount> Mounts(TempDir t, string repo) =>
+    private static IReadOnlyList<Mount> Mounts(TempDir t, string repo) =>
         Within10s(() => RepoGuard.EnsureMountTargetsAndPlan(repo, t.Path));
 
-    private static bool ReadOnly(List<Mount> mounts, string path) => mounts.Any(m => m.Path == path && m.ReadOnly);
+    private static bool ReadOnly(IReadOnlyList<Mount> mounts, string path) => mounts.Any(m => m.Path == path && m.ReadOnly);
 
     [Fact]
     public void ASelfIncludingConfigWorktreeDoesntHangStartOrTheChecks()

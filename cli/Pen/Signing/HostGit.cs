@@ -57,7 +57,7 @@ internal sealed class HostGit(string? dir, IReadOnlyList<string> config, IReadOn
     /// <returns>
     /// <c>-C</c> and the dir if there is one, then the overrides, the extra settings and the arguments.
     /// </returns>
-    public List<string> BuildArgs(IEnumerable<string> args)
+    public IReadOnlyList<string> BuildArgs(IEnumerable<string> args)
     {
         var all = new List<string>();
         if (_dir is not null)

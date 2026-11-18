@@ -40,7 +40,7 @@ internal static class Docker
     /// <returns>Their names.</returns>
     /// <exception cref="PenException">docker ps failed.</exception>
     /// <remarks>For the dind volume, any at all means an earlier session's dind outlived it.</remarks>
-    public static List<string> ListContainersUsing(string volume)
+    public static IReadOnlyList<string> ListContainersUsing(string volume)
     {
         var containers = Proc.Capture("docker",
             ["ps", "-a", "--filter", $"volume={volume}", "--format", "{{.Names}}"]);

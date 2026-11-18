@@ -303,7 +303,7 @@ internal static class RepoGuard
 
     /// <summary>Formats the first few of <paramref name="names"/> for a message, and how many more there are.</summary>
     /// <returns>One line per name listed, without indent, then "… and N more" if any weren't.</returns>
-    internal static List<string> FormatBadNames(string dir, IReadOnlyList<BadName> names) =>
+    internal static IReadOnlyList<string> FormatBadNames(string dir, IReadOnlyList<BadName> names) =>
         CappedList.FormatLines(names, MaxListed, n => PathChecks.FormatPath(dir, n.DisplayPath) + (n.EndsInNewline
             ? " (it ends in a newline, so no command can name it here: rename it by hand)" : ""));
 
@@ -398,6 +398,6 @@ internal static class RepoGuard
     /// <param name="dir">The project dir, checked by <see cref="CheckAtStart"/> first.</param>
     /// <param name="hostHome">The host user's home, for includes of ~/ paths.</param>
     /// <returns>The mounts, in order, one per path (see <see cref="MountPlanner.EnsureTargetsAndPlan"/>).</returns>
-    public static List<Mount> EnsureMountTargetsAndPlan(string dir, string hostHome) =>
+    public static IReadOnlyList<Mount> EnsureMountTargetsAndPlan(string dir, string hostHome) =>
         new MountPlanner(dir, hostHome).EnsureTargetsAndPlan();
 }

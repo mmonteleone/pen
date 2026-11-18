@@ -356,10 +356,10 @@ internal sealed class CommandTree
     /// <returns>Whether every value is a port.</returns>
     public static bool TryParsePorts(
         IEnumerable<string> values,
-        out List<int> ports,
+        out IReadOnlyList<int> ports,
         [NotNullWhen(false)] out string? error)
     {
-        ports = [];
+        var parsed = new List<int>();
         foreach (var value in values)
         {
             if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var port)
@@ -369,9 +369,10 @@ internal sealed class CommandTree
                 error = $"--port: \"{value}\" isn't a port number (1 to 65535)";
                 return false;
             }
-            if (!ports.Contains(port))
-                ports.Add(port);
+            if (!parsed.Contains(port))
+                parsed.Add(port);
         }
+        ports = parsed;
         error = null;
         return true;
     }
@@ -385,10 +386,10 @@ internal sealed class CommandTree
     public static bool TryParseTools(
         IEnumerable<string> values,
         RecipeCatalog catalog,
-        out List<ToolSpec> tools,
+        out IReadOnlyList<ToolSpec> tools,
         [NotNullWhen(false)] out string? error)
     {
-        tools = [];
+        var parsed = new List<ToolSpec>();
         foreach (var value in values)
         {
             if (!ToolSpec.TryParse(value, catalog, out var tool, out var invalid))
@@ -397,8 +398,9 @@ internal sealed class CommandTree
                 error = $"--tool: {invalid}";
                 return false;
             }
-            tools.Add(tool);
+            parsed.Add(tool);
         }
+        tools = parsed;
         error = null;
         return true;
     }
@@ -407,14 +409,14 @@ internal sealed class CommandTree
     {
         if (!TryParsePorts(result.Tokens.Select(token => token.Value), out var ports, out var error))
             result.AddError(error);
-        return ports;
+        return [.. ports];
     }
 
     private static List<ToolSpec> ParseTools(ArgumentResult result, RecipeCatalog catalog)
     {
         if (!TryParseTools(result.Tokens.Select(token => token.Value), catalog, out var tools, out var error))
             result.AddError(error);
-        return tools;
+        return [.. tools];
     }
 
     /// <summary>Parses the domain arguments of pen allow or pen deny (<paramref name="name"/>).</summary>

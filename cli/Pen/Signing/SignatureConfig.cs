@@ -15,7 +15,7 @@ internal static class SignatureConfig
     /// <c>/dev/null</c> stands in for a file that isn't set or that the agent could write: no signers are trusted
     /// and no keys are revoked.
     /// </remarks>
-    public static List<string> BuildForVerifying(HostGit git)
+    public static IReadOnlyList<string> BuildForVerifying(HostGit git)
     {
         var config = BuildPrograms(git, git.ReadGlobalValue("gpg.format") ?? "openpgp");
         config.AddRange(FormatSetting("gpg.ssh.allowedSignersFile",
@@ -33,7 +33,7 @@ internal static class SignatureConfig
     /// <returns>The settings as "-c key=value" pairs, already split.</returns>
     /// <exception cref="PenException">The format is ssh, but no key or key command is set globally.</exception>
     /// <remarks>They go on the command line so the repo can't substitute its own signing program.</remarks>
-    public static List<string> BuildForSigning(HostGit git)
+    public static IReadOnlyList<string> BuildForSigning(HostGit git)
     {
         var format = git.ReadGlobalValue("gpg.format") ?? "openpgp";
         var config = BuildPrograms(git, format);

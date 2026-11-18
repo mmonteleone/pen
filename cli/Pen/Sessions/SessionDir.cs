@@ -73,7 +73,7 @@ internal sealed class SessionDir(string projectKey, string path)
     /// The allowed domains, with <see cref="Allowlist.AnyDomain"/> in open egress, and the denied ones; a missing
     /// file adds none.
     /// </returns>
-    public (HashSet<string> Allow, HashSet<string> Deny) ReadEgress()
+    public (IReadOnlySet<string> Allow, IReadOnlySet<string> Deny) ReadEgress()
     {
         static IEnumerable<string> ReadList(string file) =>
             File.Exists(file) ? Allowlist.ParseList(File.ReadAllText(file)) : [];
@@ -212,7 +212,7 @@ internal sealed class SessionDir(string projectKey, string path)
 
     /// <summary>Reads the ports forwarded from the host.</summary>
     /// <returns>The ports; none for a session started by a Pen that didn't record them.</returns>
-    public List<int> ReadPorts()
+    public IReadOnlyList<int> ReadPorts()
     {
         if (!File.Exists(PortsFile))
             return [];

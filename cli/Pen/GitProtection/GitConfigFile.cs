@@ -53,20 +53,20 @@ internal static class GitConfigFile
     /// <summary>Parses the entries in <paramref name="text"/>.</summary>
     /// <returns>The entries, in file order.</returns>
     /// <exception cref="PenException">It isn't what git would read.</exception>
-    public static List<Entry> Parse(string text) => Parse(Encoding.UTF8.GetBytes(text), "git config");
+    public static IReadOnlyList<Entry> Parse(string text) => Parse(Encoding.UTF8.GetBytes(text), "git config");
 
     /// <summary>Parses the entries in a file's bytes, which <paramref name="source"/> names in the message.</summary>
     /// <returns>The entries, in file order.</returns>
     /// <exception cref="PenException">
     /// It isn't what git would read; the message names <paramref name="source"/>.
     /// </exception>
-    public static List<Entry> Parse(byte[] bytes, string source) =>
+    public static IReadOnlyList<Entry> Parse(byte[] bytes, string source) =>
         TryParse(bytes, source, out var entries, out var error) ? entries : throw new PenException(error);
 
     /// <summary>Parses the entries of the file at <paramref name="path"/>.</summary>
     /// <returns>The entries, in file order; none if the file is missing.</returns>
     /// <exception cref="PenException">The file can't be read or parsed.</exception>
-    public static List<Entry> ParseFile(string path) =>
+    public static IReadOnlyList<Entry> ParseFile(string path) =>
         TryParseFile(path, out var entries, out var error) ? entries : throw new PenException(error);
 
     /// <summary>
@@ -77,7 +77,7 @@ internal static class GitConfigFile
     /// <remarks>Only a read or parse failure is false; any other exception propagates on purpose.</remarks>
     public static bool TryParseFile(
         string path,
-        [NotNullWhen(true)] out List<Entry>? entries,
+        [NotNullWhen(true)] out IReadOnlyList<Entry>? entries,
         [NotNullWhen(false)] out string? error)
     {
         byte[]? bytes;
@@ -112,7 +112,7 @@ internal static class GitConfigFile
     private static bool TryParse(
         byte[] bytes,
         string source,
-        [NotNullWhen(true)] out List<Entry>? entries,
+        [NotNullWhen(true)] out IReadOnlyList<Entry>? entries,
         [NotNullWhen(false)] out string? error)
     {
         var reader = new Reader(bytes);

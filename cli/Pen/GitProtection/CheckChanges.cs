@@ -10,17 +10,31 @@ namespace Pen.GitProtection;
 /// </remarks>
 internal sealed class CheckChanges
 {
+    private readonly List<Quarantined> _moved = [];
+    private readonly List<RestoredFile> _restored = [];
+    private readonly List<ModeChange> _modeChanges = [];
+    private readonly List<string> _blocked = [];
+
     /// <summary>Gets what was renamed, or couldn't be renamed or restored, in order.</summary>
-    public List<Quarantined> Moved { get; } = [];
+    public IReadOnlyList<Quarantined> Moved => _moved;
 
     /// <summary>Gets the protected files that changed with nothing to set aside, in order.</summary>
-    public List<RestoredFile> Restored { get; } = [];
+    public IReadOnlyList<RestoredFile> Restored => _restored;
 
     /// <summary>Gets the directories made listable (or writable) and left so, in order.</summary>
-    public List<ModeChange> ModeChanges { get; } = [];
+    public IReadOnlyList<ModeChange> ModeChanges => _modeChanges;
 
     /// <summary>Gets the directories whose modes kept protected files from being put back, in order.</summary>
-    public List<string> Blocked { get; } = [];
+    public IReadOnlyList<string> Blocked => _blocked;
+
+    /// <summary>Records a rename, or a rename or restore that failed, in Moved.</summary>
+    public void Add(Quarantined moved) => _moved.Add(moved);
+
+    /// <summary>Records a protected file that changed with nothing to set aside in Restored.</summary>
+    public void Add(RestoredFile restored) => _restored.Add(restored);
+
+    /// <summary>Records a directory whose mode kept a protected file from being put back in Blocked.</summary>
+    public void AddBlocked(string directory) => _blocked.Add(directory);
 
     /// <summary>
     /// Makes a directory listable (and writable too, with <paramref name="write"/>) with
@@ -31,7 +45,7 @@ internal sealed class CheckChanges
     {
         if (!FileModes.TryMakeListable(path, write, out var change))
             return false;
-        ModeChanges.Add(change);
+        _modeChanges.Add(change);
         return true;
     }
 }

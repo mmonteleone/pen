@@ -63,7 +63,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
         }
         catch (Exception exception) when (ProtectedFiles.IsDamage(exception))
         {
-            _changes.Moved.Add(new Quarantined.Failed(_session.ProtectedManifest, "pen's list of protected files " +
+            _changes.Add(new Quarantined.Failed(_session.ProtectedManifest, "pen's list of protected files " +
                 "couldn't be read, so they weren't compared. COULD NOT RESTORE THEM: " +
                 "don't run git here until you've checked them"));
             return false;
@@ -93,7 +93,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
         }
         if (failure is not null)
         {
-            _changes.Moved.Add(new Quarantined.Failed(file.Path, "a protected file that may have changed. COULD NOT " +
+            _changes.Add(new Quarantined.Failed(file.Path, "a protected file that may have changed. COULD NOT " +
                 $"RESTORE IT ({failure}): don't run git here until you've dealt with it"));
         }
     }
@@ -143,7 +143,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
     {
         MakeParentWritable(file.Path);
         ProtectedFiles.WriteNew(file.Path, original, file.Mode);
-        _changes.Restored.Add(new(file.Path, "it was deleted during the session, and has been recreated"));
+        _changes.Add(new RestoredFile(file.Path, "it was deleted during the session, and has been recreated"));
     }
 
     /// <summary>
@@ -184,7 +184,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
         var quarantined = GitQuarantine.Move(file.Path, "it's no longer the regular file it was at the " +
             "start of the session (a symlink, a directory, or too big or unreadable " +
             "to compare), so it was moved aside and the original put back", breakLayout: false);
-        _changes.Moved.Add(quarantined);
+        _changes.Add(quarantined);
         if (quarantined is not Quarantined.Failed)
             ProtectedFiles.WriteNew(file.Path, original, file.Mode);
     }
@@ -197,13 +197,13 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
         try
         {
             ProtectedFiles.WriteNew(to, changed, ProtectedFiles.File600);
-            _changes.Moved.Add(new Quarantined.Moved(file.Path, to, "it changed during the session, so the original " +
+            _changes.Add(new Quarantined.Moved(file.Path, to, "it changed during the session, so the original " +
                 "was written back and the changed version kept here (git config on this machine during a session " +
                 "does this too)"));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            _changes.Moved.Add(new Quarantined.Failed(file.Path, "it changed during the session. The original was " +
+            _changes.Add(new Quarantined.Failed(file.Path, "it changed during the session. The original was " +
                 $"written back, but the changed version couldn't be kept ({Out.Describe(exception)})"));
         }
     }
@@ -219,7 +219,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
             return;
         _changes.TryMakeListableRecording(parent, write: true);
         if (!Native.CanWriteIn(parent))
-            _changes.Blocked.Add(parent);
+            _changes.AddBlocked(parent);
     }
 
     /// <summary>
@@ -246,7 +246,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
         {
             if (root is not null && directory != root && PathChecks.IsLink(directory))
             {
-                _changes.Moved.Add(GitQuarantine.Move(directory,
+                _changes.Add(GitQuarantine.Move(directory,
                     "a symlink in place of a directory holding the protected " +
                     $"file {Out.Field(file.Path)}: it points git at a file somewhere else", breakLayout: false));
                 return false;
@@ -258,7 +258,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
             }
             if (!Native.CanEnter(directory))
             {
-                _changes.Blocked.Add(FindTopmostShut(directory));
+                _changes.AddBlocked(FindTopmostShut(directory));
                 // Worded exactly as Out.Describe words a file operation the OS denies, as for one in the restore
                 // that throws.
                 failure = Out.DescribePermissionDenied(
@@ -304,7 +304,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
     private void RecordDirectoryGone(ProtectedFile file, string directory)
     {
         var what = PathChecks.ExistsOrIsLink(directory) ? "was replaced by a file" : "was removed";
-        _changes.Restored.Add(new(file.Path, $"not put back: {Out.Field(directory)} {what} during the session"));
+        _changes.Add(new RestoredFile(file.Path, $"not put back: {Out.Field(directory)} {what} during the session"));
     }
 
     /// <summary>Puts back the mode of a file whose contents didn't change.</summary>
@@ -315,7 +315,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
         if (handle is null)
             return "it can't be opened";
         File.SetUnixFileMode(handle, file.Mode);
-        _changes.Restored.Add(new(file.Path, "its mode was changed during the session to " +
+        _changes.Add(new RestoredFile(file.Path, "its mode was changed during the session to " +
             $"{FileModes.Octal(was)}, and is back to {FileModes.Octal(file.Mode)}"));
         return null;
     }

@@ -82,7 +82,7 @@ internal static class ModuleBaseline
     /// A session's records are deleted after its compose.yaml, which goes once its check has run, so one that's
     /// missing them and is no longer open has ended while this looked, and what its agent made has been dealt with.
     /// </remarks>
-    public static List<IReadOnlyList<string>> ReadOpenLists(
+    public static IReadOnlyList<IReadOnlyList<string>> ReadOpenLists(
         IReadOnlyList<SessionDir> open,
         string commonGitDir,
         string dir)
@@ -103,7 +103,9 @@ internal static class ModuleBaseline
 
     /// <summary>Keeps the repos in <paramref name="found"/> that every one of <paramref name="lists"/> has.</summary>
     /// <returns>Those repos, in the order found; compared ordinally.</returns>
-    public static List<string> Choose(IReadOnlyList<string> found, IReadOnlyList<IReadOnlyList<string>> lists) =>
+    public static IReadOnlyList<string> Choose(
+        IReadOnlyList<string> found,
+        IReadOnlyList<IReadOnlyList<string>> lists) =>
         [.. found.Where(repo => lists.All(list => list.Contains(repo, StringComparer.Ordinal)))];
 
     /// <summary>Reads the module repos <paramref name="session"/> listed at its start in this common git dir.</summary>

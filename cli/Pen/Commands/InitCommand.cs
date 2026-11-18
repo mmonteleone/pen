@@ -128,7 +128,7 @@ internal sealed class InitCommand(HostEnv host, Project project, RecipeCatalog c
     /// <summary>Formats the lines listing the tools and hide patterns turned on, with their sources.</summary>
     /// <returns>A tools line and a hide line, each left out when there's nothing; indented, with no prefix.</returns>
     /// <remarks>Every path and pattern comes from the repo, so each is shown through <see cref="Out.Field"/>.</remarks>
-    internal static List<string> FormatFound(ProjectDetection detection)
+    internal static IReadOnlyList<string> FormatFound(ProjectDetection detection)
     {
         var lines = new List<string>();
         if (detection.Tools.Count > 0)

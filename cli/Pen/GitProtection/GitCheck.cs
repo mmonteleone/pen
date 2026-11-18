@@ -356,7 +356,7 @@ internal sealed class GitCheck
             {
                 var isDir = repo.Kind == NestedKind.GitDir;
                 var moved = GitQuarantine.Move(repo.Path, describe(repo), breakLayout: isDir);
-                _changes.Moved.Add(moved);
+                _changes.Add(moved);
                 if (isDir && moved is Quarantined.Moved { To: var to })
                     movedAside.Add(to);
             }
@@ -390,7 +390,7 @@ internal sealed class GitCheck
         {
             attempt = GitQuarantine.RemoveLink(_dir, link, why);
         }
-        _changes.Moved.Add(attempt);
+        _changes.Add(attempt);
     }
 
     /// <summary>
@@ -566,13 +566,13 @@ internal sealed class GitCheck
         }
         if (attempt is Quarantined.Failed)
             return false;
-        _changes.Moved.Add(attempt);
+        _changes.Add(attempt);
         return true;
     }
 
     /// <summary>Renames <paramref name="path"/> aside and records it, or records that it couldn't.</summary>
     private void Quarantine(string path, string why, bool breakLayout) =>
-        _changes.Moved.Add(GitQuarantine.Move(path, why, breakLayout));
+        _changes.Add(GitQuarantine.Move(path, why, breakLayout));
 
     private bool TryMakeListable(string path) => _changes.TryMakeListableRecording(path, write: false);
 }

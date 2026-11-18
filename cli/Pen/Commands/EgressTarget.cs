@@ -72,7 +72,7 @@ internal abstract record EgressTarget
     /// For a project's .pen/, only those started in its dir; with --global, every project's.
     /// </returns>
     /// <remarks>.pen/ is per worktree: a session in another worktree of the repo reads its own.</remarks>
-    public List<SessionDir> FindRunningSessions(HostEnv host) =>
+    public IReadOnlyList<SessionDir> FindRunningSessions(HostEnv host) =>
         this is InProject { Project: var project }
             ? SessionRegistry.FindRunningIn(project.Key, host.GetRuntimeDir(project.Key), project.Dir)
             : SessionRegistry.FindRunningEverywhere(host);

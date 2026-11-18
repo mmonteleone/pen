@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using Pen.Configuration;
 using Pen.Masking;
 
 namespace Pen.Tests;
@@ -22,7 +23,7 @@ public class MaskPlannerTests
         PlanProtected(dir, commonGitDir, [], hide, replace);
 
     private static MaskPlan PlanProtected(string dir, string? commonGitDir, string[] protectedPaths, string[] hide, params (string Target, string Source)[] replace) =>
-        new MaskPlanner(dir, commonGitDir, protectedPaths, hide.Select(P).ToList(), replace.Select(r => new KeyValuePair<string, string>(r.Target, r.Source)).ToList()).Plan();
+        new MaskPlanner(dir, commonGitDir, protectedPaths, hide.Select(P).ToList(), replace.Select(r => new FileReplacement(r.Target, r.Source)).ToList()).Plan();
 
     private static MaskPlan Replace(string dir, string[] hide, params (string Target, string Source)[] replace) => Plan(dir, null, hide, replace);
 

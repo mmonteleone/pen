@@ -543,7 +543,7 @@ internal static class RepoScan
         /// <returns>
         /// The entries, or null if there's nothing to scan: the directory is gone, shut or noted unlistable.
         /// </returns>
-        private List<ListedEntry>? ListOrMakeListable(string dir)
+        private IReadOnlyList<ListedEntry>? ListOrMakeListable(string dir)
         {
             var entries = DirectoryListing.ReadOrNull(dir);
             if (entries is not null)
@@ -565,7 +565,7 @@ internal static class RepoScan
         /// The names of all its undecodable entries as listed, or null, noting the directory unlistable, if its raw
         /// names can't be read.
         /// </returns>
-        private HashSet<string>? FindUndecodable(string dir, List<ListedEntry> entries)
+        private HashSet<string>? FindUndecodable(string dir, IReadOnlyList<ListedEntry> entries)
         {
             HashSet<string> undecodable = [];
             if (!entries.Any(e => HasReplacement(e.Name)))
@@ -592,7 +592,7 @@ internal static class RepoScan
         /// <returns>
         /// Whether <paramref name="dir"/> itself has a git dir's layout (<see cref="IsGitDirLayout(string)"/>).
         /// </returns>
-        private bool ScanEntries(string dir, List<ListedEntry> entries, HashSet<string> undecodable)
+        private bool ScanEntries(string dir, IReadOnlyList<ListedEntry> entries, HashSet<string> undecodable)
         {
             var head = false;
             var objects = false;

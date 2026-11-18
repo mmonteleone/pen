@@ -36,7 +36,7 @@ internal static class Embedded
     }
 
     /// <summary>Lists the embedded names under a prefix such as "image/", sorted ordinally.</summary>
-    public static List<string> ListUnder(string prefix) =>
+    public static IReadOnlyList<string> ListUnder(string prefix) =>
         [.. ResourceAssembly.GetManifestResourceNames()
             .Where(n => n.StartsWith(prefix, StringComparison.Ordinal))
             .Order(StringComparer.Ordinal)];

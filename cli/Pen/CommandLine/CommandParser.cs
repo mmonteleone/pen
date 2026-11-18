@@ -76,7 +76,10 @@ internal static class CommandParser
     /// as an unknown option. Only the arguments before the command boundary are looked at: the rest are the
     /// command's.
     /// </remarks>
-    private static void ThrowIfInformationValueGiven(CommandTree tree, List<string> bounded, ParseResult result)
+    private static void ThrowIfInformationValueGiven(
+        CommandTree tree,
+        IReadOnlyList<string> bounded,
+        ParseResult result)
     {
         foreach (var arg in bounded.TakeWhile(arg => arg != "--"))
         {
@@ -103,7 +106,7 @@ internal static class CommandParser
     /// --, each argument is one token, or an option token and, when something follows the : or =, a value token:
     /// that's how arguments and tokens are matched up here, and anything else is Pen's bug.
     /// </remarks>
-    private static void ThrowIfAttachedValueInvalid(CommandTree tree, List<string> bounded, ParseResult result)
+    private static void ThrowIfAttachedValueInvalid(CommandTree tree, IReadOnlyList<string> bounded, ParseResult result)
     {
         var tokens = result.Tokens;
         var next = 0;

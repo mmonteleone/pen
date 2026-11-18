@@ -51,7 +51,7 @@ internal static partial class Allowlist
     /// ".github.com" covers "github.com" and "api.github.com"; Squid complains about overlapping dstdomain entries.
     /// <see cref="AnyDomain"/> covers every other entry.
     /// </remarks>
-    public static List<string> Merge(params IEnumerable<string>[] sources)
+    public static IReadOnlyList<string> Merge(params IEnumerable<string>[] sources)
     {
         var all = sources.SelectMany(source => source)
             .Select(domain => domain.Trim().ToLowerInvariant())
@@ -75,7 +75,7 @@ internal static partial class Allowlist
 
     /// <summary>Merges the sources as <see cref="Merge"/> does, leaving out <see cref="AnyDomain"/>.</summary>
     /// <returns>The domains the sources allow by name, which the proxy allows in open egress too.</returns>
-    public static List<string> MergeNamed(params IEnumerable<string>[] sources) =>
+    public static IReadOnlyList<string> MergeNamed(params IEnumerable<string>[] sources) =>
         Merge([.. sources.Select(source => source.Where(domain => domain.Trim() != AnyDomain))]);
 
     /// <summary>Lists the wildcards that match <paramref name="domain"/>, a domain or a wildcard.</summary>
@@ -97,7 +97,7 @@ internal static partial class Allowlist
     /// <summary>Merges the deny lists of the user's and the project's config.</summary>
     /// <returns>The merged list, lowercased, as <see cref="Merge"/> gives it.</returns>
     /// <remarks>The project's deny needs no approval: it can only take egress away.</remarks>
-    public static List<string> MergeDeny(UserConfiguration user, ProjectConfiguration project) =>
+    public static IReadOnlyList<string> MergeDeny(UserConfiguration user, ProjectConfiguration project) =>
         Merge(user.Deny, project.Deny);
 
     /// <summary>
@@ -108,14 +108,14 @@ internal static partial class Allowlist
         IsAllowed(list.ToHashSet(StringComparer.Ordinal), host);
 
     /// <inheritdoc cref="IsAllowed(IEnumerable{string}, string)"/>
-    public static bool IsAllowed(HashSet<string> list, string host) => IsCovered(list, host);
+    public static bool IsAllowed(IReadOnlySet<string> list, string host) => IsCovered(list, host);
 
     /// <summary>Tells whether <paramref name="host"/> is denied by a merged list (exact or under a wildcard).</summary>
     public static bool IsDenied(IEnumerable<string> list, string host) =>
         IsDenied(list.ToHashSet(StringComparer.Ordinal), host);
 
     /// <inheritdoc cref="IsDenied(IEnumerable{string}, string)"/>
-    public static bool IsDenied(HashSet<string> list, string host) => IsCovered(list, host);
+    public static bool IsDenied(IReadOnlySet<string> list, string host) => IsCovered(list, host);
 
     /// <summary>
     /// Tells how much of the allowed <paramref name="domain"/> the deny entry <paramref name="denied"/> takes.
@@ -134,7 +134,7 @@ internal static partial class Allowlist
     }
 
     /// <summary>Tells whether an entry in <paramref name="list"/> covers <paramref name="host"/>.</summary>
-    private static bool IsCovered(HashSet<string> list, string host) =>
+    private static bool IsCovered(IReadOnlySet<string> list, string host) =>
         list.Contains(host)
             || ListWildcardsOver(host).Any(list.Contains)
             || (list.Contains(AnyDomain) && !IsIpLiteral(host));
@@ -199,7 +199,7 @@ internal static partial class Allowlist
     /// <summary>Finds the hosts the proxy denied in <paramref name="logLines"/>.</summary>
     /// <returns>Each host once, in first-seen order.</returns>
     /// <remarks>The log is in squid.conf's "pen" format: time client TCP_DENIED/403 METHOD URL server.</remarks>
-    public static List<string> FindBlockedHosts(IEnumerable<string> logLines)
+    public static IReadOnlyList<string> FindBlockedHosts(IEnumerable<string> logLines)
     {
         var hosts = new List<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal); // the agent decides how many hosts there are
@@ -282,10 +282,10 @@ internal static partial class Allowlist
     /// opened); and the hosts not allowed, which alone get the pen allow line. Hosts allowed by name now are left
     /// out, as they are with no deny. None when nothing is left to report.
     /// </returns>
-    public static List<string> FormatBlockedLines(
+    public static IReadOnlyList<string> FormatBlockedLines(
         IReadOnlyList<string> hosts,
-        HashSet<string> allow,
-        HashSet<string> deny)
+        IReadOnlySet<string> allow,
+        IReadOnlySet<string> deny)
     {
         var open = allow.Contains(AnyDomain);
         if (deny.Count == 0 && !open)
@@ -344,7 +344,11 @@ internal static partial class Allowlist
     /// open egress, NotAllowed for the rest. Otherwise Unreachable for a raw IP, and in open egress for every name
     /// left, and NotAllowed for the rest, which alone pen allow would let through.
     /// </returns>
-    internal static BlockedAs ClassifyBlocked(string host, HashSet<string> named, bool open, HashSet<string> deny)
+    internal static BlockedAs ClassifyBlocked(
+        string host,
+        IReadOnlySet<string> named,
+        bool open,
+        IReadOnlySet<string> deny)
     {
         if (IsDenied(deny, host))
             return BlockedAs.Denied;

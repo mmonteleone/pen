@@ -89,7 +89,9 @@ internal sealed class AllowCommand(HostEnv host, StartDir startDir, RecipeCatalo
     /// <param name="domains">The domains just allowed.</param>
     /// <returns>One line per covered domain, naming the files whose deny covers it.</returns>
     /// <remarks><see cref="Allowlist.AnyDomain"/> is left out: deny is meant to narrow it.</remarks>
-    internal static List<string> FormatDenyWins(IReadOnlyList<ConfigDenyList> denies, IReadOnlyList<string> domains)
+    internal static IReadOnlyList<string> FormatDenyWins(
+        IReadOnlyList<ConfigDenyList> denies,
+        IReadOnlyList<string> domains)
     {
         var lines = new List<string>();
         foreach (var domain in domains.Where(domain => domain != Allowlist.AnyDomain))

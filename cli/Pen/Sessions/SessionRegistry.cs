@@ -10,7 +10,7 @@ internal static class SessionRegistry
     /// <returns>
     /// The sessions that are open (compose.yaml still there) with their session.lock held by a live Pen, by ID.
     /// </returns>
-    public static List<SessionDir> FindRunning(string projectKey, string runtimeDir)
+    public static IReadOnlyList<SessionDir> FindRunning(string projectKey, string runtimeDir)
     {
         var running = new List<SessionDir>();
         foreach (var session in FindOpen(projectKey, runtimeDir))
@@ -28,7 +28,7 @@ internal static class SessionRegistry
     /// One whose Pen died is open until the next run ends it, and its agent's container may still be running, so
     /// whatever has to allow for what other sessions' agents could write goes by this.
     /// </remarks>
-    public static List<SessionDir> FindOpen(string projectKey, string runtimeDir)
+    public static IReadOnlyList<SessionDir> FindOpen(string projectKey, string runtimeDir)
     {
         var open = new List<SessionDir>();
         var sessions = Path.Combine(runtimeDir, "sessions");
@@ -44,7 +44,7 @@ internal static class SessionRegistry
     }
 
     /// <summary>Finds every project's running sessions, for pen ps and pen allow --global.</summary>
-    public static List<SessionDir> FindRunningEverywhere(HostEnv host)
+    public static IReadOnlyList<SessionDir> FindRunningEverywhere(HostEnv host)
     {
         var all = new List<SessionDir>();
         if (!Directory.Exists(host.StateRoot))
@@ -58,7 +58,7 @@ internal static class SessionRegistry
     /// Finds the project's running sessions started in <paramref name="dir"/> (by their PROJECT_DIR).
     /// </summary>
     /// <returns>The sessions; for a linked worktree, only that worktree's.</returns>
-    public static List<SessionDir> FindRunningIn(string projectKey, string runtimeDir, string dir) =>
+    public static IReadOnlyList<SessionDir> FindRunningIn(string projectKey, string runtimeDir, string dir) =>
         [.. FindRunning(projectKey, runtimeDir)
             .Where(session => session.ReadEnv().TryGetValue("PROJECT_DIR", out var started) && started == dir)];
 
@@ -143,7 +143,7 @@ internal static class SessionRegistry
     }
 
     /// <summary>Describes why <paramref name="what"/> is refused while <paramref name="running"/> run.</summary>
-    private static string DescribeRefusal(string what, List<SessionDir> running, string where) =>
+    private static string DescribeRefusal(string what, IReadOnlyList<SessionDir> running, string where) =>
         $"refusing to {what} while {(running.Count == 1 ? "a session is" : $"{running.Count} sessions are")} " +
             $"running in {where}:\n"
         + string.Join('\n', running.Select(session => "  " + session.Container))

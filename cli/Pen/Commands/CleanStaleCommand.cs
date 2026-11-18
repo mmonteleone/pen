@@ -98,7 +98,7 @@ internal sealed partial class CleanStaleCommand(HostEnv host, Answers answers)
     }
 
     /// <summary>Writes which tools images go, and what removing the keys deletes.</summary>
-    private static void WriteWhatGoes(List<Entry> removable, List<string> staleTools)
+    private static void WriteWhatGoes(List<Entry> removable, IReadOnlyList<string> staleTools)
     {
         if (staleTools.Count > 0)
             Out.WriteRaw($"to remove, tools images on an old base image:\n  {string.Join("\n  ", staleTools)}");
@@ -114,7 +114,7 @@ internal sealed partial class CleanStaleCommand(HostEnv host, Answers answers)
 
     /// <summary>Removes the keys, then the tools images.</summary>
     /// <returns>Whether all of them went; each failure is reported.</returns>
-    private bool RemoveAll(List<Entry> removable, List<string> staleTools)
+    private bool RemoveAll(List<Entry> removable, IReadOnlyList<string> staleTools)
     {
         var failed = 0;
         foreach (var entry in removable)
@@ -145,7 +145,7 @@ internal sealed partial class CleanStaleCommand(HostEnv host, Answers answers)
     /// named tools has a repository that starts the same way. With no current base to compare, or a label that
     /// can't be read, nothing is called old.
     /// </remarks>
-    internal static List<string> FindStaleToolsImages(
+    internal static IReadOnlyList<string> FindStaleToolsImages(
         IEnumerable<string> images,
         string? currentBase,
         Func<string, string?> readBaseId)
@@ -173,7 +173,7 @@ internal sealed partial class CleanStaleCommand(HostEnv host, Answers answers)
     /// <param name="volumes">The volumes docker lists.</param>
     /// <param name="images">The images docker lists, as repository:tag.</param>
     /// <returns>The keys, in order.</returns>
-    internal static List<Entry> Find(HostEnv host, IEnumerable<string> volumes, IEnumerable<string> images)
+    internal static IReadOnlyList<Entry> Find(HostEnv host, IEnumerable<string> volumes, IEnumerable<string> images)
     {
         var byKey = GroupVolumesByKey(volumes);
         if (Directory.Exists(host.StateRoot))
