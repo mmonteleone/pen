@@ -411,8 +411,8 @@ public class WorktreeTests
         using var t = new TempDir();
         var (repo, wt, _) = RepoWithWorktree(t);
         Git.Run(repo, "remote", "add", "origin", "git@github.com:acme/widgets.git");
-        Assert.Equal("acme", GitHub.FindProjectOwner(Project.Resolve(wt, t.Host()), Config.Empty));
-        Assert.Null(GitHub.FindProjectOwner(Project.Resolve(t.Sub("plain"), t.Host()), Config.Empty));
+        Assert.Equal("acme", GitHub.FindProjectOwner(Project.Resolve(wt, t.Host()), ProjectConfiguration.Empty));
+        Assert.Null(GitHub.FindProjectOwner(Project.Resolve(t.Sub("plain"), t.Host()), ProjectConfiguration.Empty));
     }
 
     [Fact]

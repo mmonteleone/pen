@@ -15,20 +15,20 @@ internal static class ConfigLoader
     /// <param name="displayDir">How messages name the directory (e.g. "~/.config/pen").</param>
     /// <param name="catalog">The recipes the file's tools come from.</param>
     /// <returns>The settings, or empty ones if there's no config.toml.</returns>
-    public static Config LoadUser(string dir, string displayDir, RecipeCatalog catalog) =>
+    public static UserConfiguration LoadUser(string dir, string displayDir, RecipeCatalog catalog) =>
         ReadConfigText(dir, displayDir, out var display) is { } text
             ? ConfigParser.ParseUser(text, display, catalog)
-            : new Config();
+            : UserConfiguration.Empty;
 
     /// <summary>Loads the project config.toml in <paramref name="dir"/>, a project's .pen/.</summary>
     /// <param name="dir">The config directory.</param>
     /// <param name="displayDir">How messages name the directory (e.g. ".pen").</param>
     /// <param name="catalog">The recipes the file's tools come from.</param>
     /// <returns>The settings, or empty ones if there's no config.toml.</returns>
-    public static Config LoadProject(string dir, string displayDir, RecipeCatalog catalog) =>
+    public static ProjectConfiguration LoadProject(string dir, string displayDir, RecipeCatalog catalog) =>
         ReadConfigText(dir, displayDir, out var display) is { } text
             ? ConfigParser.ParseProject(text, display, catalog)
-            : new Config();
+            : ProjectConfiguration.Empty;
 
     /// <summary>Refuses a legacy config in <paramref name="dir"/>, then reads its config.toml's text.</summary>
     /// <param name="dir">The config directory.</param>

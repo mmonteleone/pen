@@ -96,7 +96,7 @@ public class TrustTests
         // Named, a domain can reach private addresses, which "*" can't: it needs its own approval.
         Assert.Equal(["internal.example"], f.Requested("allow = [\"*\", \"internal.example\"]\n").Domains);
         var both = ConfigParser.ParseProject("allow = [\"*\", \"internal.example\"]\n", "p", RecipeCatalog.Embedded);
-        Assert.Equal(["*"], TrustGate.SelectAllowedDomains(Config.Empty, both, f.Store));
+        Assert.Equal(["*"], TrustGate.SelectAllowedDomains(UserConfiguration.Empty, both, f.Store));
     }
 
     [Fact]
@@ -496,7 +496,7 @@ public class TrustTests
         f.Store.ApproveDomains(["a.example", ".wild.example"]);
         var project = ConfigParser.ParseProject("allow = [\"a.example\", \"b.example\", \"x.wild.example\"]\n", "p", RecipeCatalog.Embedded);
         Assert.Equal(["a.example", "x.wild.example"],
-            TrustGate.SelectAllowedDomains(Config.Empty, project, f.Store));
+            TrustGate.SelectAllowedDomains(UserConfiguration.Empty, project, f.Store));
     }
 
     [Fact]
@@ -591,12 +591,12 @@ public class TrustTests
         using var f = new Fixture();
         var toml = ConfigParser.ParseProject("allow = [" + string.Join(',', ManyDomains(30_000).Select(d => $"\"{d}\"")) + "]\n", "p", RecipeCatalog.Embedded);
         var watch = System.Diagnostics.Stopwatch.StartNew();
-        var request = new TrustGate(new ProjectContext(f.Host, f.Project, Config.Empty, toml), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System).FindUnapproved(f.Store, []);
+        var request = new TrustGate(new ProjectContext(f.Host, f.Project, UserConfiguration.Empty, toml), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System).FindUnapproved(f.Store, []);
         Assert.Equal(30_000, request.Domains.Count);
         f.Store.Approve(request);
         var store = f.Store;
-        Assert.True(new TrustGate(new ProjectContext(f.Host, f.Project, Config.Empty, toml), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System).FindUnapproved(store, []).IsEmpty);
-        Assert.Equal(30_000, TrustGate.SelectAllowedDomains(Config.Empty, toml, store).Count);
+        Assert.True(new TrustGate(new ProjectContext(f.Host, f.Project, UserConfiguration.Empty, toml), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System).FindUnapproved(store, []).IsEmpty);
+        Assert.Equal(30_000, TrustGate.SelectAllowedDomains(UserConfiguration.Empty, toml, store).Count);
         Assert.Equal(30_000 + 1, Allowlist.Merge(toml.Allow, [".wild.example"]).Count);
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(8), $"took {watch.Elapsed}");
     }
@@ -644,7 +644,7 @@ public class TrustTests
         Assert.True(f.Requested(toml, toml).IsEmpty);
         Assert.True(f.Requested("", toml).IsEmpty);
         var project = ConfigParser.ParseProject(toml, "p", RecipeCatalog.Embedded);
-        Assert.True(new TrustGate(new ProjectContext(f.Host, f.Project, Config.Empty, project), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System).FindUnapproved(f.Store, [Tool1]).IsEmpty);
+        Assert.True(new TrustGate(new ProjectContext(f.Host, f.Project, UserConfiguration.Empty, project), new Answers(TextReader.Null, IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System).FindUnapproved(f.Store, [Tool1]).IsEmpty);
 
         Assert.False(f.Store.CoversTool(Tool1));
         Assert.Equal(Tool1, Assert.Single(f.Requested(toml).Tools).Tool);
@@ -716,7 +716,7 @@ public class TrustTests
     });
 
     private TrustRequest RequestedWith(Fixture f, string projectToml, RecipeCatalog catalog) =>
-        new TrustGate(new ProjectContext(f.Host, f.Project, Config.Empty, ConfigParser.ParseProject(projectToml, "p", RecipeCatalog.Embedded)), new Answers(TextReader.Null, IsTerminal: false), catalog, TimeProvider.System).FindUnapproved(f.Store, []);
+        new TrustGate(new ProjectContext(f.Host, f.Project, UserConfiguration.Empty, ConfigParser.ParseProject(projectToml, "p", RecipeCatalog.Embedded)), new Answers(TextReader.Null, IsTerminal: false), catalog, TimeProvider.System).FindUnapproved(f.Store, []);
 
     private const string ToolToml = "tools = [\"pen-test:1\"]\n";
 

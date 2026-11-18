@@ -738,7 +738,7 @@ public class AllowCommandTests
         var stdout = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
-        try { new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, user, new Config())); }
+        try { new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, user, ProjectConfiguration.Empty)); }
         finally { Console.SetOut(stdout); }
         Assert.Equal(
             "blocked in this project's sessions, newest first:\n" +
@@ -765,7 +765,7 @@ public class AllowCommandTests
         var stdout = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
-        try { new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, user, new Config())); }
+        try { new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, user, ProjectConfiguration.Empty)); }
         finally { Console.SetOut(stdout); }
         var text = captured.ToString();
         Assert.Contains("pen allow example.com   (add --global for all projects)\n", text);
@@ -788,7 +788,7 @@ public class AllowCommandTests
         var stdout = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
-        try { new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, user, new Config())); }
+        try { new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, user, ProjectConfiguration.Empty)); }
         finally { Console.SetOut(stdout); }
         var lines = captured.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal("denied by config, blocked in this project's sessions, newest first:", lines[0]);

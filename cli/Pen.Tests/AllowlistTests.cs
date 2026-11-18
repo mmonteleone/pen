@@ -140,7 +140,7 @@ public class AllowlistTests
         var project = ConfigParser.ParseProject("deny = [\"a.evil.example\", \"Pastebin.com\", \"gist.github.com\"]",
             ".pen/config.toml", RecipeCatalog.Embedded);
         Assert.Equal(["gist.github.com", ".evil.example", "pastebin.com"], Allowlist.MergeDeny(user, project));
-        Assert.Empty(Allowlist.MergeDeny(Config.Empty, Config.Empty));
+        Assert.Empty(Allowlist.MergeDeny(UserConfiguration.Empty, ProjectConfiguration.Empty));
     }
 
     [Theory]

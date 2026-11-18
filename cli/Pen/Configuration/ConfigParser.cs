@@ -22,21 +22,28 @@ internal static class ConfigParser
     /// <param name="text">The TOML text.</param>
     /// <param name="displayPath">Names the file in errors.</param>
     /// <param name="catalog">The recipes the file's tools come from.</param>
-    public static Config ParseUser(string text, string displayPath, RecipeCatalog catalog) =>
-        Parse(text, displayPath, ConfigKind.User, catalog);
+    public static UserConfiguration ParseUser(string text, string displayPath, RecipeCatalog catalog)
+    {
+        var settings = Parse(text, displayPath, ConfigKind.User, catalog);
+        return new(settings.Allow, settings.Deny, settings.Tools, settings.Hide, settings.GitHubTokens, settings.Env);
+    }
 
     /// <summary>Parses the text of a project's .pen/config.toml.</summary>
     /// <param name="text">The TOML text.</param>
     /// <param name="displayPath">Names the file in errors.</param>
     /// <param name="catalog">The recipes the file's tools come from.</param>
-    public static Config ParseProject(string text, string displayPath, RecipeCatalog catalog) =>
-        Parse(text, displayPath, ConfigKind.Project, catalog);
+    public static ProjectConfiguration ParseProject(string text, string displayPath, RecipeCatalog catalog)
+    {
+        var settings = Parse(text, displayPath, ConfigKind.Project, catalog);
+        return new(settings.Allow, settings.Deny, settings.Tools, settings.Hide, settings.Replacements,
+            settings.GitHubOwner, settings.Docker, settings.Ports);
+    }
 
     /// <remarks>Keys are checked in file order, each fully before the next, so the first problem is reported.</remarks>
-    private static Config Parse(string text, string displayPath, ConfigKind kind, RecipeCatalog catalog)
+    private static Settings Parse(string text, string displayPath, ConfigKind kind, RecipeCatalog catalog)
     {
         var table = TomlReader.ParseToml(text, displayPath);
-        var config = new Config();
+        var config = new Settings();
         PenException Error(string message) => new($"{displayPath}: {Out.Field(message)}");
         foreach (var (key, value) in table)
         {
@@ -63,7 +70,7 @@ internal static class ConfigParser
     }
 
     /// <summary>Validates one top-level key's value and stores it.</summary>
-    private static void ReadKey(Config config, string key, object value, RecipeCatalog catalog,
+    private static void ReadKey(Settings config, string key, object value, RecipeCatalog catalog,
         Func<string, PenException> error)
     {
         switch (key)
@@ -130,7 +137,7 @@ internal static class ConfigParser
         }
     }
 
-    private static void ReadGitHubTokens(Config config, object value, Func<string, PenException> error)
+    private static void ReadGitHubTokens(Settings config, object value, Func<string, PenException> error)
     {
         foreach (var (owner, token) in TomlReader.RequireTable(value, "github", error))
         {
@@ -151,7 +158,7 @@ internal static class ConfigParser
     /// session's <c>docker compose run</c>, which names them with <c>-e NAME</c>, and never a line-based file such as
     /// session.env or a Dockerfile.
     /// </remarks>
-    private static void ReadEnv(Config config, object value, Func<string, PenException> error)
+    private static void ReadEnv(Settings config, object value, Func<string, PenException> error)
     {
         foreach (var (name, setting) in TomlReader.RequireTable(value, "env", error))
         {
@@ -163,7 +170,7 @@ internal static class ConfigParser
         }
     }
 
-    private static void ReadGitHubOwner(Config config, object value, Func<string, PenException> error)
+    private static void ReadGitHubOwner(Settings config, object value, Func<string, PenException> error)
     {
         var owner = TomlReader.RequireString(value, "github_owner", error);
         if (!TomlReader.OwnerRegex().IsMatch(owner))
@@ -171,7 +178,7 @@ internal static class ConfigParser
         config.GitHubOwner = owner;
     }
 
-    private static void ReadPorts(Config config, object value, Func<string, PenException> error)
+    private static void ReadPorts(Settings config, object value, Func<string, PenException> error)
     {
         if (value is not TomlArray ports)
             throw error("ports must be a list of port numbers, e.g. ports = [3000, 5173]");
@@ -188,7 +195,7 @@ internal static class ConfigParser
         }
     }
 
-    private static void ReadTools(Config config, object value, RecipeCatalog catalog,
+    private static void ReadTools(Settings config, object value, RecipeCatalog catalog,
         Func<string, PenException> error)
     {
         if (value is not TomlArray toolSpecs)
@@ -211,7 +218,7 @@ internal static class ConfigParser
         config.Tools = canonical;
     }
 
-    private static void ReadHide(Config config, object value, Func<string, PenException> error)
+    private static void ReadHide(Settings config, object value, Func<string, PenException> error)
     {
         if (value is not TomlArray patterns)
             throw error("hide must be a list of patterns, e.g. hide = [\".env\", \"secrets/\"]");
@@ -225,7 +232,7 @@ internal static class ConfigParser
         }
     }
 
-    private static void ReadReplace(Config config, object value, Func<string, PenException> error)
+    private static void ReadReplace(Settings config, object value, Func<string, PenException> error)
     {
         var targets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (target, item) in TomlReader.RequireTable(value, "replace", error))
@@ -246,7 +253,7 @@ internal static class ConfigParser
                     "are the same file where the filesystem ignores case");
             }
 
-            config.Replace.Add(new(target, source));
+            config.Replacements.Add(new(target, source));
         }
     }
 
@@ -288,5 +295,24 @@ internal static class ConfigParser
         if (item is string)
             return $"\"{item}\"";
         return item?.ToString() ?? "null";
+    }
+
+    /// <summary>The settings read so far from one file, which the entry points copy into its configuration.</summary>
+    /// <remarks>
+    /// One shape for both files: <see cref="ThrowIfMisplaced"/> refuses a key before it's read, so what belongs only in
+    /// the other file stays empty.
+    /// </remarks>
+    private sealed class Settings
+    {
+        public List<string> Allow { get; } = [];
+        public List<string> Deny { get; } = [];
+        public IReadOnlyList<ToolSpec> Tools { get; set; } = [];
+        public List<HidePattern> Hide { get; } = [];
+        public Dictionary<string, string> GitHubTokens { get; } = new(StringComparer.Ordinal);
+        public List<KeyValuePair<string, string>> Env { get; } = [];
+        public List<FileReplacement> Replacements { get; } = [];
+        public string? GitHubOwner { get; set; }
+        public bool? Docker { get; set; }
+        public List<int> Ports { get; } = [];
     }
 }

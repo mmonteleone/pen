@@ -833,7 +833,7 @@ public class SessionEndTests
         var sessions = Path.Combine(host.GetRuntimeDir(project.Key), "sessions");
         Directory.CreateDirectory(sessions);
         Directory.Move(session.Path, Path.Combine(sessions, "12345678"));
-        var run = new Session(new ProjectContext(host, project, Config.Empty, Config.Empty), new Answers(Console.In, Native.IsATty(0)), RecipeCatalog.Embedded, TimeProvider.System);
+        var run = new Session(new ProjectContext(host, project, UserConfiguration.Empty, ProjectConfiguration.Empty), new Answers(Console.In, Native.IsATty(0)), RecipeCatalog.Embedded, TimeProvider.System);
 
         var error = Assert.Throws<PenException>(() => run.Run(new(["true"])));
 

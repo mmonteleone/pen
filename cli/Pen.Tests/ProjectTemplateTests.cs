@@ -13,7 +13,7 @@ public class ProjectTemplateTests
     private static readonly string[] ProjectKeys =
         ["tools", "allow", "deny", "hide", "replace", "ports", "docker", "github_owner"];
 
-    private static Config Parse(string text) => ConfigParser.ParseProject(text, Display, RecipeCatalog.Embedded);
+    private static ProjectConfiguration Parse(string text) => ConfigParser.ParseProject(text, Display, RecipeCatalog.Embedded);
 
     private static string[] ActiveLines(string text) =>
         text.Split('\n').Where(line => line.Trim().Length > 0 && !line.TrimStart().StartsWith('#')).ToArray();
@@ -62,7 +62,7 @@ public class ProjectTemplateTests
         Assert.Empty(config.Tools);
         Assert.Empty(config.Hide);
         Assert.Empty(config.Allow);
-        Assert.Empty(config.Replace);
+        Assert.Empty(config.Replacements);
     }
 
     [Fact]
@@ -85,7 +85,7 @@ public class ProjectTemplateTests
         Assert.NotEmpty(config.Allow);
         Assert.NotEmpty(config.Deny);
         Assert.NotEmpty(config.Hide);
-        Assert.Single(config.Replace);
+        Assert.Single(config.Replacements);
         Assert.NotEmpty(config.Ports);
         Assert.True(config.Docker);
         Assert.Equal("my-org", config.GitHubOwner);
@@ -94,7 +94,7 @@ public class ProjectTemplateTests
         var edit = ConfigEdit.AddToList(uncommented.Replace("allow = ", "# allow = "), Display, ConfigKind.Project,
             ConfigListKey.Allow, ["example.com"], RecipeCatalog.Embedded);
         Assert.Equal(["example.com"], Parse(edit.Text).Allow);
-        Assert.Single(Parse(edit.Text).Replace);
+        Assert.Single(Parse(edit.Text).Replacements);
     }
 
     [Fact]
@@ -125,7 +125,7 @@ public class ProjectTemplateTests
             config.Hide.Select(pattern => pattern.Text));
         Assert.Empty(config.Allow);
         Assert.Empty(config.Deny);
-        Assert.Empty(config.Replace);
+        Assert.Empty(config.Replacements);
         Assert.Empty(config.Ports);
         Assert.Null(config.Docker);
         Assert.Null(config.GitHubOwner);
@@ -173,8 +173,8 @@ public class ProjectTemplateTests
             "\"we\\\"ird #dir/.env\" = \"we\\\"ird #dir/.env.example\" }", hint);
         var config = Parse(text.Replace(hint, hint[2..]));
         Assert.Equal(
-            [KeyValuePair.Create(".env", ".env.example"), KeyValuePair.Create("we\"ird #dir/.env", "we\"ird #dir/.env.example")],
-            config.Replace);
+            [new FileReplacement(".env", ".env.example"), new FileReplacement("we\"ird #dir/.env", "we\"ird #dir/.env.example")],
+            config.Replacements);
     }
 
     [Fact]

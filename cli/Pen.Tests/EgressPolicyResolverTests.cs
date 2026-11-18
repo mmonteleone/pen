@@ -5,9 +5,9 @@ public class EgressPolicyResolverTests
 {
     private static readonly ToolSpec PenTest = new("pen-test", "1");
 
-    private static Config User(string toml) => ConfigParser.ParseUser(toml, "u", RecipeCatalog.Embedded);
+    private static UserConfiguration User(string toml) => ConfigParser.ParseUser(toml, "u", RecipeCatalog.Embedded);
 
-    private static Config ProjectConfig(string toml) => ConfigParser.ParseProject(toml, "p", RecipeCatalog.Embedded);
+    private static ProjectConfiguration ProjectConfig(string toml) => ConfigParser.ParseProject(toml, "p", RecipeCatalog.Embedded);
 
     [Fact]
     public void SessionStart_TakesTheToolsSelectedForTheSession_NotTheConfiguredOnes()

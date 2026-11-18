@@ -1,43 +1,49 @@
-using Pen.Masking;
 using Pen.Tools;
 
 namespace Pen.Configuration;
 
 /// <summary>
-/// The settings in one config.toml: ~/.config/pen/'s or a project's .pen/'s, which may be missing.
+/// A read-only view of the settings either config.toml may hold, for code that still takes the user's and the
+/// project's as one type.
 /// </summary>
 /// <remarks>
-/// <see cref="ConfigLoader"/> reads one from disk and <see cref="ConfigParser"/> fills it in. Keys are either
-/// user-only or project-only, except allow, deny, tools and hide, whose lists are appended (allow: defaults,
-/// user, project; deny: user, project; tools: user, project, --tool; hide: user, project).
+/// A <see cref="UserConfiguration"/> or <see cref="ProjectConfiguration"/> converts to it implicitly, sharing its
+/// read-only collections; what only the other file holds is empty or null. A view of a project's settings never
+/// has tokens.
 /// </remarks>
 internal sealed class Config
 {
-    /// <summary>[github] tokens, keyed by lowercased owner (user only).</summary>
-    public Dictionary<string, string> GitHubTokens { get; } = new(StringComparer.Ordinal);
-    /// <summary>[env] values for the agent service, in file order (user only).</summary>
-    public List<KeyValuePair<string, string>> Env { get; } = [];
-    /// <summary>Extra allowed domains, or "*" for any domain name, in lowercase (both).</summary>
-    public List<string> Allow { get; } = [];
-    /// <summary>Denied domains, normalized to lowercase (both). A deny beats every allow.</summary>
-    public List<string> Deny { get; } = [];
-    /// <summary>Which owner's token to use (project only).</summary>
-    public string? GitHubOwner { get; set; }
-    /// <summary>docker = true|false: Docker-in-Docker for every session (project only); null when unset.</summary>
-    public bool? Docker { get; set; }
-    /// <summary>
-    /// ports = [3000, …]: ports to forward from the host's 127.0.0.1, in file order without duplicates (project only).
-    /// </summary>
-    public List<int> Ports { get; } = [];
-    /// <summary>tools = ["name", "name:version", …], validated against the recipes and canonical (both).</summary>
-    public IReadOnlyList<ToolSpec> Tools { get; set; } = [];
-    /// <summary>hide = [patterns]: what the sandbox sees as empty, in file order (both).</summary>
-    public List<HidePattern> Hide { get; } = [];
-    /// <summary>
-    /// [replace] target = source: project-relative paths, in file order (project only). The sandbox sees a copy
-    /// of each source over its target.
-    /// </summary>
-    public List<KeyValuePair<string, string>> Replace { get; } = [];
+    private static readonly IReadOnlyDictionary<string, string> NoTokens =
+        new Dictionary<string, string>(StringComparer.Ordinal).AsReadOnly();
 
-    public static Config Empty { get; } = new();
+    private Config(
+        IReadOnlyList<string> allow,
+        IReadOnlyList<string> deny,
+        IReadOnlyList<ToolSpec> tools,
+        string? gitHubOwner,
+        IReadOnlyDictionary<string, string> gitHubTokens)
+    {
+        Allow = allow;
+        Deny = deny;
+        Tools = tools;
+        GitHubOwner = gitHubOwner;
+        GitHubTokens = gitHubTokens;
+    }
+
+    /// <summary>Gets the extra allowed domains, or "*" for any domain name, in lowercase.</summary>
+    public IReadOnlyList<string> Allow { get; }
+    /// <summary>Gets the denied domains, in lowercase.</summary>
+    public IReadOnlyList<string> Deny { get; }
+    /// <summary>Gets the tools, validated against the recipes and canonical.</summary>
+    public IReadOnlyList<ToolSpec> Tools { get; }
+    /// <summary>Gets the project's github_owner; null for the user's settings.</summary>
+    public string? GitHubOwner { get; }
+    /// <summary>Gets the user's [github] tokens, keyed by lowercased owner; none for a project's settings.</summary>
+    public IReadOnlyDictionary<string, string> GitHubTokens { get; }
+
+    public static implicit operator Config(UserConfiguration user) =>
+        new(user.Allow, user.Deny, user.Tools, gitHubOwner: null, user.GitHubTokens);
+
+    public static implicit operator Config(ProjectConfiguration project) =>
+        new(project.Allow, project.Deny, project.Tools, project.GitHubOwner, NoTokens);
 }

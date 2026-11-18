@@ -22,7 +22,7 @@ namespace Pen.Commands;
 /// </remarks>
 internal sealed class UpgradeCommand(
     HostEnv host,
-    Config user,
+    UserConfiguration user,
     StartDir startDir,
     RecipeCatalog catalog,
     TimeProvider clock)

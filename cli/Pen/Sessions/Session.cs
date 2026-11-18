@@ -146,7 +146,9 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         var mounts = RepoGuard.EnsureMountTargetsAndPlan(Project.Dir, context.Host.Home);
         // A hide or [replace] that can't be used stops the session here, before anything is made for it.
         var masks = new MaskPlanner(Project.Dir, Project.CommonGitDir, [.. mounts.Select(mount => mount.Path)],
-            [.. context.User.Hide, .. context.ProjectConfig.Hide], context.ProjectConfig.Replace).Plan();
+            [.. context.User.Hide, .. context.ProjectConfig.Hide],
+            [.. context.ProjectConfig.Replacements.Select(entry => KeyValuePair.Create(entry.Target, entry.Source))])
+            .Plan();
         // The mounts protect every module repo; the session-end check takes as the submodules' own only those
         // listed. The open sessions are found just before the module scan.
         var modules = Project.IsRepo

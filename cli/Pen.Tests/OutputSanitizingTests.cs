@@ -218,7 +218,7 @@ public class OutputSanitizingTests
         ProjectRuntime.EnsureRuntimeDir(host, project);
         var dir = t.Sub("home", ".local", "state", "pen", project.Key, "sessions", "12345678");
         File.WriteAllText(Path.Combine(dir, "proxy.log"), $"2026-01-01T00:00:00Z 1.1.1.1 TCP_DENIED/403 CONNECT evil{Esc}[2J.com:443 -\n");
-        var (_, stdout) = Capture(() => new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, new Config(), new Config())));
+        var (_, stdout) = Capture(() => new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, UserConfiguration.Empty, ProjectConfiguration.Empty)));
         Assert.False(stdout.Contains(Esc, StringComparison.Ordinal));
         Assert.Contains("evil\\x1b[2j.com", stdout); // HostOf lowercases
         Assert.DoesNotContain("pen allow evil", stdout);
@@ -236,7 +236,7 @@ public class OutputSanitizingTests
         var start = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         File.WriteAllLines(Path.Combine(dir, "proxy.log"), Enumerable.Range(0, 5000).Select(i =>
             $"{start.AddSeconds(i):yyyy-MM-ddTHH:mm:ssZ} 1.1.1.1 TCP_DENIED/403 CONNECT h{i}.example:443 -"));
-        var (_, stdout) = Capture(() => new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, new Config(), new Config())));
+        var (_, stdout) = Capture(() => new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, UserConfiguration.Empty, ProjectConfiguration.Empty)));
         var lines = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal(1 + Allowlist.MaxListed + 2, lines.Length);
         Assert.StartsWith("  h4999.example ", lines[1]);

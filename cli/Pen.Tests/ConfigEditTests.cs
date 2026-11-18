@@ -33,9 +33,14 @@ public class ConfigEditTests
         "c.txt" = "fixtures/d.txt"
         """;
 
-    /// <summary>For each of <see cref="Config"/>'s properties, files that differ from the base only in it.</summary>
+    /// <summary>
+    /// For each property of <see cref="UserConfiguration"/> and <see cref="ProjectConfiguration"/>, files of that kind
+    /// that differ from its base only in it.
+    /// </summary>
     private static readonly (string Property, ConfigKind Kind, string Text)[] Changes =
     [
+        ("Allow", ConfigKind.User, UserBase.Replace("allow = [\"a.io\"]", "allow = [\"b.io\"]")),
+        ("Deny", ConfigKind.User, UserBase.Replace("deny = [\"d.io\"]", "deny = [\"e.io\"]")),
         ("GitHubTokens", ConfigKind.User, UserBase.Replace("acme = \"t\"", "acme = \"u\"")),
         ("GitHubTokens", ConfigKind.User, UserBase.Replace("acme = \"t\"", "other = \"t\"")),
         ("Env", ConfigKind.User, UserBase.Replace("X = \"1\"", "X = \"9\"")),
@@ -46,10 +51,11 @@ public class ConfigEditTests
         ("Docker", ConfigKind.Project, ProjectBase.Replace("docker = true", "docker = false")),
         ("Ports", ConfigKind.Project, ProjectBase.Replace("ports = [3000]", "ports = [3001]")),
         ("Tools", ConfigKind.User, UserBase.Replace("tools = [\"go\"]", "tools = [\"rust\"]")),
+        ("Tools", ConfigKind.Project, ProjectBase.Replace("tools = [\"go\"]", "tools = [\"rust\"]")),
         ("Hide", ConfigKind.User, UserBase.Replace("\"secrets/\"]", "\"keys/\"]")),
         ("Hide", ConfigKind.Project, ProjectBase.Replace("[\".env\", \"secrets/\"]", "[\"secrets/\", \".env\"]")),
-        ("Replace", ConfigKind.Project, ProjectBase.Replace("\"fixtures/d.txt\"", "\"fixtures/e.txt\"")),
-        ("Replace", ConfigKind.Project, ProjectBase.Replace("\"c.txt\"", "\"e.txt\"")),
+        ("Replacements", ConfigKind.Project, ProjectBase.Replace("\"fixtures/d.txt\"", "\"fixtures/e.txt\"")),
+        ("Replacements", ConfigKind.Project, ProjectBase.Replace("\"c.txt\"", "\"e.txt\"")),
     ];
 
     // By index, since ConfigKind is internal and a public test method can't take one.
@@ -61,10 +67,17 @@ public class ConfigEditTests
         return data;
     }
 
-    private static Config Parse(ConfigKind kind, string text) =>
+    private static UserConfiguration ParseUser(string text) =>
+        ConfigParser.ParseUser(text, "x.toml", RecipeCatalog.Embedded);
+
+    private static ProjectConfiguration ParseProject(string text) =>
+        ConfigParser.ParseProject(text, "x.toml", RecipeCatalog.Embedded);
+
+    /// <summary>Parses both texts as <paramref name="kind"/> and compares them.</summary>
+    private static bool IsOnlyAdded(ConfigKind kind, string before, string after, ConfigListKey key, List<string> added) =>
         kind == ConfigKind.User
-            ? ConfigParser.ParseUser(text, "x.toml", RecipeCatalog.Embedded)
-            : ConfigParser.ParseProject(text, "x.toml", RecipeCatalog.Embedded);
+            ? ConfigEdit.IsOnlyAdded(ParseUser(before), ParseUser(after), key, added)
+            : ConfigEdit.IsOnlyAdded(ParseProject(before), ParseProject(after), key, added);
 
     private static string Base(ConfigKind kind) => kind == ConfigKind.User ? UserBase : ProjectBase;
 
@@ -74,7 +87,7 @@ public class ConfigEditTests
     public void TheSameSettingsParsedTwicePass(bool user)
     {
         var kind = user ? ConfigKind.User : ConfigKind.Project;
-        Assert.True(ConfigEdit.IsOnlyAdded(Parse(kind, Base(kind)), Parse(kind, Base(kind)), ConfigListKey.Allow, []));
+        Assert.True(IsOnlyAdded(kind, Base(kind), Base(kind), ConfigListKey.Allow, []));
     }
 
     [Theory]
@@ -83,32 +96,36 @@ public class ConfigEditTests
     {
         var (_, kind, changed) = Changes[index];
         Assert.NotEqual(Base(kind), changed);
-        var before = Parse(kind, Base(kind));
-        Assert.False(ConfigEdit.IsOnlyAdded(before, Parse(kind, changed), ConfigListKey.Allow, []), property);
-        Assert.False(ConfigEdit.IsOnlyAdded(before, Parse(kind, changed), ConfigListKey.Deny, []), property);
-    }
-
-    [Fact]
-    public void EveryConfigPropertyHasAChangeCase()
-    {
-        var properties = typeof(Config).GetProperties(BindingFlags.Public | BindingFlags.Instance).Select(p => p.Name);
-        Assert.Empty(properties.Except(Changes.Select(c => c.Property)));
+        Assert.False(IsOnlyAdded(kind, Base(kind), changed, ConfigListKey.Allow, []), property);
+        Assert.False(IsOnlyAdded(kind, Base(kind), changed, ConfigListKey.Deny, []), property);
     }
 
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void OnlyTheAddedDomainsAtTheEndOfTheirListPass(bool allow)
+    public void EveryConfigurationPropertyHasAChangeCase(bool user)
+    {
+        var (type, kind) = user ? (typeof(UserConfiguration), ConfigKind.User) : (typeof(ProjectConfiguration), ConfigKind.Project);
+        var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance).Select(p => p.Name);
+        Assert.Empty(properties.Except(Changes.Where(c => c.Kind == kind).Select(c => c.Property)));
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    public void OnlyTheAddedDomainsAtTheEndOfTheirListPass(bool allow, bool user)
     {
         var key = allow ? ConfigListKey.Allow : ConfigListKey.Deny;
-        var before = Parse(ConfigKind.Project, ProjectBase);
+        var kind = user ? ConfigKind.User : ConfigKind.Project;
         var (from, to) = key == ConfigListKey.Allow
             ? ("allow = [\"a.io\"]", "allow = [\"a.io\", \"n.io\"]")
             : ("deny = [\"d.io\"]", "deny = [\"d.io\", \"n.io\"]");
-        var after = Parse(ConfigKind.Project, ProjectBase.Replace(from, to));
-        Assert.True(ConfigEdit.IsOnlyAdded(before, after, key, ["n.io"]));
-        Assert.False(ConfigEdit.IsOnlyAdded(before, after, key, []));
+        var after = Base(kind).Replace(from, to);
+        Assert.True(IsOnlyAdded(kind, Base(kind), after, key, ["n.io"]));
+        Assert.False(IsOnlyAdded(kind, Base(kind), after, key, []));
         var other = key == ConfigListKey.Allow ? ConfigListKey.Deny : ConfigListKey.Allow;
-        Assert.False(ConfigEdit.IsOnlyAdded(before, after, other, ["n.io"]));
+        Assert.False(IsOnlyAdded(kind, Base(kind), after, other, ["n.io"]));
     }
 }

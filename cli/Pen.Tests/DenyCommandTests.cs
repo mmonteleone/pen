@@ -132,11 +132,11 @@ public class DenyCommandTests
               .github.com      ~/.config/pen/config.toml  takes github.com (default), api.github.com (default, agent), codeload.github.com (default), cli.github.com (default), docs.github.com (default)
               x.anthropic.com  ~/.config/pen/config.toml  takes part of .anthropic.com (agent)
 
-            """, DenyCommand.FormatListing(user, "~/.config/pen/config.toml", new Config(), Catalog));
+            """, DenyCommand.FormatListing(user, "~/.config/pen/config.toml", ProjectConfiguration.Empty, Catalog));
     }
 
     [Fact]
     public void ListingWithNothingDenied() =>
         Assert.Equal("nothing denied; pen deny <domain…> [--global] adds to deny\n",
-            DenyCommand.FormatListing(new Config(), "~/.config/pen/config.toml", new Config(), Catalog));
+            DenyCommand.FormatListing(UserConfiguration.Empty, "~/.config/pen/config.toml", ProjectConfiguration.Empty, Catalog));
 }

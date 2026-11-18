@@ -1,4 +1,5 @@
 using System.Text;
+using Pen.Masking;
 using Pen.Tools;
 using Tomlyn.Parsing;
 using Tomlyn.Syntax;
@@ -35,17 +36,46 @@ internal static class ConfigEdit
         IReadOnlyList<string> domains,
         RecipeCatalog catalog)
     {
-        var before = Parse(text, displayPath, kind, catalog);
+        if (kind == ConfigKind.User)
+        {
+            var user = ConfigParser.ParseUser(text, displayPath, catalog);
+            return AddMissing(text, displayPath, key, domains, SelectList(user.Allow, user.Deny, key),
+                (edited, added) => Reparse(edited, displayPath, catalog, ConfigParser.ParseUser) is { } after
+                    && IsOnlyAdded(user, after, key, added));
+        }
+
+        var project = ConfigParser.ParseProject(text, displayPath, catalog);
+        return AddMissing(text, displayPath, key, domains, SelectList(project.Allow, project.Deny, key),
+            (edited, added) => Reparse(edited, displayPath, catalog, ConfigParser.ParseProject) is { } after
+                && IsOnlyAdded(project, after, key, added));
+    }
+
+    /// <summary>
+    /// Adds the domains not already in <paramref name="existing"/>, the list's domains before the edit, to the text's
+    /// array.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="isOnlyAdded"/> tells whether the edited text parses to the old settings with only the domains
+    /// given added to the list.
+    /// </remarks>
+    private static ListEdit AddMissing(
+        string text,
+        string displayPath,
+        ConfigListKey key,
+        IReadOnlyList<string> domains,
+        IReadOnlyList<string> existing,
+        Func<string, List<string>, bool> isOnlyAdded)
+    {
         var added = domains.Select(domain => domain.ToLowerInvariant())
             .Distinct()
-            .Where(domain => !SelectList(before, key).Contains(domain))
+            .Where(domain => !existing.Contains(domain))
             .ToList();
         if (added.Count == 0)
             return new(text, added);
 
         var result = InsertDomains(text, displayPath, key, added);
         // Belt and braces: the edit must change nothing but that list.
-        if (!IsOnlyAdded(before, Reparse(result, displayPath, kind, catalog), key, added))
+        if (!isOnlyAdded(result, added))
         {
             throw new PenException($"{displayPath}: couldn't add to {Name(key)} " +
                 $"automatically; add {string.Join(", ", added.Select(Quote))} by hand");
@@ -54,9 +84,12 @@ internal static class ConfigEdit
         return new(result, added);
     }
 
-    /// <summary>Gets the list <paramref name="key"/> names in <paramref name="config"/>.</summary>
-    private static List<string> SelectList(Config config, ConfigListKey key) =>
-        key == ConfigListKey.Allow ? config.Allow : config.Deny;
+    /// <summary>Gets <paramref name="allow"/> or <paramref name="deny"/>, as <paramref name="key"/> says.</summary>
+    private static IReadOnlyList<string> SelectList(
+        IReadOnlyList<string> allow,
+        IReadOnlyList<string> deny,
+        ConfigListKey key) =>
+        key == ConfigListKey.Allow ? allow : deny;
 
     /// <summary>Gets the key <paramref name="key"/> is written as in config.toml.</summary>
     private static string Name(ConfigListKey key) => key == ConfigListKey.Allow ? "allow" : "deny";
@@ -87,45 +120,83 @@ internal static class ConfigEdit
     }
 
     /// <summary>Parses the edited text.</summary>
-    /// <returns>Its settings, or empty ones if it doesn't parse (which the comparison then rejects).</returns>
-    private static Config Reparse(string text, string displayPath, ConfigKind kind, RecipeCatalog catalog)
+    /// <returns>Its settings, or null if it doesn't parse (which the comparison then rejects).</returns>
+    private static T? Reparse<T>(
+        string text,
+        string displayPath,
+        RecipeCatalog catalog,
+        Func<string, string, RecipeCatalog, T> parse)
+        where T : class
     {
         try
         {
-            return Parse(text, displayPath, kind, catalog);
+            return parse(text, displayPath, catalog);
         }
         catch (PenException)
         {
-            return new();
+            return null;
         }
     }
-
-    private static Config Parse(string text, string displayPath, ConfigKind kind, RecipeCatalog catalog) =>
-        kind == ConfigKind.User
-            ? ConfigParser.ParseUser(text, displayPath, catalog)
-            : ConfigParser.ParseProject(text, displayPath, catalog);
 
     /// <summary>
     /// Tells whether <paramref name="after"/> is <paramref name="before"/> with only the domains added to
     /// <paramref name="key"/>'s list.
     /// </summary>
     /// <remarks>
-    /// Every property of <see cref="Config"/> is compared, by contents and in order (tools in canonical order, the
-    /// tokens by owner), so a new property has to be added here too.
+    /// Every property of <see cref="UserConfiguration"/> is compared, by contents and in order (tools in canonical
+    /// order, the tokens by owner), so a new property has to be added here too.
     /// </remarks>
-    internal static bool IsOnlyAdded(Config before, Config after, ConfigListKey key, List<string> added) =>
-        after.Allow.SequenceEqual(key == ConfigListKey.Allow ? before.Allow.Concat(added) : before.Allow)
-            && after.Deny.SequenceEqual(key == ConfigListKey.Deny ? before.Deny.Concat(added) : before.Deny)
+    internal static bool IsOnlyAdded(
+        UserConfiguration before,
+        UserConfiguration after,
+        ConfigListKey key,
+        IReadOnlyList<string> added) =>
+        IsOnlyAdded(before.Allow, after.Allow, ConfigListKey.Allow, key, added)
+            && IsOnlyAdded(before.Deny, after.Deny, ConfigListKey.Deny, key, added)
             && after.Tools.SequenceEqual(before.Tools)
-            && after.GitHubOwner == before.GitHubOwner
-            && after.Docker == before.Docker
-            && after.Ports.SequenceEqual(before.Ports)
+            && IsSameHide(before.Hide, after.Hide)
             && after.Env.SequenceEqual(before.Env)
             && after.GitHubTokens.Count == before.GitHubTokens.Count
             && before.GitHubTokens.All(token =>
-                after.GitHubTokens.TryGetValue(token.Key, out var value) && value == token.Value)
-            && after.Hide.Select(pattern => pattern.Text).SequenceEqual(before.Hide.Select(pattern => pattern.Text))
-            && after.Replace.SequenceEqual(before.Replace);
+                after.GitHubTokens.TryGetValue(token.Key, out var value) && value == token.Value);
+
+    /// <summary>
+    /// Tells whether <paramref name="after"/> is <paramref name="before"/> with only the domains added to
+    /// <paramref name="key"/>'s list.
+    /// </summary>
+    /// <remarks>
+    /// Every property of <see cref="ProjectConfiguration"/> is compared, by contents and in order (tools in
+    /// canonical order), so a new property has to be added here too.
+    /// </remarks>
+    internal static bool IsOnlyAdded(
+        ProjectConfiguration before,
+        ProjectConfiguration after,
+        ConfigListKey key,
+        IReadOnlyList<string> added) =>
+        IsOnlyAdded(before.Allow, after.Allow, ConfigListKey.Allow, key, added)
+            && IsOnlyAdded(before.Deny, after.Deny, ConfigListKey.Deny, key, added)
+            && after.Tools.SequenceEqual(before.Tools)
+            && IsSameHide(before.Hide, after.Hide)
+            && after.GitHubOwner == before.GitHubOwner
+            && after.Docker == before.Docker
+            && after.Ports.SequenceEqual(before.Ports)
+            && after.Replacements.SequenceEqual(before.Replacements);
+
+    /// <summary>
+    /// Tells whether the list <paramref name="list"/> names went from <paramref name="before"/> to
+    /// <paramref name="after"/> by adding <paramref name="added"/> when it's the one edited, or not at all.
+    /// </summary>
+    private static bool IsOnlyAdded(
+        IReadOnlyList<string> before,
+        IReadOnlyList<string> after,
+        ConfigListKey list,
+        ConfigListKey key,
+        IReadOnlyList<string> added) =>
+        after.SequenceEqual(list == key ? before.Concat(added) : before);
+
+    /// <summary>Compares hide patterns by their text, in order.</summary>
+    private static bool IsSameHide(IReadOnlyList<HidePattern> before, IReadOnlyList<HidePattern> after) =>
+        after.Select(pattern => pattern.Text).SequenceEqual(before.Select(pattern => pattern.Text));
 
     /// <summary>Gets a key-value's key, if it's a single (undotted) bare or quoted key.</summary>
     private static string? KeyName(KeyValueSyntax keyValue)

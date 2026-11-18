@@ -70,9 +70,9 @@ public class GitHubTests
     {
         using var t = new TempDir();
         var p = RepoWithOrigin(t, "https://github.com/acme/r");
-        Assert.Equal("acme", GitHub.FindProjectOwner(p, Config.Empty));
+        Assert.Equal("acme", GitHub.FindProjectOwner(p, ProjectConfiguration.Empty));
         Assert.Equal("fork", GitHub.FindProjectOwner(p, ConfigParser.ParseProject("github_owner = \"fork\"", "x", RecipeCatalog.Embedded)));
-        Assert.Null(GitHub.FindProjectOwner(RepoWithOrigin(new TempDir(), null), Config.Empty));
+        Assert.Null(GitHub.FindProjectOwner(RepoWithOrigin(new TempDir(), null), ProjectConfiguration.Empty));
     }
 
     [Fact]
@@ -82,7 +82,7 @@ public class GitHubTests
         var host = t.Host();
         var runtime = t.Sub("runtime");
         var marker = Path.Combine(runtime, "token-notice");
-        var none = Config.Empty;
+        var none = UserConfiguration.Empty;
         var with = ConfigParser.ParseUser("[github]\nACME = \"tok\"", "x", RecipeCatalog.Embedded);
 
         Assert.Null(GitHub.SelectToken("acme", none, runtime, host));

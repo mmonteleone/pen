@@ -4,8 +4,8 @@ public class ConfigTests
 {
     private const string UserFile = "~/.config/pen/config.toml";
     private const string ProjFile = ".pen/config.toml";
-    private static Config User(string text) => ConfigParser.ParseUser(text, UserFile, RecipeCatalog.Embedded);
-    private static Config Proj(string text) => ConfigParser.ParseProject(text, ProjFile, RecipeCatalog.Embedded);
+    private static UserConfiguration User(string text) => ConfigParser.ParseUser(text, UserFile, RecipeCatalog.Embedded);
+    private static ProjectConfiguration Proj(string text) => ConfigParser.ParseProject(text, ProjFile, RecipeCatalog.Embedded);
 
     private static string Error(Func<object> f) => Assert.Throws<PenException>(() => f()).Message;
 
@@ -211,19 +211,19 @@ public class ConfigTests
     [Fact]
     public void ReplaceIsAProjectTableOfPaths_InFileOrder()
     {
-        Assert.Empty(Proj("").Replace);
+        Assert.Empty(Proj("").Replacements);
         var replace = Proj("""
             [replace]
             ".env" = ".pen/agent.env"
             "apps/web/.env.local" = "fixtures/web.env"
             "README" = '.pen/readme'
-            """).Replace;
+            """).Replacements;
         Assert.Equal([
             new(".env", ".pen/agent.env"),
             new("apps/web/.env.local", "fixtures/web.env"),
             new("README", ".pen/readme"),
         ], replace);
-        Assert.Equal([new("a.env", "b")], Proj("replace = { \"a.env\" = \"b\" }").Replace);
+        Assert.Equal([new("a.env", "b")], Proj("replace = { \"a.env\" = \"b\" }").Replacements);
     }
 
     [Fact]
@@ -245,7 +245,7 @@ public class ConfigTests
     [Fact]
     public void AReplacePathOfAtMost1024CharactersIsAcceptedAndALongerOneRefused()
     {
-        Assert.Single(Proj($"[replace]\n\"{new string('a', 1024)}\" = \"{new string('b', 1024)}\"").Replace);
+        Assert.Single(Proj($"[replace]\n\"{new string('a', 1024)}\" = \"{new string('b', 1024)}\"").Replacements);
         var problem = "can't be longer than 1024 characters";
         Assert.Equal($"{ProjFile}: replace: target \"{new string('a', 1025)}\" {problem}",
             Error(() => Proj($"[replace]\n\"{new string('a', 1025)}\" = \"src\"")));
@@ -292,7 +292,7 @@ public class ConfigTests
     {
         Assert.Equal($"{ProjFile}: replace: target \"{path}\" can't be in .pen, Pen's own directory",
             Error(() => Proj($"[replace]\n\"{path}\" = \"src\"")));
-        Assert.Equal([new("t", path)], Proj($"[replace]\n\"t\" = \"{path}\"").Replace);
+        Assert.Equal([new("t", path)], Proj($"[replace]\n\"t\" = \"{path}\"").Replacements);
     }
 
     [Fact]
@@ -400,5 +400,51 @@ public class ConfigTests
         File.WriteAllText(Path.Combine(host.ConfigDir, "config"), "");
         UserConfigInitializer.EnsureExists(host, () => new GitIdentity("T", "t@example.invalid"));
         Assert.False(File.Exists(host.UserConfigPath));
+    }
+
+    [Fact]
+    public void ParsedSettingsCantBeChangedThroughTheirCollections()
+    {
+        var user = User("allow = [\"a.io\"]\n[github]\nacme = \"t\"\n[env]\nX = \"1\"\n");
+        Assert.Throws<NotSupportedException>(() => ((ICollection<string>)user.Allow).Add("b.io"));
+        Assert.Throws<NotSupportedException>(() => ((ICollection<KeyValuePair<string, string>>)user.Env).Clear());
+        Assert.Throws<NotSupportedException>(() => ((IDictionary<string, string>)user.GitHubTokens)["acme"] = "u");
+        var project = Proj("ports = [3000]\n[replace]\n\"a\" = \"b\"\n");
+        Assert.Throws<NotSupportedException>(() => ((ICollection<int>)project.Ports).Add(3001));
+        Assert.Throws<NotSupportedException>(() => ((ICollection<FileReplacement>)project.Replacements).Clear());
+        Assert.Equal(["a.io"], user.Allow);
+        Assert.Equal([3000], project.Ports);
+    }
+
+    [Fact]
+    public void ConfigurationsTakeTheirOwnCopies()
+    {
+        List<string> allow = ["a.io"];
+        Dictionary<string, string> tokens = new(StringComparer.Ordinal) { ["acme"] = "t" };
+        List<int> ports = [3000];
+        var user = new UserConfiguration(allow, [], [], [], tokens, []);
+        var project = new ProjectConfiguration(allow, [], [], [], [], null, null, ports);
+        allow.Add("b.io");
+        tokens["other"] = "u";
+        ports.Add(3001);
+        Assert.Equal(["a.io"], user.Allow);
+        Assert.Equal(["a.io"], project.Allow);
+        Assert.Equal(["acme"], user.GitHubTokens.Keys);
+        Assert.Equal([3000], project.Ports);
+    }
+
+    [Fact]
+    public void TokenOwnersStayOrdinal()
+    {
+        var user = new UserConfiguration([], [], [], [], new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["acme"] = "t" }, []);
+        Assert.True(user.GitHubTokens.ContainsKey("acme"));
+        Assert.False(user.GitHubTokens.ContainsKey("ACME"));
+    }
+
+    [Fact]
+    public void AUserConfigurationsTextShowsNoSecrets()
+    {
+        var user = User("[github]\nacme = \"github_pat_secret\"\n[env]\nX = \"env-secret\"\n");
+        Assert.DoesNotContain("secret", user.ToString(), StringComparison.Ordinal);
     }
 }
