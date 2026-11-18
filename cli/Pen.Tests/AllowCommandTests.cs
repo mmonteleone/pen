@@ -143,7 +143,7 @@ public class AllowCommandTests
             "2026-11-05T09:00:00Z 172.18.0.3 TCP_DENIED/403 GET http://plain.io/x -",
             "2026-11-05T09:30:00Z 172.18.0.3 TCP_DENIED_ABORTED/403 CONNECT example.com:443 -",
         ];
-        var hosts = AllowCommand.FindBlockedAcross([older, newer]).Select(b => b.Host).ToList();
+        var hosts = BlockedDomainQuery.FindBlockedAcross([older, newer]).Select(b => b.Host).ToList();
         Assert.Equal(["example.com", "plain.io", "old.io"], hosts);
     }
 
@@ -162,8 +162,8 @@ public class AllowCommandTests
         return s;
     }
 
-    private static AllowCommand.Egress Egress(string[] allow, string[] deny) =>
-        new(Allowlist.Merge(allow), Allowlist.MergeNamed(allow), Allowlist.Merge(deny));
+    private static EgressPolicy Egress(string[] allow, string[] deny) =>
+        new(Allowlist.Merge(allow), Allowlist.MergeNamed(allow), Allowlist.Merge(deny), []);
 
     [Fact]
     public void WriteAclFiles_WritesAllThreeInPlace()
@@ -394,7 +394,7 @@ public class AllowCommandTests
         try
         {
             var err = CapturingStderr(() =>
-                Assert.False(AllowCommand.ApplyToRunning(host, project, false, RecipeCatalog.Embedded, TimeProvider.System)));
+                Assert.False(AllowCommand.ApplyToRunning(host, new EgressTarget.InProject(project), RecipeCatalog.Embedded, TimeProvider.System)));
             foreach (var s in new[] { first, second })
             {
                 Assert.Contains($"couldn't apply it to the running session {s.ComposeProject}: docker not found: is it installed and on PATH?", err);
@@ -604,10 +604,10 @@ public class AllowCommandTests
     [Fact]
     public void DenyWins_NamesEachFileWhoseDenyCoversTheDomain_ButNotForTheStar()
     {
-        List<(string Where, List<string> Deny)> denies =
+        List<ConfigDenyList> denies =
         [
-            ("~/.config/pen/config.toml", ["pastebin.com", ".example.org"]),
-            (".pen/config.toml", ["pastebin.com"]),
+            new("~/.config/pen/config.toml", ["pastebin.com", ".example.org"]),
+            new(".pen/config.toml", ["pastebin.com"]),
         ];
         Assert.Equal(
             [
@@ -633,6 +633,55 @@ public class AllowCommandTests
     }
 
     [Fact]
+    public void AGlobalAllowFromAProject_RecordsItsRuntimeDir_WarnsOfItsDeny_AndApprovesNothing()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        var dir = t.Sub("repo");
+        var project = Project.Resolve(dir, host);
+        Directory.CreateDirectory(project.PenDir);
+        File.WriteAllText(project.ProjectConfigPath, "deny = [\"x.example\"]\n");
+        var err = CapturingStderr(() => Assert.Equal(0, new AllowCommand(host, new StartDir(dir), RecipeCatalog.Embedded, TimeProvider.System).Run(["x.example"], global: true)));
+        Assert.Equal($"pen: added to {host.Display(host.UserConfigPath)}: x.example\n" +
+            "pen: x.example is also denied by .pen/config.toml; deny wins\n", err);
+        Assert.Equal(project.RepoDir + "\n", File.ReadAllText(Path.Combine(host.GetRuntimeDir(project.Key), ProjectRuntime.ProjectDirFile)));
+        Assert.Equal(["x.example"], Config.Load(host.ConfigDir, "x", ConfigKind.User, RecipeCatalog.Embedded).Allow);
+        Assert.Equal("deny = [\"x.example\"]\n", File.ReadAllText(project.ProjectConfigPath));
+        Assert.False(TrustStore.For(host, project).CoversDomain("x.example"));
+    }
+
+    [Fact]
+    public void AGlobalAllowFromAProject_EndsThatProjectsDeadSessions()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        var dir = t.Sub("repo");
+        var project = Project.Resolve(dir, host);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
+        var s = new SessionDir(project.Key, Path.Combine(host.GetRuntimeDir(project.Key), "sessions", "12345678"));
+        Directory.CreateDirectory(s.Path);
+        File.WriteAllText(s.ComposeFile, "");
+        File.WriteAllText(s.EnvFile, $"PROJECT_DIR={project.Dir}\n");
+        using var fake = new FakeDocker(t, """case "$1" in rm|compose|ps) exit 0 ;; *) exit 99 ;; esac""" + "\n");
+        var err = CapturingStderr(() => Assert.Equal(0, new AllowCommand(host, new StartDir(dir), RecipeCatalog.Embedded, TimeProvider.System).Run(["x.example"], global: true)));
+        Assert.Contains("whose pen exited without ending it", err);
+        Assert.False(s.IsOpen());
+        Assert.False(File.Exists(s.ComposeFile));
+    }
+
+    [Fact]
+    public void AProjectAllowOutsideAProjectFails_WithoutEditingAnything()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        Assert.Throws<PenException>(() => new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).Run(["x.example"], global: false));
+        Assert.False(File.Exists(host.UserConfigPath));
+    }
+
+    [Fact]
     public void AProjectStarIsApprovedLikeAnyDomainPenAllowWrites()
     {
         using var t = new TempDir();
@@ -641,7 +690,7 @@ public class AllowCommandTests
         var project = Project.Resolve(t.Sub("repo"), host);
         ProjectRuntime.EnsureRuntimeDir(host, project);
         Assert.False(TrustStore.For(host, project).CoversDomain("*"));
-        var addition = AllowCommand.AddAllowed(host, project, global: false, ["*"], RecipeCatalog.Embedded);
+        var addition = AllowCommand.AddAllowed(host, new EgressTarget.InProject(project), ["*"], RecipeCatalog.Embedded);
         Assert.Equal(".pen/config.toml", addition.Where);
         Assert.Equal(["*"], addition.Added);
         Assert.Equal(["*"], Config.Load(project.PenDir, ".pen", ConfigKind.Project, RecipeCatalog.Embedded).Allow);
@@ -655,13 +704,13 @@ public class AllowCommandTests
         var dir = t.Sub("cwd");
         File.WriteAllText(Path.Combine(dir, "README.md"), "");
         Directory.CreateDirectory(Path.Combine(dir, "src.io"));
-        Assert.Null(AllowCommand.FormatGlobHint("allow", dir, ["example.com"], ".pen/config.toml"));
+        Assert.Null(EgressMessages.FormatGlobHint("allow", dir, ["example.com"], ".pen/config.toml"));
         Assert.Equal("readme.md names a file here: did your shell expand *? quote it: pen allow '*'; " +
             "it was added to .pen/config.toml: remove it there if it isn't a domain",
-            AllowCommand.FormatGlobHint("allow", dir, ["readme.md", "example.com"], ".pen/config.toml"));
+            EgressMessages.FormatGlobHint("allow", dir, ["readme.md", "example.com"], ".pen/config.toml"));
         Assert.Equal("readme.md src.io name files here: did your shell expand *? pen deny takes domains, not '*'; " +
             "they were added to ~/.config/pen/config.toml: remove them there if they aren't domains",
-            AllowCommand.FormatGlobHint("deny", dir, ["readme.md", "src.io"], "~/.config/pen/config.toml"));
-        Assert.Null(AllowCommand.FormatGlobHint("allow", Path.Combine(dir, "missing"), ["readme.md"], "x"));
+            EgressMessages.FormatGlobHint("deny", dir, ["readme.md", "src.io"], "~/.config/pen/config.toml"));
+        Assert.Null(EgressMessages.FormatGlobHint("allow", Path.Combine(dir, "missing"), ["readme.md"], "x"));
     }
 }

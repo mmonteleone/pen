@@ -68,7 +68,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         // signals held, so Ctrl-C can't end Pen between the probe's create and delete.
         RepoGuard.WarnIfCaseMayFold(Project, Out.WriteLine, PathChecks.MayFoldCase);
         HooksPath.WarnIfWritable(Project, context.Host, Out.WriteLine, context.Host.GetVariable);
-        foreach (var warning in ListEgressWarnings(prepared.Tools, prepared.Deny))
+        foreach (var warning in ListEgressWarnings(prepared.Tools, prepared.Egress.Deny))
             Out.WriteLine(warning);
         // The case probe goes in .pen, so it too waits for the signals to be held.
         if (MaskMessages.FormatSummary(prepared.Masks) is { } summary)
@@ -126,22 +126,8 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         /// <summary>Gets the GitHub token for the project's owner, if there's one.</summary>
         public required string? Token { get; init; }
 
-        /// <summary>Gets the domains the tools bring.</summary>
-        public required IReadOnlyList<string> ToolDomains { get; init; }
-
-        /// <summary>
-        /// Gets the merged allowlist: just <see cref="Proxy.Allowlist.AnyDomain"/> when a source has it.
-        /// </summary>
-        public required IReadOnlyList<string> Allowlist { get; init; }
-
-        /// <summary>
-        /// Gets the merged allowlist without <see cref="Proxy.Allowlist.AnyDomain"/>: the domains allowed by name,
-        /// which reach a private address even in open egress.
-        /// </summary>
-        public required IReadOnlyList<string> NamedAllowlist { get; init; }
-
-        /// <summary>Gets the merged deny list, which beats every allow.</summary>
-        public required IReadOnlyList<string> Deny { get; init; }
+        /// <summary>Gets what the session's proxy allows and denies, and the domains its tools bring.</summary>
+        public required EgressPolicy Egress { get; init; }
     }
 
     /// <summary>
@@ -173,12 +159,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         var rootless = Docker.IsRootless();
         var owner = GitHub.FindProjectOwner(Project, context.ProjectConfig);
         var token = GitHub.SelectToken(owner, context.User, RuntimeDir, context.Host);
-        var toolDomains = ToolSpec.ListDomains(tools, catalog);
-        // The same project domains pen allow applies live: what the gate let through, never on the user's "*" alone.
-        var projectAllow = TrustGate.SelectAllowedDomains(context.User, context.ProjectConfig, trust);
-        IEnumerable<string>[] allowSources = [Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")),
-            context.User.Allow, projectAllow, toolDomains];
-        var deny = Allowlist.MergeDeny(context.User, context.ProjectConfig);
+        var egress = EgressPolicyResolver.ForSessionStart(context, trust, tools, catalog);
         return new()
         {
             Tools = tools,
@@ -188,10 +169,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
             Image = image,
             Rootless = rootless,
             Token = token,
-            ToolDomains = toolDomains,
-            Allowlist = Allowlist.Merge(allowSources),
-            NamedAllowlist = Allowlist.MergeNamed(allowSources),
-            Deny = deny,
+            Egress = egress,
         };
     }
 
@@ -239,12 +217,13 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
             {
                 foreach (var entry in deny)
                 {
-                    string taken;
-                    if (Allowlist.IsDenied([entry], domain))
-                        taken = domain;
-                    else if (Allowlist.IsAllowed([domain], entry))
-                        taken = entry;
-                    else
+                    var taken = Allowlist.FindDenyCoverage(entry, domain) switch
+                    {
+                        DenyCoverage.All => domain,
+                        DenyCoverage.Part => entry,
+                        _ => null,
+                    };
+                    if (taken is null)
                         continue;
                     if (!covered.TryGetValue(taken, out var needers))
                     {
@@ -421,7 +400,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         if (request.Docker)
             File.WriteAllText(session.DockerMarker, "");
         session.WritePorts(forwarded);
-        session.WriteTools(prepared.Tools, prepared.ToolDomains);
+        session.WriteTools(prepared.Tools, prepared.Egress.ToolDomains);
         session.WriteCommand(request.Command);
         session.WriteStarted(clock.GetUtcNow().UtcDateTime);
     }
@@ -436,8 +415,8 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         IReadOnlyList<int> forwarded)
     {
         File.WriteAllText(session.GetPath("squid.conf"), Embedded.ReadText("proxy/squid.conf"));
-        var acls = Allowlist.RenderFiles(prepared.NamedAllowlist, prepared.Allowlist.Contains(Allowlist.AnyDomain),
-            prepared.Deny);
+        var acls = Allowlist.RenderFiles(prepared.Egress.NamedAllow,
+            prepared.Egress.Allow.Contains(Allowlist.AnyDomain), prepared.Egress.Deny);
         File.WriteAllText(session.AllowlistFile, acls.AllowlistText);
         File.WriteAllText(session.DenylistFile, acls.DenylistText);
         File.WriteAllText(session.OpenEgressFile, acls.OpenEgressText);

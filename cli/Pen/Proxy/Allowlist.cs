@@ -116,6 +116,22 @@ internal static partial class Allowlist
     /// <inheritdoc cref="IsDenied(IEnumerable{string}, string)"/>
     public static bool IsDenied(HashSet<string> list, string host) => IsCovered(list, host);
 
+    /// <summary>
+    /// Tells how much of the allowed <paramref name="domain"/> the deny entry <paramref name="denied"/> takes.
+    /// </summary>
+    /// <returns>
+    /// All when the entry covers the domain (the same, or a wildcard over it), Part when it's under the domain's
+    /// wildcard, otherwise None.
+    /// </returns>
+    public static DenyCoverage FindDenyCoverage(string denied, string domain)
+    {
+        if (IsDenied([denied], domain))
+            return DenyCoverage.All;
+        if (IsAllowed([domain], denied))
+            return DenyCoverage.Part;
+        return DenyCoverage.None;
+    }
+
     /// <summary>Tells whether an entry in <paramref name="list"/> covers <paramref name="host"/>.</summary>
     private static bool IsCovered(HashSet<string> list, string host) =>
         list.Contains(host)
@@ -370,6 +386,19 @@ internal enum BlockedAs
 
     /// <summary>Nothing allows it: pen allow would let it through.</summary>
     NotAllowed,
+}
+
+/// <summary>How much of an allowed domain a deny entry takes (<see cref="Allowlist.FindDenyCoverage"/>).</summary>
+internal enum DenyCoverage
+{
+    /// <summary>None of it.</summary>
+    None,
+
+    /// <summary>All of it: the entry is the domain, or a wildcard over it.</summary>
+    All,
+
+    /// <summary>Part of it: the entry is under the domain's wildcard.</summary>
+    Part,
 }
 
 /// <summary>The contents of the proxy's ACL files: allowlist.txt, denylist.txt and open-egress.txt.</summary>

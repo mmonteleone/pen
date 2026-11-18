@@ -1146,6 +1146,21 @@ public class TrustGateTests
     }
 
     [Fact]
+    public void ALiveUpdateTakesTheToolDomainsTheSessionRecorded_NotTheToolsConfiguredNow()
+    {
+        using var f = new Fixture(projectToml: "", dockerfile: "");
+        var (s, l) = RunningSession(f);
+        using var _ = l;
+        s.WriteTools([], ["recorded.example"]);
+        // pen-test brings example.org: named in the user's config after the session started, it's for later sessions.
+        File.WriteAllText(f.Host.UserConfigPath, "tools = [\"pen-test\"]\n");
+        Assert.True(AllowCommand.Apply(f.Host, s, RecipeCatalog.Embedded, TimeProvider.System));
+        var list = File.ReadAllText(s.GetPath("allowlist.txt")).Split('\n');
+        Assert.Contains("recorded.example", list);
+        Assert.DoesNotContain("example.org", list);
+    }
+
+    [Fact]
     public void ALiveUpdateAddsNoDomainsFromAToolPlantedInTheProject_EvenAnApprovedOne()
     {
         using var f = ToolsFixture();
@@ -1191,6 +1206,27 @@ public class TrustGateTests
         Assert.Contains("example.org", Listed());
         new TrustCommand(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded, TimeProvider.System).Run(yes: true, list: false);
         Assert.DoesNotContain("example.org", Listed());
+    }
+
+    [Fact]
+    public void AllowListingTakesTheToolsConfiguredNow_NotARunningSessionsRecordedToolDomains()
+    {
+        using var f = new Fixture(projectToml: "", dockerfile: "");
+        var (s, l) = RunningSession(f);
+        using var _ = l;
+        s.WriteTools([PenTest], ["example.org"]);
+        File.WriteAllText(s.ProxyLog, "2026-11-01T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT example.org:443 -\n");
+        string Listed(Config user)
+        {
+            var stdout = Console.Out;
+            var captured = new StringWriter();
+            Console.SetOut(captured);
+            try { new AllowCommand(f.Host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(f.Host, f.Project, user, f.ProjectConfig)); }
+            finally { Console.SetOut(stdout); }
+            return captured.ToString();
+        }
+        Assert.Contains("pen allow example.org", Listed(Config.Empty));
+        Assert.DoesNotContain("example.org", Listed(Config.Parse("tools = [\"pen-test\"]\n", "u", ConfigKind.User, RecipeCatalog.Embedded)));
     }
 
     // pen upgrade's tools

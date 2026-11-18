@@ -62,7 +62,7 @@ public class DenyCommandTests
         Directory.CreateDirectory(host.ConfigDir);
         var project = Project.Resolve(t.Sub("repo"), host);
         ProjectRuntime.EnsureRuntimeDir(host, project);
-        var addition = AllowCommand.AddToConfig(host, project, global: false, ConfigListKey.Deny, ["pastebin.com"], RecipeCatalog.Embedded);
+        var addition = DenyCommand.AddDenied(host, new EgressTarget.InProject(project), ["pastebin.com"], RecipeCatalog.Embedded);
         Assert.Equal(".pen/config.toml", addition.Where);
         Assert.Equal(["pastebin.com"], addition.Added);
         var text = File.ReadAllText(project.ProjectConfigPath);
@@ -85,6 +85,54 @@ public class DenyCommandTests
               .anthropic.com     .pen/config.toml           takes .anthropic.com (agent)
 
             """, DenyCommand.FormatListing(user, "~/.config/pen/config.toml", project, Catalog));
+    }
+
+    [Fact]
+    public void AProjectDenyAppliesToTheSessionsStartedHere_AndSaysSo()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        var dir = t.Sub("repo");
+        var project = Project.Resolve(dir, host);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
+        var s = new SessionDir(project.Key, t.Sub("home", ".local", "state", "pen", project.Key, "sessions", "12345678"));
+        File.WriteAllText(s.ComposeFile, "");
+        File.WriteAllText(s.EnvFile, $"PROJECT_DIR={project.Dir}\n");
+        File.WriteAllText(s.AllowlistFile, "");
+        File.WriteAllText(s.DenylistFile, "");
+        File.WriteAllText(s.OpenEgressFile, "");
+        using var sessionLock = FileLock.TryTake(s.LockFile, exclusive: true);
+        using var fake = new FakeDocker(t, FakeDocker.ServingAclFiles + "exit 0\n");
+
+        var err = CapturingStderr(() => Assert.Equal(0, new DenyCommand(host, new StartDir(dir), Catalog, TimeProvider.System).Run(["gist.github.com"], global: false)));
+        Assert.Equal("pen: added to .pen/config.toml: gist.github.com\npen: applied to 1 running session in this directory\n", err);
+        Assert.Equal("gist.github.com\n", File.ReadAllText(s.DenylistFile));
+        Assert.False(File.Exists(TrustStore.GetPath(host.GetRuntimeDir(project.Key), project.Dir)));
+    }
+
+    [Fact]
+    public void AGlobalDenyWorksOutsideAProject_AndAProjectOneDoesnt()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        Directory.CreateDirectory(host.ConfigDir);
+        Assert.Throws<PenException>(() => new DenyCommand(host, new StartDir(null), Catalog, TimeProvider.System).Run(["x.example"], global: false));
+        Assert.False(File.Exists(host.UserConfigPath));
+        var err = CapturingStderr(() => Assert.Equal(0, new DenyCommand(host, new StartDir(null), Catalog, TimeProvider.System).Run(["x.example"], global: true)));
+        Assert.Equal($"pen: added to {host.Display(host.UserConfigPath)}: x.example\n", err);
+    }
+
+    [Fact]
+    public void ListingSaysEveryDomainAnEntryTakes_InSourceOrder_EachSourceOnce()
+    {
+        var user = Config.Parse("deny = [\".github.com\", \"x.anthropic.com\", \".github.com\"]\n", "u", ConfigKind.User, RecipeCatalog.Embedded);
+        Assert.Equal("""
+            denied (deny wins over every allow):
+              .github.com      ~/.config/pen/config.toml  takes github.com (default), api.github.com (default, agent), codeload.github.com (default), cli.github.com (default), docs.github.com (default)
+              x.anthropic.com  ~/.config/pen/config.toml  takes part of .anthropic.com (agent)
+
+            """, DenyCommand.FormatListing(user, "~/.config/pen/config.toml", new Config(), Catalog));
     }
 
     [Fact]

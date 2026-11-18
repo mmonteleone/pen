@@ -27,12 +27,23 @@ internal sealed class DenyCommand(HostEnv host, StartDir startDir, RecipeCatalog
     /// <returns>0, or 1 when applying to a running session failed; a failure to add throws.</returns>
     public int Run(IReadOnlyList<string> domains, bool global)
     {
-        var project = AllowCommand.PrepareProject(host, startDir, global, clock);
-        var addition = AllowCommand.AddToConfig(host, project, global, ConfigListKey.Deny, domains, catalog);
-        AllowCommand.WriteAdded(addition, domains);
-        AllowCommand.WriteGlobHint("deny", startDir, addition);
-        return AllowCommand.ApplyToRunning(host, project, global, catalog, clock) ? 0 : 1;
+        var target = EgressTarget.Resolve(host, startDir, global);
+        target.PrepareCurrentProject(host, clock);
+        var addition = AddDenied(host, target, domains, catalog);
+        EgressMessages.WriteAdded(addition, domains);
+        EgressMessages.WriteGlobHint("deny", startDir, addition);
+        return AllowCommand.ApplyToRunning(host, target, catalog, clock) ? 0 : 1;
     }
+
+    /// <summary>Adds <paramref name="domains"/> to deny, as <see cref="EgressTarget.AddToConfig"/> does.</summary>
+    /// <returns>The file, as messages name it, and the domains that weren't in its deny yet.</returns>
+    /// <remarks>Nothing is approved: deny needs no approval.</remarks>
+    internal static ConfigAddition AddDenied(
+        HostEnv host,
+        EgressTarget target,
+        IReadOnlyList<string> domains,
+        RecipeCatalog catalog) =>
+        target.AddToConfig(host, ConfigListKey.Deny, domains, catalog);
 
     /// <summary>Runs pen deny without domains: lists what both config files deny.</summary>
     /// <param name="context">The project and both configs.</param>
@@ -99,12 +110,13 @@ internal sealed class DenyCommand(HostEnv host, StartDir startDir, RecipeCatalog
         {
             foreach (var domain in domains)
             {
-                string taken;
-                if (Allowlist.IsDenied([denied], domain))
-                    taken = domain;
-                else if (Allowlist.IsAllowed([domain], denied))
-                    taken = "part of " + domain;
-                else
+                var taken = Allowlist.FindDenyCoverage(denied, domain) switch
+                {
+                    DenyCoverage.All => domain,
+                    DenyCoverage.Part => "part of " + domain,
+                    _ => null,
+                };
+                if (taken is null)
                     continue;
                 if (!bringers.TryGetValue(taken, out var who))
                 {
