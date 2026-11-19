@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace Pen.Tests;
 
@@ -250,6 +251,37 @@ public class SessionEndTests
             using var free = FileLock.TryTake(path, exclusive: true);
             Assert.NotNull(free);
         }
+    }
+
+    /// <summary>
+    /// A SIGTERM during teardown doesn't end Pen: the signal handling spans the session's end. The fake compose down
+    /// sends Pen (this process) SIGTERM and waits until the test's own handler has seen it, so the signal is dispatched
+    /// while compose down runs; .NET hands every handler registered then the same signal, and since the test's handler
+    /// doesn't cancel it, only the session's can keep the process alive. Nothing is left pending once the run returns.
+    /// </summary>
+    [Fact]
+    public void ASigtermDuringTeardownDoesntEndPen()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        var repo = Git.Repo(t.Sub("repo"));
+        var project = Project.Resolve(repo, host);
+        var seen = Path.Combine(t.Path, "sigterm-seen");
+        using var observer = PosixSignalRegistration.Create(PosixSignal.SIGTERM, _ => File.WriteAllText(seen, ""));
+        using var docker = new FakeDocker(t, $$"""
+            case " $* " in *" down "*)
+              kill -TERM $PPID
+              i=0; while [ ! -e '{{seen}}' ] && [ $i -lt 200 ]; do sleep 0.05; i=$((i+1)); done ;;
+            esac
+            exit 0
+
+            """);
+        var run = new Session(new ProjectContext(host, project, UserConfiguration.Empty, ProjectConfiguration.Empty),
+            new Answers(new StringReader(""), IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System);
+
+        Assert.Equal(0, run.Run(new(["true"])));
+        Assert.True(File.Exists(seen), "the SIGTERM was never handled");
+        Assert.Contains(" down ", File.ReadAllText(Path.Combine(t.Path, "calls")), StringComparison.Ordinal);
     }
 
     /// <summary>
