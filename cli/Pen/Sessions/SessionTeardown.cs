@@ -48,32 +48,6 @@ internal static class SessionTeardown
         return check.Result;
     }
 
-    /// <summary>Deletes an ended session's files, except proxy.log and proxy.log.1.</summary>
-    internal static void DeleteSessionFiles(SessionDir session)
-    {
-        foreach (var entry in Directory.EnumerateFileSystemEntries(session.Path))
-        {
-            if (entry == session.ProxyLog || entry == session.PreviousProxyLog || entry == session.LockFile
-                || entry == session.ComposeFile || entry == session.RestoredManifest
-                || entry == session.StartedWithGit || entry == session.ModulesFile)
-            {
-                continue;
-            }
-
-            if (Directory.Exists(entry))
-                Directory.Delete(entry, recursive: true);
-            else
-                File.Delete(entry);
-        }
-        // compose.yaml marks the session open, so it goes last but for the lock and the records of what it vouched
-        // for and the module repos it listed: an open session always has those records.
-        File.Delete(session.ComposeFile);
-        File.Delete(session.RestoredManifest);
-        File.Delete(session.StartedWithGit);
-        File.Delete(session.ModulesFile);
-        File.Delete(session.LockFile);
-    }
-
     /// <summary>Removes the agent's container and, in a docker session, dind's.</summary>
     /// <remarks>
     /// Any failure throws once both were tried: the session is kept for a retry, and Git isn't checked.
@@ -146,7 +120,7 @@ internal static class SessionTeardown
         if (env.Count == 0)
         {
             if (!keepFiles)
-                DeleteSessionFiles(session);
+                SessionFiles.Delete(session);
             return;
         }
 
@@ -167,7 +141,7 @@ internal static class SessionTeardown
         }
         else if (!keepFiles)
         {
-            DeleteSessionFiles(session);
+            SessionFiles.Delete(session);
         }
     }
 

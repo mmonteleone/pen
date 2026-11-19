@@ -437,7 +437,7 @@ public class AllowCommandTests
         Assert.Equal((1, 1), CountProxyCalls(t));
         // Not one of the files whose presence says what the session is.
         Assert.True(s.IsOpen());
-        SessionTeardown.DeleteSessionFiles(s);
+        SessionFiles.Delete(s);
         Assert.False(File.Exists(s.AclLockFile));
     }
 

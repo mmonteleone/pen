@@ -48,7 +48,7 @@ internal static class MaskFiles
         // Created new: what's in it is only ever what's written here. Only another of the user's processes could have
         // put something there (the session dir is 700), and CreateDirectory wouldn't fail on it, so it's thrown as a
         // failed file operation, as a failed write below is: the session's start stops and its files are deleted
-        // (Session.WriteSessionDirOrDelete).
+        // (SessionFiles.WriteOrDelete).
         if (Directory.Exists(dir) || File.Exists(dir))
             throw new IOException($"{dir} already exists");
         Directory.CreateDirectory(dir, Mode700);

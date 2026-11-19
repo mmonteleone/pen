@@ -37,7 +37,7 @@ public class SessionEndTests
         File.Delete(session.GetPath(record));
         Directory.CreateDirectory(Path.Combine(session.GetPath(record), "keep"));
 
-        Assert.ThrowsAny<Exception>(() => SessionTeardown.DeleteSessionFiles(session));
+        Assert.ThrowsAny<Exception>(() => SessionFiles.Delete(session));
 
         Assert.False(session.IsOpen());
         Assert.True(Directory.Exists(session.GetPath(record)));
@@ -54,7 +54,7 @@ public class SessionEndTests
         File.WriteAllText(session.LockFile, "");
         File.WriteAllText(session.RestoredManifest, "{}");
 
-        SessionTeardown.DeleteSessionFiles(session);
+        SessionFiles.Delete(session);
 
         Assert.Equal([session.ProxyLog], Directory.EnumerateFileSystemEntries(session.Path));
     }

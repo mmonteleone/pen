@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Security.Cryptography;
 using Pen.Configuration;
 using Pen.GitProtection;
 using Pen.Images;
@@ -19,8 +18,6 @@ namespace Pen.Sessions;
 /// <param name="clock">The clock for the start time, waits and how long ended sessions' files are kept.</param>
 internal sealed class Session(ProjectContext context, Answers answers, RecipeCatalog catalog, TimeProvider clock)
 {
-    private const UnixFileMode Dir700 = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
-
     private Project Project => context.Project;
 
     private string RuntimeDir => context.Host.GetRuntimeDir(Project.Key);
@@ -79,10 +76,10 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         if (InitHint.TryClaim(Project.PenDir, RuntimeDir))
             Out.WriteLine(InitHint.Message);
 
-        var session = CreateSessionDir();
-        using var sessionLock = FileLock.TryTake(session.LockFile, exclusive: true)
-            ?? throw new InvalidOperationException("new session's lock is taken");
-        var env = WriteSessionDirOrDelete(session, () => WriteSessionDir(session, request, prepared, forwarded));
+        var files = new SessionFiles(context.Host, Project, clock);
+        var session = files.CreateDir();
+        using var sessionLock = SessionFiles.TakeLock(session);
+        var env = files.Write(session, request, prepared, forwarded);
         // An empty command is still recorded as such (pen ps shows "(shell)"); the sandbox runs a login shell
         // matching the host's (InteractiveShell.For).
         var command = request.Command.Count > 0
@@ -93,37 +90,6 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
 
         EndAndRemind(session);
         return exitCode;
-    }
-
-    /// <summary>What <see cref="Prepare"/> found and built for the session.</summary>
-    private sealed record Preparation
-    {
-        /// <summary>Gets the session's tools, merged and canonical.</summary>
-        public required IReadOnlyList<ToolSpec> Tools { get; init; }
-
-        /// <summary>Gets the git-protection mounts over the project mount.</summary>
-        public required IReadOnlyList<Mount> Mounts { get; init; }
-
-        /// <summary>Gets what the session hides and replaces, mounted after <see cref="Mounts"/>.</summary>
-        public required MaskPlan Masks { get; init; }
-
-        /// <summary>
-        /// Gets the submodule repos in the common git dir now, split by what the open sessions listed
-        /// (<see cref="ModuleBaseline"/>).
-        /// </summary>
-        public required ModuleChoice Modules { get; init; }
-
-        /// <summary>Gets the image the agent runs.</summary>
-        public required string Image { get; init; }
-
-        /// <summary>Gets whether Docker is rootless.</summary>
-        public required bool Rootless { get; init; }
-
-        /// <summary>Gets the GitHub token for the project's owner, if there's one.</summary>
-        public required string? Token { get; init; }
-
-        /// <summary>Gets what the session's proxy allows and denies, and the domains its tools bring.</summary>
-        public required EgressPolicy Egress { get; init; }
     }
 
     /// <summary>
@@ -299,151 +265,6 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
                 throw new PenException($"can't create volume {Project.Key}_{volume}: {result.StandardError.Trim()}");
         }
     }
-
-    /// <summary>Creates a new session's directory, with a random ID no other session has.</summary>
-    private SessionDir CreateSessionDir()
-    {
-        var sessions = Path.Combine(RuntimeDir, "sessions");
-        while (true)
-        {
-            var id = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(4));
-            var path = Path.Combine(sessions, id);
-            if (Directory.Exists(path))
-                continue;
-            Directory.CreateDirectory(path, Dir700);
-            return new SessionDir(Project.Key, path);
-        }
-    }
-
-    /// <summary>
-    /// Writes the session's files: the protected files' copies, the env, the records pen ps and the session-end
-    /// check read, and the stack's files, compose.yaml last.
-    /// </summary>
-    /// <returns>The env compose runs with.</returns>
-    private Dictionary<string, string> WriteSessionDir(
-        SessionDir session,
-        SessionRequest request,
-        Preparation prepared,
-        IReadOnlyList<int> forwarded)
-    {
-        // The protected files and the module list, by the open sessions found again and their lists read again: one
-        // that opened between Prepare's read and its scan could have made a repo the scan found.
-        ModuleBaseline.NarrowAndSave(new(
-            Session: session,
-            Mounts: prepared.Mounts,
-            Chosen: prepared.Modules,
-            Open: SessionRegistry.FindOpen(session.ProjectKey, RuntimeDir),
-            CommonGitDir: Project.CommonGitDir,
-            Dir: Project.Dir));
-        var env = BuildEnv(prepared);
-        File.WriteAllLines(session.EnvFile, env.Select(variable => $"{variable.Key}={variable.Value}"));
-        WriteRecords(session, request, prepared, forwarded);
-        WriteStackFiles(session, request.Docker, prepared, forwarded);
-        return env;
-    }
-
-    /// <summary>
-    /// Writes a new session's files with <paramref name="write"/>, deleting them if that fails: without compose.yaml
-    /// the session never opened and nothing ran in it.
-    /// </summary>
-    /// <param name="session">The new session, whose lock this holds.</param>
-    /// <param name="write">Writes the session's files, compose.yaml last.</param>
-    /// <returns>What <paramref name="write"/> returns.</returns>
-    internal static T WriteSessionDirOrDelete<T>(SessionDir session, Func<T> write)
-    {
-        try
-        {
-            return write();
-        }
-        catch
-        {
-            try
-            {
-                SessionTeardown.DeleteSessionFiles(session);
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                // Not open, so the next run here deletes what's left once it's old (SessionRecovery).
-            }
-            throw;
-        }
-    }
-
-    /// <summary>Builds the env compose runs with, which compose.yaml interpolates.</summary>
-    private Dictionary<string, string> BuildEnv(Preparation prepared)
-    {
-        var host = context.Host;
-        return new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["PROJECT_DIR"] = Project.Dir,
-            ["PEN_PROJECT"] = Project.Key,
-            ["PEN_UID"] = prepared.Rootless ? "0" : host.Uid.ToString(),
-            ["PEN_GID"] = prepared.Rootless ? "0" : host.Gid.ToString(),
-            ["NUGET_PACKAGES"] = host.NuGetPackages,
-            ["PEN_IMAGE"] = prepared.Image,
-            ["PEN_SEED"] = host.SeedDir,
-        };
-    }
-
-    /// <summary>
-    /// Writes the session's records for pen ps and the stack: the docker marker, and its ports, tools, command and
-    /// start time.
-    /// </summary>
-    private void WriteRecords(
-        SessionDir session,
-        SessionRequest request,
-        Preparation prepared,
-        IReadOnlyList<int> forwarded)
-    {
-        if (request.Docker)
-            File.WriteAllText(session.DockerMarker, "");
-        session.WritePorts(forwarded);
-        session.WriteTools(prepared.Tools, prepared.Egress.ToolDomains);
-        session.WriteCommand(request.Command);
-        session.WriteStarted(clock.GetUtcNow().UtcDateTime);
-    }
-
-    /// <summary>
-    /// Writes the stack's files: squid.conf, the ACL files, the mask files, the override, proxy.log and compose.yaml.
-    /// </summary>
-    private static void WriteStackFiles(
-        SessionDir session,
-        bool docker,
-        Preparation prepared,
-        IReadOnlyList<int> forwarded)
-    {
-        File.WriteAllText(session.GetPath("squid.conf"), Embedded.ReadText("proxy/squid.conf"));
-        var acls = Allowlist.RenderFiles(prepared.Egress.NamedAllow,
-            prepared.Egress.Allow.Contains(Allowlist.AnyDomain), prepared.Egress.Deny);
-        File.WriteAllText(session.AllowlistFile, acls.AllowlistText);
-        File.WriteAllText(session.DenylistFile, acls.DenylistText);
-        File.WriteAllText(session.OpenEgressFile, acls.OpenEgressText);
-        var dindContainer = docker ? session.DindContainer : null;
-        var ports = new PortForward(forwarded, session.PortsContainer, session.Container);
-        // The plan was made before the image was ensured, and Docker would create a mount point that's gone since.
-        prepared.Masks.ThrowIfChanged();
-        var mounts = WriteMasks(session, prepared.Mounts, prepared.Masks);
-        File.WriteAllText(session.OverrideFile,
-            SessionCompose.GenerateOverride(mounts, prepared.Rootless, dindContainer, ports));
-        File.WriteAllText(session.ProxyLog, "");
-        // Squid's own user writes the log on Linux; the session dir itself is 700.
-        File.SetUnixFileMode(session.ProxyLog, (UnixFileMode)0b110_110_110);
-        // compose.yaml goes last: its presence is what marks a session as open.
-        File.WriteAllText(session.ComposeFile, Embedded.ReadText("compose.yaml"));
-    }
-
-    /// <summary>
-    /// Writes the files mounted over what's hidden and replaced, and lists every mount over the project.
-    /// </summary>
-    /// <param name="session">The session, whose masks dir gets the files.</param>
-    /// <param name="protection">The git-protection mounts.</param>
-    /// <param name="masks">What the session hides and replaces.</param>
-    /// <returns><paramref name="protection"/>, then the mask mounts (<see cref="MaskFiles.Write"/>).</returns>
-    internal static IReadOnlyList<Mount> WriteMasks(
-        SessionDir session,
-        IReadOnlyList<Mount> protection,
-        MaskPlan masks) =>
-        [.. protection, .. MaskFiles.Write(session.MasksDir, masks)];
 
     /// <summary>Creates the docker compose run of the agent, with the secrets in its env.</summary>
     /// <param name="session">The session.</param>

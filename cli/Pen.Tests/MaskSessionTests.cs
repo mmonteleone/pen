@@ -43,7 +43,7 @@ public class MaskSessionTests
 
         Assert.Empty(MaskFiles.Write(session.MasksDir, MaskPlan.Empty));
         Assert.False(Directory.Exists(session.MasksDir));
-        Assert.Equal([new Mount("/p/.pen", true)], Session.WriteMasks(session, [new("/p/.pen", true)], MaskPlan.Empty));
+        Assert.Equal([new Mount("/p/.pen", true)], SessionFiles.WriteMasks(session, [new("/p/.pen", true)], MaskPlan.Empty));
         Assert.False(Directory.Exists(session.MasksDir));
     }
 
@@ -410,10 +410,10 @@ public class MaskSessionTests
         var session = NewSession(t);
         File.WriteAllText(session.LockFile, "");
 
-        var thrown = Assert.Throws<PenException>(() => Session.WriteSessionDirOrDelete<int>(session, () =>
+        var thrown = Assert.Throws<PenException>(() => SessionFiles.WriteOrDelete<int>(session, () =>
         {
             File.WriteAllText(session.EnvFile, "A=1");
-            Session.WriteMasks(session, [], Sample());
+            SessionFiles.WriteMasks(session, [], Sample());
             throw new PenException("not starting");
         }));
 
@@ -428,7 +428,7 @@ public class MaskSessionTests
         using var t = new TempDir();
         var session = NewSession(t);
 
-        var result = Session.WriteSessionDirOrDelete(session, () =>
+        var result = SessionFiles.WriteOrDelete(session, () =>
         {
             File.WriteAllText(session.ComposeFile, "stack");
             return 7;
@@ -447,7 +447,7 @@ public class MaskSessionTests
         var session = NewSession(t);
         Mount[] protection = [new("/p/.git", false), new("/p/.git/config", true, Verify: true), new("/p/.pen", true)];
 
-        var mounts = Session.WriteMasks(session, protection, Sample());
+        var mounts = SessionFiles.WriteMasks(session, protection, Sample());
 
         Assert.Equal(protection, mounts.Take(3));
         Assert.Equal(["/p/.env", "/p/apps/web/.env", "/p/secrets", "/p/config.env", "/p/run.sh"],
@@ -462,7 +462,7 @@ public class MaskSessionTests
     {
         using var t = new TempDir();
         var session = NewSession(t);
-        var mounts = Session.WriteMasks(session, [new("/p/.git", false), new("/p/.pen", true)], Sample());
+        var mounts = SessionFiles.WriteMasks(session, [new("/p/.git", false), new("/p/.pen", true)], Sample());
 
         var json = SessionCompose.GenerateOverride(mounts, readOnlyRoot: false,
             dindContainer: docker ? "x-dind" : null, ports: null);
@@ -495,7 +495,7 @@ public class MaskSessionTests
         File.WriteAllText(session.ComposeFile, "stack");
         File.WriteAllText(session.LockFile, "");
         File.WriteAllText(session.ProxyLog, "");
-        Session.WriteMasks(session, [], Sample());
+        SessionFiles.WriteMasks(session, [], Sample());
         return session;
     }
 
@@ -506,7 +506,7 @@ public class MaskSessionTests
         using var t = new TempDir();
         var session = OpenSessionWithMasks(t);
 
-        SessionTeardown.DeleteSessionFiles(session);
+        SessionFiles.Delete(session);
 
         Assert.Equal([session.ProxyLog], Directory.EnumerateFileSystemEntries(session.Path));
     }
