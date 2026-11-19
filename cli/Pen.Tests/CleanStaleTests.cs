@@ -261,6 +261,504 @@ public class CleanStaleTests
         Assert.True(CleanStaleCommand.Remove(host, e));
     }
 
+    /// <summary>
+    /// Opens a session in <paramref name="key"/>'s runtime dir as a Pen that died would leave it: its compose.yaml and
+    /// its protected copies' manifest there, its session.lock free.
+    /// </summary>
+    private static SessionDir OpenSession(HostEnv host, string key, string id)
+    {
+        var session = new SessionDir(key, Path.Combine(host.GetRuntimeDir(key), "sessions", id));
+        Directory.CreateDirectory(session.ProtectedDir);
+        File.WriteAllText(session.ProtectedManifest, "{}");
+        File.WriteAllText(session.ComposeFile, "");
+        return session;
+    }
+
+    /// <summary>Records a project, then deletes it, returning its dir and key.</summary>
+    private static (string Dir, string Key) RecordMissing(TempDir t, HostEnv host, string name)
+    {
+        var dir = Git.Repo(t.Sub(name));
+        var key = Record(host, dir);
+        Directory.Delete(dir, recursive: true);
+        return (dir, key);
+    }
+
+    private const string KeptHeading = "kept, sessions that haven't ended (their protected copies may be the only good ones of the\n"
+        + "project's git files):";
+
+    private static string CapturingStderr(Action action)
+    {
+        var stderr = Console.Error;
+        var captured = new StringWriter();
+        Console.SetError(captured);
+        try { action(); }
+        finally { Console.SetError(stderr); }
+        return captured.ToString();
+    }
+
+    /// <summary>A docker that lists <paramref name="volumes"/> and no images, and has no pen:latest.</summary>
+    private static string VolumesDocker(params string[] volumes) => $"""
+        case "$*" in
+          "volume ls"*) printf '%s\n' {string.Join(' ', volumes)} ;;
+          "image inspect"*) exit 1 ;;
+        esac
+        exit 0
+
+        """;
+
+    private static string[] Calls(TempDir t, string prefix)
+    {
+        var calls = Path.Combine(t.Path, "calls");
+        return File.Exists(calls) ? File.ReadAllLines(calls).Where(c => c.StartsWith(prefix, StringComparison.Ordinal)).ToArray() : [];
+    }
+
+    private const string MissingAdvice =
+        "\n    if you moved the project, move it back (or if it's on a volume that isn't mounted, mount it) and"
+        + "\n    run pen clean there, which ends its sessions and restores the files (answer n to keep its"
+        + "\n    sandbox); if it's really gone, remove the sessions' containers and files (copy what you"
+        + "\n    need from any protected copies first; this skips Pen's check of the project's .git) and"
+        + "\n    run pen clean --stale again, as one command:";
+
+    /// <summary>The advice's line that removes an abandoned session's containers, before its files go.</summary>
+    private static string StackLine(string key, string id) =>
+        $"\n    docker rm -f {key}-{id}-agent && docker compose -p {key}-{id} down -t 1 --remove-orphans &&";
+
+    [Fact]
+    public void AMissingKeyWithAnOpenSessionIsKept_AndListedWithItsProtectedCopies()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        var (dir, key) = RecordMissing(t, host, "gone");
+        var session = OpenSession(host, key, "s1");
+
+        var e = Only(CleanStaleCommand.Find(host, [$"{key}_home"], []), key);
+        Assert.Equal(CleanStaleCommand.Status.Missing, e.Status);
+        var open = Assert.Single(e.OpenSessions);
+        Assert.Equal(session.Path, open.Session.Path);
+        Assert.False(open.Running);
+        Assert.True(open.HasProtectedCopies);
+        Assert.False(e.Removable);
+
+        var text = CleanStaleCommand.Render(host, [e]);
+        Assert.Equal(
+            KeptHeading + $"\n  {dir}  ({key})"
+                + $"\n    ~/.local/state/pen/{key}/sessions/s1/protected (manifest.json lists them)"
+                + MissingAdvice
+                + StackLine(key, "s1")
+                + $"\n    rm -rf ~/.local/state/pen/{key}/sessions/s1 && pen clean --stale",
+            text);
+        Assert.DoesNotContain("to remove", text);
+    }
+
+    [Fact]
+    public void TheMissingAdviceSaysToMoveTheProjectBack()
+    {
+        // A plain mv leaves the recorded dir gone, so a moved project usually shows as missing.
+        using var t = new TempDir();
+        var host = t.Host();
+        var repo = Git.Repo(t.Sub("repo"));
+        var key = Record(host, repo);
+        Directory.Move(repo, Path.Combine(t.Path, "renamed"));
+        OpenSession(host, key, "s1");
+
+        var e = Only(CleanStaleCommand.Find(host, [], []), key);
+        Assert.Equal(CleanStaleCommand.Status.Missing, e.Status);
+        Assert.Contains("if you moved the project, move it back", CleanStaleCommand.Render(host, [e]));
+    }
+
+    [Fact]
+    public void ARunningSessionIsMarked_AndOnlyTheAbandonedOnesAreOfferedForRemoval()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        var (dir, key) = RecordMissing(t, host, "gone");
+        var running = OpenSession(host, key, "s1");
+        OpenSession(host, key, "s2");
+        using var held = FileLock.TryTake(running.LockFile, exclusive: true);
+        Assert.NotNull(held);
+
+        var e = Only(CleanStaleCommand.Find(host, [], []), key);
+        Assert.Equal([true, false], e.OpenSessions.Select(open => open.Running));
+        Assert.Equal(
+            KeptHeading + $"\n  {dir}  ({key})"
+                + $"\n    {key}-s1-agent is still running: exit it first"
+                + $"\n    ~/.local/state/pen/{key}/sessions/s2/protected (manifest.json lists them)"
+                + MissingAdvice
+                + StackLine(key, "s2")
+                + $"\n    rm -rf ~/.local/state/pen/{key}/sessions/s2 && pen clean --stale",
+            CleanStaleCommand.Render(host, [e]));
+    }
+
+    [Fact]
+    public void AKeyWhoseSessionsAllRunGetsNoRemovalAdvice()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        var (dir, key) = RecordMissing(t, host, "gone");
+        var running = OpenSession(host, key, "s1");
+        using var held = FileLock.TryTake(running.LockFile, exclusive: true);
+        Assert.NotNull(held);
+
+        var e = Only(CleanStaleCommand.Find(host, [], []), key);
+        Assert.False(e.Removable);
+        var text = CleanStaleCommand.Render(host, [e]);
+        Assert.Equal(
+            KeptHeading + $"\n  {dir}  ({key})"
+                + $"\n    {key}-s1-agent is still running: exit it first"
+                + "\n    then run pen clean --stale again",
+            text);
+        Assert.DoesNotContain("rm -r", text);
+        Assert.DoesNotContain("docker", text);
+        Assert.DoesNotContain("protected", text.Replace(KeptHeading, ""));
+    }
+
+    [Fact]
+    public void ASessionWithoutProtectedCopiesKeepsTheKey_WithoutAProtectedPath()
+    {
+        // A session outside a git repo saves no copies, and an end check that restored them deletes them.
+        using var t = new TempDir();
+        var host = t.Host();
+        var (dir, key) = RecordMissing(t, host, "gone");
+        var session = OpenSession(host, key, "s1");
+        Directory.Delete(session.ProtectedDir, recursive: true);
+
+        var e = Only(CleanStaleCommand.Find(host, [], []), key);
+        Assert.False(Assert.Single(e.OpenSessions).HasProtectedCopies);
+        Assert.False(e.Removable);
+        Assert.Equal(
+            KeptHeading + $"\n  {dir}  ({key})"
+                + MissingAdvice
+                + StackLine(key, "s1")
+                + $"\n    rm -rf ~/.local/state/pen/{key}/sessions/s1 && pen clean --stale",
+            CleanStaleCommand.Render(host, [e]));
+    }
+
+    [Fact]
+    public void LiveAndUnknownKeysSessionsArentRead_SoOneThatCantBeReadChangesNothing()
+    {
+        Assert.SkipWhen(Native.GetUid() == 0, "root reads any directory");
+        using var t = new TempDir();
+        var host = t.Host();
+        var liveKey = Record(host, Git.Repo(t.Sub("live")));
+        var unknownKey = Record(host, t.Sub("unknown"));
+        File.Delete(Path.Combine(host.GetRuntimeDir(unknownKey), ProjectRuntime.ProjectDirFile));
+        var (_, goneKey) = RecordMissing(t, host, "gone");
+        var shut = new List<string>();
+        foreach (var key in new[] { liveKey, unknownKey })
+        {
+            OpenSession(host, key, "s1");
+            var sessions = Path.Combine(host.GetRuntimeDir(key), "sessions");
+            File.SetUnixFileMode(sessions, UnixFileMode.None);
+            shut.Add(sessions);
+        }
+        try
+        {
+            var entries = CleanStaleCommand.Find(host, [], []);
+            Assert.Equal(CleanStaleCommand.Status.Live, Only(entries, liveKey).Status);
+            Assert.Equal(CleanStaleCommand.Status.Unknown, Only(entries, unknownKey).Status);
+            Assert.All(entries, e => Assert.Empty(e.OpenSessions));
+            Assert.True(Only(entries, goneKey).Removable);
+        }
+        finally
+        {
+            foreach (var sessions in shut)
+                File.SetUnixFileMode(sessions, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Fact]
+    public void AMissingKeyWhoseSessionsCantBeReadStopsTheCommand()
+    {
+        Assert.SkipWhen(Native.GetUid() == 0, "root reads any directory");
+        using var t = new TempDir();
+        var host = t.Host();
+        var (_, key) = RecordMissing(t, host, "gone");
+        OpenSession(host, key, "s1");
+        var sessions = Path.Combine(host.GetRuntimeDir(key), "sessions");
+        File.SetUnixFileMode(sessions, UnixFileMode.None);
+        try
+        {
+            Assert.Throws<UnauthorizedAccessException>(() => CleanStaleCommand.Find(host, [], []));
+        }
+        finally
+        {
+            File.SetUnixFileMode(sessions, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Fact]
+    public void RunWithOnlyAKeptKeyFindsNothingStale_AndRemovesNothing()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        var (_, key) = RecordMissing(t, host, "gone");
+        var session = OpenSession(host, key, "s1");
+        using var fake = new FakeDocker(t, VolumesDocker($"{key}_home"));
+
+        var code = 1;
+        var stderr = CapturingStderr(() => code = new CleanStaleCommand(host, new Answers(new StringReader("y\n"), IsTerminal: false)).Run());
+        Assert.Equal(0, code);
+        Assert.Contains(KeptHeading, stderr);
+        Assert.Contains("pen: nothing stale to clean", stderr);
+        Assert.DoesNotContain("[y/N]", stderr);
+        Assert.DoesNotContain("Removing deletes", stderr);
+        Assert.Empty(Calls(t, "volume rm"));
+        Assert.True(File.Exists(session.ProtectedManifest));
+        Assert.True(File.Exists(Path.Combine(host.GetRuntimeDir(key), ProjectRuntime.ProjectDirFile)));
+    }
+
+    [Fact]
+    public void AMovedKeyWithAnOpenSessionGetsTheMoveBackAdvice()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        var repo = Git.Repo(t.Sub("repo"));
+        var key = Record(host, repo);
+        Directory.Move(repo, Path.Combine(t.Path, "moved"));
+        var other = Git.Repo(t.Sub("other"));
+        File.CreateSymbolicLink(repo, other);
+        OpenSession(host, key, "s1");
+        OpenSession(host, key, "s2");
+
+        var e = Only(CleanStaleCommand.Find(host, [], []), key);
+        Assert.Equal(CleanStaleCommand.Status.Moved, e.Status);
+        Assert.False(e.Removable);
+        Assert.Equal(
+            KeptHeading + $"\n  {repo}  ({key}, now {Project.ComputeKey(other)})"
+                + $"\n    ~/.local/state/pen/{key}/sessions/s1/protected (manifest.json lists them)"
+                + $"\n    ~/.local/state/pen/{key}/sessions/s2/protected (manifest.json lists them)"
+                + "\n    make its old dir the project again (move what's there now aside, and the project back) and run"
+                + "\n    pen clean there, which ends its sessions and restores the files (answer n to keep its"
+                + "\n    sandbox); or remove the sessions' containers and files (copy what you need from any"
+                + "\n    protected copies first; this skips Pen's check of the project's .git) and run pen clean"
+                + "\n    --stale again, as one command:"
+                + StackLine(key, "s1")
+                + StackLine(key, "s2")
+                + $"\n    rm -rf ~/.local/state/pen/{key}/sessions/s1 ~/.local/state/pen/{key}/sessions/s2 && pen clean --stale",
+            CleanStaleCommand.Render(host, [e]));
+    }
+
+    [Fact]
+    public void TheKeptGroupGoesAfterTheUnknownOne_AndBeforeTheOnesToRemove()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        var live = Git.Repo(t.Sub("live"));
+        var liveKey = Record(host, live);
+        OpenSession(host, liveKey, "s1"); // a live key's open sessions change nothing
+        var (_, keptKey) = RecordMissing(t, host, "kept");
+        OpenSession(host, keptKey, "s1");
+        var (goneDir, goneKey) = RecordMissing(t, host, "gone");
+        var text = CleanStaleCommand.Render(host, CleanStaleCommand.Find(host, ["pen-old-0123abcd_home"], []));
+
+        Assert.StartsWith($"kept, in use:\n  {live}  ({liveKey})\n", text);
+        var unknown = text.IndexOf("kept, project unknown", StringComparison.Ordinal);
+        var kept = text.IndexOf(KeptHeading, StringComparison.Ordinal);
+        var keptAt = text.IndexOf($"({keptKey})", StringComparison.Ordinal);
+        var missing = text.IndexOf("to remove, missing", StringComparison.Ordinal);
+        Assert.True(unknown > 0 && kept > unknown && keptAt > kept && missing > keptAt, text);
+        Assert.True(text.IndexOf($"\n  {goneDir}  ({goneKey})", StringComparison.Ordinal) > missing, text);
+        Assert.Equal(keptAt + 1, text.LastIndexOf(keptKey + ")", StringComparison.Ordinal)); // listed once only
+        Assert.DoesNotContain($"{liveKey}/sessions", text);
+    }
+
+    [Fact]
+    public void WithAKeptKeyAndOneToRemove_OnlyTheSecondGoes()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        var (_, keptKey) = RecordMissing(t, host, "kept");
+        var session = OpenSession(host, keptKey, "s1");
+        var (_, goneKey) = RecordMissing(t, host, "gone");
+        using var fake = new FakeDocker(t, VolumesDocker($"{keptKey}_home", $"{goneKey}_home"));
+
+        var code = 1;
+        var stderr = CapturingStderr(() => code = new CleanStaleCommand(host, new Answers(new StringReader("y\n"), IsTerminal: false)).Run());
+        Assert.Equal(0, code);
+        Assert.Contains("Removing deletes that project's", stderr);
+        Assert.Contains("pen: remove it? [y/N] y", stderr);
+        Assert.Contains($"pen: removed {goneKey}", stderr);
+        Assert.DoesNotContain($"removed {keptKey}", stderr);
+        Assert.Equal($"volume rm {goneKey}_home", Assert.Single(Calls(t, "volume rm")));
+        Assert.False(Directory.Exists(host.GetRuntimeDir(goneKey)));
+        Assert.True(File.Exists(session.ProtectedManifest));
+    }
+
+    [Fact]
+    public void AnEndedSessionDoesntKeepTheKey()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        var (_, key) = RecordMissing(t, host, "gone");
+        // What SessionFiles.Delete leaves: the session's dir, with its proxy logs and without compose.yaml.
+        var ended = Path.Combine(host.GetRuntimeDir(key), "sessions", "s1");
+        Directory.CreateDirectory(ended);
+        File.WriteAllText(Path.Combine(ended, "proxy.log"), "");
+
+        var e = Only(CleanStaleCommand.Find(host, [], []), key);
+        Assert.Empty(e.OpenSessions);
+        Assert.True(e.Removable);
+        Assert.DoesNotContain("haven't ended", CleanStaleCommand.Render(host, [e]));
+        Assert.True(CleanStaleCommand.Remove(host, e));
+        Assert.False(Directory.Exists(host.GetRuntimeDir(key)));
+    }
+
+    [Fact]
+    public void AKeyThatGainsAnOpenSessionBeforeRemovalIsSkipped()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        var (_, key) = RecordMissing(t, host, "gone");
+        var e = Only(CleanStaleCommand.Find(host, [$"{key}_home"], [$"{key}:latest"]), key);
+        Assert.True(e.Removable);
+        Assert.Equal([$"{key}_home"], e.Volumes);
+        Assert.Equal([$"{key}:latest"], e.Images);
+        var session = OpenSession(host, key, "s1");
+        using var fake = new FakeDocker(t, "exit 0\n");
+
+        var removed = true;
+        var stderr = CapturingStderr(() => removed = CleanStaleCommand.Remove(host, e));
+        Assert.False(removed);
+        Assert.Equal($"pen: skipping {key}: it has a session that hasn't ended\n", stderr);
+        // The re-check comes before anything goes: the volumes and images stay too.
+        Assert.Empty(Calls(t, "volume rm"));
+        Assert.Empty(Calls(t, "image rm"));
+        Assert.True(File.Exists(session.ProtectedManifest));
+        Assert.True(File.Exists(Path.Combine(host.GetRuntimeDir(key), ProjectRuntime.ProjectDirFile)));
+    }
+
+    [Fact]
+    public void TheAdviceRemovesEachAbandonedSessionsContainers_BeforeItsFiles()
+    {
+        // rm -r alone would leave an agent that outlived its Pen running, with nothing left to end it from.
+        using var t = new TempDir();
+        var host = t.Host();
+        var (_, key) = RecordMissing(t, host, "gone");
+        OpenSession(host, key, "s1");
+        OpenSession(host, key, "s2");
+
+        var text = CleanStaleCommand.Render(host, [Only(CleanStaleCommand.Find(host, [], []), key)]);
+        var first = text.IndexOf($"docker rm -f {key}-s1-agent && docker compose -p {key}-s1 down", StringComparison.Ordinal);
+        var second = text.IndexOf($"docker rm -f {key}-s2-agent && docker compose -p {key}-s2 down", StringComparison.Ordinal);
+        var files = text.IndexOf("\n    rm -rf ", StringComparison.Ordinal);
+        Assert.True(first > 0 && second > first && files > second, text);
+        // Every line before the last goes on with &&, so pasted they run as one command.
+        var command = text[first..].Split("\n    ");
+        Assert.All(command[..^1], line => Assert.EndsWith(" &&", line));
+        Assert.EndsWith("&& pen clean --stale", command[^1]);
+    }
+
+    [Fact]
+    public void ASessionDirThatCantBeSearchedKeepsTheKey_AndIsntOfferedForRemoval()
+    {
+        Assert.SkipWhen(Native.GetUid() == 0, "root searches any directory");
+        using var t = new TempDir();
+        var host = t.Host();
+        var (_, key) = RecordMissing(t, host, "gone");
+        var session = OpenSession(host, key, "s1");
+        File.SetUnixFileMode(session.Path, UnixFileMode.None);
+        try
+        {
+            var e = Only(CleanStaleCommand.Find(host, [$"{key}_home"], []), key);
+            var open = Assert.Single(e.OpenSessions);
+            Assert.True(open.Running);
+            Assert.False(e.Removable);
+            var text = CleanStaleCommand.Render(host, [e]);
+            Assert.True(open.Unreadable);
+            Assert.Contains(
+                $"~/.local/state/pen/{key}/sessions/s1 can't be read: check its permissions, then run "
+                    + "pen clean --stale again",
+                text);
+            Assert.DoesNotContain("still running", text);
+            Assert.DoesNotContain("rm -r", text);
+        }
+        finally
+        {
+            File.SetUnixFileMode(session.Path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Fact]
+    public void ASessionDirThatCantBeSearchedByTheRemovalStopsIt()
+    {
+        Assert.SkipWhen(Native.GetUid() == 0, "root searches any directory");
+        using var t = new TempDir();
+        var host = t.Host();
+        var (_, key) = RecordMissing(t, host, "gone");
+        var e = Only(CleanStaleCommand.Find(host, [$"{key}_home"], []), key);
+        Assert.True(e.Removable);
+        var session = OpenSession(host, key, "s1");
+        File.SetUnixFileMode(session.Path, UnixFileMode.None);
+        using var fake = new FakeDocker(t, "exit 0\n");
+        try
+        {
+            var removed = true;
+            var stderr = CapturingStderr(() => removed = CleanStaleCommand.Remove(host, e));
+            Assert.False(removed);
+            Assert.StartsWith($"pen: skipping {key}: ", stderr);
+            Assert.Empty(Calls(t, "volume rm"));
+            Assert.True(File.Exists(Path.Combine(host.GetRuntimeDir(key), ProjectRuntime.ProjectDirFile)));
+        }
+        finally
+        {
+            File.SetUnixFileMode(session.Path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+        Assert.True(File.Exists(session.ProtectedManifest));
+    }
+
+    [Fact]
+    public void ASessionWhoseLockCantBeProbedCountsAsRunning()
+    {
+        // A read-only session dir without a session.lock: the probe can't create one.
+        Assert.SkipWhen(Native.GetUid() == 0, "root writes any directory");
+        using var t = new TempDir();
+        var host = t.Host();
+        var (_, key) = RecordMissing(t, host, "gone");
+        var session = OpenSession(host, key, "s1");
+        Assert.False(File.Exists(session.LockFile));
+        File.SetUnixFileMode(session.Path, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            var e = Only(CleanStaleCommand.Find(host, [], []), key);
+            var open = Assert.Single(e.OpenSessions);
+            Assert.True(open.Running);
+            Assert.False(e.Removable);
+            var text = CleanStaleCommand.Render(host, [e]);
+            Assert.True(open.Unreadable);
+            Assert.Contains(
+                $"~/.local/state/pen/{key}/sessions/s1 can't be read: check its permissions, then run "
+                    + "pen clean --stale again",
+                text);
+            Assert.DoesNotContain("still running", text);
+            Assert.DoesNotContain("rm -r", text);
+        }
+        finally
+        {
+            File.SetUnixFileMode(session.Path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Fact]
+    public void APathThatNeedsQuotingKeepsTheTildeOutsideTheQuotes()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        var (_, key) = RecordMissing(t, host, "gone");
+        OpenSession(host, key, "a b");
+
+        var text = CleanStaleCommand.Render(host, [Only(CleanStaleCommand.Find(host, [], []), key)]);
+        Assert.Contains($"\n    rm -rf ~/'.local/state/pen/{key}/sessions/a b' && pen clean --stale", text);
+        Assert.Contains($"docker rm -f '{key}-a b-agent' && docker compose -p '{key}-a b' down", text);
+    }
+
+    [Theory]
+    [InlineData("~/.local/state/pen/pen-x-0123abcd", "~/.local/state/pen/pen-x-0123abcd")]
+    [InlineData("~/a b/c", "~/'a b/c'")]
+    [InlineData("~/it's", "~/'it'\\''s'")]
+    [InlineData("/a b", "'/a b'")]
+    [InlineData("~", "~")]
+    public void Quote(string text, string quoted) => Assert.Equal(quoted, CleanStaleCommand.Quote(text));
+
     private const string CurrentBase = "sha256:current", OldBase = "sha256:old";
     private const string OldTools = "pen-tools:0123456789abcdef", CurrentTools = "pen-tools:fedcba9876543210";
 

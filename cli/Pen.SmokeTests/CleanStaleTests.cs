@@ -104,12 +104,45 @@ public sealed class CleanStaleTests(CleanStaleTests.Fixture fixture) : IClassFix
                 && fixture.Again.OutputComplete && !fixture.Again.Output.Contains(GoneKey, StringComparison.Ordinal),
             fixture.Again.Describe());
 
+    [Fact(DisplayName = "a deleted project's key with a session that hasn't ended is kept, with its protected copies")]
+    public void KeyWithAnOpenSessionIsKept() =>
+        Assert.Multiple(
+            () => AssertHas(fixture.WithOpenSession, "kept, sessions that haven't ended"),
+            () => AssertHas(fixture.WithOpenSession, $"  {fixture.GoneDir}  ({GoneKey})"),
+            () => AssertHas(
+                fixture.WithOpenSession,
+                $"    ~/.local/state/pen/{GoneKey}/sessions/{Fixture.OpenId}/protected (manifest.json lists them)"),
+            () => AssertHas(fixture.WithOpenSession, "    if you moved the project, move it back"),
+            () => AssertHas(
+                fixture.WithOpenSession,
+                $"    docker rm -f {GoneKey}-{Fixture.OpenId}-agent && "
+                    + $"docker compose -p {GoneKey}-{Fixture.OpenId} down -t 1 --remove-orphans &&\n"),
+            () => AssertHas(
+                fixture.WithOpenSession,
+                $"    rm -rf ~/.local/state/pen/{GoneKey}/sessions/{Fixture.OpenId} && pen clean --stale"),
+            () => Assert.True(
+                fixture.WithOpenSession.Output.Contains("pen: nothing stale to clean", StringComparison.Ordinal)
+                    && fixture.WithOpenSession.ExitCode == 0 && fixture.WithOpenSession.OutputComplete
+                    && !fixture.WithOpenSession.Output.Contains("[y/N]", StringComparison.Ordinal),
+                fixture.WithOpenSession.Describe()),
+            () => Assert.True(fixture.ProtectedAfterOpen, "the protected copies are gone"));
+
+    [Fact(DisplayName = "...and removed once that session has ended")]
+    public void KeyIsRemovedOnceTheSessionEnded() =>
+        Assert.Multiple(
+            () => Assert.True(
+                fixture.AfterEnded.Output.Contains($"pen: removed {GoneKey}", StringComparison.Ordinal)
+                    && fixture.AfterEnded.ExitCode == 0,
+                fixture.AfterEnded.Describe()),
+            () => Assert.False(fixture.GoneRuntimeAfterEnded, "the runtime dir is still there"));
+
     private static void AssertHas(CommandResult result, string text) =>
         Assert.True(result.Output.Contains(text, StringComparison.Ordinal), $"no \"{text}\"; {result.Describe()}");
 
     /// <summary>Makes a project with a layer and a tools layer, which it then deletes, a live one, and
     /// tools images on an old base and on it, then runs pen clean --stale answering no, with a held lock, yes,
-    /// and again.</summary>
+    /// and again; then with a session that hasn't ended in the deleted project's runtime dir, and once it
+    /// has.</summary>
     public sealed class Fixture : SmokeFixture
     {
         internal string GoneDir { get; private set; } = null!;
@@ -171,6 +204,17 @@ public sealed class CleanStaleTests(CleanStaleTests.Fixture fixture) : IClassFix
 
         internal CommandResult Again { get; private set; } = null!;
 
+        /// <summary>Gets the ID of the session left open in the deleted project's runtime dir.</summary>
+        internal const string OpenId = "smoke-open";
+
+        internal CommandResult WithOpenSession { get; private set; } = null!;
+
+        internal bool ProtectedAfterOpen { get; private set; }
+
+        internal CommandResult AfterEnded { get; private set; } = null!;
+
+        internal bool GoneRuntimeAfterEnded { get; private set; }
+
         private string GoneRuntimeDir => Home.GetRuntimeDir(GoneKey);
 
         protected override void Prepare()
@@ -201,6 +245,27 @@ public sealed class CleanStaleTests(CleanStaleTests.Fixture fixture) : IClassFix
                 && new FileInfo(liveProjectDir).Length > 0;
             OtherVolumesAfter = ListOtherVolumes();
             Again = Cli.WithStdin("n\n").Run("clean", "--stale").RequireSuccess();
+
+            var session = OpenSessionInGone();
+            WithOpenSession = Cli.WithStdin("y\n").Run("clean", "--stale");
+            ProtectedAfterOpen = File.Exists(Path.Combine(session, "protected", "manifest.json"));
+            // The session ends: compose.yaml goes first, as Pen's teardown removes it.
+            File.Delete(Path.Combine(session, "compose.yaml"));
+            AfterEnded = Cli.WithStdin("y\n").Run("clean", "--stale");
+            GoneRuntimeAfterEnded = Path.Exists(GoneRuntimeDir);
+        }
+
+        /// <summary>Puts back the deleted project's runtime dir as a Pen that died in a session there would have
+        /// left it: its project-dir record, and the session's compose.yaml and protected copies.</summary>
+        /// <returns>The session's dir.</returns>
+        private string OpenSessionInGone()
+        {
+            var session = Path.Combine(GoneRuntimeDir, "sessions", OpenId);
+            Directory.CreateDirectory(Path.Combine(session, "protected"));
+            File.WriteAllText(Path.Combine(GoneRuntimeDir, "project-dir"), GoneDir + "\n");
+            File.WriteAllText(Path.Combine(session, "protected", "manifest.json"), "{}");
+            File.WriteAllText(Path.Combine(session, "compose.yaml"), "");
+            return session;
         }
 
         /// <summary>Makes a project with a layer and a layer on a tools image, and a live project, each with a

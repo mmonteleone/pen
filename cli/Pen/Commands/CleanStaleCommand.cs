@@ -85,9 +85,31 @@ internal sealed partial class CleanStaleCommand(HostEnv host, Answers answers)
         /// <summary>Gets its runtime dir, or null when there's none.</summary>
         public required string? RuntimeDir { get; init; }
 
-        /// <summary>Gets whether pen clean --stale removes it: its project moved or is missing.</summary>
-        public bool Removable => Status is Status.Moved or Status.Missing;
+        /// <summary>
+        /// Gets its open sessions (<see cref="FindMaybeOpen"/>), by ID; only a moved or missing key's are
+        /// looked for, so a live or unknown key has none.
+        /// </summary>
+        public required IReadOnlyList<OpenSession> OpenSessions { get; init; }
+
+        /// <summary>
+        /// Gets whether pen clean --stale removes it: its project moved or is missing, and no session there is open.
+        /// </summary>
+        /// <remarks>
+        /// An open session's protected dir may hold the only good copies of the project's git files, and nothing ends
+        /// it while its project is away, so the key is kept until the session is ended or its dir removed by hand.
+        /// </remarks>
+        public bool Removable => OpenSessions.Count == 0 && Status is Status.Moved or Status.Missing;
     }
+
+    /// <summary>A moved or missing key's session that hasn't ended.</summary>
+    /// <param name="Session">The session's dir.</param>
+    /// <param name="Running">
+    /// Whether its Pen may still be running (<see cref="SessionRegistry.IsRunning"/>); true too when it can't be read.
+    /// </param>
+    /// <param name="HasProtectedCopies">Whether its protected dir has its manifest, so copies are there.</param>
+    /// <param name="Unreadable">Whether its dir or lock can't be read, so it can't be told whether it runs.</param>
+    internal sealed record OpenSession(
+        SessionDir Session, bool Running, bool HasProtectedCopies, bool Unreadable = false);
 
     /// <summary>Lists every key and the old tools images, and removes the ones to remove if the user agrees.</summary>
     /// <returns>
@@ -237,14 +259,93 @@ internal sealed partial class CleanStaleCommand(HostEnv host, Answers answers)
         if (!Directory.Exists(runtimeDir))
             runtimeDir = null;
         var recorded = runtimeDir is null ? null : ReadProjectDir(runtimeDir);
+        var fate = Classify(key, recorded);
         return new Entry
         {
             Key = key,
-            Fate = Classify(key, recorded),
+            Fate = fate,
             Volumes = [.. volumes.Order(StringComparer.Ordinal)],
             Images = [.. images.Where(image => IsImageOf(key, image)).Order(StringComparer.Ordinal)],
             RuntimeDir = runtimeDir,
+            OpenSessions = runtimeDir is not null && fate.Status is Status.Moved or Status.Missing
+                ? FindOpenSessions(key, runtimeDir)
+                : [],
         };
+    }
+
+    /// <summary>Finds a moved or missing key's open sessions, with whether each still runs and has copies.</summary>
+    /// <remarks>
+    /// A live or unknown key is never removed, so its sessions aren't read, and a sessions dir there that can't be
+    /// read changes nothing. Here an error stops the command, since the key can't be shown to have none open.
+    /// </remarks>
+    private static IReadOnlyList<OpenSession> FindOpenSessions(string key, string runtimeDir) =>
+        [.. FindMaybeOpen(key, runtimeDir).Select(Inspect)];
+
+    /// <summary>
+    /// Finds the sessions in <paramref name="runtimeDir"/> that may be open: their compose.yaml is there, or can't be
+    /// shown to be missing.
+    /// </summary>
+    /// <returns>The sessions, by ID.</returns>
+    /// <remarks>
+    /// <see cref="SessionRegistry.FindOpen"/> goes by File.Exists, which takes a session dir that can't be searched for
+    /// one that ended; here that would delete what may be the only good copies of the project's git files. A sessions
+    /// dir that can't be read throws.
+    /// </remarks>
+    internal static IReadOnlyList<SessionDir> FindMaybeOpen(string key, string runtimeDir)
+    {
+        List<string> paths;
+        try
+        {
+            paths = [.. Directory.EnumerateDirectories(Path.Combine(runtimeDir, "sessions"))
+                .Order(StringComparer.Ordinal)];
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return [];
+        }
+        return [.. paths.Select(path => new SessionDir(key, path)).Where(MayBeOpen)];
+    }
+
+    /// <summary>Tells whether <paramref name="session"/> may be open: compose.yaml isn't known to be gone.</summary>
+    private static bool MayBeOpen(SessionDir session)
+    {
+        try
+        {
+            File.GetAttributes(session.ComposeFile);
+            return true;
+        }
+        catch (FileNotFoundException)
+        {
+            return false;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return false;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Reads <paramref name="session"/>: whether its Pen may still be running (its session.lock is held), and whether
+    /// that can't be told (compose.yaml can't be statted, or the lock can't be probed: a read-only session dir
+    /// without one, say).
+    /// </summary>
+    /// <remarks>Such a session is kept and marked, and never offered for removal.</remarks>
+    private static OpenSession Inspect(SessionDir session)
+    {
+        var copies = File.Exists(session.ProtectedManifest);
+        try
+        {
+            File.GetAttributes(session.ComposeFile);
+            return new OpenSession(session, SessionRegistry.IsRunning(session), copies);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            return new OpenSession(session, Running: true, copies, Unreadable: true);
+        }
     }
 
     /// <summary>
@@ -314,16 +415,18 @@ internal sealed partial class CleanStaleCommand(HostEnv host, Answers answers)
     }
 
     /// <summary>
-    /// Renders the listing: one line per key, grouped by status, with how to remove an unknown one by hand.
+    /// Renders the listing: one line per key, grouped by status, with how to remove an unknown one by hand and how
+    /// to have a moved or missing one's open sessions ended.
     /// </summary>
     internal static string Render(HostEnv host, IReadOnlyList<Entry> entries)
     {
         var listing = new StringBuilder();
-        void Group<T>(string heading, Func<Entry, T, string> describe)
+        var removable = entries.Where(entry => entry.Removable).ToList();
+        void Group<T>(string heading, IReadOnlyList<Entry> from, Func<Entry, T, string> describe)
             where T : Fate
         {
             var group = new List<(Entry Entry, T Fate)>();
-            foreach (var entry in entries)
+            foreach (var entry in from)
             {
                 if (entry.Fate is T fate)
                     group.Add((entry, fate));
@@ -335,16 +438,20 @@ internal sealed partial class CleanStaleCommand(HostEnv host, Answers answers)
                 listing.Append("  ").Append(describe(entry, fate)).Append('\n');
         }
 
-        Group<Fate.Live>("kept, in use:",
+        Group<Fate.Live>("kept, in use:", entries,
             (entry, live) => $"{Out.Field(host.Display(live.Dir))}  ({entry.Key})");
         Group<Fate.Unknown>("kept, project unknown (pen hasn't run there since it began recording projects; run any\n"
-                                + "pen command in it to record it, or remove it by hand):",
+                                + "pen command in it to record it, or remove it by hand):", entries,
             (entry, _) => DescribeUnknown(host, entry));
-        Group<Fate.Moved>("to remove, moved (the dir now belongs to another project):",
+        Group<Fate>("kept, sessions that haven't ended (their protected copies may be the only good ones of the\n"
+                        + "project's git files):",
+            [.. entries.Where(entry => !entry.Removable && entry.Status is Status.Moved or Status.Missing)],
+            (entry, fate) => DescribeUnended(host, entry, fate));
+        Group<Fate.Moved>("to remove, moved (the dir now belongs to another project):", removable,
             (entry, moved) => $"{Out.Field(host.Display(moved.Dir))}  ({entry.Key}, now {moved.CurrentKey})"
                 + DescribeContents(entry));
         Group<Fate.Missing>("to remove, missing (the dir is gone: if it's on a volume that isn't mounted, mount it\n"
-                                + "and run pen clean --stale again instead):",
+                                + "and run pen clean --stale again instead):", removable,
             (entry, missing) => $"{Out.Field(host.Display(missing.Dir))}  ({entry.Key}){DescribeContents(entry)}");
         return listing.ToString().TrimEnd('\n');
     }
@@ -362,6 +469,71 @@ internal sealed partial class CleanStaleCommand(HostEnv host, Answers answers)
         return description;
     }
 
+    /// <summary>
+    /// Describes a moved or missing key kept for its open sessions: which still run, where the others' protected
+    /// copies are, and how to have those ended or remove them by hand.
+    /// </summary>
+    /// <remarks>
+    /// <para>pen clean is the command named, since it ends a project's abandoned sessions and changes nothing else
+    /// unless the user agrees. pen clean --stale itself never ends them: that checks git in the recorded dir, which
+    /// now belongs to another project or isn't there. Only the abandoned sessions are offered for removal: a running
+    /// session's Pen still needs its files to end it, and the rest of the key then goes the usual way.</para>
+    /// <para>An abandoned session's agent may still be running (after a hangup compose may have left it), and a
+    /// session is also kept open when its end couldn't remove its containers, so the command removes them before the
+    /// files only Pen could end them from. compose down finds the stack by its labels, without the session's
+    /// compose.yaml, but leaves the agent, which compose run started, so that goes first by name. Each line but the
+    /// last ends in &amp;&amp;, so pasted it runs as one command that stops at the first failure.</para>
+    /// </remarks>
+    private static string DescribeUnended(HostEnv host, Entry entry, Fate fate)
+    {
+        var (line, advice) = fate switch
+        {
+            Fate.Moved moved => ($"{Out.Field(host.Display(moved.Dir))}  ({entry.Key}, now {moved.CurrentKey})",
+                "make its old dir the project again (move what's there now aside, and the project back) and run\n"
+                    + "    pen clean there, which ends its sessions and restores the files (answer n to keep its\n"
+                    + "    sandbox); or remove the sessions' containers and files (copy what you need from any\n"
+                    + "    protected copies first; this skips Pen's check of the project's .git) and run pen clean\n"
+                    + "    --stale again, as one command:"),
+            Fate.Missing missing => ($"{Out.Field(host.Display(missing.Dir))}  ({entry.Key})",
+                "if you moved the project, move it back (or if it's on a volume that isn't mounted, mount it) and\n"
+                    + "    run pen clean there, which ends its sessions and restores the files (answer n to keep its\n"
+                    + "    sandbox); if it's really gone, remove the sessions' containers and files (copy what you\n"
+                    + "    need from any protected copies first; this skips Pen's check of the project's .git) and\n"
+                    + "    run pen clean --stale again, as one command:"),
+            _ => throw new ArgumentException("only a moved or missing key is kept for its sessions", nameof(fate)),
+        };
+        var lines = new List<string> { line };
+        var stacks = new List<string>();
+        var abandoned = new List<string>();
+        foreach (var open in entry.OpenSessions)
+        {
+            if (open.Running)
+            {
+                lines.Add(open.Unreadable
+                    ? $"{Out.Field(host.Display(open.Session.Path))} can't be read: check its permissions, then run "
+                        + "pen clean --stale again"
+                    : $"{Out.Field(open.Session.Container)} is still running: exit it first");
+                continue;
+            }
+            stacks.Add($"docker rm -f {Quote(open.Session.Container)} && "
+                + $"docker compose -p {Quote(open.Session.ComposeProject)} down -t 1 --remove-orphans &&");
+            abandoned.Add(Quote(host.Display(open.Session.Path)));
+            if (open.HasProtectedCopies)
+                lines.Add($"{Out.Field(host.Display(open.Session.ProtectedDir))} (manifest.json lists them)");
+        }
+        if (abandoned.Count == 0)
+        {
+            lines.Add("then run pen clean --stale again");
+        }
+        else
+        {
+            lines.Add(advice);
+            lines.AddRange(stacks);
+            lines.Add($"rm -rf {string.Join(' ', abandoned)} && pen clean --stale");
+        }
+        return string.Join("\n    ", lines);
+    }
+
     /// <summary>Describes the volumes and images a key to remove has, on a line of its own.</summary>
     /// <returns>The line, or "" when it has neither.</returns>
     private static string DescribeContents(Entry entry)
@@ -375,24 +547,38 @@ internal sealed partial class CleanStaleCommand(HostEnv host, Answers answers)
     }
 
     /// <summary>Quotes <paramref name="text"/> for a shell, unless it needs none.</summary>
-    private static string Quote(string text) =>
-        text.All(c => char.IsAsciiLetterOrDigit(c) || "/~._-".Contains(c))
-            ? text
-            : "'" + text.Replace("'", "'\\''") + "'";
+    /// <remarks>A leading ~/ stays outside the quotes, so the shell still expands it.</remarks>
+    internal static string Quote(string text)
+    {
+        if (text.All(c => char.IsAsciiLetterOrDigit(c) || "/~._-".Contains(c)))
+            return text;
+        return text.StartsWith("~/", StringComparison.Ordinal) ? "~/" + Shell.Quote(text[2..]) : Shell.Quote(text);
+    }
 
     /// <summary>Removes one moved or missing key: its volumes, then its images, then its runtime dir.</summary>
     /// <returns>Whether all of it went; a failure is reported.</returns>
     /// <remarks>
-    /// It runs under project.lock exclusive, and only with no session running. The runtime dir goes only once the
-    /// rest has, so a failed key stays listed.
+    /// It runs under project.lock exclusive, and only with no session that is or may be open, running or not: one
+    /// could have opened since the listing. The runtime dir goes only once the rest has, so a failed key stays listed.
     /// </remarks>
     internal static bool Remove(HostEnv host, Entry entry)
     {
         var runtimeDir = entry.RuntimeDir ?? host.GetRuntimeDir(entry.Key);
         using var projectLock = FileLock.TryTake(SessionRegistry.GetProjectLockFile(runtimeDir), exclusive: true);
-        if (projectLock is null || SessionRegistry.FindRunning(entry.Key, runtimeDir).Count > 0)
+        var open = projectLock is null ? [] : FindOpenSessions(entry.Key, runtimeDir);
+        if (projectLock is null || open.Any(session => session.Running && !session.Unreadable))
         {
             Out.WriteLine($"skipping {entry.Key}: a session (or pen sign or pen clean) is running in it");
+            return false;
+        }
+        if (open.Any(session => session.Unreadable))
+        {
+            Out.WriteLine($"skipping {entry.Key}: a session dir can't be read: check its permissions");
+            return false;
+        }
+        if (open.Count > 0)
+        {
+            Out.WriteLine($"skipping {entry.Key}: it has a session that hasn't ended");
             return false;
         }
 

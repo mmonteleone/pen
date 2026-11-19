@@ -10,16 +10,14 @@ internal static class SessionRegistry
     /// <returns>
     /// The sessions that are open (compose.yaml still there) with their session.lock held by a live Pen, by ID.
     /// </returns>
-    public static IReadOnlyList<SessionDir> FindRunning(string projectKey, string runtimeDir)
+    public static IReadOnlyList<SessionDir> FindRunning(string projectKey, string runtimeDir) =>
+        [.. FindOpen(projectKey, runtimeDir).Where(IsRunning)];
+
+    /// <summary>Tells whether an open session's Pen is still running: its session.lock is held.</summary>
+    public static bool IsRunning(SessionDir session)
     {
-        var running = new List<SessionDir>();
-        foreach (var session in FindOpen(projectKey, runtimeDir))
-        {
-            using var probe = FileLock.TryTake(session.LockFile, exclusive: true);
-            if (probe is null)
-                running.Add(session);
-        }
-        return running;
+        using var probe = FileLock.TryTake(session.LockFile, exclusive: true);
+        return probe is null;
     }
 
     /// <summary>Finds the project's open sessions, whether or not their Pen is still running.</summary>
