@@ -326,7 +326,7 @@ public class SessionEndTests
                     new CleanCommand(host, project, answers, TimeProvider.System).Run();
                     break;
                 default:
-                    EgressTarget.Resolve(host, new StartDir(repo), global: false).PrepareCurrentProject(host, TimeProvider.System);
+                    EgressTarget.Resolve(host, new StartDir(repo), global: false).PrepareProjectAndRecover(host, TimeProvider.System);
                     break;
             }
         }));

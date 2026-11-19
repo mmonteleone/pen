@@ -128,6 +128,8 @@ internal static class ConfigEdit
         }
         catch (PenException)
         {
+            // The parser's refusals are the only statement of a valid config, so an edit it refuses is the wanted
+            // "not only an addition" result; the caller then refuses the edit with its own message.
             return null;
         }
     }

@@ -34,13 +34,47 @@ internal sealed partial class CleanStaleCommand(HostEnv host, Answers answers)
         Unknown,
     }
 
+    /// <summary>What became of a key's project, with what the listing shows for it.</summary>
+    internal abstract record Fate
+    {
+        private Fate(Status status) => Status = status;
+
+        /// <summary>Gets which of the four it is.</summary>
+        public Status Status { get; }
+
+        /// <summary>Its recorded dir still resolves to the key.</summary>
+        /// <param name="Dir">The recorded dir.</param>
+        public sealed record Live(string Dir) : Fate(Status.Live);
+
+        /// <summary>Its recorded dir resolves to another key.</summary>
+        /// <param name="Dir">The recorded dir.</param>
+        /// <param name="CurrentKey">The key the recorded dir has now.</param>
+        public sealed record Moved(string Dir, string CurrentKey) : Fate(Status.Moved);
+
+        /// <summary>Its recorded dir is gone.</summary>
+        /// <param name="Dir">The recorded dir.</param>
+        public sealed record Missing(string Dir) : Fate(Status.Missing);
+
+        /// <summary>It has no record.</summary>
+        public sealed record Unknown : Fate
+        {
+            /// <summary>Initializes the fate.</summary>
+            public Unknown() : base(Status.Unknown)
+            {
+            }
+        }
+    }
+
     /// <summary>One project key, with what it has and what became of its project.</summary>
     internal sealed record Entry
     {
         public required string Key { get; init; }
 
         /// <summary>Gets what became of its project.</summary>
-        public required Status Status { get; init; }
+        public required Fate Fate { get; init; }
+
+        /// <summary>Gets which of the fates its project has.</summary>
+        public Status Status => Fate.Status;
 
         /// <summary>Gets its volumes, in order.</summary>
         public required IReadOnlyList<string> Volumes { get; init; }
@@ -50,12 +84,6 @@ internal sealed partial class CleanStaleCommand(HostEnv host, Answers answers)
 
         /// <summary>Gets its runtime dir, or null when there's none.</summary>
         public required string? RuntimeDir { get; init; }
-
-        /// <summary>Gets the dir its runtime dir recorded, or null when there's no record.</summary>
-        public required string? RecordedDir { get; init; }
-
-        /// <summary>Gets, for a moved one, the key its recorded dir has now.</summary>
-        public string? CurrentKey { get; init; }
 
         /// <summary>Gets whether pen clean --stale removes it: its project moved or is missing.</summary>
         public bool Removable => Status is Status.Moved or Status.Missing;
@@ -209,16 +237,13 @@ internal sealed partial class CleanStaleCommand(HostEnv host, Answers answers)
         if (!Directory.Exists(runtimeDir))
             runtimeDir = null;
         var recorded = runtimeDir is null ? null : ReadProjectDir(runtimeDir);
-        var (status, current) = Classify(key, recorded);
         return new Entry
         {
             Key = key,
-            Status = status,
+            Fate = Classify(key, recorded),
             Volumes = [.. volumes.Order(StringComparer.Ordinal)],
             Images = [.. images.Where(image => IsImageOf(key, image)).Order(StringComparer.Ordinal)],
             RuntimeDir = runtimeDir,
-            RecordedDir = recorded,
-            CurrentKey = current,
         };
     }
 
@@ -230,17 +255,17 @@ internal sealed partial class CleanStaleCommand(HostEnv host, Answers answers)
     /// moved (with the key it has now) when it resolves to another key, missing when it's gone, unknown without a
     /// record.
     /// </returns>
-    internal static (Status Status, string? CurrentKey) Classify(string key, string? recordedDir)
+    internal static Fate Classify(string key, string? recordedDir)
     {
         if (recordedDir is null)
-            return (Status.Unknown, null);
+            return new Fate.Unknown();
         if (!Directory.Exists(recordedDir))
-            return (Status.Missing, null);
+            return new Fate.Missing(recordedDir);
         var real = Native.RealPath(recordedDir);
         if (real is null)
-            return (Status.Missing, null);
+            return new Fate.Missing(recordedDir);
         var current = Project.ComputeKey(Project.FindRepo(real).RepoDir);
-        return current == key ? (Status.Live, null) : (Status.Moved, current);
+        return current == key ? new Fate.Live(recordedDir) : new Fate.Moved(recordedDir, current);
     }
 
     /// <summary>Finds the project key a Pen volume (&lt;key&gt;_home, _nuget or _dind) belongs to.</summary>
@@ -294,27 +319,33 @@ internal sealed partial class CleanStaleCommand(HostEnv host, Answers answers)
     internal static string Render(HostEnv host, IReadOnlyList<Entry> entries)
     {
         var listing = new StringBuilder();
-        void Group(Status status, string heading, Func<Entry, string> describe)
+        void Group<T>(string heading, Func<Entry, T, string> describe)
+            where T : Fate
         {
-            var group = entries.Where(entry => entry.Status == status).ToList();
+            var group = new List<(Entry Entry, T Fate)>();
+            foreach (var entry in entries)
+            {
+                if (entry.Fate is T fate)
+                    group.Add((entry, fate));
+            }
             if (group.Count == 0)
                 return;
             listing.Append(heading).Append('\n');
-            foreach (var entry in group)
-                listing.Append("  ").Append(describe(entry)).Append('\n');
+            foreach (var (entry, fate) in group)
+                listing.Append("  ").Append(describe(entry, fate)).Append('\n');
         }
 
-        Group(Status.Live, "kept, in use:",
-            entry => $"{Out.Field(host.Display(entry.RecordedDir!))}  ({entry.Key})");
-        Group(Status.Unknown, "kept, project unknown (pen hasn't run there since it began recording projects; run any\n"
+        Group<Fate.Live>("kept, in use:",
+            (entry, live) => $"{Out.Field(host.Display(live.Dir))}  ({entry.Key})");
+        Group<Fate.Unknown>("kept, project unknown (pen hasn't run there since it began recording projects; run any\n"
                                 + "pen command in it to record it, or remove it by hand):",
-            entry => DescribeUnknown(host, entry));
-        Group(Status.Moved, "to remove, moved (the dir now belongs to another project):",
-            entry => $"{Out.Field(host.Display(entry.RecordedDir!))}  ({entry.Key}, now {entry.CurrentKey})"
+            (entry, _) => DescribeUnknown(host, entry));
+        Group<Fate.Moved>("to remove, moved (the dir now belongs to another project):",
+            (entry, moved) => $"{Out.Field(host.Display(moved.Dir))}  ({entry.Key}, now {moved.CurrentKey})"
                 + DescribeContents(entry));
-        Group(Status.Missing, "to remove, missing (the dir is gone: if it's on a volume that isn't mounted, mount it\n"
+        Group<Fate.Missing>("to remove, missing (the dir is gone: if it's on a volume that isn't mounted, mount it\n"
                                 + "and run pen clean --stale again instead):",
-            entry => $"{Out.Field(host.Display(entry.RecordedDir!))}  ({entry.Key}){DescribeContents(entry)}");
+            (entry, missing) => $"{Out.Field(host.Display(missing.Dir))}  ({entry.Key}){DescribeContents(entry)}");
         return listing.ToString().TrimEnd('\n');
     }
 

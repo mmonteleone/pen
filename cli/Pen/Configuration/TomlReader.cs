@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.RegularExpressions;
 using Pen.Platform;
 using Tomlyn;
@@ -20,7 +21,19 @@ internal static partial class TomlReader
     };
 
     /// <summary>Parses TOML text into its untyped table; errors call the file <paramref name="displayPath"/>.</summary>
-    internal static TomlTable ParseToml(string text, string displayPath)
+    internal static TomlTable ParseToml(string text, string displayPath) =>
+        TryParseToml(text, displayPath, out var table, out var error) ? table : throw new PenException(error);
+
+    /// <summary>
+    /// Parses TOML text into its untyped table, or says why it can't, calling the file
+    /// <paramref name="displayPath"/>. Diagnostics and model errors come back as false; a <c>TomlException</c> from
+    /// the syntax parser itself could still escape, so callers that must not throw catch it.
+    /// </summary>
+    internal static bool TryParseToml(
+        string text,
+        string displayPath,
+        [NotNullWhen(true)] out TomlTable? table,
+        [NotNullWhen(false)] out string? error)
     {
         // Validating the syntax tree first enforces the whole TOML spec (a key or table defined twice, say), with
         // line numbers; the model built afterwards would quietly let the last definition win.
@@ -29,17 +42,23 @@ internal static partial class TomlReader
         {
             if (diagnostic.Kind == Tomlyn.Syntax.DiagnosticMessageKind.Error)
             {
-                throw new PenException(
-                    $"{displayPath}:{diagnostic.Span.Start.Line + 1}: {Out.Field(diagnostic.Message)}");
+                table = null;
+                error = $"{displayPath}:{diagnostic.Span.Start.Line + 1}: {Out.Field(diagnostic.Message)}";
+                return false;
             }
         }
         try
         {
-            return TomlSerializer.Deserialize(text, TomlContext.Default.TomlTable) ?? [];
+            table = TomlSerializer.Deserialize(text, TomlContext.Default.TomlTable) ?? [];
+            error = null;
+            return true;
         }
         catch (TomlException exception)
         {
-            throw new PenException($"{displayPath}: {Out.Field(exception.Message)}");
+            // Tomlyn reports a model it can't build only by throwing.
+            table = null;
+            error = $"{displayPath}: {Out.Field(exception.Message)}";
+            return false;
         }
     }
 

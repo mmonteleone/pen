@@ -552,15 +552,16 @@ internal sealed partial record ProjectDetection
         {
             try
             {
-                var table = TomlReader.ParseToml(text, displayPath);
-                if (table.TryGetValue("toolchain", out var toolchain) && toolchain is TomlTable toolchainTable
+                if (TomlReader.TryParseToml(text, displayPath, out var table, out _)
+                    && table.TryGetValue("toolchain", out var toolchain) && toolchain is TomlTable toolchainTable
                     && toolchainTable.TryGetValue("channel", out var channel) && channel is string channelText)
                 {
                     return TrimToNull(channelText);
                 }
             }
-            catch (Exception exception) when (exception is PenException or TomlException)
+            catch (TomlException)
             {
+                // Detection is advisory: a file Tomlyn's syntax parser throws on is one with no channel to suggest.
             }
             return null;
         }

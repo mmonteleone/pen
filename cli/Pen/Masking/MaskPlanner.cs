@@ -113,8 +113,9 @@ internal sealed class MaskPlanner
             throw new PenException($"[replace] needs {_replace.Count} mounts, and pen allows at most {MaxMounts}: " +
                 "replace fewer files");
         }
-        if (_hide.Count > 0 && _hide.All(pattern => pattern.IsLiteral))
-            FindLiterals();
+        var literals = _hide.Select(pattern => pattern.LiteralPath).OfType<string>().ToList();
+        if (_hide.Count > 0 && literals.Count == _hide.Count)
+            FindLiterals(literals);
         else if (_hide.Count > 0)
             Walk();
 
@@ -240,7 +241,10 @@ internal sealed class MaskPlanner
         }
     }
 
-    /// <summary>Follows each literal pattern's path down from the project dir, hiding what it reaches.</summary>
+    /// <summary>
+    /// Follows each literal pattern's path (<paramref name="literals"/>, one per hide pattern, in order) down from the
+    /// project dir, hiding what it reaches.
+    /// </summary>
     /// <remarks>
     /// This replaces the walk when every pattern is literal, and finds what the walk would. Each step takes every entry
     /// whose name is the segment as <see cref="HidePattern.IsMatch"/> compares (so on a file system that tells case
@@ -248,14 +252,14 @@ internal sealed class MaskPlanner
     /// symlink, not off limits, not hidden. So it reaches exactly the entries the walk would test against the pattern,
     /// and <see cref="Visit"/> tests each the same way.
     /// </remarks>
-    private void FindLiterals()
+    private void FindLiterals(List<string> literals)
     {
         if (Enter(_projectDir, "") is not { } root)
             return;
-        foreach (var pattern in _hide)
+        foreach (var literal in literals)
         {
             List<SeenDir> level = [root];
-            foreach (var segment in pattern.LiteralPath!.Split('/'))
+            foreach (var segment in literal.Split('/'))
                 level = VisitNamed(level, segment);
         }
     }

@@ -92,7 +92,7 @@ internal sealed class GitCheck
         string? commonGitDir,
         IReadOnlyCollection<string>? modulesAtStart) =>
         new GitCheck(dir, mayChangeModes: false)
-            .Run(session: null, () => (startedWithGit, commonGitDir), () => modulesAtStart);
+            .Run(session: null, () => new(startedWithGit, commonGitDir), () => modulesAtStart);
 
     /// <summary>
     /// Checks <paramref name="dir"/> for a session that's ending, against what <paramref name="session"/> recorded
@@ -128,7 +128,7 @@ internal sealed class GitCheck
     /// <remarks>Never throws: what stops the check is its Failure.</remarks>
     private CheckResult Run(
         SessionDir? session,
-        Func<(bool StartedWithGit, string? CommonGitDir)> readGit,
+        Func<GitAtStart> readGit,
         Func<IReadOnlyCollection<string>?> readModules)
     {
         // Decides RestoreIncomplete if the run stops before the restore does.
@@ -191,7 +191,7 @@ internal sealed class GitCheck
     /// </summary>
     private void RestoreAndCheck(
         SessionDir? session,
-        Func<(bool StartedWithGit, string? CommonGitDir)> readGit,
+        Func<GitAtStart> readGit,
         Func<IReadOnlyCollection<string>?> readModules)
     {
         var (startedWithGit, commonGitDir) = readGit();

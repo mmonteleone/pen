@@ -455,7 +455,7 @@ public sealed class ModuleBaselineTests : IDisposable
         Assert.Empty(narrowed.Listed);
         Assert.Equal([module], narrowed.Unlisted);
         Assert.Empty(s.ReadModules()!);
-        Assert.Equal((true, git), s.ReadGit());
+        Assert.Equal(new GitAtStart(true, git), s.ReadGit());
         Assert.True(Assert.Single(ProtectedFiles.Read(s)!.Files, f => f.Path == Path.Combine(module, "config")).Adopted);
     }
 

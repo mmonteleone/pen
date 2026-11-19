@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text;
 using Pen.Configuration;
@@ -24,6 +25,7 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
     /// <summary>The dir's own .git path, which may not exist.</summary>
     public string GitDir => Path.Combine(Dir, ".git");
     /// <summary>Whether the dir is a git repo (a checkout or a linked worktree).</summary>
+    [MemberNotNullWhen(true, nameof(CommonGitDir))]
     public bool IsRepo => CommonGitDir is not null;
     /// <summary>Whether the dir is a linked worktree: its .git is a file naming another repo's git dir.</summary>
     public bool IsWorktree => CommonGitDir is not null && CommonGitDir != GitDir;

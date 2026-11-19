@@ -233,12 +233,12 @@ internal sealed class SessionDir(string projectKey, string path)
     /// Whether it started in a repo, and the common git dir it started with, or null when it didn't start in one
     /// or its Pen didn't record the dir.
     /// </returns>
-    public (bool StartedWithGit, string? CommonGitDir) ReadGit()
+    public GitAtStart ReadGit()
     {
         if (!File.Exists(StartedWithGit))
-            return (false, null);
+            return new(false, null);
         var common = File.ReadAllText(StartedWithGit).TrimEnd('\n');
-        return (true, common.Length == 0 ? null : common);
+        return new(true, common.Length == 0 ? null : common);
     }
 
     /// <summary>Reads the project's main checkout as its runtime dir records it.</summary>
@@ -287,3 +287,10 @@ internal sealed class SessionDir(string projectKey, string path)
         return env;
     }
 }
+
+/// <summary>Whether a session started in a repo, and the common git dir it started with.</summary>
+/// <param name="StartedWithGit">Whether it started in a repo.</param>
+/// <param name="CommonGitDir">
+/// The common git dir, or null when it didn't start in a repo or its Pen didn't record the dir.
+/// </param>
+internal sealed record GitAtStart(bool StartedWithGit, string? CommonGitDir);

@@ -48,6 +48,8 @@ internal abstract record EgressTarget
         }
         catch (PenException)
         {
+            // StartDir.Get's and Project.Resolve's refusals, RepoScan's included, are the only statement of what counts
+            // as a project, so a refusal here is the wanted "no current project": --global works from anywhere.
             return new Global(null);
         }
     }
@@ -56,7 +58,7 @@ internal abstract record EgressTarget
     /// Records the current project's runtime dir (the project-dir marker included) and finishes its sessions whose
     /// Pen died; nothing without one.
     /// </summary>
-    public void PrepareCurrentProject(HostEnv host, TimeProvider clock)
+    public void PrepareProjectAndRecover(HostEnv host, TimeProvider clock)
     {
         if (CurrentProject is not { } project)
             return;

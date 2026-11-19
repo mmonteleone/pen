@@ -134,7 +134,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
             ReplaceAside(file, original);
             return null;
         }
-        KeepChangedVersion(file, current!.Bytes);
+        KeepChangedVersion(file, current.Bytes);
         return null;
     }
 
@@ -152,7 +152,7 @@ internal sealed class ProtectedFileRestore(SessionDir session, string dir, strin
     /// </summary>
     /// <returns>Whether it was written back; false if it isn't a regular file it can open for writing.</returns>
     [SuppressMessage("Reliability", "CA2000", Justification = "The using block disposes it once it isn't null")]
-    private static bool TryWriteInPlace(ProtectedFile file, byte[] original, RegularFile? current)
+    private static bool TryWriteInPlace(ProtectedFile file, byte[] original, [NotNullWhen(true)] RegularFile? current)
     {
         if (current is null)
             return false;

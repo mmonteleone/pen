@@ -98,24 +98,36 @@ public class SourceStyleTests
             "native calls outside cli/Pen/Platform/Native.cs:\n" + string.Join("\n", offenders));
     }
 
-    // RepoGuard runs at session start, when the agent may have planted git config and hooks, so it reads files
-    // directly and never runs git or any other process.
+    // GitProtection and Masking run at session start and end, when the agent may have planted git config and hooks,
+    // so they read files directly and never run git or any other process. None of their files needs to: Pen's own
+    // host git calls are in Signing (HostGit), and the session end runs them only after GitCheck returns.
     private static readonly Regex ProcOrHostGit = new("\\b(?:HostGit|Proc)\\b", RegexOptions.Compiled);
 
+    private static readonly string[] NoProcessFolders = ["GitProtection", "Masking"];
+
     [Fact]
-    public void RepoGuardNeverRunsGit()
+    public void GitProtectionAndMaskingNeverRunGit()
     {
-        var repoGuard = Path.Combine("GitProtection", "RepoGuard.cs");
-        Assert.True(File.Exists(Path.Combine(FindCliDir(), "Pen", repoGuard)),
+        var pen = Path.Combine(FindCliDir(), "Pen");
+        var scanned = 0;
+        foreach (var folder in NoProcessFolders)
+        {
+            Assert.True(Directory.Exists(Path.Combine(pen, folder)),
+                $"cli/Pen/{folder} moved: update this test to follow it");
+            scanned += Directory.EnumerateFiles(Path.Combine(pen, folder), "*.cs", SearchOption.AllDirectories).Count();
+        }
+        Assert.True(File.Exists(Path.Combine(pen, "GitProtection", "RepoGuard.cs")),
             "cli/Pen/GitProtection/RepoGuard.cs moved: update this test to follow it");
+        Assert.True(scanned > 0, "no sources found in " + string.Join(", ", NoProcessFolders));
 
         var offenders = FindCodeLines(ProcOrHostGit)
-            .Where(found => found.File == repoGuard)
+            .Where(found => NoProcessFolders.Any(
+                folder => found.File.StartsWith(folder + Path.DirectorySeparatorChar, StringComparison.Ordinal)))
             .Select(found => $"{found.File}:{found.Line}")
             .ToList();
 
         Assert.True(offenders.Count == 0,
-            "RepoGuard refers to HostGit or Proc:\n" + string.Join("\n", offenders));
+            "GitProtection or Masking refers to HostGit or Proc:\n" + string.Join("\n", offenders));
     }
 
     /// <summary>Finds the lines of cli/Pen's sources, outside line comments, that match <paramref name="pattern"/>.</summary>

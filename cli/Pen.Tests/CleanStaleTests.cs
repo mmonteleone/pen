@@ -49,7 +49,7 @@ public class CleanStaleTests
         Directory.Delete(repo, recursive: true);
         var e = Only(CleanStaleCommand.Find(host, [], []), key);
         Assert.Equal(CleanStaleCommand.Status.Missing, e.Status);
-        Assert.Equal(repo, e.RecordedDir);
+        Assert.Equal(repo, Assert.IsType<CleanStaleCommand.Fate.Missing>(e.Fate).Dir);
         Assert.True(e.Removable);
     }
 
@@ -79,7 +79,7 @@ public class CleanStaleTests
 
         var e = Only(CleanStaleCommand.Find(host, [], []), key);
         Assert.Equal(CleanStaleCommand.Status.Moved, e.Status);
-        Assert.Equal(Project.ComputeKey(other), e.CurrentKey);
+        Assert.Equal(Project.ComputeKey(other), Assert.IsType<CleanStaleCommand.Fate.Moved>(e.Fate).CurrentKey);
         Assert.True(e.Removable);
     }
 
@@ -93,9 +93,8 @@ public class CleanStaleTests
         Directory.Delete(dir);
         var main = Git.Repo(t.Sub("main"));
         Git.Run(main, "worktree", "add", "-q", dir);
-        var (status, current) = CleanStaleCommand.Classify(key, dir);
-        Assert.Equal(CleanStaleCommand.Status.Moved, status);
-        Assert.Equal(Project.ComputeKey(main), current);
+        var moved = Assert.IsType<CleanStaleCommand.Fate.Moved>(CleanStaleCommand.Classify(key, dir));
+        Assert.Equal(Project.ComputeKey(main), moved.CurrentKey);
     }
 
     [Fact]

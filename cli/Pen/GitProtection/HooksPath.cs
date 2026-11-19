@@ -37,6 +37,7 @@ internal static class HooksPath
     /// A value core.hooksPath may have, or (with a null Value) the Problem that keeps it from being known, and the
     /// File that sets it: a config file, or the environment variable.
     /// </summary>
+    /// <remarks>Exactly one of Value and Problem is set.</remarks>
     private readonly record struct Candidate(string? Value, string File, string? Problem = null);
 
     /// <summary>Where a path leads, as far as the sandbox is concerned.</summary>
@@ -221,12 +222,15 @@ internal static class HooksPath
         Candidate? unknown = null;
         foreach (var candidate in Enumerable.Reverse(found))
         {
-            var reach = candidate.Value is null
-                ? SandboxReach.Unknown
-                : Locate(candidate.Value, project, host.Home, top, relativeKnown);
+            if (candidate.Value is not { } value)
+            {
+                unknown ??= candidate;
+                continue;
+            }
+            var reach = Locate(value, project, host.Home, top, relativeKnown);
             if (reach == SandboxReach.Writable)
             {
-                return $"warning: core.hooksPath ({PausedGit.FormatLine(candidate.Value!)}, " +
+                return $"warning: core.hooksPath ({PausedGit.FormatLine(value)}, " +
                     $"in {Out.Field(host.Display(candidate.File))}) " +
                     $"is inside this {(project.IsWorktree ? "worktree or its repo's git dir" : "project")}: those " +
                     "hooks can be changed from the sandbox, and git on this machine will run them. Check them before " +
@@ -238,7 +242,9 @@ internal static class HooksPath
         }
         if (unknown is not { } first)
             return null;
-        var why = first.Problem ?? $"{PausedGit.FormatLine(first.Value!)}, in {Out.Field(host.Display(first.File))}";
+        var why = first.Value is { } unplaced
+            ? $"{PausedGit.FormatLine(unplaced)}, in {Out.Field(host.Display(first.File))}"
+            : first.Problem;
         return $"warning: pen can't tell where core.hooksPath leads ({why}): those hooks " +
             "may be inside this project, where they can be changed from the sandbox, and " +
             "git on this machine would run them. Check them before running git here";

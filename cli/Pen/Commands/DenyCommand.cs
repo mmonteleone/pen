@@ -28,7 +28,7 @@ internal sealed class DenyCommand(HostEnv host, StartDir startDir, RecipeCatalog
     public int Run(IReadOnlyList<string> domains, bool global)
     {
         var target = EgressTarget.Resolve(host, startDir, global);
-        target.PrepareCurrentProject(host, clock);
+        target.PrepareProjectAndRecover(host, clock);
         var addition = AddDenied(host, target, domains, catalog);
         EgressMessages.WriteAdded(addition, domains);
         EgressMessages.WriteGlobHint("deny", startDir, addition);

@@ -115,9 +115,9 @@ internal sealed class SignatureVerifier(HostGit git)
 
         var signers = git.ReadGlobalValue("gpg.ssh.allowedSignersFile");
         var addKey = $"echo \"{FormatEmailForHint()} {FormatPublicKeyForHint()}\" >> ";
-        if (SignatureConfig.KeepIfOutsideTheRepo(signers) is not null)
+        if (SignatureConfig.KeepIfOutsideTheRepo(signers) is { } kept)
         {
-            return warning + $"  Your key may not be listed in \"{Out.Field(signers!)}\". To add " +
+            return warning + $"  Your key may not be listed in \"{Out.Field(kept)}\". To add " +
                 $"it:\n    {addKey}\"$(git config --global --type=path gpg.ssh.allowedSignersFile)\"";
         }
 

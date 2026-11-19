@@ -123,12 +123,12 @@ internal sealed class PenDirHash : IDisposable
                 return problem;
         }
 
-        if (_copy is not null)
+        if (_copy is { } copyRoot)
         {
             if (ReadTime(() => self.LastWriteTimeUtc) is not { } time)
                 return CantRead;
-            Directory.SetLastWriteTimeUtc(GetCopyPath(relativePath), time);
-            File.SetUnixFileMode(GetCopyPath(relativePath), self.UnixFileMode);
+            Directory.SetLastWriteTimeUtc(GetCopyPath(copyRoot, relativePath), time);
+            File.SetUnixFileMode(GetCopyPath(copyRoot, relativePath), self.UnixFileMode);
         }
         return null;
     }
@@ -163,9 +163,9 @@ internal sealed class PenDirHash : IDisposable
             return false;
         }
         // Writable until its entries are in; its real mode comes last.
-        if (_copy is not null)
+        if (_copy is { } copyRoot)
         {
-            Directory.CreateDirectory(GetCopyPath(relativePath),
+            Directory.CreateDirectory(GetCopyPath(copyRoot, relativePath),
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
 
@@ -213,13 +213,13 @@ internal sealed class PenDirHash : IDisposable
             return refused;
         AppendHead(LinkEntry, 0, relativePath);
         AppendFramed(Encoding.UTF8.GetBytes(target));
-        if (_copy is null)
+        if (_copy is not { } copyRoot)
             return null;
         // macOS lets a symlink's target be empty, and File.CreateSymbolicLink refuses one: such a link can't be
         // copied, so the copy has no hash.
         if (target.Length == 0)
             return CantRead;
-        File.CreateSymbolicLink(GetCopyPath(relativePath), target);
+        File.CreateSymbolicLink(GetCopyPath(copyRoot, relativePath), target);
         return null;
     }
 
@@ -261,7 +261,7 @@ internal sealed class PenDirHash : IDisposable
             AppendHead(FileEntry, mode, relativePath);
             AppendLength(length);
         }
-        using var copy = _copy is null || !hashAndCopy ? null : CreateCopyFile(relativePath);
+        using var copy = _copy is { } copyRoot && hashAndCopy ? CreateCopyFile(copyRoot, relativePath) : null;
         var buffer = new byte[64 * 1024];
         long offset = 0;
         for (int read; (read = RandomAccess.Read(file, buffer, offset)) > 0; offset += read)
@@ -317,16 +317,20 @@ internal sealed class PenDirHash : IDisposable
         }
     }
 
-    /// <summary>Creates the copy of the file at <paramref name="relativePath"/>, which must not exist yet.</summary>
-    private FileStream CreateCopyFile(string relativePath) => new(GetCopyPath(relativePath), new FileStreamOptions
-    {
-        Mode = FileMode.CreateNew,
-        Access = FileAccess.Write,
-        UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
-    });
+    /// <summary>
+    /// Creates the copy, under <paramref name="copyRoot"/>, of the file at <paramref name="relativePath"/>, which must
+    /// not exist yet.
+    /// </summary>
+    private static FileStream CreateCopyFile(string copyRoot, string relativePath) =>
+        new(GetCopyPath(copyRoot, relativePath), new FileStreamOptions
+        {
+            Mode = FileMode.CreateNew,
+            Access = FileAccess.Write,
+            UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
+        });
 
-    private string GetCopyPath(string relativePath) =>
-        relativePath.Length == 0 ? _copy! : Path.Combine(_copy!, relativePath);
+    private static string GetCopyPath(string copyRoot, string relativePath) =>
+        relativePath.Length == 0 ? copyRoot : Path.Combine(copyRoot, relativePath);
 
     /// <summary>Checks that the symlink at <paramref name="relativePath"/> leads straight into .pen/.</summary>
     /// <returns>Why it doesn't, or null when it does.</returns>

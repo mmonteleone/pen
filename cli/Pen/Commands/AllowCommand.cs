@@ -29,7 +29,7 @@ internal sealed class AllowCommand(HostEnv host, StartDir startDir, RecipeCatalo
     public int Run(IReadOnlyList<string> domains, bool global)
     {
         var target = EgressTarget.Resolve(host, startDir, global);
-        target.PrepareCurrentProject(host, clock);
+        target.PrepareProjectAndRecover(host, clock);
         var addition = AddAllowed(host, target, domains, catalog);
         EgressMessages.WriteAdded(addition, domains);
         EgressMessages.WriteGlobHint("allow", startDir, addition);
@@ -77,7 +77,8 @@ internal sealed class AllowCommand(HostEnv host, StartDir startDir, RecipeCatalo
         }
         catch (PenException)
         {
-            // Warn from what could be read.
+            // The loaders' refusals are the only statement of a readable config, so a refusal here means "warn from
+            // what could be read": the warning is advisory, and applying to a running session reports the failure.
         }
 
         foreach (var line in FormatDenyWins(denies, domains))

@@ -172,6 +172,7 @@ public class InitCommandTests
     [Fact]
     public void ACreateFailingInAReadOnlyPenDir_IsntReportedAsAlreadyExisting()
     {
+        Assert.SkipWhen(Native.GetUid() == 0, "root writes everything");
         using var t = new TempDir();
         var (host, project) = Setup(t);
         Directory.CreateDirectory(project.PenDir);

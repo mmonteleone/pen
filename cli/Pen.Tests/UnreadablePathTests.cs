@@ -117,7 +117,7 @@ public class UnreadablePathTests
     }
 
     [Fact]
-    public void FinishDeadSessionsEndsTheSessionAndTheNextCommandWorks()
+    public void FinishAbandonedEndsTheSessionAndTheNextCommandWorks()
     {
         using var t = new TempDir();
         var repo = RepoWithModule(t, out var foo);

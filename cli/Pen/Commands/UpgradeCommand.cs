@@ -56,6 +56,9 @@ internal sealed class UpgradeCommand(
         }
         catch (PenException)
         {
+            // StartDir.Get's and Project.Resolve's refusals, RepoScan's included, are the only statement of what counts
+            // as a project, so a refusal here is the wanted "no project": pen upgrade works from anywhere, rebuilding
+            // the base and the user's tools alone.
             return null;
         }
     }

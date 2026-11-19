@@ -44,6 +44,7 @@ internal sealed class HidePattern
 
     /// <summary>Whether the pattern names one path: anchored, with no *, ? or **.</summary>
     /// <remarks>A literal pattern can be checked at <see cref="LiteralPath"/> without walking the project.</remarks>
+    [MemberNotNullWhen(true, nameof(LiteralPath))]
     public bool IsLiteral => LiteralPath is not null;
 
     /// <summary>
