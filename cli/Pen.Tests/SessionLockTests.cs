@@ -170,4 +170,51 @@ public sealed class SessionLockTests : IDisposable
             new EgressTarget.Global(_wt).FindRunningSessions(_host).Select(s => s.Id).Order(StringComparer.Ordinal));
         Assert.Equal(4, new EgressTarget.Global(null).FindRunningSessions(_host).Count);
     }
+
+    /// <summary>
+    /// A second --docker session for the project is refused, before it publishes anything or creates a volume, while
+    /// the first is running and holds the dind lock; the first then ends normally.
+    /// </summary>
+    [Fact]
+    public void ASecondDockerSessionIsRefusedWhileTheFirstHoldsTheDindLock()
+    {
+        var repo = Git.Repo(_t.Sub("docker-repo"));
+        var project = Project.Resolve(repo, _host);
+        var sessions = Path.Combine(_host.GetRuntimeDir(project.Key), "sessions");
+        var running = Path.Combine(_t.Path, "first-running");
+        var release = Path.Combine(_t.Path, "release-first");
+        using var docker = new FakeDocker(_t, $$"""
+            case " $* " in *" compose "*" run "*)
+              : > '{{running}}'
+              i=0; while [ ! -e '{{release}}' ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done ;;
+            esac
+            exit 0
+
+            """);
+        SessionRunner Runner() => new(new ProjectContext(_host, project, UserConfiguration.Empty, ProjectConfiguration.Empty),
+            new Answers(new StringReader(""), IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System);
+        var firstExit = -1;
+        var first = new Thread(() => firstExit = Runner().Run(new(["true"]) { Docker = true }));
+        first.Start();
+        try
+        {
+            Assert.True(SpinWait.SpinUntil(() => File.Exists(running), TimeSpan.FromSeconds(30)), "the first session never ran");
+            var callsBefore = File.ReadAllLines(Path.Combine(_t.Path, "calls")).Length;
+
+            var error = Assert.Throws<PenException>(() => Runner().Run(new(["true"]) { Docker = true }));
+
+            Assert.Equal("another --docker session is running in this project, and only one can run at a time " +
+                "(they'd share its Docker volume): exit it, or start this one without --docker", error.Message);
+            Assert.Single(Directory.GetDirectories(sessions));
+            Assert.DoesNotContain(File.ReadAllLines(Path.Combine(_t.Path, "calls")).Skip(callsBefore),
+                call => call.StartsWith("volume ", StringComparison.Ordinal) || call.StartsWith("compose ", StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.WriteAllText(release, "");
+            first.Join();
+        }
+        Assert.Equal(0, firstExit);
+        Assert.Empty(SessionRegistry.FindOpen(project.Key, _host.GetRuntimeDir(project.Key)));
+    }
 }

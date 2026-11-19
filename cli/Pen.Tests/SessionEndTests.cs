@@ -229,7 +229,7 @@ public class SessionEndTests
         var runtime = host.GetRuntimeDir(project.Key);
         var worktreeLock = SessionRegistry.GetWorktreeLockFile(runtime, project.Dir);
         using var docker = new FakeDocker(t, ProbingLocks(runtime, worktreeLock));
-        var run = new Session(new ProjectContext(host, project, UserConfiguration.Empty, ProjectConfiguration.Empty),
+        var run = new SessionRunner(new ProjectContext(host, project, UserConfiguration.Empty, ProjectConfiguration.Empty),
             new Answers(new StringReader(""), IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System);
 
         Assert.Equal(0, run.Run(new(["true"]) { Docker = true }));
@@ -276,7 +276,7 @@ public class SessionEndTests
             exit 0
 
             """);
-        var run = new Session(new ProjectContext(host, project, UserConfiguration.Empty, ProjectConfiguration.Empty),
+        var run = new SessionRunner(new ProjectContext(host, project, UserConfiguration.Empty, ProjectConfiguration.Empty),
             new Answers(new StringReader(""), IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System);
 
         Assert.Equal(0, run.Run(new(["true"])));
@@ -316,7 +316,7 @@ public class SessionEndTests
             switch (command)
             {
                 case "run":
-                    new Session(new ProjectContext(host, project, UserConfiguration.Empty, ProjectConfiguration.Empty),
+                    new SessionRunner(new ProjectContext(host, project, UserConfiguration.Empty, ProjectConfiguration.Empty),
                         answers, RecipeCatalog.Embedded, TimeProvider.System).Run(new(["true"]));
                     break;
                 case "sign":
@@ -575,7 +575,7 @@ public class SessionEndTests
         using var _ = docker;
 
         var result = default(SessionEndResult);
-        var output = CapturingStderr(() => result = Session.EndAndRemind(session));
+        var output = CapturingStderr(() => result = SessionRunner.EndAndRemind(session));
 
         Assert.True(result.CheckFinished);
         Assert.Equal(repo, result.ReminderDir);
@@ -818,7 +818,7 @@ public class SessionEndTests
         var (docker, gitCalls) = FakeHost(t);
         using var _ = docker;
 
-        var output = CapturingStderr(() => Session.EndAndRemind(session));
+        var output = CapturingStderr(() => SessionRunner.EndAndRemind(session));
 
         Assert.Equal(original, File.ReadAllText(config));
         Assert.Contains("WARNING", output);
@@ -836,7 +836,7 @@ public class SessionEndTests
         var (docker, gitCalls) = FakeHost(t);
         using var _ = docker;
 
-        var output = CapturingStderr(() => Session.EndAndRemind(session));
+        var output = CapturingStderr(() => SessionRunner.EndAndRemind(session));
 
         Assert.True(File.Exists(config));
         Assert.Contains(".git/config: it was deleted", output.Replace(t.Path + "/repo/", "", StringComparison.Ordinal));
@@ -857,7 +857,7 @@ public class SessionEndTests
         try
         {
             SessionEndResult result = default;
-            var output = CapturingStderr(() => result = Session.EndAndRemind(session));
+            var output = CapturingStderr(() => result = SessionRunner.EndAndRemind(session));
             Assert.False(result.CheckFinished);
             Assert.Contains("good copies", output);
             Assert.True(session.IsOpen());
@@ -999,7 +999,7 @@ public class SessionEndTests
         var (docker, gitCalls) = FakeHost(t);
         using var _d = docker;
         SessionEndResult result = default;
-        var output = CapturingStderr(() => result = Session.EndAndRemind(session));
+        var output = CapturingStderr(() => result = SessionRunner.EndAndRemind(session));
         Assert.False(result.CheckFinished);
         Assert.Contains("isn't there any more", output);
         Assert.Empty(RepoGitCalls(gitCalls));
@@ -1077,7 +1077,7 @@ public class SessionEndTests
         File.Delete(Path.Combine(t.Path, "repo", ".git", "commondir"));
         var (docker, gitCalls) = FakeHost(t);
         using var _ = docker;
-        Assert.True(Session.EndAndRemind(session).CheckFinished);
+        Assert.True(SessionRunner.EndAndRemind(session).CheckFinished);
         Assert.Single(RepoGitCalls(gitCalls));
     }
 
@@ -1104,7 +1104,7 @@ public class SessionEndTests
         var session = Create(t, docker: false);
         var (docker, gitCalls) = FakeHost(t);
         using var _ = docker;
-        Assert.True(Session.EndAndRemind(session).CheckFinished);
+        Assert.True(SessionRunner.EndAndRemind(session).CheckFinished);
         Assert.False(File.Exists(gitCalls));
     }
 
@@ -1163,7 +1163,7 @@ public class SessionEndTests
         using var _ = docker;
 
         var ok = false;
-        var output = CapturingStderr(() => ok = Session.EndAndRemind(session).CheckFinished);
+        var output = CapturingStderr(() => ok = SessionRunner.EndAndRemind(session).CheckFinished);
 
         Assert.True(ok); // it doesn't stop Pen's own git, which continues nothing
         Assert.Contains(".git/rebase-merge: a paused rebase", output);
@@ -1183,7 +1183,7 @@ public class SessionEndTests
         using var _ = docker;
 
         var ok = true;
-        var output = CapturingStderr(() => ok = Session.EndAndRemind(session).CheckFinished);
+        var output = CapturingStderr(() => ok = SessionRunner.EndAndRemind(session).CheckFinished);
 
         Assert.False(ok);
         Assert.Contains("git wasn't checked: don't run git here", output);
@@ -1278,7 +1278,7 @@ public class SessionEndTests
             var (docker, gitCalls) = FakeHost(t);
             using var _ = docker;
             var ok = true;
-            var output = CapturingStderr(() => ok = Session.EndAndRemind(session).CheckFinished);
+            var output = CapturingStderr(() => ok = SessionRunner.EndAndRemind(session).CheckFinished);
             Assert.False(ok);
             Assert.Contains("COULD NOT MOVE", output);
             Assert.Contains("git wasn't checked", output);
@@ -1315,7 +1315,7 @@ public class SessionEndTests
         var sessions = Path.Combine(host.GetRuntimeDir(project.Key), "sessions");
         Directory.CreateDirectory(sessions);
         Directory.Move(session.Path, Path.Combine(sessions, "12345678"));
-        var run = new Session(new ProjectContext(host, project, UserConfiguration.Empty, ProjectConfiguration.Empty), new Answers(Console.In, Native.IsATty(0)), RecipeCatalog.Embedded, TimeProvider.System);
+        var run = new SessionRunner(new ProjectContext(host, project, UserConfiguration.Empty, ProjectConfiguration.Empty), new Answers(Console.In, Native.IsATty(0)), RecipeCatalog.Embedded, TimeProvider.System);
 
         var error = Assert.Throws<PenException>(() => run.Run(new(["true"])));
 

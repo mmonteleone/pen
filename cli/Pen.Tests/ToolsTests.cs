@@ -80,7 +80,7 @@ public class ToolsTests
     [Fact]
     public void OnlyTheFirstWordCounts() => Assert.Null(Implied(["bash", "helper"]));
 
-    /// <summary>What a pen command line implies, as Session.Run sees its command.</summary>
+    /// <summary>What a pen command line implies, as SessionRunner.Run sees its command.</summary>
     private static string? ImpliedBy(params string[] args)
     {
         var command = Assert.IsType<RunInvocation>(CommandParser.Parse(args, () => null, RecipeCatalog.Embedded));

@@ -3,7 +3,6 @@ using Pen.Commands;
 using Pen.Configuration;
 using Pen.Platform;
 using Pen.Projects;
-using Pen.Sessions;
 using Pen.Tools;
 
 // Pen drives Docker on macOS and Linux only.
@@ -123,23 +122,9 @@ internal static class Program
     }
 
     /// <summary>Runs a session in the project's sandbox.</summary>
-    /// <remarks>
-    /// --docker turns Docker-in-Docker on for one session; docker = true in
-    /// .pen/config.toml for every session. Nothing turns it off per session.
-    /// --port adds to ports in .pen/config.toml.
-    /// --tool adds to tools in both config files.
-    /// </remarks>
     private static int RunSession(
-        ProjectContext context, RunInvocation run, RecipeCatalog catalog, TimeProvider clock)
-    {
-        var request = new SessionRequest(run.Command)
-        {
-            Docker = run.Docker || context.ProjectConfig.Docker == true,
-            Ports = Port.Merge(context.ProjectConfig.Ports, run.Ports),
-            FlagTools = run.Tools,
-        };
-        return new Session(context, ReadAnswersFromStdin(), catalog, clock).Run(request);
-    }
+        ProjectContext context, RunInvocation run, RecipeCatalog catalog, TimeProvider clock) =>
+        new RunCommand(context, ReadAnswersFromStdin(), catalog, clock).Run(run);
 
     /// <summary>Gets this process's stdin, and whether it's a terminal.</summary>
     private static Answers ReadAnswersFromStdin() => new(Console.In, Native.IsATty(0));

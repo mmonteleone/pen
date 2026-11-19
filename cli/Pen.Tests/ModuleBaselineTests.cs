@@ -24,7 +24,7 @@ public sealed class ModuleBaselineTests : IDisposable
     }
 
     /// <summary>
-    /// Starts a session as Session does: the refusals, the module repos chosen by the open sessions' lists, its lock,
+    /// Starts a session as SessionRunner does: the refusals, the module repos chosen by the open sessions' lists, its lock,
     /// the choice narrowed with the protected files and git records saved, then compose.yaml last.
     /// </summary>
     private SessionDir Start(string dir, string common, string id)
@@ -40,7 +40,7 @@ public sealed class ModuleBaselineTests : IDisposable
         return s;
     }
 
-    /// <summary>Ends a session as Session does: the check, then its files, compose.yaml first.</summary>
+    /// <summary>Ends a session as SessionRunner does: the check, then its files, compose.yaml first.</summary>
     private CheckResult End(string dir, SessionDir s)
     {
         var check = GitCheck.RunAtSessionEnd(dir, s);

@@ -17,7 +17,7 @@ public class ProtectedFilesTests
         new(Key, t.Sub("runtime", "sessions", id));
 
     /// <summary>
-    /// Starts a session as Session does, with the project's open sessions as the baselines: the module repos chosen,
+    /// Starts a session as SessionRunner does, with the project's open sessions as the baselines: the module repos chosen,
     /// the choice narrowed with the files and git records saved, then compose.yaml, which opens it for the next one.
     /// </summary>
     private static SessionDir Started(TempDir t, string dir, string common, string id = "abcd1234")

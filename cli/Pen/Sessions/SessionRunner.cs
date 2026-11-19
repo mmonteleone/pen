@@ -1,4 +1,3 @@
-using Pen.Configuration;
 using Pen.GitProtection;
 using Pen.Masking;
 using Pen.Platform;
@@ -8,12 +7,15 @@ using Pen.Tools;
 
 namespace Pen.Sessions;
 
-/// <summary>Runs a session: prepares its protections, runs the agent, stops what could write and checks Git.</summary>
+/// <summary>
+/// Runs a session: takes and keeps its locks, ends abandoned ones, prepares its protections, publishes it, runs the
+/// agent, stops what could write and checks Git.
+/// </summary>
 /// <param name="context">The project and both configs.</param>
 /// <param name="answers">Where approvals of .pen/ come from.</param>
 /// <param name="catalog">The recipes tools come from.</param>
 /// <param name="clock">The clock for the start time, waits and how long ended sessions' files are kept.</param>
-internal sealed class Session(ProjectContext context, Answers answers, RecipeCatalog catalog, TimeProvider clock)
+internal sealed class SessionRunner(ProjectContext context, Answers answers, RecipeCatalog catalog, TimeProvider clock)
 {
     private Project Project => context.Project;
 
@@ -22,9 +24,11 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
     /// <summary>Runs <paramref name="request"/>'s command in the project's sandbox, then ends the session.</summary>
     /// <returns>The command's exit code, or 1 when the agent couldn't be started; a refusal throws.</returns>
     /// <remarks>
-    /// The steps are: prepare, write the session dir, run the agent, end. The project and worktree locks, the dind
-    /// lock, the signal handling and the session's lock are all held until the end (teardown and the .git check)
-    /// has finished, and released in reverse order.
+    /// The steps, in this order: ensure the runtime dir; take the project and worktree locks; end abandoned sessions;
+    /// prepare and approve; take the dind lock; choose the ports and create the volumes; hold the signals; warn and
+    /// claim the init hint; create and lock the session dir; write its files; run the agent; end. The project and
+    /// worktree locks, the dind lock, the signal handling and the session's lock are all held until the end
+    /// (teardown and the .git check) has finished, and released in reverse order.
     /// </remarks>
     public int Run(SessionRequest request)
     {
@@ -58,7 +62,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         // signals held, so Ctrl-C can't end Pen between the probe's create and delete.
         RepoGuard.WarnIfCaseMayFold(Project, Out.WriteLine, PathChecks.MayFoldCase);
         HooksPath.WarnIfWritable(Project, context.Host, Out.WriteLine, context.Host.GetVariable);
-        foreach (var warning in ListEgressWarnings(prepared.Tools, prepared.Egress.Deny))
+        foreach (var warning in EgressWarnings.ListForSession(context, catalog, prepared.Tools, prepared.Egress.Deny))
             Out.WriteLine(warning);
         // The case probe goes in .pen, so it too waits for the signals to be held.
         if (MaskMessages.FormatSummary(prepared.Masks) is { } summary)
@@ -86,79 +90,6 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
 
         EndAndRemind(session);
         return exitCode;
-    }
-
-    /// <summary>Lists the warnings about the session's egress: open egress, and deny taking what tools need.</summary>
-    private IReadOnlyList<string> ListEgressWarnings(IReadOnlyList<ToolSpec> tools, IReadOnlyList<string> deny)
-    {
-        var needs = tools.Select(tool => tool.Name).Distinct(StringComparer.Ordinal)
-            .Select(name => (name, catalog.TryGet(name, out var recipe) ? recipe.Allow : []));
-        return FormatEgressWarnings(context.User, context.Host.Display(context.Host.UserConfigPath),
-            context.ProjectConfig, deny, needs);
-    }
-
-    /// <summary>Formats the warnings about a session's egress.</summary>
-    /// <param name="user">The user's config.</param>
-    /// <param name="userConfigPath">Names the user's config.toml.</param>
-    /// <param name="projectConfig">The project's config.</param>
-    /// <param name="deny">The merged deny list.</param>
-    /// <param name="toolDomains">Each of the session's tools, by name, with the domains its recipe brings.</param>
-    /// <returns>
-    /// One line when allow has <see cref="Allowlist.AnyDomain"/>, naming the files; then one per domain a tool
-    /// needs that deny covers, in part or whole, naming the narrower of the two and the tools.
-    /// </returns>
-    internal static IReadOnlyList<string> FormatEgressWarnings(
-        UserConfiguration user,
-        string userConfigPath,
-        ProjectConfiguration projectConfig,
-        IReadOnlyList<string> deny,
-        IEnumerable<(string Tool, IReadOnlyList<string> Domains)> toolDomains)
-    {
-        var warnings = new List<string>();
-        var openIn = new List<string>();
-        if (user.Allow.Contains(Allowlist.AnyDomain))
-            openIn.Add(userConfigPath);
-        if (projectConfig.Allow.Contains(Allowlist.AnyDomain))
-            openIn.Add(".pen/" + ConfigLoader.FileName);
-        if (openIn.Count > 0)
-            warnings.Add($"egress is open: any domain is allowed (allow = [\"*\"] in {string.Join(" and ", openIn)})");
-
-        // A deny entry under a tool's wildcard takes part of what it needs, and one over a tool's domain all of it.
-        var covered = new Dictionary<string, List<string>>(StringComparer.Ordinal);
-        var order = new List<string>();
-        foreach (var (tool, domains) in toolDomains)
-        {
-            foreach (var domain in domains)
-            {
-                foreach (var entry in deny)
-                {
-                    var taken = Allowlist.FindDenyCoverage(entry, domain) switch
-                    {
-                        DenyCoverage.All => domain,
-                        DenyCoverage.Part => entry,
-                        _ => null,
-                    };
-                    if (taken is null)
-                        continue;
-                    if (!covered.TryGetValue(taken, out var needers))
-                    {
-                        covered[taken] = needers = [];
-                        order.Add(taken);
-                    }
-                    if (!needers.Contains(tool))
-                        needers.Add(tool);
-                }
-            }
-        }
-        foreach (var taken in order)
-        {
-            var needers = covered[taken];
-            var who = needers.Count == 1
-                ? needers[0] + " needs"
-                : string.Join(", ", needers[..^1]) + " and " + needers[^1] + " need";
-            warnings.Add($"deny covers {taken}, which {who}");
-        }
-        return warnings;
     }
 
     /// <summary>Takes the project's dind lock, for a docker session.</summary>

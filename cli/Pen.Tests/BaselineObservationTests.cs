@@ -26,7 +26,7 @@ public class BaselineObservationTests
             exit 0
 
             """);
-        var run = new Session(new ProjectContext(host, project, UserConfiguration.Empty, ProjectConfiguration.Empty),
+        var run = new SessionRunner(new ProjectContext(host, project, UserConfiguration.Empty, ProjectConfiguration.Empty),
             new Answers(new StringReader(""), IsTerminal: false), RecipeCatalog.Embedded, TimeProvider.System);
 
         var error = Record.Exception(() => run.Run(new(["true"])));

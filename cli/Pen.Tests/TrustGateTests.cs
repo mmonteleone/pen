@@ -70,7 +70,7 @@ public class TrustGateTests
         public bool HasSeen(string name) => File.Exists(Path.Combine(T.Path, name));
 
         public int Run(Answers answers, IReadOnlyList<ToolSpec>? flagTools = null, RecipeCatalog? recipes = null, string[]? command = null) =>
-            new Session(new ProjectContext(Host, Project, User, ProjectConfig), answers, recipes ?? RecipeCatalog.Embedded, TimeProvider.System).Run(new(command ?? ["true"]) { Docker = ProjectConfig.Docker == true, FlagTools = flagTools ?? [] });
+            new SessionRunner(new ProjectContext(Host, Project, User, ProjectConfig), answers, recipes ?? RecipeCatalog.Embedded, TimeProvider.System).Run(new(command ?? ["true"]) { Docker = ProjectConfig.Docker == true, FlagTools = flagTools ?? [] });
 
         public void AssertNothingReached()
         {
@@ -642,7 +642,7 @@ public class TrustGateTests
     public void PortsAloneDontAsk()
     {
         using var f = new Fixture(projectToml: "ports = [39871]\n", dockerfile: "");
-        Assert.Equal(0, new Session(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded, TimeProvider.System).Run(new(["true"]) { Ports = Port.Merge(f.ProjectConfig.Ports, []) }));
+        Assert.Equal(0, new SessionRunner(new ProjectContext(f.Host, f.Project, f.User, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded, TimeProvider.System).Run(new(["true"]) { Ports = Port.Merge(f.ProjectConfig.Ports, []) }));
     }
 
     [Fact]
@@ -745,7 +745,7 @@ public class TrustGateTests
     {
         File.WriteAllText(f.Host.UserConfigPath, userToml); // what pen allow reads live
         var user = ConfigParser.ParseUser(userToml, "u", RecipeCatalog.Embedded);
-        return new Session(new ProjectContext(f.Host, f.Project, user, f.ProjectConfig), answers, RecipeCatalog.Embedded, TimeProvider.System).Run(new(["true"]));
+        return new SessionRunner(new ProjectContext(f.Host, f.Project, user, f.ProjectConfig), answers, RecipeCatalog.Embedded, TimeProvider.System).Run(new(["true"]));
     }
 
     [Fact]
@@ -807,7 +807,7 @@ public class TrustGateTests
     {
         using var f = new Fixture(projectToml: StarToml, dockerfile: "");
         var user = ConfigParser.ParseUser("allow = [\"*\"]\n", "u", RecipeCatalog.Embedded);
-        Assert.Equal(0, new Session(new ProjectContext(f.Host, f.Project, user, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded, TimeProvider.System).Run(new(["true"])));
+        Assert.Equal(0, new SessionRunner(new ProjectContext(f.Host, f.Project, user, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded, TimeProvider.System).Run(new(["true"])));
         Assert.Equal(".\n", f.Seen("open-egress-seen"));
         Assert.False(TrustStore.For(f.Host, f.Project).CoversDomain("*"));
     }
@@ -1107,7 +1107,7 @@ public class TrustGateTests
     {
         using var f = ToolsFixture();
         var user = ConfigParser.ParseUser(ProjectTool, "u", RecipeCatalog.Embedded);
-        Assert.Equal(0, new Session(new ProjectContext(f.Host, f.Project, user, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded, TimeProvider.System).Run(new(["true"])));
+        Assert.Equal(0, new SessionRunner(new ProjectContext(f.Host, f.Project, user, f.ProjectConfig), NoTerminal, RecipeCatalog.Embedded, TimeProvider.System).Run(new(["true"])));
         Assert.Contains("example.org", f.Seen("allowlist-seen").Split('\n'));
         Assert.False(TrustStore.For(f.Host, f.Project).CoversTool(PenTest));
     }

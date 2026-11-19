@@ -385,7 +385,7 @@ public class AllowlistTests
 
     private static IReadOnlyList<string> EgressWarnings(string user, string project, string[] deny,
         params (string Tool, IReadOnlyList<string> Domains)[] tools) =>
-        Session.FormatEgressWarnings(ConfigParser.ParseUser(user, "u", RecipeCatalog.Embedded), "~/.config/pen/config.toml",
+        Pen.Proxy.EgressWarnings.Format(ConfigParser.ParseUser(user, "u", RecipeCatalog.Embedded), "~/.config/pen/config.toml",
             ConfigParser.ParseProject(project, "p", RecipeCatalog.Embedded), deny, tools);
 
     [Fact]

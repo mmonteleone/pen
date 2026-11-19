@@ -65,7 +65,7 @@ public class SessionFilesTests
         var sessions = Path.Combine(host.GetRuntimeDir(project.Key), "sessions");
         using var fake = new FakeDocker(t, dockerBody?.Invoke(sessions) ?? "exit 0\n");
         TimeProvider clock = atStarted is null ? TimeProvider.System : new AtStarted(project.Key, sessions, atStarted);
-        var run = new Session(new ProjectContext(host, project, user ?? UserConfiguration.Empty, ProjectConfiguration.Empty),
+        var run = new SessionRunner(new ProjectContext(host, project, user ?? UserConfiguration.Empty, ProjectConfiguration.Empty),
             new Answers(new StringReader(""), IsTerminal: false), RecipeCatalog.Embedded, clock);
 
         var error = Record.Exception(() => run.Run(new(["true"]) { Docker = docker }));
