@@ -68,7 +68,7 @@ Before merging, run the suite on macOS arm64 and Linux amd64, with both rootful 
 
 **Container files and templates are embedded in the CLI.** The installed pen never reads this checkout. Reinstall after changing `compose.yaml`, `image/`, `proxy/`, `templates/` or `tools/`, just as you would after a CLI change. Changes under `image/` trigger an image rebuild on the next session.
 
-[AGENTS.md](AGENTS.md) explains command flow, sessions, locking and git protection. Read it before changing session handling or anything that touches the host repo.
+[AGENTS.md](AGENTS.md) explains command flow, sessions, locking and git protection; its "Entry points" paragraph says where to add a command, where configuration is validated and approved, and how a session starts, ends and recovers. Read it before changing session handling or anything that touches the host repo.
 
 Keep code AOT/trim-safe: use source-generated serialization rather than reflection-based APIs. Native calls belong in `Native.cs`. Tests access internals through `InternalsVisibleTo`; use the `TempDir` and `Git` helpers in `Pen.TestSupport`.
 
