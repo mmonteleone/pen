@@ -104,6 +104,30 @@ public class TrustGateTests
     }
 
     [Fact]
+    public void ARepoWithANestedRepoIsRefusedBeforeAnythingIsAskedOrReached()
+    {
+        using var f = new Fixture();
+        Git.Repo(f.T.Sub("repo", "vendor", "inner"));
+        var e = Assert.Throws<PenException>(() => f.Run(NoTerminal));
+        Assert.Contains("it has other git repos inside it", e.Message);
+        Assert.Contains("vendor/inner", e.Message);
+        Assert.DoesNotContain("pen trust", e.Message);
+        f.AssertNothingReached();
+    }
+
+    [Fact]
+    public void DecliningCreatesNoMountTargetsInTheRepo()
+    {
+        using var f = new Fixture();
+        var hooks = Path.Combine(f.Project.Dir, ".git", "hooks");
+        Directory.Delete(hooks, recursive: true);
+        var e = Assert.Throws<PenException>(() => f.Run(NoTerminal));
+        Assert.Contains("pen trust", e.Message);
+        Assert.False(Directory.Exists(hooks));
+        f.AssertNothingReached();
+    }
+
+    [Fact]
     public void WithoutATerminalItsRefused_ListingTheItems_EvenWithAYesWaitingOnStdin()
     {
         using var f = new Fixture();
