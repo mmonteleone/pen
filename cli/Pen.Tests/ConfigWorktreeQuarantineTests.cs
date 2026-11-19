@@ -11,7 +11,7 @@ public class ConfigWorktreeQuarantineTests
 
     private static SessionDir Started(TempDir t, string dir, string common, string id = "aaaaaaaa", IReadOnlyList<SessionDir>? running = null)
     {
-        // As Session does: the module repos every open session listed, and the rest unlisted.
+        // As SessionRunner does: the module repos every open session listed, and the rest unlisted.
         var open = running ?? [];
         var lists = ModuleBaseline.ReadOpenLists(open, common, dir);
         var mounts = RepoGuard.EnsureMountTargetsAndPlan(dir, "/nonexistent-home");

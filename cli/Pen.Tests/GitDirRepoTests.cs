@@ -16,7 +16,7 @@ public class GitDirRepoTests
     private static SessionDir Started(TempDir t, string dir, string common, string id = "aaaaaaaa")
     {
         RepoGuard.CheckAtStart(dir);
-        // As Session does, with no other session open: every module repo found is listed.
+        // As SessionRunner does, with no other session open: every module repo found is listed.
         var lists = ModuleBaseline.ReadOpenLists([], common, dir);
         var mounts = RepoGuard.EnsureMountTargetsAndPlan(dir, "/nonexistent-home");
         var found = RepoScan.FindModuleRepos(common);

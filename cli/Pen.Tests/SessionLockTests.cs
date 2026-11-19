@@ -183,10 +183,12 @@ public sealed class SessionLockTests : IDisposable
         var sessions = Path.Combine(_host.GetRuntimeDir(project.Key), "sessions");
         var running = Path.Combine(_t.Path, "first-running");
         var release = Path.Combine(_t.Path, "release-first");
+        // Only the first compose run waits, so a second session that isn't refused fails the test at once.
         using var docker = new FakeDocker(_t, $$"""
             case " $* " in *" compose "*" run "*)
-              : > '{{running}}'
-              i=0; while [ ! -e '{{release}}' ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done ;;
+              if mkdir '{{running}}' 2>/dev/null; then
+                i=0; while [ ! -e '{{release}}' ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done
+              fi ;;
             esac
             exit 0
 
@@ -198,7 +200,7 @@ public sealed class SessionLockTests : IDisposable
         first.Start();
         try
         {
-            Assert.True(SpinWait.SpinUntil(() => File.Exists(running), TimeSpan.FromSeconds(30)), "the first session never ran");
+            Assert.True(SpinWait.SpinUntil(() => Directory.Exists(running), TimeSpan.FromSeconds(30)), "the first session never ran");
             var callsBefore = File.ReadAllLines(Path.Combine(_t.Path, "calls")).Length;
 
             var error = Assert.Throws<PenException>(() => Runner().Run(new(["true"]) { Docker = true }));
