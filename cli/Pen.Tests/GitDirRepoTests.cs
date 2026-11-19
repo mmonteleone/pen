@@ -18,7 +18,7 @@ public class GitDirRepoTests
         RepoGuard.CheckAtStart(dir);
         // As SessionRunner does, with no other session open: every module repo found is listed.
         var lists = ModuleBaseline.ReadOpenLists([], common, dir);
-        var mounts = RepoGuard.EnsureMountTargetsAndPlan(dir, "/nonexistent-home");
+        var mounts = new MountPlanner(dir, "/nonexistent-home").EnsureTargetsAndPlan();
         var found = RepoScan.FindModuleRepos(common);
         var modules = ModuleBaseline.Choose(found, lists);
         var s = new SessionDir(Key, t.Sub("runtime", "sessions", id));

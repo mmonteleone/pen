@@ -390,14 +390,4 @@ internal static class RepoGuard
         if (project.CommonGitDir is { } common && probe(common))
             warn(CaseWarning);
     }
-
-    /// <summary>
-    /// Plans the mounts over the project mount, creating what must exist to be mounted (.pen/, .git/hooks, and a few
-    /// files inside .git) so that the agent can't create them instead.
-    /// </summary>
-    /// <param name="dir">The project dir, checked by <see cref="CheckAtStart"/> first.</param>
-    /// <param name="hostHome">The host user's home, for includes of ~/ paths.</param>
-    /// <returns>The mounts, in order, one per path (see <see cref="MountPlanner.EnsureTargetsAndPlan"/>).</returns>
-    public static IReadOnlyList<Mount> EnsureMountTargetsAndPlan(string dir, string hostHome) =>
-        new MountPlanner(dir, hostHome).EnsureTargetsAndPlan();
 }

@@ -29,7 +29,7 @@ public class SessionEndTests
     [InlineData("started-with-git")]
     [InlineData("modules")]
     [InlineData("restored-manifest.json")]
-    public void DeleteSessionFiles_RemovesComposeYamlBeforeTheRecordsAnOpenSessionHas(string record)
+    public void Delete_RemovesComposeYamlBeforeTheRecordsAnOpenSessionHas(string record)
     {
         using var t = new TempDir();
         var session = Create(t, docker: false);
@@ -48,7 +48,7 @@ public class SessionEndTests
     }
 
     [Fact]
-    public void DeleteSessionFiles_LeavesOnlyTheProxyLogs()
+    public void Delete_LeavesOnlyTheProxyLogs()
     {
         using var t = new TempDir();
         var session = Create(t, docker: true);
@@ -459,7 +459,7 @@ public class SessionEndTests
     {
         using var t = new TempDir();
         var (host, project, dead) = AbandonedInProject(t);
-        ProtectedFiles.Save(dead, RepoGuard.EnsureMountTargetsAndPlan(project.Dir, "/nonexistent-home"), project.Dir, [], []);
+        ProtectedFiles.Save(dead, new MountPlanner(project.Dir, "/nonexistent-home").EnsureTargetsAndPlan(), project.Dir, [], []);
         var config = Path.Combine(project.Dir, ".git", "config");
         var original = File.ReadAllText(config);
         File.AppendAllText(config, "[core]\n fsmonitor = /evil\n");
@@ -804,7 +804,7 @@ public class SessionEndTests
         var session = Create(t, docker: false);
         var repo = Path.Combine(t.Path, "repo");
         File.Delete(Path.Combine(repo, ".git", "commondir"));
-        ProtectedFiles.Save(session, RepoGuard.EnsureMountTargetsAndPlan(repo, "/nonexistent-home"), repo, [], []);
+        ProtectedFiles.Save(session, new MountPlanner(repo, "/nonexistent-home").EnsureTargetsAndPlan(), repo, [], []);
         return (session, Path.Combine(repo, ".git", "config"));
     }
 
@@ -958,7 +958,7 @@ public class SessionEndTests
         File.WriteAllText(session.StartedWithGit, Path.Combine(repo, ".git") + "\n");
         File.WriteAllText(session.ModulesFile, "");
         File.WriteAllText(session.ProxyLog, "");
-        ProtectedFiles.Save(session, RepoGuard.EnsureMountTargetsAndPlan(wt, "/nonexistent-home"), wt, [], []);
+        ProtectedFiles.Save(session, new MountPlanner(wt, "/nonexistent-home").EnsureTargetsAndPlan(), wt, [], []);
 
         File.WriteAllText(gitFile, "gitdir: /forged\n");
         File.SetUnixFileMode(wt, UnixFileMode.None);
@@ -1016,7 +1016,7 @@ public class SessionEndTests
         var innerSession = new SessionDir("k", t.Sub("runtime2", "sessions", "1"));
         File.WriteAllText(innerSession.StartedWithGit, Path.Combine(inner, ".git") + "\n");
         File.WriteAllText(innerSession.ModulesFile, "");
-        ProtectedFiles.Save(innerSession, RepoGuard.EnsureMountTargetsAndPlan(inner, "/nonexistent-home"), inner, [], []);
+        ProtectedFiles.Save(innerSession, new MountPlanner(inner, "/nonexistent-home").EnsureTargetsAndPlan(), inner, [], []);
         File.SetUnixFileMode(holder, UnixFileMode.None);
         try { check = GitCheck.RunAtSessionEnd(inner, innerSession); }
         finally { File.SetUnixFileMode(holder, (UnixFileMode)0b111_101_101); }

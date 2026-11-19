@@ -82,6 +82,63 @@ public class SourceStyleTests
             "string normalization in cli/Pen (use Native.NormalizeFormC):\n" + string.Join("\n", offenders));
     }
 
+    // A global using alias elsewhere (for example, aliasing NativeLibrary) isn't caught.
+    private static readonly Regex NativeImport =
+        new("\\b(?:DllImport|LibraryImport|NativeLibrary)\\b|delegate\\s*\\*\\s*unmanaged", RegexOptions.Compiled);
+
+    [Fact]
+    public void OnlyNativeDeclaresNativeCalls()
+    {
+        var offenders = FindCodeLines(NativeImport)
+            .Where(found => found.File != Path.Combine("Platform", "Native.cs"))
+            .Select(found => $"{found.File}:{found.Line}")
+            .ToList();
+
+        Assert.True(offenders.Count == 0,
+            "native calls outside cli/Pen/Platform/Native.cs:\n" + string.Join("\n", offenders));
+    }
+
+    // RepoGuard runs at session start, when the agent may have planted git config and hooks, so it reads files
+    // directly and never runs git or any other process.
+    private static readonly Regex ProcOrHostGit = new("\\b(?:HostGit|Proc)\\b", RegexOptions.Compiled);
+
+    [Fact]
+    public void RepoGuardNeverRunsGit()
+    {
+        var repoGuard = Path.Combine("GitProtection", "RepoGuard.cs");
+        Assert.True(File.Exists(Path.Combine(FindCliDir(), "Pen", repoGuard)),
+            "cli/Pen/GitProtection/RepoGuard.cs moved: update this test to follow it");
+
+        var offenders = FindCodeLines(ProcOrHostGit)
+            .Where(found => found.File == repoGuard)
+            .Select(found => $"{found.File}:{found.Line}")
+            .ToList();
+
+        Assert.True(offenders.Count == 0,
+            "RepoGuard refers to HostGit or Proc:\n" + string.Join("\n", offenders));
+    }
+
+    /// <summary>Finds the lines of cli/Pen's sources, outside line comments, that match <paramref name="pattern"/>.</summary>
+    /// <returns>Each file relative to cli/Pen, with its line number.</returns>
+    private static List<(string File, int Line)> FindCodeLines(Regex pattern)
+    {
+        var pen = Path.Combine(FindCliDir(), "Pen");
+        var found = new List<(string File, int Line)>();
+        var files = Directory.EnumerateFiles(pen, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !IsBuildOutput(Path.GetRelativePath(pen, f)))
+            .OrderBy(f => f, StringComparer.Ordinal);
+        foreach (var file in files)
+        {
+            var lines = File.ReadAllLines(file);
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (!lines[i].TrimStart().StartsWith("//", StringComparison.Ordinal) && pattern.IsMatch(lines[i]))
+                    found.Add((Path.GetRelativePath(pen, file), i + 1));
+            }
+        }
+        return found;
+    }
+
     /// <summary>Finds the raw string literal a line ends inside, given the one it starts inside.</summary>
     /// <param name="line">The line.</param>
     /// <param name="closing">The closing quotes of the raw string the line starts inside, or null if none.</param>

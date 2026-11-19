@@ -261,7 +261,7 @@ internal static class CommandParser
     }
 
     /// <summary>Reads an argument's values exactly as given.</summary>
-    private static IReadOnlyList<string> ReadTokens(ParseResult result, Argument argument) =>
+    private static string[] ReadTokens(ParseResult result, Argument argument) =>
         result.GetResult(argument)?.Tokens.Select(token => token.Value).ToArray() ?? [];
 
     /// <summary>

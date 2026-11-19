@@ -943,7 +943,7 @@ public class PausedGitTests
     }
 
     [Fact]
-    public void AnUnlistableGitDirIsStillSweptByNameWhenPenCantOpenIt_AndStaysAFailure()
+    public void AnUnlistableGitDirIsStillSweptByNameWhenPenWontMakeItListable_AndStaysAFailure()
     {
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
@@ -961,7 +961,7 @@ public class PausedGitTests
     }
 
     [Fact]
-    public void AWorktreeEntryThatStaysClosedIsAFailure()
+    public void AWorktreeEntryThatStaysUnlistableIsAFailure()
     {
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
@@ -976,7 +976,7 @@ public class PausedGitTests
     }
 
     [Fact]
-    public void AWorktreeEntryThatCanBeOpenedIsCheckedAtSessionEnd()
+    public void AWorktreeEntryThatCanBeMadeListableIsCheckedAtSessionEnd()
     {
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));

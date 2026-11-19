@@ -14,7 +14,7 @@ public class ConfigWorktreeQuarantineTests
         // As SessionRunner does: the module repos every open session listed, and the rest unlisted.
         var open = running ?? [];
         var lists = ModuleBaseline.ReadOpenLists(open, common, dir);
-        var mounts = RepoGuard.EnsureMountTargetsAndPlan(dir, "/nonexistent-home");
+        var mounts = new MountPlanner(dir, "/nonexistent-home").EnsureTargetsAndPlan();
         var found = RepoScan.FindModuleRepos(common);
         var modules = ModuleBaseline.Choose(found, lists);
         var s = new SessionDir(Key, t.Sub("runtime", "sessions", id));
@@ -772,7 +772,7 @@ public class ConfigWorktreeQuarantineTests
     }
 
     [Fact]
-    public void AnEntryPenCantOpen_IsAFailureNotASilentPass()
+    public void AnEntryPenCantList_IsAFailureNotASilentPass()
     {
         using var t = new TempDir();
         var (repo, git) = Repo(t);

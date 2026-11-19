@@ -99,16 +99,16 @@ public class ScanFailClosedTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void ADirectoryThatStaysUnlistableIsReported(bool claimsOpened)
+    public void ADirectoryThatStaysUnlistableIsReported(bool claimsMadeListable)
     {
         using var t = new TempDir();
         var repo = RepoWithHiddenRepo(t, out var sub);
         using var _ = new Chmod(sub, Mode311);
-        Assert.Equal([sub], RepoScan.ScanNested(repo, Path.Combine(repo, ".git"), [], p => claimsOpened).UnlistableDirs);
+        Assert.Equal([sub], RepoScan.ScanNested(repo, Path.Combine(repo, ".git"), [], p => claimsMadeListable).UnlistableDirs);
     }
 
     [Fact]
-    public void WithoutOpeningAnUnlistableDirectoryIsAFailure_AndKeepsItsMode()
+    public void WithoutMakingItListable_AnUnlistableDirectoryIsAFailure_AndKeepsItsMode()
     {
         using var t = new TempDir();
         var repo = RepoWithHiddenRepo(t, out var sub);
@@ -299,7 +299,7 @@ public class ScanFailClosedTests
     }
 
     [Fact]
-    public void TryOpenWontChmodThroughASymlink()
+    public void TryMakeListableWontChmodThroughASymlink()
     {
         using var t = new TempDir();
         var target = t.Sub("target");
@@ -339,7 +339,7 @@ public class ScanFailClosedTests
     private static string Inc(params string[] paths) => string.Concat(paths.Select(p => $"[include]\n\tpath = {p}\n"));
 
     private static IReadOnlyList<Mount> Mounts(TempDir t, string repo) =>
-        Within10s(() => RepoGuard.EnsureMountTargetsAndPlan(repo, t.Path));
+        Within10s(() => new MountPlanner(repo, t.Path).EnsureTargetsAndPlan());
 
     private static bool ReadOnly(IReadOnlyList<Mount> mounts, string path) => mounts.Any(m => m.Path == path && m.ReadOnly);
 
@@ -411,7 +411,7 @@ public class ScanFailClosedTests
         var repo = Git.Repo(t.Sub("repo"));
         var file = Path.Combine(repo, ".git", "config.worktree");
         File.WriteAllText(file, Inc(Enumerable.Range(0, GitConfigIncludes.MaxFiles + 1).Select(i => $"f{i}.inc").ToArray()));
-        var e = Within10s(() => Assert.Throws<PenException>(() => RepoGuard.EnsureMountTargetsAndPlan(repo, t.Path)));
+        var e = Within10s(() => Assert.Throws<PenException>(() => new MountPlanner(repo, t.Path).EnsureTargetsAndPlan()));
         Assert.Contains(".git/config.worktree", e.Message);
         Assert.Contains("remove it", e.Message);
     }
@@ -428,17 +428,17 @@ public class ScanFailClosedTests
         var path = include == "LONG" ? new string('n', 300) : include;
         File.WriteAllText(file, Inc(path));
 
-        var e = Assert.Throws<PenException>(() => RepoGuard.EnsureMountTargetsAndPlan(repo, t.Path));
+        var e = Assert.Throws<PenException>(() => new MountPlanner(repo, t.Path).EnsureTargetsAndPlan());
         Assert.Contains(".git/config.worktree includes", e.Message);
         Assert.Contains(path, e.Message);
         Assert.Contains("remove it", e.Message);
 
         File.Delete(file);
-        RepoGuard.EnsureMountTargetsAndPlan(repo, t.Path);
+        new MountPlanner(repo, t.Path).EnsureTargetsAndPlan();
     }
 
     [Fact]
-    public void AnOpenDirectoryWithTheBitsAlreadySetRecordsNoChange()
+    public void AnAlreadyListableDirectoryRecordsNoChange()
     {
         using var t = new TempDir();
         Assert.False(FileModes.TryMakeListable(t.Sub("d"), write: false, out var opened));

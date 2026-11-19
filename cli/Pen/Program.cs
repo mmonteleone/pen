@@ -104,13 +104,15 @@ internal static class Program
         var project = Project.Resolve(startDir.Get(), host);
         return invocation switch
         {
-            RunInvocation run => RunSession(ProjectContext.Load(host, project, user, catalog), run, catalog, clock),
-            ListBlockedInvocation =>
-                ListBlocked(ProjectContext.Load(host, project, user, catalog), startDir, catalog, clock),
-            ListDeniedInvocation =>
-                ListDenied(ProjectContext.Load(host, project, user, catalog), startDir, catalog, clock),
-            TrustInvocation trust =>
-                RunTrust(ProjectContext.Load(host, project, user, catalog), trust.Mode, catalog, clock),
+            RunInvocation run => new RunCommand(
+                ProjectContext.Load(host, project, user, catalog), ReadAnswersFromStdin(), catalog, clock).Run(run),
+            ListBlockedInvocation => new AllowCommand(host, startDir, catalog, clock)
+                .ListBlocked(ProjectContext.Load(host, project, user, catalog)),
+            ListDeniedInvocation => new DenyCommand(host, startDir, catalog, clock)
+                .List(ProjectContext.Load(host, project, user, catalog)),
+            TrustInvocation trust => new TrustCommand(
+                ProjectContext.Load(host, project, user, catalog), ReadAnswersFromStdin(), catalog, clock)
+                .Run(trust.Mode),
             InitInvocation => new InitCommand(host, project, catalog).Run(),
             SignInvocation sign => new SignCommand(host, project, clock).Run(sign.Base),
             CleanInvocation => new CleanCommand(host, project, ReadAnswersFromStdin(), clock).Run(),
@@ -118,24 +120,6 @@ internal static class Program
         };
     }
 
-    /// <summary>Runs a session in the project's sandbox.</summary>
-    private static int RunSession(
-        ProjectContext context, RunInvocation run, RecipeCatalog catalog, TimeProvider clock) =>
-        new RunCommand(context, ReadAnswersFromStdin(), catalog, clock).Run(run);
-
     /// <summary>Gets this process's stdin, and whether it's a terminal.</summary>
     private static Answers ReadAnswersFromStdin() => new(Console.In, Native.IsATty(0));
-
-    /// <summary>Runs pen allow without domains: lists the recently blocked ones.</summary>
-    private static int ListBlocked(
-        ProjectContext context, StartDir startDir, RecipeCatalog catalog, TimeProvider clock) =>
-        new AllowCommand(context.Host, startDir, catalog, clock).ListBlocked(context);
-
-    /// <summary>Runs pen deny without domains: lists what's denied.</summary>
-    private static int ListDenied(
-        ProjectContext context, StartDir startDir, RecipeCatalog catalog, TimeProvider clock) =>
-        new DenyCommand(context.Host, startDir, catalog, clock).List(context);
-
-    private static int RunTrust(ProjectContext context, TrustMode mode, RecipeCatalog catalog, TimeProvider clock) =>
-        new TrustCommand(context, ReadAnswersFromStdin(), catalog, clock).Run(mode);
 }

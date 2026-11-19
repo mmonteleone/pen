@@ -1048,7 +1048,7 @@ public class MaskPlannerTests
         Write(dir, "conf/git.inc", "");
         Write(dir, "agent.env");
         File.AppendAllText(Path.Combine(dir, ".git", "config"), "[include]\n\tpath = ../conf/git.inc\n");
-        var mounts = RepoGuard.EnsureMountTargetsAndPlan(dir, t.Sub("home")).Select(m => m.Path).ToArray();
+        var mounts = new MountPlanner(dir, t.Sub("home")).EnsureTargetsAndPlan().Select(m => m.Path).ToArray();
 
         var hide = Refused(() => PlanProtected(dir, Path.Combine(dir, ".git"), mounts, ["conf/"]));
         var replace = Refused(() => PlanProtected(dir, Path.Combine(dir, ".git"), mounts, [], ("conf/git.inc", "agent.env")));

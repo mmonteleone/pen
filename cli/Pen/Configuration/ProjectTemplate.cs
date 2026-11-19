@@ -113,7 +113,7 @@ internal static class ProjectTemplate
         {
             var line = $"# {FormatTool(tool)}";
             if (tool.Sources.Count > 0)
-                line += $", from {ListCapped(tool.Sources)}";
+                line += $", from {CappedList.Join(tool.Sources, MaxListed)}";
             if (tool.HasUnknownVersion)
                 line += $" ({DescribeUnknownVersion(tool)}, so it's at the recipe's default)";
             yield return line;
@@ -128,7 +128,7 @@ internal static class ProjectTemplate
     {
         0 => "a version found isn't one its recipe knows",
         1 => $"{tool.UnknownVersions[0]} isn't a version its recipe knows",
-        _ => $"{ListCapped(tool.UnknownVersions)} aren't versions its recipe knows",
+        _ => $"{CappedList.Join(tool.UnknownVersions, MaxListed)} aren't versions its recipe knows",
     };
 
     /// <summary>Notes that Node and Python, when found, come with the base image.</summary>
@@ -157,7 +157,7 @@ internal static class ProjectTemplate
         {
             var line = $"  {Quote(pattern.Pattern)},";
             if (pattern.Sources.Count > 0)
-                line += $" # {ListCapped(pattern.Sources)}";
+                line += $" # {CappedList.Join(pattern.Sources, MaxListed)}";
             yield return line;
         }
         yield return "]";
@@ -182,13 +182,7 @@ internal static class ProjectTemplate
     {
         if (detection.DockerFiles.Count == 0)
             yield break;
-        yield return $"# Found {ListCapped(detection.DockerFiles)}: if sessions need Docker, uncomment this.";
-    }
-
-    /// <summary>Lists the first <see cref="MaxListed"/> items, then says how many more there are.</summary>
-    internal static string ListCapped(IReadOnlyList<string> items)
-    {
-        var listed = string.Join(", ", items.Take(MaxListed));
-        return items.Count > MaxListed ? $"{listed} and {items.Count - MaxListed} more" : listed;
+        var found = CappedList.Join(detection.DockerFiles, MaxListed);
+        yield return $"# Found {found}: if sessions need Docker, uncomment this.";
     }
 }

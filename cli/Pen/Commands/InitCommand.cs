@@ -153,5 +153,5 @@ internal sealed class InitCommand(HostEnv host, Project project, RecipeCatalog c
 
     /// <summary>Lists repo-derived items through <see cref="Out.Field"/>, capped as the template caps them.</summary>
     private static string ListFields(IReadOnlyList<string> items) =>
-        ProjectTemplate.ListCapped([.. items.Select(Out.Field)]);
+        CappedList.Join(items, ProjectTemplate.MaxListed, Out.Field);
 }

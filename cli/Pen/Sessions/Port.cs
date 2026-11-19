@@ -16,7 +16,7 @@ internal readonly record struct Port(int Number, bool FromFlag)
 
     /// <summary>Merges the config's ports and then the flag's, without duplicates.</summary>
     /// <remarks>A port in both counts as from the flag.</remarks>
-    public static IReadOnlyList<Port> Merge(IEnumerable<int> config, IEnumerable<int> flag)
+    public static IReadOnlyList<Port> Merge(IReadOnlyList<int> config, IReadOnlyList<int> flag)
     {
         var fromFlag = flag.ToHashSet();
         var merged = new List<Port>();

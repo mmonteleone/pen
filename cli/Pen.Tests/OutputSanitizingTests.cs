@@ -186,7 +186,7 @@ public class OutputSanitizingTests
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
         Git.Run(repo, "config", "include.path", "../inc" + Esc + "\tname");
-        var m = Assert.Throws<PenException>(() => RepoGuard.EnsureMountTargetsAndPlan(repo, "/nonexistent-home")).Message;
+        var m = Assert.Throws<PenException>(() => new MountPlanner(repo, "/nonexistent-home").EnsureTargetsAndPlan()).Message;
         Assert.Contains("inc\\x1b\\tname", m);
         Assert.False(m.Contains(Esc, StringComparison.Ordinal));
     }

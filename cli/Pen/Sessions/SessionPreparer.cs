@@ -45,7 +45,7 @@ internal sealed class SessionPreparer(
         var tools = ToolSpec.Merge(catalog, context.User.Tools, context.ProjectConfig.Tools, flagTools);
         // Before anything below uses a setting from .pen/.
         var trust = new TrustGate(context, answers, catalog, clock).RequireForSession(flagTools);
-        var mounts = RepoGuard.EnsureMountTargetsAndPlan(Project.Dir, context.Host.Home);
+        var mounts = new MountPlanner(Project.Dir, context.Host.Home).EnsureTargetsAndPlan();
         // A hide or [replace] that can't be used stops the session here, before anything is made for it.
         var masks = new MaskPlanner(Project.Dir, Project.CommonGitDir, [.. mounts.Select(mount => mount.Path)],
             [.. context.User.Hide, .. context.ProjectConfig.Hide],

@@ -269,7 +269,7 @@ public class RepoGuardTests
     // --- mounts ---------------------------------------------------------------
 
     private static List<(string, bool)> Mounts(string dir, string? home = null) =>
-        RepoGuard.EnsureMountTargetsAndPlan(dir, home ?? "/nonexistent-home").Select(m => (PathChecks.FormatPath(dir, m.Path), m.ReadOnly)).ToList();
+        new MountPlanner(dir, home ?? "/nonexistent-home").EnsureTargetsAndPlan().Select(m => (PathChecks.FormatPath(dir, m.Path), m.ReadOnly)).ToList();
 
     [Fact]
     public void MountsForARepo()
@@ -507,7 +507,7 @@ public class RepoGuardTests
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
         File.AppendAllText(Path.Combine(repo, ".git", "config"), text);
-        var mounts = RepoGuard.EnsureMountTargetsAndPlan(repo, "/nonexistent-home");
+        var mounts = new MountPlanner(repo, "/nonexistent-home").EnsureTargetsAndPlan();
         Assert.Contains(mounts, m => m.Path == Path.Combine(repo, ".git", "inc") && m.ReadOnly && m.Verify);
         Assert.True(File.Exists(Path.Combine(repo, ".git", "inc")));
     }
@@ -546,7 +546,7 @@ public class RepoGuardTests
         File.WriteAllText(Path.Combine(root, "config.worktree"), "[include]\npath = first.inc\n");
         File.WriteAllText(Path.Combine(root, "first.inc"), "[includeIf \"onbranch:other\"]\npath = last.inc\n");
         File.WriteAllText(Path.Combine(root, "last.inc"), "");
-        var mounts = RepoGuard.EnsureMountTargetsAndPlan(linked ? Path.Combine(repo, "wt") : repo, "/nonexistent-home");
+        var mounts = new MountPlanner(linked ? Path.Combine(repo, "wt") : repo, "/nonexistent-home").EnsureTargetsAndPlan();
         Assert.Contains(mounts, x => x.Path == Path.Combine(root, "first.inc") && x.ReadOnly);
         Assert.Contains(mounts, x => x.Path == Path.Combine(root, "last.inc") && x.ReadOnly);
     }
@@ -936,7 +936,7 @@ public class RepoGuardTests
         if (exists)
             File.WriteAllText(Path.Combine(t.Path, spelled), "");
         File.AppendAllText(Path.Combine(repo, ".git", "config"), $"[include]\n\tpath = {alias}/{spelled}\n");
-        var mounts = RepoGuard.EnsureMountTargetsAndPlan(repo, "/nonexistent-home");
+        var mounts = new MountPlanner(repo, "/nonexistent-home").EnsureTargetsAndPlan();
         Assert.Contains(mounts, m => m.Path == Path.Combine(repo, shown) && m.ReadOnly && m.Verify);
         Assert.DoesNotContain(mounts, m => m.Path.StartsWith("/System/Volumes/Data", StringComparison.Ordinal));
         Assert.True(File.Exists(Path.Combine(repo, shown)));

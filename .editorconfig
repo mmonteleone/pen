@@ -181,6 +181,13 @@ dotnet_code_quality.CA1002.api_surface = public, internal
 # CA2227 only checks public types, so it has nothing to check in this internal-only assembly today; settable
 # collection properties are kept out by review.
 dotnet_diagnostic.CA2227.severity = warning
+# Multiple enumeration, members that use no instance state, and concrete types where an interface costs a virtual
+# call. CA1859 looks only at locals and private members: a non-private one hands out the read-only interface
+# CA1002 asks for, rather than the List<T> or array behind it.
+dotnet_diagnostic.CA1851.severity = warning
+dotnet_diagnostic.CA1822.severity = warning
+dotnet_diagnostic.CA1859.severity = warning
+dotnet_code_quality.CA1859.api_surface = private
 
 # APIs with one owner each (cli/Pen/BannedSymbols.txt): only their owners may use them.
 dotnet_diagnostic.RS0030.severity = warning

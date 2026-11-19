@@ -30,7 +30,7 @@ public sealed class ModuleBaselineTests : IDisposable
     private SessionDir Start(string dir, string common, string id)
     {
         RepoGuard.CheckAtStart(dir);
-        var mounts = RepoGuard.EnsureMountTargetsAndPlan(dir, "/nonexistent-home");
+        var mounts = new MountPlanner(dir, "/nonexistent-home").EnsureTargetsAndPlan();
         var chosen = ModuleBaseline.ChooseAtStart(SessionRegistry.FindOpen(Key, Runtime), common, dir);
 
         var s = new SessionDir(Key, _t.Sub("runtime", "sessions", id));
@@ -218,8 +218,12 @@ public sealed class ModuleBaselineTests : IDisposable
         Die(a);
         // On macOS, Process.Start forks: a parallel test's child, until it execs, shares the lock's open file
         // description and keeps the flock held for a moment after the release.
-        var released = Retry.Repeat(250, TimeSpan.FromMilliseconds(20),
-            () => SessionRegistry.FindRunning(Key, Runtime).Count == 0);
+        var released = SessionRegistry.FindRunning(Key, Runtime).Count == 0;
+        for (var tried = 1; !released && tried < 250; tried++)
+        {
+            Thread.Sleep(20);
+            released = SessionRegistry.FindRunning(Key, Runtime).Count == 0;
+        }
         Assert.True(released, "the released session still looks running");
         var (module, checkout) = Plant(git, Path.Combine(repo, "evil"), hook);
         AssertFires(checkout, marker);
@@ -434,7 +438,7 @@ public sealed class ModuleBaselineTests : IDisposable
         var (hook, _) = Canary();
         var (repo, git) = Repo();
         var (module, _) = Plant(git, Path.Combine(repo, "evil"), hook);
-        var mounts = RepoGuard.EnsureMountTargetsAndPlan(repo, "/nonexistent-home");
+        var mounts = new MountPlanner(repo, "/nonexistent-home").EnsureTargetsAndPlan();
         var chosen = ModuleBaseline.ChooseAtStart(SessionRegistry.FindOpen(Key, Runtime), git, repo);
         Assert.Equal([module], chosen.Listed);
         // A session that opened after that read, listing nothing (its Pen has died since): the repo the scan found
