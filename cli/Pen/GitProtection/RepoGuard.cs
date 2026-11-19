@@ -165,25 +165,23 @@ internal static class RepoGuard
         if (nested.Count == 0)
             return;
         var message = new StringBuilder(FormatNestedHeading(dir, git));
-        var anySubmodule = false;
-        var anyOther = false;
         // Only the repos listed are looked at for the advice; any not listed may be other repos.
-        var anyQuarantined = false;
+        var shown = nested.Take(MaxListed).ToList();
+        var submodules = shown.Where(repo => repo.Kind == NestedKind.GitDir && IsSubmodulePath(dir, repo.RepoDir))
+            .ToHashSet(ReferenceEqualityComparer.Instance);
+        var anySubmodule = submodules.Count > 0;
+        var anyQuarantined = shown.Any(repo => IsInQuarantine(dir, repo.RepoDir));
+        var anyOther = nested.Count > MaxListed
+            || shown.Any(repo => !submodules.Contains(repo) && !IsInQuarantine(dir, repo.RepoDir));
         var listed = CappedList.FormatLines(nested, MaxListed, repo =>
         {
-            var submodule = repo.Kind == NestedKind.GitDir && IsSubmodulePath(dir, repo.RepoDir);
-            var quarantined = IsInQuarantine(dir, repo.RepoDir);
-            anySubmodule |= submodule;
-            anyQuarantined |= quarantined;
-            anyOther |= !submodule && !quarantined;
-            var kind = submodule
+            var kind = submodules.Contains(repo)
                 ? " (a submodule with its own .git dir)"
                 : NestedRepoWording.DescribeRefused(repo.Kind);
             return PathChecks.FormatPath(dir, repo.RepoDir) + kind;
         });
         foreach (var line in listed)
             message.Append("\n  ").Append(line);
-        anyOther |= nested.Count > MaxListed;
         if (anySubmodule)
         {
             message.Append("\nfor a submodule, run git submodule absorbgitdirs here on this machine: " +
@@ -206,17 +204,16 @@ internal static class RepoGuard
     {
         if (found.Count == 0)
             return;
-        var anyRefs = false;
-        var anyEntry = false;
-        var anyQuarantined = false;
+        var shown = found.Take(MaxListed).ToList();
+        var anyRefs = shown.Any(IsMadeByRefNames);
+        var anyEntry = shown.Any(repo => repo is { Region: GitDirRegion.WorktreeEntry, Kind: NestedKind.Bare });
+        var anyQuarantined = shown.Any(repo => IsInQuarantine(common, repo.RepoDir));
         var listed = CappedList.FormatLines(found, MaxListed, repo =>
         {
-            var refs = repo is { Region: GitDirRegion.Refs, Kind: NestedKind.Bare };
-            anyRefs |= refs;
-            anyQuarantined |= IsInQuarantine(common, repo.RepoDir);
-            anyEntry |= repo is { Region: GitDirRegion.WorktreeEntry, Kind: NestedKind.Bare };
-            return PathChecks.FormatPath(dir, repo.RepoDir) + (refs ? " (ref names that lay it out as a git dir)" :
-                NestedRepoWording.DescribeRefusedInGitDir(repo));
+            var kind = IsMadeByRefNames(repo)
+                ? " (ref names that lay it out as a git dir)"
+                : NestedRepoWording.DescribeRefusedInGitDir(repo);
+            return PathChecks.FormatPath(dir, repo.RepoDir) + kind;
         });
         var message = new StringBuilder($"refusing to run in {Out.Field(dir)}: its git dir has repos where git " +
             "keeps none, whose config and hooks pen can't protect, and git run in their directories (through a " +
@@ -242,6 +239,10 @@ internal static class RepoGuard
             : "\ninspect each and remove it, then rerun");
         throw new PenException(message.ToString());
     }
+
+    /// <summary>Whether a repo in the git dir is laid out by ref names, in refs/ or logs/.</summary>
+    private static bool IsMadeByRefNames(NestedRepo repo) =>
+        repo is { Region: GitDirRegion.Refs, Kind: NestedKind.Bare };
 
     /// <summary>
     /// Refuses symlinks in the tree that lead into the git dir, or would once a directory they name is made, and

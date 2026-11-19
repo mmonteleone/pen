@@ -254,24 +254,31 @@ internal sealed class MaskPlanner
             return;
         foreach (var pattern in _hide)
         {
-            var segments = pattern.LiteralPath!.Split('/');
             List<SeenDir> level = [root];
-            foreach (var segment in segments)
+            foreach (var segment in pattern.LiteralPath!.Split('/'))
+                level = VisitNamed(level, segment);
+        }
+    }
+
+    /// <summary>
+    /// Visits the entries named <paramref name="segment"/> (<see cref="IsSameName"/>) in each directory of
+    /// <paramref name="level"/>, in order.
+    /// </summary>
+    /// <returns>The directories to look in for the next segment.</returns>
+    private List<SeenDir> VisitNamed(List<SeenDir> level, string segment)
+    {
+        var next = new List<SeenDir>();
+        foreach (var dir in level)
+        {
+            if (ListOnce(dir) is not { } entries)
+                continue;
+            foreach (var entry in entries)
             {
-                var next = new List<SeenDir>();
-                foreach (var dir in level)
-                {
-                    if (ListOnce(dir) is not { } entries)
-                        continue;
-                    foreach (var entry in entries)
-                    {
-                        if (IsSameName(entry.Name, segment) && Visit(dir, entry) is { } subdir)
-                            next.Add(subdir);
-                    }
-                }
-                level = next;
+                if (IsSameName(entry.Name, segment) && Visit(dir, entry) is { } subdir)
+                    next.Add(subdir);
             }
         }
+        return next;
     }
 
     /// <summary>
@@ -292,33 +299,53 @@ internal sealed class MaskPlanner
             return null;
         var path = Path.Join(dir.Path, entry.Name);
         var relative = dir.Relative.Length == 0 ? entry.Name : dir.Relative + "/" + entry.Name;
+        if (TakeUsableName(entry, path, relative) is not { } usable)
+            return null;
+        return MatchAndHide(usable, path, relative);
+    }
+
+    /// <summary>
+    /// Takes an entry whose name can be used to look at it: as listed, or with its type from lstat when the listing
+    /// shows U+FFFD in its name.
+    /// </summary>
+    /// <returns>The entry, or null, with a warning, when its name isn't valid UTF-8.</returns>
+    private Entry? TakeUsableName(Entry entry, string path, string relative)
+    {
         if (entry.IsUndecodable)
         {
             WarnUndecodable(entry, relative);
             return null;
         }
 
-        if (entry.Name.Contains('\uFFFD'))
+        if (!entry.Name.Contains('\uFFFD'))
+            return entry;
+        // The listing shows a name that isn't valid UTF-8 with U+FFFD in place of the bad bytes, so the path made
+        // from it names nothing there (or another entry). A real U+FFFD in a name is found by lstat.
+        if (Native.Stat(path, follow: false) is not { } status)
         {
-            // The listing shows a name that isn't valid UTF-8 with U+FFFD in place of the bad bytes, so the path
-            // made from it names nothing there (or another entry). A real U+FFFD in a name is found by lstat.
-            if (Native.Stat(path, follow: false) is not { } status)
-            {
-                WarnUndecodable(entry, relative);
-                return null;
-            }
-
-            entry = entry with { IsDirectory = status.IsDirectory, IsLink = status.IsSymlink };
+            WarnUndecodable(entry, relative);
+            return null;
         }
 
+        return entry with { IsDirectory = status.IsDirectory, IsLink = status.IsSymlink };
+    }
+
+    /// <summary>
+    /// Hides the entry at <paramref name="path"/> if a pattern matches it, as <see cref="Visit"/> says.
+    /// </summary>
+    /// <returns>The entry as a directory to look in, or null when there's nothing to look in.</returns>
+    private SeenDir? MatchAndHide(Entry entry, string path, string relative)
+    {
         var isDirectory = entry.IsDirectory && !entry.IsLink;
         if (isDirectory && path == _commonGitDir)
             return null;
         if (entry.IsLink)
             WarnLiteralsThrough(path, relative);
         var match = FindMatch(relative, isDirectory);
+        var dirMatch = match;
         // A directory-only pattern matches a symlink that leads to a directory in the project.
-        var dirMatch = entry.IsLink ? match ?? FindMatch(relative, isDirectory: true) : match;
+        if (entry.IsLink)
+            dirMatch ??= FindMatch(relative, isDirectory: true);
         if (dirMatch is null)
             return isDirectory ? Enter(path, relative) : null;
         if (isDirectory && _commonGitDir is not null && PathChecks.IsInside(path, _commonGitDir))
@@ -686,6 +713,27 @@ internal sealed class MaskPlanner
     /// </remarks>
     private ProjectFile ReadSource(string target, string source, Dictionary<(ulong, ulong), string> hidden)
     {
+        RequireSourceNameNotHidden(target, source);
+        var file = ReadSourceFile(target, source);
+        if (DescribeHiddenStep(file, hidden) is { } why)
+            throw HiddenSource(target, source, why);
+        // What it's hidden by is only known for the names the walk saw, and it never looks in a hidden directory.
+        if (file.Steps[^1].Links > 1)
+        {
+            throw new PenException($"replace: source \"{Out.Field(source)}\" (for \"{Out.Field(target)}\") has " +
+                "another name (a hard link), so pen can't tell whether hide hides it: use a copy instead");
+        }
+
+        return file;
+    }
+
+    /// <summary>
+    /// Refuses a [replace] source by its name, before anything is read: one in .git, or one that a pattern matches,
+    /// or a directory on its way.
+    /// </summary>
+    /// <exception cref="PenException">It's refused, naming the pattern and the entry it matches.</exception>
+    private void RequireSourceNameNotHidden(string target, string source)
+    {
         var parts = source.Split('/');
         if (parts.Any(part => part.Equals(".git", StringComparison.OrdinalIgnoreCase)))
         {
@@ -703,37 +751,40 @@ internal sealed class MaskPlanner
                 throw HiddenSource(target, source, $"hide \"{Out.Field(pattern.Text)}\" matches {shown}");
             }
         }
+    }
 
-        ProjectFile file;
+    /// <summary>Reads a [replace] source through <see cref="Native.ReadInsideProject"/>.</summary>
+    /// <exception cref="PenException">It can't be read, with the reason.</exception>
+    private ProjectFile ReadSourceFile(string target, string source)
+    {
         try
         {
-            file = Native.ReadInsideProject(_projectDir, source);
+            return Native.ReadInsideProject(_projectDir, source);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             throw new PenException($"replace: source \"{Out.Field(source)}\" (for \"{Out.Field(target)}\") can't " +
                 "be used: " + Out.Field(exception.Message));
         }
+    }
 
+    /// <summary>
+    /// Describes the first step of <paramref name="file"/>, the directories it was read through and then the file,
+    /// that is in <paramref name="hidden"/>, for <see cref="HiddenSource"/>.
+    /// </summary>
+    /// <returns>The description, safe to print, or null if none is.</returns>
+    private string? DescribeHiddenStep(ProjectFile file, Dictionary<(ulong, ulong), string> hidden)
+    {
         for (var index = 0; index < file.Steps.Count; index++)
         {
             var step = file.Steps[index];
             if (!hidden.TryGetValue((step.Device, step.Inode), out var path))
                 continue;
-            var why = index == file.Steps.Count - 1
-                ? $"it's {Format(path)}, which hide hides"
-                : $"it's in {Format(path)}/, which hide hides whole";
-            throw HiddenSource(target, source, why);
+            if (index == file.Steps.Count - 1)
+                return $"it's {Format(path)}, which hide hides";
+            return $"it's in {Format(path)}/, which hide hides whole";
         }
-
-        // What it's hidden by is only known for the names the walk saw, and it never looks in a hidden directory.
-        if (file.Steps[^1].Links > 1)
-        {
-            throw new PenException($"replace: source \"{Out.Field(source)}\" (for \"{Out.Field(target)}\") has " +
-                "another name (a hard link), so pen can't tell whether hide hides it: use a copy instead");
-        }
-
-        return file;
+        return null;
     }
 
     /// <summary>

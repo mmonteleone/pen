@@ -123,8 +123,7 @@ internal static class ConfigParser
             var domain = item is string text ? text.ToLowerInvariant() : null;
             if (!allowStar && domain == Allowlist.AnyDomain)
                 throw error($"{key} = [\"*\"] would block everything; remove the allow entries instead");
-            if (domain is null
-                || !(allowStar ? Allowlist.IsValidAllowEntry(domain) : Allowlist.IsValidDomain(domain)))
+            if (domain is null || !IsValidEntry(domain, allowStar))
             {
                 throw error($"{key}: {DescribeItem(item)} " +
                     "isn't a domain (use example.com, or .example.com to include its subdomains)");
@@ -133,6 +132,10 @@ internal static class ConfigParser
             list.Add(domain);
         }
     }
+
+    /// <summary>Whether <paramref name="domain"/> is valid in allow (<paramref name="allowStar"/>) or deny.</summary>
+    private static bool IsValidEntry(string domain, bool allowStar) =>
+        allowStar ? Allowlist.IsValidAllowEntry(domain) : Allowlist.IsValidDomain(domain);
 
     private static void ReadGitHubTokens(Settings config, object value, Func<string, PenException> error)
     {

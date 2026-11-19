@@ -123,67 +123,137 @@ internal sealed class GitDirLinkCheck
         var target = ReadTarget(link);
         if (target is null)
             return Lead.Unknown;
-        var reached = target.StartsWith('/') ? "/" : Native.RealPath(Paths.GetParent(link));
-        if (reached is null)
+        var start = target.StartsWith('/') ? "/" : Native.RealPath(Paths.GetParent(link));
+        if (start is null)
             return Lead.Unknown;
-        var parts = new List<string>(Split(target));
 
+        var walk = new TargetWalk(start, target);
         var looked = new HashSet<string>(StringComparer.Ordinal);
         var unknown = false;
-        bool LeadsIn(string dir)
+        while (true)
         {
-            if (!looked.Add(dir))
-                return false;
-            var lead = IsAtOrInside(dir);
-            unknown |= lead == Lead.Unknown;
-            return lead == Lead.Inside;
-        }
-
-        var linksMet = 0;
-        var unmade = 0; // directories yet to be made below reached that the walk is in
-        var next = 0;
-        while (next < parts.Count)
-        {
-            var part = parts[next++];
-            if (part == ".")
-                continue;
-            if (unmade > 0)
-            {
-                unmade += part == ".." ? -1 : 1;
-                continue;
-            }
-            var path = reached == "/" ? "/" + part : reached + "/" + part;
-            if (IsDirectory(path))
-            {
-                if (Native.RealPath(path) is not { } real)
-                    return Lead.Unknown;
-                reached = real;
-                continue;
-            }
-            if (part == "..")
-                return Lead.Unknown; // reached's parent can't be looked at
-            if (PathChecks.IsLink(path))
-            {
-                if (++linksMet > MaxLinks)
-                    return unknown ? Lead.Unknown : Lead.Elsewhere;
-                if (ReadTarget(path) is not { } spliced)
-                    return Lead.Unknown;
-                if (spliced.StartsWith('/'))
-                    reached = "/";
-                parts = [.. Split(spliced), .. parts[next..]];
-                next = 0;
-                continue;
-            }
-            if (LeadsIn(reached))
+            var stop = walk.ResolveExisting();
+            if (stop == WalkStop.Unknown)
+                return Lead.Unknown;
+            if (stop == WalkStop.TooManyLinks)
+                break;
+            var lead = LookOnce(walk.Reached, looked);
+            if (lead == Lead.Inside)
                 return Lead.Inside;
-            unmade = 1;
+            unknown |= lead == Lead.Unknown;
+            if (stop == WalkStop.End || !walk.LeaveUnmade())
+                break;
         }
-        if (unmade == 0 && LeadsIn(reached))
-            return Lead.Inside;
         return unknown ? Lead.Unknown : Lead.Elsewhere;
     }
 
+    /// <summary>
+    /// Whether <paramref name="dir"/> is at or inside a git dir (<see cref="IsAtOrInside"/>), unless it's in
+    /// <paramref name="looked"/> already, which it's added to.
+    /// </summary>
+    /// <returns><see cref="Lead.Elsewhere"/> for a directory looked at before, which told all it could then.</returns>
+    private Lead LookOnce(string dir, HashSet<string> looked) =>
+        looked.Add(dir) ? IsAtOrInside(dir) : Lead.Elsewhere;
+
     private static string[] Split(string target) => target.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+    /// <summary>Why <see cref="TargetWalk.ResolveExisting"/> stopped.</summary>
+    private enum WalkStop
+    {
+        /// <summary>Every component is resolved.</summary>
+        End,
+
+        /// <summary>A component is missing, or isn't a directory: it and those after it are yet to be made.</summary>
+        Missing,
+
+        /// <summary>A component can't be looked at, or a symlink met can't be read.</summary>
+        Unknown,
+
+        /// <summary>More than <see cref="MaxLinks"/> symlinks were met.</summary>
+        TooManyLinks,
+    }
+
+    /// <summary>
+    /// A symlink's target being resolved from the directory reached so far, as a real path, with the components still
+    /// to come.
+    /// </summary>
+    private sealed class TargetWalk(string start, string target)
+    {
+        private List<string> _parts = [.. Split(target)];
+        private int _next;
+        private int _linksMet;
+
+        /// <summary>The directory reached so far, as a real path.</summary>
+        public string Reached { get; private set; } = start;
+
+        /// <summary>
+        /// Resolves the components that are there, descending into each directory and putting each symlink's target
+        /// in place of its name, up to the first that's missing (or isn't a directory) or the end.
+        /// </summary>
+        public WalkStop ResolveExisting()
+        {
+            while (_next < _parts.Count)
+            {
+                var part = _parts[_next++];
+                if (part == ".")
+                    continue;
+                var path = Reached == "/" ? "/" + part : Reached + "/" + part;
+                if (IsDirectory(path))
+                {
+                    if (Native.RealPath(path) is not { } real)
+                        return WalkStop.Unknown;
+                    Reached = real;
+                    continue;
+                }
+                if (part == "..")
+                    return WalkStop.Unknown; // Reached's parent can't be looked at
+                if (!PathChecks.IsLink(path))
+                    return WalkStop.Missing;
+                if (Splice(path) is { } stop)
+                    return stop;
+            }
+            return WalkStop.End;
+        }
+
+        /// <summary>
+        /// Puts the target of <paramref name="link"/>, a symlink met on the way, in place of its name.
+        /// </summary>
+        /// <returns>Why the walk stops, or null if it goes on.</returns>
+        private WalkStop? Splice(string link)
+        {
+            if (++_linksMet > MaxLinks)
+                return WalkStop.TooManyLinks;
+            if (ReadTarget(link) is not { } spliced)
+                return WalkStop.Unknown;
+            if (spliced.StartsWith('/'))
+                Reached = "/";
+            _parts = [.. Split(spliced), .. _parts[_next..]];
+            _next = 0;
+            return null;
+        }
+
+        /// <summary>
+        /// Takes the components after a missing one, each naming a directory yet to be made below
+        /// <see cref="Reached"/> and each ".." leaving one, up to the ".." that leaves the last of them.
+        /// </summary>
+        /// <returns>
+        /// Whether it left them all, so the walk is back in <see cref="Reached"/>; false if the target ends first.
+        /// </returns>
+        public bool LeaveUnmade()
+        {
+            var unmade = 1;
+            while (_next < _parts.Count)
+            {
+                var part = _parts[_next++];
+                if (part == ".")
+                    continue;
+                unmade += part == ".." ? -1 : 1;
+                if (unmade == 0)
+                    return true;
+            }
+            return false;
+        }
+    }
 
     /// <summary>Whether <paramref name="dir"/> is a git dir or inside one, going up by "..".</summary>
     /// <returns>

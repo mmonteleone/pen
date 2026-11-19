@@ -19,6 +19,10 @@ internal sealed class InitCommand(HostEnv host, Project project, RecipeCatalog c
 {
     private const string Where = ".pen/" + ConfigLoader.FileName;
 
+    /// <summary>The mode .pen/config.toml is created with: 644.</summary>
+    private const UnixFileMode CreatedMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead |
+        UnixFileMode.OtherRead;
+
     /// <summary>Writes .pen/config.toml unless it or a legacy .pen/config exists, and says what it turned on.</summary>
     /// <returns>0; a refusal throws.</returns>
     /// <exception cref="PenException">
@@ -80,45 +84,50 @@ internal sealed class InitCommand(HostEnv host, Project project, RecipeCatalog c
     /// <exception cref="PenException">Something is at <paramref name="path"/> already, as in a race.</exception>
     private static void Create(string path, string text)
     {
-        const UnixFileMode mode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead |
-            UnixFileMode.OtherRead;
-        FileStream file;
+        using var file = CreateNew(path);
         try
         {
-            file = new FileStream(path, new FileStreamOptions
+            // The umask may have narrowed the mode it was created with.
+            File.SetUnixFileMode(file.SafeFileHandle, CreatedMode);
+            file.Write(Encoding.UTF8.GetBytes(text));
+        }
+        catch
+        {
+            // A partial file would be refused as already existing on the next try.
+            DeleteAfterFailedWrite(path);
+            throw;
+        }
+    }
+
+    /// <summary>Creates the file at <paramref name="path"/>, which mustn't exist, for writing.</summary>
+    /// <exception cref="PenException">Something is at <paramref name="path"/> already, as in a race.</exception>
+    private static FileStream CreateNew(string path)
+    {
+        try
+        {
+            return new FileStream(path, new FileStreamOptions
             {
                 Mode = FileMode.CreateNew,
                 Access = FileAccess.Write,
-                UnixCreateMode = mode,
+                UnixCreateMode = CreatedMode,
             });
         }
         catch (IOException) when (Path.Exists(path) || PathChecks.IsLink(path))
         {
             throw CreateExistsError();
         }
+    }
 
-        using (file)
+    /// <summary>Deletes the file at <paramref name="path"/> that a write failed on, leaving it if it can't.</summary>
+    private static void DeleteAfterFailedWrite(string path)
+    {
+        try
         {
-            try
-            {
-                // The umask may have narrowed the mode it was created with.
-                File.SetUnixFileMode(file.SafeFileHandle, mode);
-                file.Write(Encoding.UTF8.GetBytes(text));
-            }
-            catch
-            {
-                // A partial file would be refused as already existing on the next try.
-                try
-                {
-                    File.Delete(path);
-                }
-                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-                {
-                    // The write error is the one to report.
-                }
-
-                throw;
-            }
+            File.Delete(path);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // The write error is the one to report.
         }
     }
 

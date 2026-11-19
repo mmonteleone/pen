@@ -43,11 +43,11 @@ internal static class EgressMessages
     /// </summary>
     public static void WriteApplied(int applied, EgressTarget target)
     {
-        if (applied > 0)
-        {
-            Out.WriteLine($"applied to {applied} running session{(applied == 1 ? "" : "s")}"
-                + $"{(target is EgressTarget.Global ? "" : " in this directory")}");
-        }
+        if (applied <= 0)
+            return;
+        var sessions = applied == 1 ? "session" : "sessions";
+        var where = target is EgressTarget.Global ? "" : " in this directory";
+        Out.WriteLine($"applied to {applied} running {sessions}{where}");
     }
 
     /// <summary>
@@ -79,10 +79,12 @@ internal static class EgressMessages
         var matches = domains.Where(domain => ShellGlob.NamesEntry(dir, domain)).ToList();
         if (matches.Count == 0)
             return null;
-        var what = matches.Count == 1 ? "names a file here" : "name files here";
-        var were = matches.Count == 1 ? "it was" : "they were";
+        var one = matches.Count == 1;
+        var what = one ? "names a file here" : "name files here";
+        var were = one ? "it was" : "they were";
+        var them = one ? "it" : "them";
+        var notDomains = one ? "it isn't a domain" : "they aren't domains";
         return $"{string.Join(' ', matches.Select(Out.Field))} {what}: {ShellGlob.FormatAdvice(command)}; " +
-            $"{were} added to {where}: remove {(matches.Count == 1 ? "it" : "them")} there if " +
-            $"{(matches.Count == 1 ? "it isn't a domain" : "they aren't domains")}";
+            $"{were} added to {where}: remove {them} there if {notDomains}";
     }
 }

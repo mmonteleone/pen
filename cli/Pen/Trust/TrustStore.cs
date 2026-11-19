@@ -67,8 +67,9 @@ internal sealed class TrustStore
 
     private static TrustStore Read(string path, string dir)
     {
-        var text = Native.ReadRegularFileOrNull(path);
-        return (text is null ? null : Parse(text, path, dir)) ?? new TrustStore(path, dir);
+        if (Native.ReadRegularFileOrNull(path) is { } text && Parse(text, path, dir) is { } store)
+            return store;
+        return new TrustStore(path, dir);
     }
 
     /// <summary>Parses the store file's <paramref name="text"/>.</summary>
