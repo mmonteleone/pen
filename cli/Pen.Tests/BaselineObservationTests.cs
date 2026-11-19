@@ -15,8 +15,8 @@ public class BaselineObservationTests
         var repo = Git.Repo(t.Sub("repo"));
         var project = Project.Resolve(repo, host);
         var other = Path.Combine(host.GetRuntimeDir(project.Key), "sessions", "zzzzzzzz");
-        // The first docker call comes from EnsureImage, after Prepare's first look at the open sessions: a session
-        // opens then (no module list recorded) and its Pen is gone (its lock is free).
+        // The first docker call comes from SessionPreparer's EnsureImage, after its first look at the open sessions:
+        // a session opens then (no module list recorded) and its Pen is gone (its lock is free).
         using var docker = new FakeDocker(t, $$"""
             if [ ! -e opened ]; then
               mkdir -p '{{other}}'

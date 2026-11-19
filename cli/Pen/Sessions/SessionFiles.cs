@@ -55,7 +55,7 @@ internal sealed class SessionFiles(HostEnv host, Project project, TimeProvider c
     /// <param name="prepared">What the session's preparation found and built.</param>
     /// <param name="forwarded">The ports forwarded from the host.</param>
     /// <returns>The env compose runs with.</returns>
-    public Dictionary<string, string> Write(
+    public IReadOnlyDictionary<string, string> Write(
         SessionDir session,
         SessionRequest request,
         Preparation prepared,

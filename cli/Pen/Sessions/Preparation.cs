@@ -6,7 +6,7 @@ using Pen.Tools;
 namespace Pen.Sessions;
 
 /// <summary>What a session's preparation found and built for it, which its files are written from.</summary>
-internal sealed record Preparation
+internal sealed class Preparation
 {
     /// <summary>Gets the session's tools, merged and canonical.</summary>
     public required IReadOnlyList<ToolSpec> Tools { get; init; }

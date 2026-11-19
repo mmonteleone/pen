@@ -1104,6 +1104,7 @@ public class TrustGateTests
         var e = Assert.Throws<PenException>(() => f.Run(Saying("y"), flagTools: [new("pen-test", "2")]));
         Assert.Contains("can't be used together", e.Message);
         f.AssertNothingReached();
+        Assert.False(File.Exists(TrustStore.GetPath(f.Host.GetRuntimeDir(f.Project.Key), f.Project.Dir))); // never asked
     }
 
     [Fact]
