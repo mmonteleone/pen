@@ -1,3 +1,6 @@
+using System.Reflection;
+using System.Runtime.InteropServices;
+
 namespace Pen.Tests;
 
 /// <summary>
@@ -164,6 +167,70 @@ public class InitCommandTests
         var existing = Assert.Throws<PenException>(() => Init(host, project));
         Assert.Contains("is a symlink", existing.Message);
         Assert.Equal("", File.ReadAllText(target));
+    }
+
+    [Fact]
+    public void ACreateFailingInAReadOnlyPenDir_IsntReportedAsAlreadyExisting()
+    {
+        using var t = new TempDir();
+        var (host, project) = Setup(t);
+        Directory.CreateDirectory(project.PenDir);
+        File.SetUnixFileMode(project.PenDir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            var e = Assert.Throws<UnauthorizedAccessException>(() => Init(host, project));
+
+            Assert.Equal($"Access to the path '{project.ProjectConfigPath}' is denied.", e.Message);
+        }
+        finally
+        {
+            File.SetUnixFileMode(project.PenDir,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+        Assert.False(File.Exists(project.ProjectConfigPath));
+    }
+
+    /// <summary>
+    /// Only something already at the path is reported as existing: another I/O error, here a missing directory (which
+    /// pen init makes first, so it's reached only by calling CreateNew directly), is passed on as it is.
+    /// </summary>
+    [Fact]
+    public void CreateNew_PassesOnAnIOErrorOtherThanExisting()
+    {
+        using var t = new TempDir();
+        var path = Path.Combine(t.Path, "missing", "config.toml");
+        var createNew = typeof(InitCommand).GetMethod("CreateNew", BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException("InitCommand.CreateNew is gone: update this test to follow it");
+
+        var e = Assert.Throws<TargetInvocationException>(() => createNew.Invoke(null, [path]));
+
+        var inner = Assert.IsType<DirectoryNotFoundException>(e.InnerException);
+        Assert.Equal($"Could not find a part of the path '{path}'.", inner.Message);
+        Assert.False(Path.Exists(path));
+    }
+
+    [DllImport("libc", EntryPoint = "umask")]
+    private static extern uint Umask(uint mask);
+
+    /// <summary>The file is 644 however narrow the umask. The collection runs alone, so no other test sees it.</summary>
+    [Fact]
+    public void WritesTheConfigInMode644_UnderARestrictiveUmask()
+    {
+        using var t = new TempDir();
+        var (host, project) = Setup(t);
+        var saved = Umask(0b000_111_111) & 0b111_111_111;
+        try
+        {
+            CapturingStderr(() => Assert.Equal(0, Init(host, project)));
+        }
+        finally
+        {
+            Umask(saved);
+        }
+
+        Assert.Equal(
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead,
+            File.GetUnixFileMode(project.ProjectConfigPath));
     }
 
     [Fact]

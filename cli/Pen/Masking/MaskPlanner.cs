@@ -731,7 +731,9 @@ internal sealed class MaskPlanner
     /// Refuses a [replace] source by its name, before anything is read: one in .git, or one that a pattern matches,
     /// or a directory on its way.
     /// </summary>
-    /// <exception cref="PenException">It's refused, naming the pattern and the entry it matches.</exception>
+    /// <exception cref="PenException">
+    /// It's refused: for one in .git, saying so; otherwise naming the pattern and the entry it matches.
+    /// </exception>
     private void RequireSourceNameNotHidden(string target, string source)
     {
         var parts = source.Split('/');

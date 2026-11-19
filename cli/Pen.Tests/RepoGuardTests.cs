@@ -1041,4 +1041,24 @@ public class RepoGuardTests
         Assert.Contains("run pen in each repo instead", msg);
         Assert.Contains("… and 1 more", msg);
     }
+
+    /// <summary>The advice comes from the repos listed: a submodule past the cap doesn't bring its advice line.</summary>
+    [Fact]
+    public void ASubmoduleOnlyPastMaxListed_BringsNoAbsorbgitdirsAdvice()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        for (var i = 0; i <= RepoGuard.MaxListed; i++)
+            Git.Run(repo, "init", "-q", $"sub{i:00}");
+        File.WriteAllText(Path.Combine(repo, ".gitmodules"),
+            $"[submodule \"s\"]\n\tpath = sub{RepoGuard.MaxListed:00}\n");
+
+        var msg = Refusal(repo);
+        Assert.Contains("\n  sub00\n", msg);
+        Assert.DoesNotContain($"sub{RepoGuard.MaxListed:00}", msg);
+        Assert.Contains("… and 1 more", msg);
+        Assert.DoesNotContain("absorbgitdirs", msg);
+        Assert.DoesNotContain("(a submodule with its own .git dir)", msg);
+        Assert.Contains("run pen in each repo instead", msg);
+    }
 }

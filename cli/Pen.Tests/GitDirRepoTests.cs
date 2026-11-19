@@ -788,6 +788,7 @@ public class GitDirRepoTests
     [InlineData(".git/nothing/x/y", true)]
     [InlineData("missing/../.git/objects/ab", true)] // once missing is made, inside .git
     [InlineData("missing/../.git", true)]
+    [InlineData("missing/./../.git", true)] // "." past a missing directory names nothing to leave
     [InlineData(".git/objects/zz/../../..", true)] // it ends in the project, but it stops at objects
     [InlineData("src/chain/x", true)] // src/chain leads nowhere, but into .git
     [InlineData("src/missing", false)]
@@ -822,6 +823,21 @@ public class GitDirRepoTests
     }
 
     /// <summary>
+    /// A symlink met on the way whose target isn't valid UTF-8 can't be followed, so neither it nor one that leads
+    /// through it can be traced.
+    /// </summary>
+    [Fact]
+    public void ASymlinkThroughOneWhoseTargetIsntUtf8_IsOneThatCantBeTraced()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Sh(repo, "ln -s \"$(printf 'x\\377')\" bad && ln -s bad/../src docs");
+
+        Assert.Empty(Links(repo));
+        Assert.Equal(["bad", "docs"], Untraced(repo));
+    }
+
+    /// <summary>
     /// A dangling symlink met on the way is spliced in as the kernel splices it: x/../.. through x, a symlink to
     /// a/b, is a/b/../.., which leads into .git once a/b is made, though x alone leads nowhere near it.
     /// </summary>
@@ -832,6 +848,25 @@ public class GitDirRepoTests
         var repo = Git.Repo(t.Sub("repo"));
         Directory.CreateDirectory(Path.Combine(repo, ".git", "foo"));
         Directory.CreateSymbolicLink(Path.Combine(repo, "x"), "a/b");
+        var link = Path.Combine(repo, "L");
+        Directory.CreateSymbolicLink(link, "x/../../.git/foo");
+
+        Assert.Equal(["L"], Links(repo));
+        Directory.CreateDirectory(Path.Combine(repo, "a", "b"));
+        Assert.Equal(Native.RealPath(Path.Combine(repo, ".git", "foo")), Native.RealPath(link));
+    }
+
+    /// <summary>
+    /// A dangling symlink met on the way whose target is absolute is spliced in from "/": x/../.. through x, a symlink
+    /// to the absolute path of a/b, leads into .git once a/b is made.
+    /// </summary>
+    [Fact]
+    public void ADanglingSymlinkChainedThroughAnAbsoluteTarget_Counts()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Directory.CreateDirectory(Path.Combine(repo, ".git", "foo"));
+        Directory.CreateSymbolicLink(Path.Combine(repo, "x"), Path.Combine(repo, "a", "b"));
         var link = Path.Combine(repo, "L");
         Directory.CreateSymbolicLink(link, "x/../../.git/foo");
 
@@ -857,6 +892,27 @@ public class GitDirRepoTests
         var links = Links(repo);
         Assert.Contains("l00", links);
         Assert.Equal(count, links.Count);
+    }
+
+    /// <summary>
+    /// The symlinks met on the way past the first are followed up to 40: a chain of 41 into .git counts from its
+    /// first, and one of 42 counts from its second on, its first leading nowhere that's looked at.
+    /// </summary>
+    [Theory]
+    [InlineData(41, true)]
+    [InlineData(42, false)]
+    public void ADanglingChainAtTheLinkLimit_CountsFromItsFirst_AndOnePastIt_DoesNot(int count, bool firstCounts)
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        for (var i = 0; i < count - 1; i++)
+            Directory.CreateSymbolicLink(Path.Combine(repo, $"l{i:00}"), $"l{i + 1:00}");
+        Directory.CreateSymbolicLink(Path.Combine(repo, $"l{count - 1:00}"), ".git/missing");
+
+        var links = Links(repo);
+        Assert.Equal(firstCounts, links.Contains("l00"));
+        Assert.Equal(firstCounts ? count : count - 1, links.Count);
+        Assert.Empty(Untraced(repo));
     }
 
     /// <summary>
