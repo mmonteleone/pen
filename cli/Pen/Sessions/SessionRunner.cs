@@ -32,34 +32,32 @@ internal sealed class SessionRunner(ProjectContext context, Answers answers, Rec
     /// </remarks>
     public int Run(SessionRequest request)
     {
-        // Every session holds project.lock and its dir's worktree lock
-        // shared; pen clean holds the first exclusive, pen sign the second.
+        // Every session holds project.lock and its dir's worktree lock shared; pen clean holds the first exclusive, pen
+        // sign the second.
         ProjectRuntime.EnsureRuntimeDir(context.Host, Project);
         using var locks = SessionRegistry.TakeForSession(RuntimeDir, Project);
 
-        // A check that didn't finish vouches for nothing: starting now would take
-        // the module repos there as this session's baseline, and its end would
-        // run git in the directory just warned about.
+        // A check that didn't finish vouches for nothing: starting now would take the module repos there as this
+        // session's baseline, and its end would run git in the directory just warned about.
         if (!SessionRecovery.FinishAbandoned(Project.Key, RuntimeDir, clock).EveryCheckFinished)
             throw new PenException("not starting: deal with the warning above first");
 
         var prepared = new SessionPreparer(context, answers, catalog, clock).CheckApproveAndBuild(request);
 
-        // One docker session per project: two daemons can't share the dind
-        // volume. A dind still using it (an earlier session's teardown failed)
-        // would be corrupted by a second, so that's refused too.
+        // One docker session per project: two daemons can't share the dind volume. A dind still using it (an earlier
+        // session's teardown failed) would be corrupted by a second, so that's refused too.
         using var dindLock = request.Docker ? TakeDindLock() : null;
 
-        // Ports already in use on the host: a --port is refused, a config
-        // port skipped. (One taken between here and compose run fails it.)
+        // Ports already in use on the host: a --port is refused, a config port skipped. One taken between here and
+        // compose run fails the run.
         var forwarded = Port.Choose(request.Ports, Port.IsTakenOnHost, Out.WriteLine);
         CreateVolumes(request.Docker);
 
         // From here on Ctrl-C belongs to the agent, and a hangup still ends the session cleanly.
         using var signals = new SessionSignals();
 
-        // Past the refusals, so a session that won't start doesn't warn, and with
-        // signals held, so Ctrl-C can't end Pen between the probe's create and delete.
+        // Past the refusals, so a session that won't start doesn't warn, and with signals held, so Ctrl-C can't end Pen
+        // between the probe's create and delete.
         RepoGuard.WarnIfCaseMayFold(Project, Out.WriteLine, PathChecks.MayFoldCase);
         HooksPath.WarnIfWritable(Project, context.Host, Out.WriteLine, context.Host.GetVariable);
         foreach (var warning in EgressWarnings.ListForSession(context, catalog, prepared.Tools, prepared.Egress.Deny))

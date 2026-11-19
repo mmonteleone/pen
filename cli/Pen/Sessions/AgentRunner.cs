@@ -5,15 +5,12 @@ using Pen.Proxy;
 namespace Pen.Sessions;
 
 /// <summary>Runs a session's agent: the docker compose run of its command, with the secrets in its env.</summary>
-/// <param name="session">The session.</param>
-/// <param name="env">The env compose runs with.</param>
-/// <param name="signals">The session's signal handling, which the agent's container and child are handed to.</param>
 internal sealed class AgentRunner(SessionDir session, IReadOnlyDictionary<string, string> env, SessionSignals signals)
 {
-    /// <summary>Runs <paramref name="command"/> in the sandbox and waits for it, trimming the proxy log.</summary>
-    /// <param name="command">The command to run in the sandbox.</param>
-    /// <param name="token">The GitHub token, if there's one.</param>
-    /// <param name="userEnv">The user's [env], passed to the agent as secrets.</param>
+    /// <summary>
+    /// Runs <paramref name="command"/> in the sandbox and waits for it, trimming the proxy log. The GitHub token, if
+    /// there's one, and the user's [env] reach the agent as secrets.
+    /// </summary>
     /// <returns>The agent's exit code, or 1 when it couldn't be started (reported).</returns>
     /// <remarks>A stop asked for before the start refuses it; one asked for after stops the child.</remarks>
     public int Run(

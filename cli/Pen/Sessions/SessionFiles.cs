@@ -11,9 +11,6 @@ namespace Pen.Sessions;
 /// Creates a new session's directory and writes its files, compose.yaml last; deletes them if that fails, and when
 /// the session has ended.
 /// </summary>
-/// <param name="host">The host user, whose IDs and paths go in the env.</param>
-/// <param name="project">The project the session runs in.</param>
-/// <param name="clock">The clock for the start time.</param>
 /// <remarks>
 /// An instance writes one project's sessions, so a write takes only what differs per session. Deleting needs only
 /// the session's dir, and teardown and recovery have no project to hand, so those members are static.
@@ -50,11 +47,8 @@ internal sealed class SessionFiles(HostEnv host, Project project, TimeProvider c
     /// check read, and the stack's files, compose.yaml last. If that fails, they're deleted
     /// (<see cref="WriteOrDelete"/>).
     /// </summary>
-    /// <param name="session">The new session, whose lock the caller holds.</param>
-    /// <param name="request">The session's command and whether it has Docker.</param>
-    /// <param name="prepared">What the session's preparation found and built.</param>
-    /// <param name="forwarded">The ports forwarded from the host.</param>
     /// <returns>The env compose runs with.</returns>
+    /// <remarks>The caller holds the new session's lock.</remarks>
     public IReadOnlyDictionary<string, string> Write(
         SessionDir session,
         SessionRequest request,
@@ -118,9 +112,6 @@ internal sealed class SessionFiles(HostEnv host, Project project, TimeProvider c
     /// <summary>
     /// Writes the files mounted over what's hidden and replaced, and lists every mount over the project.
     /// </summary>
-    /// <param name="session">The session, whose masks dir gets the files.</param>
-    /// <param name="protection">The git-protection mounts.</param>
-    /// <param name="masks">What the session hides and replaces.</param>
     /// <returns><paramref name="protection"/>, then the mask mounts (<see cref="MaskFiles.Write"/>).</returns>
     internal static IReadOnlyList<Mount> WriteMasks(
         SessionDir session,
@@ -202,7 +193,7 @@ internal sealed class SessionFiles(HostEnv host, Project project, TimeProvider c
         File.WriteAllText(session.OpenEgressFile, acls.OpenEgressText);
         var dindContainer = docker ? session.DindContainer : null;
         var ports = new PortForward(forwarded, session.PortsContainer, session.Container);
-        // The plan was made before the image was ensured, and Docker would create a mount point that's gone since.
+        // The mask plan was made before the image was ensured, and Docker would create a mount point that's gone since.
         prepared.Masks.ThrowIfChanged();
         var mounts = WriteMasks(session, prepared.Mounts, prepared.Masks);
         File.WriteAllText(session.OverrideFile,

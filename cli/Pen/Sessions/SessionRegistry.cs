@@ -62,7 +62,6 @@ internal static class SessionRegistry
         [.. FindRunning(projectKey, runtimeDir)
             .Where(session => session.ReadEnv().TryGetValue("PROJECT_DIR", out var started) && started == dir)];
 
-    /// <summary>Gets the path of the project's project.lock.</summary>
     public static string GetProjectLockFile(string runtimeDir) => Path.Combine(runtimeDir, "project.lock");
 
     /// <summary>
@@ -157,7 +156,6 @@ internal static class SessionRegistry
         /// <summary>Gets the locks held, in the order they were taken.</summary>
         public IReadOnlyList<FileLock> Held => _held;
 
-        /// <summary>Adds <paramref name="fileLock"/> to the locks held.</summary>
         public void Add(FileLock fileLock) => _held.Add(fileLock);
 
         /// <summary>Releases the locks, the last taken first.</summary>

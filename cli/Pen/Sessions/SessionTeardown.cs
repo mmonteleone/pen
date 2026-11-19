@@ -14,11 +14,10 @@ namespace Pen.Sessions;
 /// </remarks>
 internal static class SessionTeardown
 {
-    /// <summary>How the session-end .git check went, and whether the session's files must stay.</summary>
-    /// <param name="Result">What the end path returns.</param>
-    /// <param name="KeepFiles">
-    /// Whether the session's files stay, for a retry, since putting files back didn't finish.
-    /// </param>
+    /// <summary>
+    /// How the session-end .git check went, and whether the session's files stay for a retry because putting files
+    /// back didn't finish.
+    /// </summary>
     private sealed record EndCheck(SessionEndResult Result, bool KeepFiles);
 
     /// <summary>
@@ -29,7 +28,7 @@ internal static class SessionTeardown
     /// <para>The agent container goes first (after a hangup compose may have left it running), and in a docker
     /// session dind with it, since containers inside dind can write to the project until it's gone. If that fails,
     /// the session's files are kept for a retry and this throws, before Git is checked. Then the .git check, then
-    /// the stack, then the session's files except proxy.log.</para>
+    /// the stack, then the session's files except the proxy logs.</para>
     /// <para>The caller holds the session's lock and releases it after. A check that can't finish doesn't stop
     /// any of this: it warns, and the session ends.</para>
     /// </remarks>
@@ -39,9 +38,8 @@ internal static class SessionTeardown
         RemoveWriters(session);
         // The .git check, now that the agent is gone and before anything runs git.
         var check = CheckGit(session, env);
-        // What the session ended up allowing and denying (pen allow may have
-        // changed it), so the blocked line doesn't suggest a domain that's
-        // allowed by now, and says which hosts deny blocked.
+        // What the session ended up allowing and denying (pen allow may have changed it), so the blocked line doesn't
+        // suggest a domain that's allowed by now, and says which hosts deny blocked.
         var egress = session.ReadEgress();
         StopStack(session, env, check.KeepFiles);
         ReportBlocked(session, egress.Allow, egress.Deny);
@@ -76,9 +74,10 @@ internal static class SessionTeardown
         }
     }
 
-    /// <summary>Runs the session-end .git check and reports it.</summary>
-    /// <param name="session">The session.</param>
-    /// <param name="env">The env the session started with, which names its project dir.</param>
+    /// <summary>
+    /// Runs the session-end .git check in the project dir that PROJECT_DIR in <paramref name="env"/>, the env the
+    /// session started with, names, and reports it.
+    /// </summary>
     /// <returns>
     /// The end result (no reminder unless the check finished, moved nothing and put nothing back), and whether the
     /// session's files must stay.

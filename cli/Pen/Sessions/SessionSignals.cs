@@ -18,9 +18,10 @@ internal sealed class SessionSignals : IDisposable
     private int _stopping;
     private int _stopIssued;
 
-    /// <summary>Records the agent's container, which a stop removes first, and then its running child.</summary>
-    /// <param name="container">The container's name, or null when the child has none.</param>
-    /// <param name="child">The running child.</param>
+    /// <summary>
+    /// Records the agent's container (null when the child has none), which a stop removes first, and then its running
+    /// child.
+    /// </summary>
     /// <remarks>
     /// The container is recorded before the child, so a stop that sees the child sees the container too. A stop
     /// requested before the child was recorded (a signal between starting the child and recording it) stops it now.
@@ -83,9 +84,8 @@ internal sealed class SessionSignals : IDisposable
         {
             try
             {
-                // With a TTY, compose forwards neither signal and keeps waiting
-                // on the container, so the container goes first (as in the end
-                // path), and compose then exits on its own.
+                // With a TTY, compose forwards neither signal and keeps waiting on the container, so the container
+                // goes first (as in the end path), and compose then exits on its own.
                 if (container is not null)
                     Proc.Capture("docker", ["rm", "-f", container]);
                 if (!child.WaitForExit(grace))

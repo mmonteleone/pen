@@ -14,8 +14,7 @@ internal readonly record struct Port(int Number, bool FromFlag)
     /// <summary>Tells whether <paramref name="number"/> is a TCP port, 1 to 65535.</summary>
     public static bool IsValid(long number) => number is >= 1 and <= 65535;
 
-    /// <summary>Merges the config's ports and the flag's.</summary>
-    /// <returns>The config's ports, then the flag's, without duplicates (lists append).</returns>
+    /// <summary>Merges the config's ports and then the flag's, without duplicates.</summary>
     /// <remarks>A port in both counts as from the flag.</remarks>
     public static IReadOnlyList<Port> Merge(IEnumerable<int> config, IEnumerable<int> flag)
     {
@@ -29,11 +28,8 @@ internal readonly record struct Port(int Number, bool FromFlag)
         return merged;
     }
 
-    /// <summary>Chooses the ports to forward: those free on the host.</summary>
-    /// <param name="ports">The ports asked for.</param>
-    /// <param name="isTaken">Tells whether a port is taken on the host.</param>
-    /// <param name="warn">Writes a warning.</param>
-    /// <returns>The free ones, in order; a taken --port throws.</returns>
+    /// <summary>Chooses the ports to forward: those free on the host, in order.</summary>
+    /// <exception cref="PenException">A port from --port is taken.</exception>
     /// <remarks>
     /// A taken config port is skipped with a warning (another session of the project usually forwards it
     /// already). Ports are never remapped.

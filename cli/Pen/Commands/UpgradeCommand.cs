@@ -121,8 +121,8 @@ internal sealed class UpgradeCommand(
     private static void PullSidecarImages()
     {
         Out.WriteLine("pulling sidecar images");
-        // compose reads the embedded compose.yaml from stdin. Its required
-        // variables only need values for interpolation; nothing is started.
+        // compose reads the embedded compose.yaml from stdin. Its required variables only need values for
+        // interpolation; nothing is started.
         var env = new Dictionary<string, string>
         {
             ["PROJECT_DIR"] = "/nonexistent",

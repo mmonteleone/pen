@@ -3,8 +3,7 @@ namespace Pen.Sessions;
 /// <summary>Picks the shell a session runs when it's given no command.</summary>
 internal static class InteractiveShell
 {
-    /// <summary>Gets the login shell command matching the host's shell.</summary>
-    /// <param name="hostShell">The host's $SHELL, or null when it's unset.</param>
+    /// <summary>Gets the login shell command matching the host's $SHELL (null when it's unset).</summary>
     /// <returns>
     /// fish -l, zsh -l or bash -l when the last path component of <paramref name="hostShell"/> is exactly fish, zsh
     /// or bash; bash -l for anything else.

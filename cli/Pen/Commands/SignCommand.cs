@@ -8,13 +8,10 @@ using Pen.Sessions;
 namespace Pen.Commands;
 
 /// <summary>Runs pen sign: re-creates the branch's unpushed commits on the host with the same trees, signed.</summary>
-/// <param name="host">The host user's environment.</param>
-/// <param name="project">The project to sign in. Its .pen/config.toml is never read.</param>
-/// <param name="clock">The clock that says when an ended session's files are old enough to delete.</param>
 /// <remarks>
-/// The order matters: the locks (project.lock shared, so pen clean can't run, and this dir's worktree lock
-/// exclusive, so no session runs here), then finishing dead sessions, then the session-end check of
-/// <c>.git</c>, and only then any host git, all of it through <see cref="HostGit"/>'s overrides.
+/// It never reads the project's .pen/config.toml. The order matters: the locks (project.lock shared, so pen clean
+/// can't run, and this dir's worktree lock exclusive, so no session runs here), then finishing dead sessions, then the
+/// session-end check of <c>.git</c>, and only then any host git, all of it through <see cref="HostGit"/>'s overrides.
 /// </remarks>
 internal sealed class SignCommand(HostEnv host, Project project, TimeProvider clock)
 {
@@ -30,8 +27,8 @@ internal sealed class SignCommand(HostEnv host, Project project, TimeProvider cl
             throw new PenException($"{Out.Field(project.Dir)} isn't a git repo");
         ProjectRuntime.EnsureRuntimeDir(host, project);
         using var locks = SessionRegistry.TakeForSign(host, project);
-        // This command's own check below takes the module repos there now, so
-        // it can't stand in for an ended session's that didn't finish.
+        // This command's own check below takes the module repos there now, so it can't stand in for an ended session's
+        // that didn't finish.
         if (!SessionRecovery.FinishAbandoned(project.Key, host.GetRuntimeDir(project.Key), clock).EveryCheckFinished)
             throw new PenException("not signing: deal with the warning above first");
         CheckGitDir();

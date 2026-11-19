@@ -6,8 +6,6 @@ using Pen.Sessions;
 namespace Pen.Commands;
 
 /// <summary>Runs pen ps: lists every project's running sessions.</summary>
-/// <param name="host">The host user's environment.</param>
-/// <param name="clock">The clock sessions' ages are shown by.</param>
 internal sealed partial class PsCommand(HostEnv host, TimeProvider clock)
 {
     private const int MaxCommand = 80;

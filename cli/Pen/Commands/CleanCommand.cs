@@ -5,10 +5,6 @@ using Pen.Sessions;
 namespace Pen.Commands;
 
 /// <summary>Runs pen clean: removes the project's volumes, after asking.</summary>
-/// <param name="host">The host user's environment.</param>
-/// <param name="project">The project whose volumes go.</param>
-/// <param name="answers">Where the confirmation is read from.</param>
-/// <param name="clock">The clock that says when an ended session's files are old enough to delete.</param>
 /// <remarks>
 /// It holds project.lock exclusive throughout, so it refuses while any session or pen sign runs in the project,
 /// and none starts until it's done.

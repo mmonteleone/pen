@@ -47,7 +47,6 @@ internal sealed class DenyCommand(HostEnv host, StartDir startDir, RecipeCatalog
         target.AddToConfig(host, ConfigListKey.Deny, domains, catalog);
 
     /// <summary>Runs pen deny without domains: lists what both config files deny.</summary>
-    /// <param name="context">The project and both configs.</param>
     /// <returns>0.</returns>
     public int List(ProjectContext context)
     {
@@ -56,11 +55,10 @@ internal sealed class DenyCommand(HostEnv host, StartDir startDir, RecipeCatalog
         return 0;
     }
 
-    /// <summary>Formats the listing of what both config files deny.</summary>
-    /// <param name="user">The user's config.</param>
-    /// <param name="userConfigPath">The user's config.toml, as messages name it.</param>
-    /// <param name="projectConfig">The project's config.</param>
-    /// <param name="catalog">The recipes, whose domains a deny may take.</param>
+    /// <summary>
+    /// Formats the listing of what both config files deny, naming the user's config.toml as
+    /// <paramref name="userConfigPath"/>.
+    /// </summary>
     /// <returns>
     /// One line per entry, user's first: the domain, its file, and which default or recipe domains it takes, in
     /// whole or in part; a note when nothing is denied.

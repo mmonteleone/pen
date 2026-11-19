@@ -12,8 +12,6 @@ namespace Pen.Commands;
 /// Runs pen clean --stale: removes what moved or deleted projects left behind (volumes, project-layer images,
 /// the runtime dir) and tools images on an old base, after asking.
 /// </summary>
-/// <param name="host">The host user's environment.</param>
-/// <param name="answers">Where the confirmation is read from.</param>
 /// <remarks>
 /// A key's project is known from the project-dir file its runtime dir holds
 /// (<see cref="ProjectRuntime.EnsureRuntimeDir"/>).
@@ -39,7 +37,6 @@ internal sealed partial class CleanStaleCommand(HostEnv host, Answers answers)
     /// <summary>One project key, with what it has and what became of its project.</summary>
     internal sealed record Entry
     {
-        /// <summary>Gets the project key.</summary>
         public required string Key { get; init; }
 
         /// <summary>Gets what became of its project.</summary>
@@ -168,10 +165,10 @@ internal sealed partial class CleanStaleCommand(HostEnv host, Answers answers)
         return result.ExitStatus.ExitCode == 0 ? result.StandardOutput.Trim() : null;
     }
 
-    /// <summary>Finds every key that has volumes or a runtime dir, and classifies it.</summary>
-    /// <param name="host">The host user's environment.</param>
-    /// <param name="volumes">The volumes docker lists.</param>
-    /// <param name="images">The images docker lists, as repository:tag.</param>
+    /// <summary>
+    /// Finds every key that has volumes or a runtime dir, and classifies it, from the volumes and images (as
+    /// repository:tag) docker lists.
+    /// </summary>
     /// <returns>The keys, in order.</returns>
     internal static IReadOnlyList<Entry> Find(HostEnv host, IEnumerable<string> volumes, IEnumerable<string> images)
     {

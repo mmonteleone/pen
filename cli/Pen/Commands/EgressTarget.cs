@@ -36,10 +36,7 @@ internal abstract record EgressTarget
         }
     }
 
-    /// <summary>Resolves the target from the start directory.</summary>
-    /// <param name="host">The host user's environment.</param>
-    /// <param name="startDir">The directory Pen was started in.</param>
-    /// <param name="global">Whether --global was given.</param>
+    /// <summary>Resolves the target from the start directory and whether --global was given.</summary>
     /// <remarks>--global works from anywhere; without it, a failure to resolve the project throws.</remarks>
     public static EgressTarget Resolve(HostEnv host, StartDir startDir, bool global)
     {

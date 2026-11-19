@@ -37,9 +37,10 @@ internal static class EgressMessages
         }
     }
 
-    /// <summary>Says how many running sessions took the change; nothing when none did.</summary>
-    /// <param name="applied">How many took it.</param>
-    /// <param name="target">Where the change went, which says which sessions it was for.</param>
+    /// <summary>
+    /// Says how many running sessions took the change, and whether they were only this directory's; nothing when none
+    /// did.
+    /// </summary>
     public static void WriteApplied(int applied, EgressTarget target)
     {
         if (applied > 0)
@@ -63,11 +64,10 @@ internal static class EgressMessages
             Out.WriteLine(hint);
     }
 
-    /// <summary>Formats <see cref="WriteGlobHint"/>'s hint for <paramref name="dir"/>.</summary>
-    /// <param name="command">The subcommand.</param>
-    /// <param name="dir">The start directory.</param>
-    /// <param name="domains">The domains that were added.</param>
-    /// <param name="where">The config file they were added to, as messages name it.</param>
+    /// <summary>
+    /// Formats <see cref="WriteGlobHint"/>'s hint for <paramref name="domains"/>, added to <paramref name="where"/>
+    /// (the config file as messages name it), in the start directory <paramref name="dir"/>.
+    /// </summary>
     /// <returns>The hint, or null when no argument is named like one, or the directory can't be listed.</returns>
     /// <remarks>Names are compared ignoring case, since the parser lowercased the arguments.</remarks>
     internal static string? FormatGlobHint(

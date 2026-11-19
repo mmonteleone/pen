@@ -23,10 +23,8 @@ internal sealed class Preparation
     /// </summary>
     public required ModuleChoice Modules { get; init; }
 
-    /// <summary>Gets the image the agent runs.</summary>
     public required string Image { get; init; }
 
-    /// <summary>Gets whether Docker is rootless.</summary>
     public required bool Rootless { get; init; }
 
     /// <summary>Gets the GitHub token for the project's owner, if there's one.</summary>

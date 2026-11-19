@@ -33,8 +33,6 @@ internal sealed class SessionPreparer(
     /// hidden and replaced, builds the images when they aren't current and finds the token and the allow and deny
     /// lists.
     /// </summary>
-    /// <param name="request">The session's command and its --tool list.</param>
-    /// <returns>What the later steps need.</returns>
     /// <remarks>
     /// This creates what the mounts need in the project and its git dir, may ask for approval and save it, updates
     /// the token notice and may build images. A refusal throws.
@@ -60,8 +58,8 @@ internal sealed class SessionPreparer(
                 Project.Dir)
             : ModuleChoice.None;
         var image = EnsureImage(tools);
-        // Under rootless Docker, the host user is container root: the agent
-        // runs as UID 0 (with no capabilities) on a read-only root filesystem.
+        // Under rootless Docker, the host user is container root: the agent runs as UID 0 (with no capabilities) on a
+        // read-only root filesystem.
         var rootless = Docker.IsRootless();
         var owner = GitHub.FindProjectOwner(Project, context.ProjectConfig);
         var token = GitHub.SelectTokenAndUpdateNotice(owner, context.User, RuntimeDir, context.Host);

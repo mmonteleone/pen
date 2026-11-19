@@ -11,12 +11,9 @@ namespace Pen.Commands;
 /// Runs pen init: writes a starting .pen/config.toml from <see cref="ProjectTemplate"/>, with the tools and hide
 /// patterns <see cref="ProjectDetection"/> finds turned on.
 /// </summary>
-/// <param name="host">The host user's environment.</param>
-/// <param name="project">The project in the start directory; its .pen/config.toml is never read.</param>
-/// <param name="catalog">The recipes detected tools are checked against.</param>
 /// <remarks>
-/// It never overwrites and never approves anything: what it writes comes from repo files, so its tools go through
-/// <see cref="Trust.TrustGate"/> like any other change to .pen/.
+/// It never reads the project's .pen/config.toml, never overwrites and never approves anything: what it writes comes
+/// from repo files, so its tools go through <see cref="Trust.TrustGate"/> like any other change to .pen/.
 /// </remarks>
 internal sealed class InitCommand(HostEnv host, Project project, RecipeCatalog catalog)
 {

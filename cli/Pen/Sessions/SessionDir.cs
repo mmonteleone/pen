@@ -6,28 +6,25 @@ using Pen.Tools;
 
 namespace Pen.Sessions;
 
-/// <summary>One session's directory under the project's runtime dir, and the files in it.</summary>
-/// <param name="projectKey">The key of the session's project.</param>
-/// <param name="path">The directory, sessions/&lt;id&gt; under the project's runtime dir.</param>
+/// <summary>
+/// One session's directory, sessions/&lt;id&gt; under the project's runtime dir, and the files in it.
+/// </summary>
 /// <remarks>
 /// It holds the session's lock, the generated compose.yaml, squid.conf and ACL files, the env compose needs, the
 /// records pen ps and the session-end check read, and the proxy log, which outlives the session.
 /// </remarks>
 internal sealed class SessionDir(string projectKey, string path)
 {
-    /// <summary>Gets the directory.</summary>
     public string Path { get; } = path;
 
     /// <summary>Gets the session's ID, the directory's name.</summary>
     public string Id { get; } = System.IO.Path.GetFileName(path);
 
-    /// <summary>Gets the key of the session's project.</summary>
     public string ProjectKey => projectKey;
 
     /// <summary>Gets the name of the session's compose project, &lt;key&gt;-&lt;id&gt;.</summary>
     public string ComposeProject => $"{projectKey}-{Id}";
 
-    /// <summary>Gets the name of the agent's container.</summary>
     public string Container => $"{ComposeProject}-agent";
 
     /// <summary>Gets the name of the dind container, in a docker session.</summary>
@@ -83,7 +80,6 @@ internal sealed class SessionDir(string projectKey, string path)
         return (allow, ReadList(DenylistFile).ToHashSet(StringComparer.Ordinal));
     }
 
-    /// <summary>Gets the path of the proxy's log.</summary>
     public string ProxyLog => GetPath("proxy.log");
 
     /// <summary>
@@ -121,7 +117,7 @@ internal sealed class SessionDir(string projectKey, string path)
     public string EnvFile => GetPath("session.env");
 
     /// <summary>Gets the path of the file that's present when the session started in a repo.</summary>
-    /// <remarks>It holds the repo's common git dir (empty from older pens: PROJECT_DIR/.git).</remarks>
+    /// <remarks>It holds the repo's common git dir; empty, from an older Pen, means PROJECT_DIR/.git.</remarks>
     public string StartedWithGit => GetPath("started-with-git");
 
     /// <summary>
@@ -177,13 +173,11 @@ internal sealed class SessionDir(string projectKey, string path)
     /// </summary>
     public string DockerMarker => GetPath("docker");
 
-    /// <summary>Gets the path of the file <paramref name="name"/> in the session's directory.</summary>
     public string GetPath(string name) => System.IO.Path.Combine(Path, name);
 
     /// <summary>Checks whether the session's files are still there, so its stack may be up.</summary>
     public bool IsOpen() => File.Exists(ComposeFile);
 
-    /// <summary>Writes the command run in the sandbox.</summary>
     public void WriteCommand(IReadOnlyList<string> command) =>
         File.WriteAllText(CommandFile, string.Concat(command.Select(argument => argument + "\0")));
 
@@ -201,11 +195,9 @@ internal sealed class SessionDir(string projectKey, string path)
     public string[]? ReadModules() =>
         File.Exists(ModulesFile) ? File.ReadAllText(ModulesFile).Split('\0')[..^1] : null;
 
-    /// <summary>Writes when the session started.</summary>
     public void WriteStarted(DateTime utc) =>
         File.WriteAllText(StartedFile, utc.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture));
 
-    /// <summary>Writes the ports forwarded from the host.</summary>
     public void WritePorts(IReadOnlyList<int> ports) =>
         File.WriteAllText(PortsFile,
             string.Concat(ports.Select(port => port.ToString(CultureInfo.InvariantCulture) + "\n")));
@@ -249,7 +241,7 @@ internal sealed class SessionDir(string projectKey, string path)
         return (true, common.Length == 0 ? null : common);
     }
 
-    /// <summary>Reads the project's main checkout, as its runtime dir records it.</summary>
+    /// <summary>Reads the project's main checkout as its runtime dir records it.</summary>
     /// <returns>The main checkout, or null if that can't be read.</returns>
     public string? ReadRepoDir()
     {
@@ -280,8 +272,7 @@ internal sealed class SessionDir(string projectKey, string path)
             : null;
     }
 
-    /// <summary>Reads the env compose runs with.</summary>
-    /// <returns>The variables; none when the file is missing.</returns>
+    /// <summary>Reads the env compose runs with; none when the file is missing.</summary>
     public Dictionary<string, string> ReadEnv()
     {
         var env = new Dictionary<string, string>(StringComparer.Ordinal);

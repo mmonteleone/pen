@@ -8,7 +8,6 @@ internal static class InitHint
     /// <summary>The file in a project's runtime dir that records the hint was shown.</summary>
     public const string MarkerName = "init-hint";
 
-    /// <summary>The hint.</summary>
     public const string Message =
         "no .pen/config.toml here: pen init writes one with this project's tools and hidden files";
 
