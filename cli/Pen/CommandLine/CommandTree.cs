@@ -15,14 +15,17 @@ namespace Pen.CommandLine;
 
 /// <summary>Pen's command line as a System.CommandLine tree: its subcommands, options, arguments and help.</summary>
 /// <remarks>
-/// Built for each parse, since the domain arguments' parsers close over the start directory. Values are
-/// checked as they're parsed, with Pen's own messages. <see cref="CommandBoundary"/> reads its option and
-/// subcommand names from here, so the two can't disagree.
+/// Built for each parse, since the domain arguments' parsers close over the start directory (null when it can't be
+/// read), for the advice on an argument named like a file there (<see cref="ShellGlob"/>). Values are checked as
+/// they're parsed, with Pen's own messages. <see cref="CommandBoundary"/> reads its option and subcommand names from
+/// here, so the two can't disagree.
 /// </remarks>
 internal sealed class CommandTree
 {
-    /// <summary>The width help is wrapped at when it doesn't go to a terminal, or to one narrower than
-    /// <see cref="MinHelpWidth"/>.</summary>
+    /// <summary>
+    /// The width help is wrapped at when it doesn't go to a terminal, or to one narrower than
+    /// <see cref="MinHelpWidth"/>.
+    /// </summary>
     private const int DefaultHelpWidth = 80;
 
     /// <summary>The narrowest terminal whose width help is wrapped at.</summary>
@@ -35,12 +38,6 @@ internal sealed class CommandTree
     /// <summary>The longer help each command has after the sections System.CommandLine writes.</summary>
     private readonly Dictionary<SclCommand, string> _details = [];
 
-    /// <summary>Creates the tree.</summary>
-    /// <param name="startDir">
-    /// Gets the start directory, or null when it can't be read, for the advice on a domain argument named like a file
-    /// there (<see cref="ShellGlob"/>).
-    /// </param>
-    /// <param name="catalog">The recipes --tool values are parsed against.</param>
     public CommandTree(Func<string?> startDir, RecipeCatalog catalog)
     {
         Catalog = catalog;
@@ -171,7 +168,6 @@ internal sealed class CommandTree
     /// <summary>Gets the help option, -h or --help, in every command.</summary>
     public HelpOption Help { get; }
 
-    /// <summary>Gets pen --version.</summary>
     public VersionOption Version { get; }
 
     /// <summary>Gets pen run: running a command whose name is also a subcommand's.</summary>
@@ -183,61 +179,46 @@ internal sealed class CommandTree
     /// <summary>Gets pen run's command to run, everything from its name on.</summary>
     public Argument<string[]> RunCommandLine { get; }
 
-    /// <summary>Gets pen tools.</summary>
     public SclCommand Tools { get; }
 
-    /// <summary>Gets pen upgrade.</summary>
     public SclCommand Upgrade { get; }
 
-    /// <summary>Gets pen upgrade --no-cache.</summary>
     public Option<bool> NoCache { get; }
 
-    /// <summary>Gets pen allow.</summary>
     public SclCommand Allow { get; }
 
     /// <summary>Gets pen allow's domains, lowercased and without duplicates.</summary>
     public Argument<string[]> AllowDomains { get; }
 
-    /// <summary>Gets pen allow --global.</summary>
     public Option<bool> AllowGlobal { get; }
 
-    /// <summary>Gets pen allow --defaults.</summary>
     public Option<bool> AllowDefaults { get; }
 
-    /// <summary>Gets pen deny.</summary>
     public SclCommand Deny { get; }
 
     /// <summary>Gets pen deny's domains, lowercased and without duplicates.</summary>
     public Argument<string[]> DenyDomains { get; }
 
-    /// <summary>Gets pen deny --global.</summary>
     public Option<bool> DenyGlobal { get; }
 
-    /// <summary>Gets pen init.</summary>
     public SclCommand Init { get; }
 
-    /// <summary>Gets pen trust.</summary>
     public SclCommand Trust { get; }
 
-    /// <summary>Gets pen trust --yes.</summary>
     public Option<bool> TrustYes { get; }
 
-    /// <summary>Gets pen trust --list.</summary>
     public Option<bool> TrustList { get; }
 
     /// <summary>Gets pen ps, also called pen ls.</summary>
     public SclCommand Ps { get; }
 
-    /// <summary>Gets pen sign.</summary>
     public SclCommand Sign { get; }
 
     /// <summary>Gets pen sign's base: none or one.</summary>
     public Argument<string?> SignBase { get; }
 
-    /// <summary>Gets pen clean.</summary>
     public SclCommand Clean { get; }
 
-    /// <summary>Gets pen clean --stale.</summary>
     public Option<bool> CleanStale { get; }
 
     /// <summary>Writes what a help or version request asks for to <paramref name="output"/>.</summary>
@@ -255,7 +236,6 @@ internal sealed class CommandTree
         });
 
     /// <summary>Chooses the width help is wrapped at.</summary>
-    /// <param name="terminalWidth">The terminal's width when help goes to one, otherwise null.</param>
     /// <returns>
     /// The terminal's width when it's at least <see cref="MinHelpWidth"/>, otherwise <see cref="DefaultHelpWidth"/>.
     /// </returns>
@@ -305,8 +285,8 @@ internal sealed class CommandTree
 
     /// <summary>Creates an option that's on or off, given without a value.</summary>
     /// <remarks>
-    /// Arity zero, since the default would take a following true or false as its value (pen -d false
-    /// claude runs false claude).
+    /// Arity zero, since the default would take a following true or false as its value (pen -d false claude runs
+    /// false claude).
     /// </remarks>
     private static Option<bool> CreateFlag(string name, string? alias, string description)
     {
@@ -340,11 +320,10 @@ internal sealed class CommandTree
         return domains;
     }
 
-    /// <summary>Parses --port values into <paramref name="ports"/>: in order, without duplicates.</summary>
-    /// <param name="values">The values as given.</param>
-    /// <param name="ports">The ports when every value is one; otherwise empty.</param>
-    /// <param name="error">What's wrong with the first value that isn't a port; otherwise null.</param>
-    /// <returns>Whether every value is a port.</returns>
+    /// <summary>
+    /// Parses --port values into <paramref name="ports"/>, in order without duplicates, or says in
+    /// <paramref name="error"/> what's wrong with the first value that isn't a port.
+    /// </summary>
     public static bool TryParsePorts(
         IEnumerable<string> values,
         out IReadOnlyList<int> ports,
@@ -368,12 +347,10 @@ internal sealed class CommandTree
         return true;
     }
 
-    /// <summary>Parses --tool values into <paramref name="tools"/>, as given.</summary>
-    /// <param name="values">The values as given.</param>
-    /// <param name="catalog">The recipes the tools come from.</param>
-    /// <param name="tools">The tools when every value is one; otherwise empty.</param>
-    /// <param name="error">What's wrong with the first value that isn't a tool; otherwise null.</param>
-    /// <returns>Whether every value is a tool.</returns>
+    /// <summary>
+    /// Parses --tool values into <paramref name="tools"/>, as given, or says in <paramref name="error"/> what's wrong
+    /// with the first value that isn't a tool.
+    /// </summary>
     public static bool TryParseTools(
         IEnumerable<string> values,
         RecipeCatalog catalog,
@@ -427,21 +404,15 @@ internal sealed class CommandTree
         return [.. domains];
     }
 
-    /// <summary>Reads one domain argument of pen allow or pen deny (<paramref name="name"/>).</summary>
-    /// <param name="name">The subcommand, for messages.</param>
-    /// <param name="arg">The argument.</param>
-    /// <param name="allowStar">
-    /// Whether <see cref="Allowlist.AnyDomain"/> is valid: pen allow's, not pen deny's.
-    /// </param>
-    /// <param name="startDir">
-    /// Gets the start directory, or null when it can't be read: an argument that isn't a domain but names an entry
-    /// there gets the advice for a shell that expanded an unquoted *.
-    /// </param>
-    /// <param name="domain">
-    /// The domain, lowercased, or <see cref="Allowlist.AnyDomain"/>, when the argument is one; otherwise empty.
-    /// </param>
-    /// <param name="error">Why the argument is refused (an unknown option, or not a domain); otherwise null.</param>
-    /// <returns>Whether the argument is a domain.</returns>
+    /// <summary>
+    /// Reads one domain argument of pen allow or pen deny (<paramref name="name"/>) into <paramref name="domain"/>,
+    /// lowercased, or says in <paramref name="error"/> why it's refused (an unknown option, or not a domain).
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Allowlist.AnyDomain"/> is valid only with <paramref name="allowStar"/>: pen allow's, not pen deny's.
+    /// An argument that isn't a domain but names an entry of the start directory gets the advice for a shell that
+    /// expanded an unquoted *.
+    /// </remarks>
     private static bool TryReadDomain(
         string name,
         string arg,
@@ -530,8 +501,7 @@ internal sealed class CommandTree
 
     /// <summary>Writes "pen" and Pen's version, or help when <paramref name="help"/> was given too.</summary>
     /// <remarks>
-    /// A version request with anything else but help is a usage error: the parser checks that before invoking
-    /// this.
+    /// A version request with anything else but help is a usage error: the parser checks that before invoking this.
     /// </remarks>
     private sealed class VersionAction(HelpOption help) : SynchronousCommandLineAction
     {
@@ -717,7 +687,6 @@ internal sealed record RunOptionSet(
     Option<List<ToolSpec>> Tool,
     RecipeCatalog Catalog)
 {
-    /// <summary>Gets the three options.</summary>
     public IEnumerable<Option> All => [Docker, Port, Tool];
 
     /// <summary>Gets the options that take a value, with how their values are checked.</summary>

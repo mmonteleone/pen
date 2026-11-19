@@ -18,20 +18,16 @@ internal static class ConfigParser
     private const string UserFile = "~/.config/pen/" + ConfigLoader.FileName;
     private const string ProjectFile = ".pen/" + ConfigLoader.FileName;
 
-    /// <summary>Parses the text of the user config.toml.</summary>
-    /// <param name="text">The TOML text.</param>
-    /// <param name="displayPath">Names the file in errors.</param>
-    /// <param name="catalog">The recipes the file's tools come from.</param>
+    /// <summary>Parses the text of the user config.toml, which errors call <paramref name="displayPath"/>.</summary>
     public static UserConfiguration ParseUser(string text, string displayPath, RecipeCatalog catalog)
     {
         var settings = Parse(text, displayPath, ConfigKind.User, catalog);
         return new(settings.Allow, settings.Deny, settings.Tools, settings.Hide, settings.GitHubTokens, settings.Env);
     }
 
-    /// <summary>Parses the text of a project's .pen/config.toml.</summary>
-    /// <param name="text">The TOML text.</param>
-    /// <param name="displayPath">Names the file in errors.</param>
-    /// <param name="catalog">The recipes the file's tools come from.</param>
+    /// <summary>
+    /// Parses the text of a project's .pen/config.toml, which errors call <paramref name="displayPath"/>.
+    /// </summary>
     public static ProjectConfiguration ParseProject(string text, string displayPath, RecipeCatalog catalog)
     {
         var settings = Parse(text, displayPath, ConfigKind.Project, catalog);
@@ -110,12 +106,13 @@ internal static class ConfigParser
         }
     }
 
-    /// <summary>Validates a list of domains, allow's or deny's, and adds them to <paramref name="list"/>.</summary>
-    /// <param name="key">The key, which errors name.</param>
-    /// <param name="value">The key's value.</param>
-    /// <param name="list">Gets the domains, lowercased.</param>
-    /// <param name="allowStar">Whether "*", any domain name, is valid as a whole entry (allow's, not deny's).</param>
-    /// <param name="error">Makes the exception for a problem.</param>
+    /// <summary>
+    /// Validates a list of domains, allow's or deny's, and adds them to <paramref name="list"/>, lowercased.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="allowStar"/> says whether "*", any domain name, is valid as a whole entry: it is in allow, never
+    /// in deny.
+    /// </remarks>
     private static void ReadDomains(string key, object value, List<string> list, bool allowStar,
         Func<string, PenException> error)
     {

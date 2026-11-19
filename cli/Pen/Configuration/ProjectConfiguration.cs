@@ -15,14 +15,6 @@ internal sealed class ProjectConfiguration
     public static ProjectConfiguration Empty { get; } = new([], [], [], [], [], gitHubOwner: null, docker: null, []);
 
     /// <summary>Creates the settings, taking its own copies of the collections.</summary>
-    /// <param name="allow">Extra allowed domains, or "*", lowercased, in file order.</param>
-    /// <param name="deny">Denied domains, lowercased, in file order.</param>
-    /// <param name="tools">The tools, validated against the recipes and canonical.</param>
-    /// <param name="hide">The hide patterns, in file order.</param>
-    /// <param name="replacements">The [replace] entries, in file order.</param>
-    /// <param name="gitHubOwner">github_owner, if set.</param>
-    /// <param name="docker">docker, if set.</param>
-    /// <param name="ports">The ports, in file order without duplicates.</param>
     public ProjectConfiguration(
         IEnumerable<string> allow,
         IEnumerable<string> deny,
@@ -43,9 +35,9 @@ internal sealed class ProjectConfiguration
         Ports = [.. ports];
     }
 
-    /// <summary>Gets the extra allowed domains, or "*" for any domain name, in lowercase.</summary>
+    /// <summary>Gets the extra allowed domains, or "*" for any domain name, in lowercase and file order.</summary>
     public IReadOnlyList<string> Allow { get; }
-    /// <summary>Gets the denied domains, in lowercase. A deny beats every allow.</summary>
+    /// <summary>Gets the denied domains, in lowercase and file order. A deny beats every allow.</summary>
     public IReadOnlyList<string> Deny { get; }
     /// <summary>Gets tools = ["name", "name:version", …], validated against the recipes and canonical.</summary>
     public IReadOnlyList<ToolSpec> Tools { get; }

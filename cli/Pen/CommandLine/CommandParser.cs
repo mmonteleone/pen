@@ -20,21 +20,16 @@ internal static class CommandParser
         ResponseFileTokenReplacer = null,
     };
 
-    /// <summary>Parses the arguments Pen was started with.</summary>
-    /// <param name="args">The arguments.</param>
-    /// <param name="startDir">
-    /// Gets the start directory, or null when it can't be read, for the advice on a domain argument named like a file
-    /// there (<see cref="ShellGlob"/>).
-    /// </param>
-    /// <param name="catalog">The recipes --tool values are parsed against.</param>
-    /// <returns>What they ask Pen to do.</returns>
+    /// <summary>Parses the arguments Pen was started with into what they ask Pen to do.</summary>
     /// <exception cref="PenException">
     /// The arguments aren't valid; exit code 2, with the help command to run for usage.
     /// </exception>
     /// <remarks>
-    /// A first argument that's a subcommand selects it; any other first argument that isn't an option is the
-    /// command to run, as is everything after it. Options before the command are Pen's: --docker, --port and
-    /// --tool (for running, also right after run), help and version. Any other one is an error.
+    /// A first argument that's a subcommand selects it; any other first argument that isn't an option is the command
+    /// to run, as is everything after it. Options before the command are Pen's: --docker, --port and --tool (for
+    /// running, also right after run), help and version. Any other one is an error. <paramref name="startDir"/> gives
+    /// the start directory, or null when it can't be read, for the advice on a domain argument named like a file there
+    /// (<see cref="ShellGlob"/>).
     /// </remarks>
     public static CliInvocation Parse(IReadOnlyList<string> args, Func<string?> startDir, RecipeCatalog catalog)
     {
@@ -140,16 +135,12 @@ internal static class CommandParser
             ?? $"{option.Name}: missing the value";
 
     /// <summary>Refuses an argument starting with - before the command that isn't one of Pen's options.</summary>
-    /// <param name="tree">The tree that was parsed.</param>
-    /// <param name="result">The parse.</param>
-    /// <param name="help">
-    /// Whether help was asked for: then only the root's arguments up to the first that doesn't start with - are
-    /// checked, since the command starts there (pen --help claude is help, pen --dockr claude --help an error).
-    /// </param>
     /// <remarks>
     /// The parser doesn't report these: they become the root's command to run, even with a subcommand after them
     /// (pen --dockr allow x.com). Without help, the root's arguments that come before a -- are always these, since
-    /// <see cref="CommandBoundary"/> puts one before the command.
+    /// <see cref="CommandBoundary"/> puts one before the command. When <paramref name="help"/> was asked for, only the
+    /// root's arguments up to the first that doesn't start with - are checked, since the command starts there
+    /// (pen --help claude is help, pen --dockr claude --help an error).
     /// </remarks>
     private static void ThrowIfUnknownRootOption(CommandTree tree, ParseResult result, bool help)
     {
@@ -300,7 +291,8 @@ internal static class CommandParser
             Tools: canonical);
     }
 
-    /// <summary>Finds the option of <paramref name="options"/> that the parser read <paramref name="token"/> as.
+    /// <summary>
+    /// Finds the option of <paramref name="options"/> that the parser read <paramref name="token"/> as.
     /// </summary>
     private static Option FindOption(IEnumerable<Option> options, Token token) =>
         options.Single(option => option.Name == token.Value || option.Aliases.Contains(token.Value));
@@ -308,9 +300,10 @@ internal static class CommandParser
     /// <summary>Formats the parsed subcommand's name as it was given (ls for pen ls).</summary>
     private static string FormatName(ParseResult result) => result.CommandResult.IdentifierToken.Value;
 
-    /// <summary>Creates the error for an invalid command line: the message, then where to find the usage.</summary>
-    /// <param name="message">What's wrong.</param>
-    /// <param name="command">The command whose help shows the usage.</param>
+    /// <summary>
+    /// Creates the error for an invalid command line: the message, then the help of <paramref name="command"/> to run
+    /// for usage.
+    /// </summary>
     private static PenException CreateUsageError(string message, SclCommand command)
     {
         var help = command is RootCommand ? "pen --help" : $"pen {command.Name} --help";

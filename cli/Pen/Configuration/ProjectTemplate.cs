@@ -15,7 +15,6 @@ namespace Pen.Configuration;
 /// </remarks>
 internal static class ProjectTemplate
 {
-    /// <summary>The embedded template's name.</summary>
     public const string ResourceName = "templates/project/config.toml";
 
     /// <summary>The most paths a comment lists for one finding before "and N more".</summary>

@@ -7,7 +7,8 @@ namespace Pen.CommandLine;
 /// </summary>
 internal static class ShellGlob
 {
-    /// <summary>Tells whether <paramref name="name"/> names an entry of <paramref name="dir"/>, ignoring case.
+    /// <summary>
+    /// Tells whether <paramref name="name"/> names an entry of <paramref name="dir"/>, ignoring case.
     /// </summary>
     /// <returns>False when the directory can't be listed.</returns>
     /// <remarks>Case is ignored since the parser lowercases the arguments.</remarks>

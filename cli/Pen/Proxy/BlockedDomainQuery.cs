@@ -10,12 +10,9 @@ namespace Pen.Proxy;
 internal static class BlockedDomainQuery
 {
     /// <summary>
-    /// Finds the hosts blocked in the proxy logs of the sessions in <paramref name="runtimeDir"/>, and groups them
-    /// by what <paramref name="policy"/> does with them.
+    /// Finds the hosts blocked in the proxy logs of the sessions in the project's <paramref name="runtimeDir"/>, and
+    /// groups them by what <paramref name="policy"/>, a session started now, would do with them.
     /// </summary>
-    /// <param name="projectKey">The project's key.</param>
-    /// <param name="runtimeDir">The project's runtime dir.</param>
-    /// <param name="policy">What a session started now would be allowed and denied.</param>
     /// <returns>Each group newest last denial first; hosts the policy allows by name are left out.</returns>
     public static BlockedHosts Find(string projectKey, string runtimeDir, EgressPolicy policy)
     {

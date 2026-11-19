@@ -17,13 +17,10 @@ namespace Pen.Configuration;
 /// </remarks>
 internal static class ConfigEdit
 {
-    /// <summary>Adds the domains not already in <paramref name="key"/> to <paramref name="text"/>'s array.</summary>
-    /// <param name="text">The config.toml text.</param>
-    /// <param name="displayPath">Names the file in errors.</param>
-    /// <param name="kind">Which keys the file may hold.</param>
-    /// <param name="key">The list to add to.</param>
-    /// <param name="domains">The domains to add.</param>
-    /// <param name="catalog">The recipes the file's tools come from.</param>
+    /// <summary>
+    /// Adds the domains not already in <paramref name="key"/> to the array in <paramref name="text"/>, a config.toml
+    /// of the given <paramref name="kind"/>.
+    /// </summary>
     /// <returns>
     /// The edited text, or <paramref name="text"/> itself if nothing needed adding, and the domains added.
     /// </returns>
@@ -84,14 +81,12 @@ internal static class ConfigEdit
         return new(result, added);
     }
 
-    /// <summary>Gets <paramref name="allow"/> or <paramref name="deny"/>, as <paramref name="key"/> says.</summary>
     private static IReadOnlyList<string> SelectList(
         IReadOnlyList<string> allow,
         IReadOnlyList<string> deny,
         ConfigListKey key) =>
         key == ConfigListKey.Allow ? allow : deny;
 
-    /// <summary>Gets the key <paramref name="key"/> is written as in config.toml.</summary>
     private static string Name(ConfigListKey key) => key == ConfigListKey.Allow ? "allow" : "deny";
 
     /// <summary>
@@ -119,8 +114,7 @@ internal static class ConfigEdit
             $"can add to; add {string.Join(", ", added.Select(Quote))} by hand");
     }
 
-    /// <summary>Parses the edited text.</summary>
-    /// <returns>Its settings, or null if it doesn't parse (which the comparison then rejects).</returns>
+    /// <summary>Parses the edited text; null if it doesn't parse, which the comparison then rejects.</summary>
     private static T? Reparse<T>(
         string text,
         string displayPath,
@@ -194,7 +188,6 @@ internal static class ConfigEdit
         IReadOnlyList<string> added) =>
         after.SequenceEqual(list == key ? before.Concat(added) : before);
 
-    /// <summary>Compares hide patterns by their text, in order.</summary>
     private static bool IsSameHide(IReadOnlyList<HidePattern> before, IReadOnlyList<HidePattern> after) =>
         after.Select(pattern => pattern.Text).SequenceEqual(before.Select(pattern => pattern.Text));
 
@@ -220,7 +213,6 @@ internal static class ConfigEdit
     private static string Insert(string text, int offset, string insertion) =>
         text[..offset] + insertion + text[offset..];
 
-    /// <summary>Finds the start of the line holding <paramref name="offset"/>.</summary>
     private static int LineStart(string text, int offset) =>
         offset == 0 ? 0 : text.LastIndexOf('\n', offset - 1) + 1;
 
@@ -278,8 +270,8 @@ internal static class ConfigEdit
         else
             builder.Insert(close, newline + lines);
 
-        // The last item needs a comma before anything follows it (inserted
-        // last, at an earlier offset, so the offsets above stay valid).
+        // The last item needs a comma before anything follows it (inserted last, at an earlier offset, so the
+        // offsets above stay valid).
         if (items.Count > 0 && items[^1].Comma is null)
             builder.Insert(items[^1].Value!.Span.End.Offset + 1, ",");
         return builder.ToString();

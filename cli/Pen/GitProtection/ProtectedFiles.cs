@@ -263,8 +263,9 @@ internal static class ProtectedFiles
             var manifest = ReadRecord(session);
             if (manifest is null)
             {
-                // A session's record is deleted after its compose.yaml, so one that's still open with no record is
-                // from an older Pen or damaged, and its agent could still write.
+                // A session's record is written before its compose.yaml and deleted after it (by then as
+                // restored-manifest.json), so one that's still open with no record is from an older Pen or damaged,
+                // and its agent could still write.
                 unrecorded |= session.IsOpen();
                 continue;
             }

@@ -7,11 +7,10 @@ namespace Pen.Proxy;
 /// <summary>Words the warnings about a session's egress: open egress, and deny taking what tools need.</summary>
 internal static class EgressWarnings
 {
-    /// <summary>Lists the warnings about the egress of a session with <paramref name="tools"/>.</summary>
-    /// <param name="context">The project and both configs.</param>
-    /// <param name="catalog">The recipes that say which domains each tool brings.</param>
-    /// <param name="tools">The session's tools.</param>
-    /// <param name="deny">The merged deny list.</param>
+    /// <summary>
+    /// Lists the warnings about the egress of a session with <paramref name="tools"/> and the merged
+    /// <paramref name="deny"/> list.
+    /// </summary>
     public static IReadOnlyList<string> ListForSession(
         ProjectContext context, RecipeCatalog catalog, IReadOnlyList<ToolSpec> tools, IReadOnlyList<string> deny)
     {

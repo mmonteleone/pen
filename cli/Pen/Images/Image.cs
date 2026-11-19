@@ -37,10 +37,9 @@ internal static class Image
     }
 
     /// <summary>Builds pen:latest from the embedded image context, labeled with <paramref name="hash"/>.</summary>
-    /// <param name="hash">The hash of the image files, for the label.</param>
-    /// <param name="refresh">The PEN_REFRESH build argument, which gives the base a new ID, or null.</param>
-    /// <param name="pull">Whether to pull a newer base image (--pull).</param>
-    /// <param name="noCache">Whether to build without the cache (--no-cache).</param>
+    /// <remarks>
+    /// A non-null <paramref name="refresh"/> is the PEN_REFRESH build argument, which gives the base a new ID.
+    /// </remarks>
     public static void Build(string hash, string? refresh, bool pull, bool noCache)
     {
         var args = new List<string> { "build", "-t", Name, "--label", $"{HashLabel}={hash}" };
@@ -62,27 +61,20 @@ internal static class Image
     }
 
     /// <summary>
-    /// Builds the project layer, .pen/Dockerfile (FROM pen:latest) with .pen/ as its context, as
-    /// <see cref="GetProjectLayerName"/>, with its output shown as <see cref="RunBuild"/> does.
+    /// Builds the project layer from .pen/Dockerfile (FROM pen:latest) as <see cref="GetProjectLayerName"/>, with its
+    /// output shown as <see cref="RunBuild"/> does.
     /// </summary>
-    /// <param name="host">The host user's environment.</param>
-    /// <param name="project">The project whose .pen/ to build.</param>
-    /// <param name="clock">The clock the wait for another build of the same directory is timed by.</param>
-    /// <param name="noCache">Whether to build without the cache (--no-cache).</param>
-    /// <param name="baseImage">The image that stands in for pen:latest in the Dockerfile, which stays as it is.</param>
     /// <returns>The image to run, or null when the project has no layer.</returns>
     /// <remarks>
     /// <para>
-    /// It's built on every launch; the cache makes that near-instant, and a rebuilt pen:latest invalidates it.
+    /// <paramref name="baseImage"/> stands in for pen:latest, and the Dockerfile stays as it is. The layer is built on
+    /// every launch; the cache makes that near-instant, and a rebuilt pen:latest invalidates it.
     /// </para>
     /// <para>
-    /// Docker only ever reads a private copy, whose hash has to be the approved
-    /// one: a session in the main checkout can write to an in-tree worktree's .pen/
-    /// at any moment, so checking .pen/ itself would prove nothing about the build.
-    /// </para>
-    /// <para>
-    /// A tag says nothing about which .pen/ made it, so an existing image must never
-    /// skip the build: only building is what ties it to the approved copy.
+    /// Docker only ever reads a private copy of .pen/, whose hash has to be the approved one: a session in the main
+    /// checkout can write to an in-tree worktree's .pen/ at any moment, so checking .pen/ itself would prove nothing
+    /// about the build. A tag says nothing about which .pen/ made it, so an existing image must never skip the build:
+    /// only building ties it to the approved copy.
     /// </para>
     /// </remarks>
     public static string? EnsureProjectLayer(
@@ -131,14 +123,11 @@ internal static class Image
     }
 
     /// <summary>
-    /// Runs docker build with <paramref name="args"/>, with its output hidden unless the build is slow,
-    /// when <paramref name="announce"/> and the output are shown, or fails, when the end of the output
-    /// and <paramref name="failure"/> are.
+    /// Runs docker build with <paramref name="args"/>, its output hidden unless the build is slow, when
+    /// <paramref name="announce"/> and the output are shown, or fails, when the end of the output and
+    /// <paramref name="failure"/> are.
     /// </summary>
-    /// <param name="args">The docker arguments.</param>
-    /// <param name="context">Writes the tar context to docker's stdin, if given.</param>
-    /// <param name="announce">The line shown before the output of a slow build.</param>
-    /// <param name="failure">The start of the error when the build fails.</param>
+    /// <remarks>A non-null <paramref name="context"/> writes the tar context to docker's stdin.</remarks>
     internal static void RunBuild(IReadOnlyList<string> args, Action<Stream>? context, string announce, string failure)
     {
         var startInfo = Proc.CreateStartInfo("docker", args);
@@ -164,7 +153,6 @@ internal static class Image
         }
     }
 
-    /// <summary>Writes the build context to the stdin of <paramref name="process"/>.</summary>
     private static void WriteContext(Process process, Action<Stream> context)
     {
         try
@@ -180,9 +168,8 @@ internal static class Image
 
     /// <summary>Gets the name of the project layer built on <paramref name="baseImage"/>.</summary>
     /// <returns>
-    /// &lt;key&gt; for the main checkout (or a plain dir), and &lt;key&gt;-&lt;hash(dir)&gt; for a linked
-    /// worktree, whose .pen/ is its own; tagged latest on pen:latest, and on a tools image with that
-    /// image's hash.
+    /// &lt;key&gt; for the main checkout (or a plain dir) and &lt;key&gt;-&lt;hash(dir)&gt; for a linked worktree,
+    /// whose .pen/ is its own; tagged latest on pen:latest, and on a tools image with that image's hash.
     /// </returns>
     /// <remarks>The tag keeps tool sets and bases from sharing a project layer.</remarks>
     public static string GetProjectLayerName(Project project, string baseImage)

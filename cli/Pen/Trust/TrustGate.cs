@@ -8,14 +8,11 @@ using Pen.Tools;
 namespace Pen.Trust;
 
 /// <summary>Decides what a project's .pen/ asks for that isn't approved, and asks the user before a session.</summary>
-/// <param name="context">The project and both configs.</param>
-/// <param name="answers">Where the user's approval comes from.</param>
-/// <param name="catalog">The recipes that say which domains a tool brings.</param>
-/// <param name="clock">The clock that says when an abandoned review copy is old enough to delete.</param>
 /// <remarks>
 /// Settings from .pen/ reach the token lookup, the allowlist and docker build only once approved in the
-/// <see cref="TrustStore"/>, since the agent can write a .pen/ (in a worktree inside the project) for the
-/// next session to run with, and can keep changing it while the user looks.
+/// <see cref="TrustStore"/>, since the agent can write a .pen/ (in a worktree inside the project) for the next session
+/// to run with, and can keep changing it while the user looks. The clock says when an abandoned review copy is old
+/// enough to delete.
 /// </remarks>
 internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeCatalog catalog, TimeProvider clock)
 {
@@ -33,11 +30,9 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
         [.. Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt"))];
 
     /// <summary>Finds what's in the project config and .pen/ that nothing approves yet.</summary>
-    /// <param name="store">The approvals for the project's directory.</param>
-    /// <param name="flagTools">The tools pen --tool names, which need no approval.</param>
     /// <returns>
-    /// What the defaults, the user's config, <paramref name="flagTools"/> and <paramref name="store"/>
-    /// don't cover; empty when nothing needs approving.
+    /// What the defaults, the user's config, <paramref name="flagTools"/> (pen --tool, which needs no approval) and
+    /// <paramref name="store"/> don't cover; empty when nothing needs approving.
     /// </returns>
     public TrustRequest FindUnapproved(TrustStore store, IReadOnlyList<ToolSpec> flagTools)
     {
@@ -60,13 +55,11 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     }
 
     /// <summary>Selects the entries of the project's allow that a session's allowlist may take.</summary>
-    /// <param name="user">The user's config.</param>
-    /// <param name="projectConfig">The project's config, whose allow is agent-writable.</param>
-    /// <param name="store">The approvals for the project's directory.</param>
     /// <returns>
-    /// Those approved in <paramref name="store"/>, or covered by the defaults and the user's allow without
-    /// asking, in order; the rest are what a prompt asks for. Session start and live apply both take these.
+    /// Those approved in <paramref name="store"/>, or covered by the defaults and the user's allow without asking, in
+    /// order; the rest are what a prompt asks for. Session start and live apply both take these.
     /// </returns>
+    /// <remarks>The project's allow is agent-writable.</remarks>
     internal static IReadOnlyList<string> SelectAllowedDomains(
         UserConfiguration user,
         ProjectConfiguration projectConfig,
@@ -91,11 +84,10 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     }
 
     /// <summary>Finds the project's github_owner when it needs approving.</summary>
-    /// <param name="store">The approvals for the project's directory.</param>
-    /// <param name="origin">The owner of origin, or null when it has none or can't be read.</param>
     /// <returns>
     /// The github_owner, or null when there's none, it's origin's owner (ignoring case) or it's approved.
     /// </returns>
+    /// <remarks><paramref name="origin"/> is null when there's no origin owner or it can't be read.</remarks>
     private string? FindUnapprovedOwner(TrustStore store, string? origin)
     {
         if (context.ProjectConfig.GitHubOwner is not { } owner)
@@ -106,17 +98,13 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     }
 
     /// <summary>Finds the project's tools that need an approval.</summary>
-    /// <param name="projectConfig">The project's .pen/config.toml.</param>
-    /// <param name="namedByUser">The tools the user's config and pen --tool name.</param>
-    /// <param name="store">The approvals for the project's directory.</param>
-    /// <param name="catalog">The recipes that say which domains each tool brings.</param>
     /// <returns>Each tool that's new at its version, or brings domains not approved for it.</returns>
     /// <remarks>
-    /// One the user also names isn't among them, since this session has it anyway. Nor is it approved:
-    /// without the flag, or taken out of the user's config, the entry in .pen/ asks as any other. An
-    /// approval covers the tool at its version and the domains shown for it, each recorded apart from the
-    /// store's allow domains, so a recipe that later brings another domain asks again, and one that drops a
-    /// domain doesn't.
+    /// One the user also names (<paramref name="namedByUser"/>: the user's config and pen --tool) isn't among them,
+    /// since this session has it anyway. Nor is it approved: without the flag, or taken out of the user's config, the
+    /// entry in .pen/ asks as any other. An approval covers the tool at its version and the domains shown for it, each
+    /// recorded apart from the store's allow domains, so a recipe that later brings another domain asks again, and one
+    /// that drops a domain doesn't.
     /// </remarks>
     public static IReadOnlyList<ToolRequest> FindUnapprovedTools(
         ProjectConfiguration projectConfig,
@@ -139,11 +127,9 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     }
 
     /// <summary>Finds whether the .pen/ a .pen/Dockerfile builds from needs approving.</summary>
-    /// <param name="project">The project whose .pen/ is hashed.</param>
-    /// <param name="store">The approvals for the project's directory.</param>
     /// <returns>
-    /// Null when there's no Dockerfile or the hash of .pen/ is the approved one; otherwise the new hash,
-    /// or the problem that means .pen/ has none.
+    /// Null when there's no Dockerfile or the hash of .pen/ is the approved one; otherwise the new hash, or the problem
+    /// that means .pen/ has none.
     /// </returns>
     /// <remarks>It's the same check as before a build.</remarks>
     public static LayerRequest? FindUnapprovedLayer(Project project, TrustStore store)
@@ -226,14 +212,12 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
     }
 
     /// <summary>Takes <paramref name="request"/>'s layer from the private copy in <paramref name="review"/>.</summary>
-    /// <param name="request">What .pen/ asks for, as found on the live .pen/.</param>
-    /// <param name="review">The private copy of .pen/, kept until the user answers.</param>
-    /// <param name="store">The approvals for the project's directory.</param>
-    /// <param name="showCopy">Whether the prompt points the user at the copy, to read the rest of it there.</param>
     /// <returns>The request with the copy's hash, its Dockerfile to show, or no layer if the copy's approved.</returns>
     /// <remarks>
-    /// The hash that would be approved and the text shown are the same bytes, whatever .pen/ turns into
-    /// while the user reads, so a swap can't get approved unseen.
+    /// <paramref name="request"/> was found on the live .pen/, and <paramref name="review"/> is kept until the user
+    /// answers; with <paramref name="showCopy"/> the prompt points the user at the copy to read the rest of it there.
+    /// The hash that would be approved and the text shown are the same bytes, whatever .pen/ turns into while the user
+    /// reads, so a swap can't get approved unseen.
     /// </remarks>
     internal static TrustRequest WithReviewedLayer(
         TrustRequest request,
@@ -262,8 +246,8 @@ internal sealed class TrustGate(ProjectContext context, Answers answers, RecipeC
 
     /// <summary>Formats the Dockerfile at <paramref name="path"/> for the prompt, cut short.</summary>
     /// <remarks>
-    /// Its lines are escaped, as it's the agent's, and what's cut is counted. Only what's shown depends on
-    /// reading it: the hash that's approved was taken already.
+    /// Its lines are escaped, as it's the agent's, and what's cut is counted. Only what's shown depends on reading it:
+    /// the hash that's approved was taken already.
     /// </remarks>
     private static string FormatDockerfile(string path)
     {

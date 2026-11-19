@@ -13,14 +13,9 @@ internal sealed record ProjectContext(HostEnv Host, Project Project, UserConfigu
     ProjectConfiguration ProjectConfig)
 {
     /// <summary>Loads the project's .pen/config.toml and builds the context with it.</summary>
-    /// <param name="host">The host user's environment.</param>
-    /// <param name="project">The resolved project.</param>
-    /// <param name="user">The user's config.</param>
-    /// <param name="catalog">The recipes the project config's tools come from.</param>
-    /// <returns>The context for <paramref name="project"/>.</returns>
     /// <remarks>
-    /// .pen/ is agent-writable, so only the commands that use the project config build a context:
-    /// pen sign and pen clean never read it, and a broken or hostile one can't get in their way.
+    /// .pen/ is agent-writable, so only the commands that use the project config build a context: pen sign and
+    /// pen clean never read it, and a broken or hostile one can't get in their way.
     /// </remarks>
     public static ProjectContext Load(
         HostEnv host,

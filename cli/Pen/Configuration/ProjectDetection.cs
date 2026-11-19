@@ -12,12 +12,11 @@ namespace Pen.Configuration;
 /// <summary>What a read-only look at a project's files suggests for its config: tools, hide patterns, hints.</summary>
 /// <remarks>
 /// It's advisory: anything it can't read is skipped, and repo content never makes it throw. The walk lists
-/// directories up to three levels below the project dir (so a/b/c/go.mod counts), at most
-/// <see cref="MaxEntries"/> entries, doesn't follow the symlinks it lists (a race can still swap one in; see
-/// <c>Scan.VisitFile</c>) and never enters <see cref="SkippedDirs"/>.
-/// Values are only recipe-validated specs and patterns that pass <see cref="HidePattern.TryParse"/>. The paths
-/// kept as sources and hints are only those that can go in a comment or on a terminal (<see cref="IsSafeName"/>);
-/// a file under an unsafe name still counts, just without its path.
+/// directories up to three levels below the project dir (so a/b/c/go.mod counts), at most <see cref="MaxEntries"/>
+/// entries, doesn't follow the symlinks it lists (a race can still swap one in; see <c>Scan.VisitFile</c>) and never
+/// enters <see cref="SkippedDirs"/>. Values are only recipe-validated specs and patterns that pass
+/// <see cref="HidePattern.TryParse"/>. The paths kept as sources and hints are only those that can go in a comment or
+/// on a terminal (<see cref="IsSafeName"/>); a file under an unsafe name still counts, just without its path.
 /// </remarks>
 internal sealed partial record ProjectDetection
 {
@@ -58,15 +57,18 @@ internal sealed partial record ProjectDetection
     /// <summary>Gets the detected tools' specs, in canonical order.</summary>
     public IEnumerable<ToolSpec> ToolSpecs => Tools.Select(tool => tool.Tool);
 
-    /// <summary>Looks at the files under <paramref name="projectDir"/>.</summary>
-    /// <param name="projectDir">The project dir, by real path.</param>
-    /// <param name="catalog">The recipes that tool versions are checked against.</param>
+    /// <summary>
+    /// Looks at the files under <paramref name="projectDir"/>, a real path, checking tool versions against
+    /// <paramref name="catalog"/>.
+    /// </summary>
     public static ProjectDetection Detect(string projectDir, RecipeCatalog catalog) =>
         new Scan(projectDir, catalog).Run();
 
     /// <summary>Checks whether a name or path can be written into a comment or onto a terminal.</summary>
-    /// <returns>False if it has a control character (a newline included) or U+FFFD, which stands for bytes that
-    /// weren't valid UTF-8.</returns>
+    /// <returns>
+    /// False if it has a control character (a newline included) or U+FFFD, which stands for bytes that weren't valid
+    /// UTF-8.
+    /// </returns>
     internal static bool IsSafeName(string name) => !name.Any(c => Out.IsControl(c) || c == '\uFFFD');
 
     [GeneratedRegex(@"^[A-Za-z0-9._-]+\z")]
@@ -207,12 +209,10 @@ internal sealed partial record ProjectDetection
 
         /// <summary>Records what a file's name says.</summary>
         /// <remarks>
-        /// A symlink counts only for hide patterns, which match its name (the sandbox hides what it leads to);
-        /// it's never a toolchain marker, version file or hint, so the walk doesn't read through a symlink it
-        /// listed. That can be raced: a file listed as regular and replaced by a symlink before it's read is read
-        /// through it (<see cref="Native.ReadRegularFile"/> follows symlinks), as a directory replaced before
-        /// it's listed is listed through it. The most that does is suggest a tool version from a file outside the
-        /// project, and only one that passes the recipe's check, or report names found there.
+        /// A symlink counts only for hide patterns, which match its name (the sandbox hides what it leads to); it's
+        /// never read as a toolchain marker, version file or hint. A file or directory swapped for a symlink after
+        /// it's listed is still read through it (<see cref="Native.ReadRegularFile"/> follows symlinks), which at most
+        /// suggests a recipe-valid tool version or names from outside the project.
         /// </remarks>
         private void VisitFile(Entry entry, FoundFile file)
         {
@@ -295,11 +295,10 @@ internal sealed partial record ProjectDetection
         /// file (never expected).
         /// </returns>
         /// <remarks>
-        /// Anchored, since an any-depth *.pem would also hide what masking finds in <see cref="SkippedDirs"/>,
-        /// which this walk never looks at (a venv's certifi/cacert.pem, which Python needs for HTTPS; test
-        /// certificates under node_modules, enough of them to pass the mount cap). A directory name a pattern
-        /// would read as a wildcard or refuse, or one that can't go in a comment, is written as * and never
-        /// as **, so the pattern matches at one depth only.
+        /// Anchored, since an any-depth *.pem would also hide files in <see cref="SkippedDirs"/>, which this walk
+        /// never looks at: a venv's certifi/cacert.pem, which Python needs for HTTPS, or enough test certificates
+        /// under node_modules to pass the mount cap. A directory name a pattern would read as a wildcard or refuse, or
+        /// one that can't go in a comment, is written as * and never as **, so the pattern matches at one depth only.
         /// </remarks>
         private static string? AnchorKeyPattern(FoundFile file, string extension)
         {
@@ -315,8 +314,8 @@ internal sealed partial record ProjectDetection
 
         /// <summary>Checks whether a directory name can be a literal segment of a hide pattern.</summary>
         /// <remarks>
-        /// *, ? and ** would be wildcards, and [, ] and \ are refused. Spaces, ! and # are taken as written
-        /// inside an anchored pattern, which starts with / and ends with the extension; anything else
+        /// *, ? and ** would be wildcards, and [, ] and \ are refused. Spaces, ! and # are taken as written inside an
+        /// anchored pattern, which starts with / and ends with the extension; anything else
         /// <see cref="HidePattern.TryParse"/> refuses is caught by trying the pattern.
         /// </remarks>
         private static bool IsLiteralSegment(string name) =>
@@ -385,13 +384,10 @@ internal sealed partial record ProjectDetection
         }
 
         /// <summary>
-        /// Adds <paramref name="name"/> for each marker, at the version in the nearest version file at or above
-        /// the marker's directory, or at the default when there is none.
+        /// Adds the tool <paramref name="name"/> for each marker, at the version <paramref name="read"/> finds in the
+        /// nearest version file at or above the marker's directory, or at the default when there is none.
         /// </summary>
-        /// <param name="name">The tool.</param>
-        /// <param name="markers">The files that show the project uses it.</param>
-        /// <param name="read">Reads a version file's version: the version to try and the text found, or null.</param>
-        /// <param name="versionFiles">Version files by directory, the first taking precedence in a directory.</param>
+        /// <remarks>In a directory with more than one kind of version file, the first in the list wins.</remarks>
         private void AddWithVersionFiles(
             string name,
             List<FoundFile> markers,
@@ -434,11 +430,12 @@ internal sealed partial record ProjectDetection
             return slash < 0 ? "" : dir[..slash];
         }
 
-        /// <summary>Records a tool at <paramref name="version"/>, or its default if the recipe lacks it.</summary>
-        /// <param name="name">The recipe's name.</param>
-        /// <param name="version">The version to try, or null for the default.</param>
-        /// <param name="found">What the file said, for the note when the version isn't known.</param>
-        /// <param name="sources">The files it was found from.</param>
+        /// <summary>
+        /// Records a tool at <paramref name="version"/>, or at its default if that's null or the recipe lacks it.
+        /// </summary>
+        /// <remarks>
+        /// <paramref name="found"/> is what the file said, for the note when the version isn't known.
+        /// </remarks>
         private void AddTool(string name, string? version, string? found, IEnumerable<FoundFile> sources)
         {
             var tool = default(ToolSpec);
@@ -661,9 +658,9 @@ internal sealed record DetectedTool(ToolSpec Tool, IReadOnlyList<string> Sources
 {
     /// <summary>Whether <see cref="Tool"/>'s version was read from a file and accepted by the recipe.</summary>
     /// <remarks>
-    /// False when it's the recipe's default because nothing gave a version (or the one given was refused), so
-    /// it can be written as the bare name and follow the recipe's default; true even when the version read
-    /// equals today's default, so that it stays pinned when the default moves.
+    /// False when it's the recipe's default because nothing gave a version (or the one given was refused), so it can
+    /// be written as the bare name and follow the recipe's default; true even when the version read equals today's
+    /// default, so that it stays pinned when the default moves.
     /// </remarks>
     public bool IsPinned { get; init; }
 

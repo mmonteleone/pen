@@ -14,10 +14,6 @@ internal static class ConfigFileEditor
     /// Adds the domains not already in <paramref name="key"/> to the config.toml <paramref name="target"/>, creating
     /// it from its stub if it's missing.
     /// </summary>
-    /// <param name="target">The config.toml to change.</param>
-    /// <param name="key">The list to add to.</param>
-    /// <param name="domains">The domains to add.</param>
-    /// <param name="catalog">The recipes the file's tools come from.</param>
     /// <returns>The domains added, lowercased, in order; none when the file is left alone.</returns>
     /// <remarks>The file is replaced by rename, keeping its mode.</remarks>
     public static IReadOnlyList<string> AddToList(
@@ -37,11 +33,10 @@ internal static class ConfigFileEditor
         return edit.Added;
     }
 
-    /// <summary>Chooses the mode for the config.toml at <paramref name="path"/>.</summary>
-    /// <returns>
-    /// The file's own mode when it <paramref name="exists"/>; otherwise 600 for the user's (it may hold secrets)
-    /// and 644 for a project's.
-    /// </returns>
+    /// <summary>
+    /// Chooses the config.toml's mode: its own when it exists; otherwise 600 for the user's (it may hold secrets) and
+    /// 644 for a project's.
+    /// </summary>
     private static UnixFileMode ChooseMode(string path, bool exists, ConfigKind kind)
     {
         if (exists)

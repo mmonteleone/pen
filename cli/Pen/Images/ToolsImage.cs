@@ -26,8 +26,8 @@ internal static class ToolsImage
     /// <summary>Plans the installs for <paramref name="tools"/>.</summary>
     /// <returns>The recipes to run, in canonical order, each with its versions.</returns>
     /// <remarks>
-    /// The tools may have come from .pen/, and their versions reach a Dockerfile and a root script,
-    /// so they're checked again here rather than trusted to have been parsed.
+    /// The tools may have come from .pen/, and their versions reach a Dockerfile and a root script, so they're checked
+    /// again here rather than trusted to have been parsed.
     /// </remarks>
     private static List<Install> PlanInstalls(IEnumerable<ToolSpec> tools, RecipeCatalog catalog)
     {
@@ -48,13 +48,12 @@ internal static class ToolsImage
 
     /// <summary>Generates the Dockerfile that installs <paramref name="plan"/> on pen:latest.</summary>
     /// <remarks>
-    /// One RUN per recipe, in JSON (exec) form: no shell parses it, each version is
-    /// one JSON string and so one argument, and Dockerfile variables aren't expanded in it.
-    /// Only that recipe's directory is mounted, read-only, so a script can't see another's
-    /// and none stays in the image. pen:latest has no USER, but this states the root the
-    /// scripts rely on. Each recipe's [env] is ENV after all the RUNs, so installs don't
-    /// depend on each other, sessions and a .pen/Dockerfile's RUNs get it, and that
-    /// Dockerfile or the user's [env] can still override it. A value is literal.
+    /// One RUN per recipe, in JSON (exec) form: no shell parses it, each version is one JSON string and so one
+    /// argument, and Dockerfile variables aren't expanded in it. Only that recipe's directory is mounted, read-only, so
+    /// a script can't see another's and none stays in the image. pen:latest has no USER, but this states the root the
+    /// scripts rely on. Each recipe's [env] is ENV after all the RUNs, so installs don't depend on each other, sessions
+    /// and a .pen/Dockerfile's RUNs get it, and that Dockerfile or the user's [env] can still override it. A value is
+    /// literal.
     /// </remarks>
     private static string GenerateDockerfile(List<Install> plan)
     {
@@ -86,8 +85,8 @@ internal static class ToolsImage
     /// <summary>Computes the name of the image for <paramref name="tools"/> on <paramref name="baseId"/>.</summary>
     /// <returns>pen-tools:&lt;hash&gt;, the same whatever order the tools are in.</returns>
     /// <remarks>
-    /// The hash covers the base image's ID, the canonical list, the recipes' files and the Dockerfile
-    /// generated from them.
+    /// The hash covers the base image's ID, the canonical list, the recipes' files and the Dockerfile generated from
+    /// them.
     /// </remarks>
     internal static string ComputeTag(string baseId, IEnumerable<ToolSpec> tools, RecipeCatalog catalog)
     {

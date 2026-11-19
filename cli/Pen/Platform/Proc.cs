@@ -7,10 +7,10 @@ namespace Pen.Platform;
 /// <remarks>None of them inherit anything but stdin/stdout/stderr (so never a lock fd).</remarks>
 internal static class Proc
 {
-    /// <summary>Creates the start info for running <paramref name="file"/>, inheriting no handles.</summary>
-    /// <param name="file">The program.</param>
-    /// <param name="args">Its arguments.</param>
-    /// <param name="env">Environment variables to set on top of Pen's own, if any.</param>
+    /// <summary>
+    /// Creates the start info for running <paramref name="file"/>, inheriting no handles, with
+    /// <paramref name="env"/>, if any, set on top of Pen's own environment.
+    /// </summary>
     public static ProcessStartInfo CreateStartInfo(
         string file,
         IEnumerable<string> args,
@@ -187,7 +187,7 @@ internal static class Proc
         }
         catch (IOException)
         {
-            // the child exited without reading it all; its exit code says why
+            // The child exited without reading it all; its exit code says why.
         }
     }
 
@@ -208,7 +208,7 @@ internal static class Proc
         }
         catch (InvalidOperationException)
         {
-            // it had exited already
+            // It had exited already.
         }
         catch (Exception e) when (e is AggregateException or System.ComponentModel.Win32Exception)
         {

@@ -38,8 +38,6 @@ internal static class EgressPolicyResolver
     }
 
     /// <summary>Resolves what a session started now would be allowed and denied, for pen allow's listing.</summary>
-    /// <param name="context">The project and both configs.</param>
-    /// <param name="catalog">The recipes that say which domains a tool brings.</param>
     /// <remarks>
     /// The tools are the user's and the project's approved ones, with no --tool or implied agent. Only approved
     /// domains and tools from .pen/ count, so an unapproved domain there stays listed.
@@ -58,10 +56,6 @@ internal static class EgressPolicyResolver
     /// Resolves what <paramref name="session"/>, started in <paramref name="projectDir"/>, gets now, reading the
     /// config files.
     /// </summary>
-    /// <param name="host">The host user's environment.</param>
-    /// <param name="session">The running session.</param>
-    /// <param name="projectDir">The dir it was started in.</param>
-    /// <param name="catalog">The recipes the config files' tools come from.</param>
     /// <remarks>
     /// The tools' domains are the ones it started with (tool-domains), so a tools entry added to either config file
     /// since adds nothing.

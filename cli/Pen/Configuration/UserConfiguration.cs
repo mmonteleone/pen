@@ -15,12 +15,6 @@ internal sealed class UserConfiguration
     public static UserConfiguration Empty { get; } = new([], [], [], [], [], []);
 
     /// <summary>Creates the settings, taking its own copies of the collections.</summary>
-    /// <param name="allow">Extra allowed domains, or "*", lowercased, in file order.</param>
-    /// <param name="deny">Denied domains, lowercased, in file order.</param>
-    /// <param name="tools">The tools, validated against the recipes and canonical.</param>
-    /// <param name="hide">The hide patterns, in file order.</param>
-    /// <param name="gitHubTokens">The [github] tokens, keyed by lowercased owner, with no key twice.</param>
-    /// <param name="env">The [env] values, in file order.</param>
     public UserConfiguration(
         IEnumerable<string> allow,
         IEnumerable<string> deny,
@@ -37,9 +31,9 @@ internal sealed class UserConfiguration
         Env = [.. env];
     }
 
-    /// <summary>Gets the extra allowed domains, or "*" for any domain name, in lowercase.</summary>
+    /// <summary>Gets the extra allowed domains, or "*" for any domain name, in lowercase and file order.</summary>
     public IReadOnlyList<string> Allow { get; }
-    /// <summary>Gets the denied domains, in lowercase. A deny beats every allow.</summary>
+    /// <summary>Gets the denied domains, in lowercase and file order. A deny beats every allow.</summary>
     public IReadOnlyList<string> Deny { get; }
     /// <summary>Gets tools = ["name", "name:version", …], validated against the recipes and canonical.</summary>
     public IReadOnlyList<ToolSpec> Tools { get; }

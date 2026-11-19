@@ -5,10 +5,9 @@ namespace Pen.Platform;
 
 /// <summary>Writes messages to stderr, and Pen's own stdout, sanitized.</summary>
 /// <remarks>
-/// Writes never throw: after a hangup the terminal is gone, and the end-of-session path must
-/// still run to completion. Everything is sanitized on the way out (<see cref="StripControls"/>),
-/// since messages carry names and text the agent chose, and those could otherwise rewrite the
-/// terminal, including erasing a warning.
+/// Writes never throw: after a hangup the terminal is gone, and the end-of-session path must still run to completion.
+/// Everything is sanitized on the way out (<see cref="StripControls"/>), since messages carry names and text the agent
+/// chose, and those could otherwise rewrite the terminal, including erasing a warning.
 /// </remarks>
 internal static class Out
 {
@@ -48,8 +47,7 @@ internal static class Out
     }
 
     /// <summary>
-    /// Checks whether a terminal could act on this character: C0, DEL, C1, or one that reorders or
-    /// breaks lines of text.
+    /// Checks whether a terminal could act on this character: C0, DEL, C1, or one that reorders or breaks lines.
     /// </summary>
     internal static bool IsControl(char character) => character is < ' ' or (>= '\x7f' and <= '\x9f')
         or '\u061c' or '\u200e' or '\u200f' or (>= '\u2028' and <= '\u202e') or (>= '\u2066' and <= '\u2069');
@@ -70,12 +68,12 @@ internal static class Out
     }
 
     /// <summary>
-    /// Formats a value the agent can influence (a path, branch, host, subject) for putting in a
-    /// message: control characters show as escapes, newlines among them.
+    /// Formats a value the agent can influence (a path, branch, host, subject) for putting in a message: control
+    /// characters show as escapes, newlines among them.
     /// </summary>
     /// <remarks>
-    /// The escapes mean the value can't forge a line of Pen's output. Not for text a shell will
-    /// read, which has to keep the real name.
+    /// The escapes mean the value can't forge a line of Pen's output. Not for text a shell will read, which has to keep
+    /// the real name.
     /// </remarks>
     public static string Field(string value)
     {
@@ -102,8 +100,8 @@ internal static class Out
 
     /// <summary>Describes an exception for the user.</summary>
     /// <remarks>
-    /// The AOT build (UseSystemResourceKeys) has framework exceptions' messages as raw resource
-    /// keys, so only Pen's own are shown as they are.
+    /// The AOT build (UseSystemResourceKeys) has framework exceptions' messages as raw resource keys, so only Pen's own
+    /// are shown as they are.
     /// </remarks>
     public static string Describe(Exception exception) => exception switch
     {
@@ -114,8 +112,8 @@ internal static class Out
 
     /// <summary>Describes a permission error for the user: the path, when it names one.</summary>
     /// <remarks>
-    /// The exception's own text can't be shown, since the AOT build (UseSystemResourceKeys)
-    /// has it as "UnauthorizedAccess_IODenied_Path, /the/path".
+    /// The exception's own text can't be shown, since the AOT build (UseSystemResourceKeys) has it as
+    /// "UnauthorizedAccess_IODenied_Path, /the/path".
     /// </remarks>
     public static string DescribePermissionDenied(UnauthorizedAccessException exception)
     {

@@ -75,8 +75,9 @@ internal static class CommandBoundary
 
     private static bool IsNamed(SclCommand command, string arg) => command.Name == arg || command.Aliases.Contains(arg);
 
-    /// <summary>An option for running found in the arguments.</summary>
-    /// <param name="Option">The option.</param>
-    /// <param name="Attached">The value after : or =, possibly empty; null when it's given without one.</param>
+    /// <summary>
+    /// An option for running found in the arguments, with its value after : or = (possibly empty), or null when it's
+    /// given without one.
+    /// </summary>
     private sealed record FoundOption(Option Option, string? Attached);
 }

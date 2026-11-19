@@ -13,10 +13,10 @@ namespace Pen.Trust;
 /// worktree the agent made starts with none. A store is immutable; approving returns the store as written.
 /// </para>
 /// <para>
-/// The file is plain text, a line for each approval. Every value is checked to be a strict shape, when
-/// written and when read, so none can hold a line break and add an approval. Anything else in the file
-/// means it's corrupt, and a corrupt store approves nothing. The file names its directory because
-/// hash(dir) is short enough to collide on purpose.
+/// The file is plain text, a line for each approval. Every value is checked to be a strict shape, when written and
+/// when read, so none can hold a line break and add an approval. Anything else in the file means it's corrupt, and a
+/// corrupt store approves nothing. The file names its directory because hash(dir) is short enough to collide on
+/// purpose.
 /// </para>
 /// </remarks>
 internal sealed class TrustStore
@@ -196,9 +196,8 @@ internal sealed class TrustStore
     /// <returns>The store as written.</returns>
     /// <exception cref="PenException">When a value isn't its strict shape: then nothing is written.</exception>
     /// <remarks>
-    /// It adds to what the file holds now, since another Pen may have approved something since this store
-    /// was read (losing that would only ask again), and replaces it by rename, so it's never seen
-    /// half-written.
+    /// It adds to what the file holds now, since another Pen may have approved something since this store was read
+    /// (losing that would only ask again), and replaces it by rename, so it's never seen half-written.
     /// </remarks>
     private TrustStore SaveWith(
         IEnumerable<string> domains,

@@ -60,7 +60,8 @@ internal enum TrustMode
 /// <summary>pen clean: starts this project's sandbox fresh.</summary>
 internal sealed record CleanInvocation : CliInvocation;
 
-/// <summary>pen clean --stale: removes what moved or deleted projects and old upgrades left, in every project.
+/// <summary>
+/// pen clean --stale: removes what moved or deleted projects and old upgrades left, in every project.
 /// </summary>
 internal sealed record CleanStaleInvocation : CliInvocation;
 
@@ -69,7 +70,6 @@ internal sealed record CleanStaleInvocation : CliInvocation;
 internal sealed record SignInvocation(string? Base) : CliInvocation;
 
 /// <summary>pen upgrade: rebuilds the base image, agents and tools.</summary>
-/// <param name="NoCache">Whether --no-cache was given.</param>
 internal sealed record UpgradeInvocation(bool NoCache) : CliInvocation;
 
 /// <summary>pen ps, or pen ls: lists running sessions in every project.</summary>
@@ -82,6 +82,7 @@ internal sealed record ToolsInvocation : CliInvocation;
 internal sealed record InitInvocation : CliInvocation;
 
 /// <summary>Help or the version: pen --help, pen &lt;subcommand&gt; --help, pen --version.</summary>
-/// <param name="ParseResult">The parse to invoke (<see cref="CommandTree.InvokeBuiltin"/>) for what it asks for.
+/// <param name="ParseResult">
+/// The parse to invoke (<see cref="CommandTree.InvokeBuiltin"/>) for what it asks for.
 /// </param>
 internal sealed record BuiltinInvocation(ParseResult ParseResult) : CliInvocation;

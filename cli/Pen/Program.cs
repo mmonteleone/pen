@@ -18,9 +18,8 @@ internal static class Program
     /// <summary>Runs <paramref name="run"/>, showing expected failures as one line.</summary>
     /// <returns>The exit code <paramref name="run"/> returned, or the failure's.</returns>
     /// <remarks>
-    /// Only what no caller handled gets here; a session it interrupts is finished by
-    /// the next run, as when Pen dies. Other exceptions are Pen's bugs and keep
-    /// their stack traces.
+    /// Only what no caller handled gets here; a session it interrupts is finished by the next run, as when Pen dies.
+    /// Other exceptions are Pen's bugs and keep their stack traces.
     /// </remarks>
     internal static int RunGuarded(Func<int> run)
     {
@@ -47,8 +46,7 @@ internal static class Program
 
     /// <summary>Describes a file error that nothing handled, for the user.</summary>
     /// <remarks>
-    /// The exception's own text can't be shown: the AOT build (UseSystemResourceKeys)
-    /// has it as a resource key.
+    /// The exception's own text can't be shown: the AOT build (UseSystemResourceKeys) has it as a resource key.
     /// </remarks>
     internal static string DescribeFileFailure(IOException exception) =>
         $"a file operation failed ({exception.GetType().Name}): check that the disk has space " +
@@ -56,10 +54,9 @@ internal static class Program
 
     /// <summary>Runs the command <paramref name="args"/> ask for.</summary>
     /// <remarks>
-    /// Each step needs more than the one before, and each command runs as soon as it has
-    /// what it needs: help and listings need only the embedded recipes (no host, config or project),
-    /// pen ps and pen clean --stale the host, pen upgrade, pen allow &lt;domain…&gt; and
-    /// pen deny &lt;domain…&gt; the user config, the rest the project.
+    /// Each step needs more than the one before, and each command runs as soon as it has what it needs: help and
+    /// listings need only the embedded recipes (no host, config or project), pen ps and pen clean --stale the host,
+    /// pen upgrade, pen allow &lt;domain…&gt; and pen deny &lt;domain…&gt; the user config, the rest the project.
     /// Of the project commands, only a session, the pen allow and pen deny listings and pen trust load the project
     /// config; pen upgrade, pen allow &lt;domain…&gt; and pen deny &lt;domain…&gt; read it tolerantly or only to
     /// apply to running sessions.
@@ -139,7 +136,6 @@ internal static class Program
         ProjectContext context, StartDir startDir, RecipeCatalog catalog, TimeProvider clock) =>
         new DenyCommand(context.Host, startDir, catalog, clock).List(context);
 
-    /// <summary>Runs pen trust.</summary>
     private static int RunTrust(ProjectContext context, TrustMode mode, RecipeCatalog catalog, TimeProvider clock) =>
         new TrustCommand(context, ReadAnswersFromStdin(), catalog, clock).Run(mode);
 }

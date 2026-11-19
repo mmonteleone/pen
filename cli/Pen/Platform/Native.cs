@@ -29,10 +29,9 @@ internal static partial class Native
     [LibraryImport(Libc, EntryPoint = "isatty")]
     private static partial int IsATtyNative(int fd);
 
-    // open(2) is variadic, and on Apple arm64 variadic arguments go on the
-    // stack, so a mode passed as a fixed argument arrives as garbage. So this
-    // binding never passes O_CREAT (the mode is never read), and creat(2),
-    // which isn't variadic, makes missing files.
+    // open(2) is variadic, and on Apple arm64 variadic arguments go on the stack, so a mode passed as a fixed argument
+    // arrives as garbage. So this binding never passes O_CREAT (the mode is never read), and creat(2), which isn't
+    // variadic, makes missing files.
     [LibraryImport(Libc, EntryPoint = "open", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
     private static partial int OpenNative(string path, int flags);
 
@@ -113,8 +112,7 @@ internal static partial class Native
 
     /// <summary>Lists the entries of <paramref name="dir"/> whose names aren't valid UTF-8.</summary>
     /// <returns>
-    /// The entries, or null if that can't be found out (including on a platform whose dirent
-    /// layout isn't known).
+    /// The entries, or null if that can't be found out (including on a platform whose dirent layout isn't known).
     /// </returns>
     /// <remarks>Only readdir(3) sees the real bytes: .NET's listing has U+FFFD in place of the bad ones.</remarks>
     public static IReadOnlyList<UndecodableEntry>? ListUndecodable(string dir)
@@ -173,10 +171,12 @@ internal static partial class Native
 
     /// <summary>Reads a regular file's text, through a symlink if it's one.</summary>
     /// <returns>The text, or null if it's anything but a regular file or over <see cref="MaxTextFile"/>.</returns>
+    /// <exception cref="FileNotFoundException">Nothing is at the path.</exception>
+    /// <exception cref="UnauthorizedAccessException">Permission is denied.</exception>
+    /// <exception cref="IOException">Reading fails.</exception>
     /// <remarks>
-    /// Opening a FIFO for reading blocks until a writer comes, and a sparse file costs nothing to
-    /// make and runs Pen out of memory. The non-blocking open returns at once, and the size check
-    /// and read use that same descriptor.
+    /// Opening a FIFO for reading blocks until a writer comes, and a sparse file costs nothing to make and runs Pen out
+    /// of memory. The non-blocking open returns at once, and the size check and read use that same descriptor.
     /// </remarks>
     public static string? ReadRegularFile(string path)
     {
@@ -220,9 +220,8 @@ internal static partial class Native
 
     /// <summary>Opens the regular file at <paramref name="path"/> without blocking.</summary>
     /// <returns>
-    /// The handle, or null if it's anything else, a symlink too when the flags say O_NOFOLLOW (a
-    /// FIFO with no reader, a directory for writing and a socket can't be opened at all, and are
-    /// null as well).
+    /// The handle, or null if it's anything else, a symlink too when the flags say O_NOFOLLOW (a FIFO with no reader, a
+    /// directory for writing and a socket can't be opened at all, and are null as well).
     /// </returns>
     /// <exception cref="UnauthorizedAccessException">Permission is denied.</exception>
     /// <exception cref="FileNotFoundException">Nothing is at the path.</exception>
@@ -280,16 +279,16 @@ internal static partial class Native
     }
 
     /// <summary>
-    /// Opens the regular file at <paramref name="path"/>, never through a symlink at that name, for
-    /// changing it through the descriptor.
+    /// Opens the regular file at <paramref name="path"/>, never through a symlink at that name, for changing it through
+    /// the descriptor.
     /// </summary>
     /// <returns>The handle, or null if it's anything else.</returns>
     public static SafeFileHandle? OpenProtected(string path, bool write) =>
         OpenRegular(path, (write ? O_WRONLY : O_RDONLY) | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
 
     /// <summary>
-    /// Opens the file at <paramref name="path"/> for reading if it's a regular file, never following
-    /// a symlink there, and returning at once for a FIFO.
+    /// Opens the file at <paramref name="path"/> for reading if it's a regular file, never following a symlink there,
+    /// and returning at once for a FIFO.
     /// </summary>
     /// <returns>The handle, or null for anything else or any failure.</returns>
     /// <remarks>Type and contents then come from one descriptor, so swapping the file changes nothing.</remarks>
@@ -329,9 +328,9 @@ internal static partial class Native
         }
     }
 
-    // stat(2) and friends. struct stat differs by platform and architecture, so: on macOS fstatat(2),
-    // whose 64-bit-inode struct has one layout on arm64 and x64 (where the symbol is fstatat$INODE64);
-    // on Linux statx(2), whose struct has one layout on every architecture.
+    // stat(2) and friends. struct stat differs by platform and architecture, so: on macOS fstatat(2), whose
+    // 64-bit-inode struct has one layout on arm64 and x64 (where the symbol is fstatat$INODE64); on Linux statx(2),
+    // whose struct has one layout on every architecture.
     [LibraryImport(Libc, EntryPoint = "fstatat", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
     private static unsafe partial int FStatAtMacArm64(int dirfd, string path, byte* buffer, int flags);
 
@@ -636,9 +635,10 @@ internal static partial class Native
         return (fd, at);
     }
 
-    /// <summary>Turns the last call's errno, in <see cref="ReadInsideProject"/>, into an exception.</summary>
-    /// <param name="path">The path the step opened.</param>
-    /// <param name="refused">What's wrong with <paramref name="path"/> if O_NOFOLLOW or O_DIRECTORY refused it.</param>
+    /// <summary>
+    /// Turns the last call's errno, in <see cref="ReadInsideProject"/>, into the exception for <paramref name="path"/>,
+    /// the path the step opened, which says <paramref name="refused"/> if O_NOFOLLOW or O_DIRECTORY refused it.
+    /// </summary>
     private static Exception ReadInsideException(string path, string refused)
     {
         var errno = Marshal.GetLastPInvokeError();
@@ -784,8 +784,6 @@ internal static partial class Native
         }
     }
 
-    /// <summary>Where struct dirent keeps d_type and d_name.</summary>
-    /// <param name="Type">The offset of d_type.</param>
-    /// <param name="Name">The offset of d_name.</param>
+    /// <summary>The offsets of d_type and d_name in struct dirent.</summary>
     private readonly record struct DirentOffsets(int Type, int Name);
 }

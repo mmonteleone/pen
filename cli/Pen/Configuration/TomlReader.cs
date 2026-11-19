@@ -19,14 +19,11 @@ internal static partial class TomlReader
         "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "DOCKER_HOST",
     };
 
-    /// <summary>Parses TOML text into its untyped table.</summary>
-    /// <param name="text">The TOML text.</param>
-    /// <param name="displayPath">Names the file in errors.</param>
+    /// <summary>Parses TOML text into its untyped table; errors call the file <paramref name="displayPath"/>.</summary>
     internal static TomlTable ParseToml(string text, string displayPath)
     {
-        // Validating the syntax tree first enforces the whole TOML spec (e.g.
-        // a key or table defined twice), with line numbers; the model built
-        // afterwards would quietly let the last definition win.
+        // Validating the syntax tree first enforces the whole TOML spec (a key or table defined twice, say), with
+        // line numbers; the model built afterwards would quietly let the last definition win.
         var document = SyntaxParser.Parse(text, displayPath, validate: true);
         foreach (var diagnostic in document.Diagnostics)
         {

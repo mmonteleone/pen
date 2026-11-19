@@ -322,7 +322,6 @@ internal static partial class Allowlist
     }
 
     /// <summary>Says why a blocked host is in the group of <see cref="ClassifyBlocked"/>'s Unreachable.</summary>
-    /// <param name="open">Whether egress is open.</param>
     /// <remarks>
     /// The log doesn't say which; a name blocked before egress opened is among them too. Of the rest, pen allow
     /// would let through only a name that resolves privately, which open egress keeps out on purpose, so it isn't

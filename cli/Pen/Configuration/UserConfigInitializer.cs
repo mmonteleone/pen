@@ -6,17 +6,13 @@ namespace Pen.Configuration;
 internal static class UserConfigInitializer
 {
     /// <summary>
-    /// Creates ~/.config/pen/ and, each only when missing, its config.toml (600) from the template
-    /// and the home seed (see <see cref="Seed"/>), and says so in one line.
+    /// Creates ~/.config/pen/ and, each only when missing, its config.toml (600) from the template and the home seed
+    /// (see <see cref="Seed"/>), and says so in one line.
     /// </summary>
-    /// <param name="host">The host user's environment.</param>
-    /// <param name="identity">
-    /// Gives the git user.name and user.email for the seed's .gitconfig; called only when the seed is created.
-    /// Pen passes <see cref="GitIdentity.ReadFromHost"/>.
-    /// </param>
     /// <remarks>
-    /// Never rewrites an existing file, and adds no config.toml next to a legacy config (<see cref="ConfigLoader"/>
-    /// reports that).
+    /// <paramref name="identity"/> gives the git user.name and user.email for the seed's .gitconfig and is called only
+    /// when the seed is created; Pen passes <see cref="GitIdentity.ReadFromHost"/>. Never rewrites an existing file,
+    /// and adds no config.toml next to a legacy config (<see cref="ConfigLoader"/> reports that).
     /// </remarks>
     public static void EnsureExists(HostEnv host, Func<GitIdentity> identity)
     {

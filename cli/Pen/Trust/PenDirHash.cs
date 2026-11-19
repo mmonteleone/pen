@@ -11,21 +11,21 @@ namespace Pen.Trust;
 /// <summary>Hashes what docker build reads from .pen/, and copies it to build from.</summary>
 /// <remarks>
 /// <para>
-/// The hash covers all of .pen/ but config.toml, which pen allow edits and which holds only settings
-/// approved one by one. Every entry counts by type, permission bits (COPY keeps them all), full relative
-/// path and content or link target, each with its length first, so moving bytes between a name and a
-/// content can't produce the same input. Entries come in a fixed order.
+/// The hash covers all of .pen/ but config.toml, which pen allow and pen deny edit and which holds only settings
+/// approved one by one. Every entry counts by type, permission bits (COPY keeps them all), full relative path and
+/// content or link target, each with its length first, so moving bytes between a name and a content can't produce the
+/// same input. Entries come in a fixed order.
 /// </para>
 /// <para>
-/// The agent may have written everything here. Whatever the hash wouldn't pin down, or that could hang
-/// or exhaust Pen, means no hash: special files, names that aren't valid UTF-8, trees over the limits,
-/// anything unreadable, and symlinks other than a relative one through real directories to a real file
-/// or directory in .pen/. Others could read content from outside, or be repointed from outside, without
-/// changing the hash. Never runs docker or git.
+/// The agent may have written everything here. Whatever the hash wouldn't pin down, or that could hang or exhaust
+/// Pen, means no hash: special files, names that aren't valid UTF-8, trees over the limits, anything unreadable, and
+/// symlinks other than a relative one through real directories to a real file or directory in .pen/. Other symlinks
+/// could read content from outside, or be repointed from outside, without changing the hash. It never runs docker or
+/// git.
 /// </para>
 /// <para>
-/// The hash says what a directory held at one moment, and the agent may be able to change .pen/ right
-/// after, so only a copy nobody else can write is safe to build from: see <see cref="Snapshot"/>.
+/// The hash says what a directory held at one moment, and the agent may be able to change .pen/ right after, so only a
+/// copy nobody else can write is safe to build from: see <see cref="Snapshot"/>.
 /// </para>
 /// </remarks>
 internal sealed class PenDirHash : IDisposable
@@ -57,7 +57,6 @@ internal sealed class PenDirHash : IDisposable
         _copy = copy;
     }
 
-    /// <summary>Releases the hash.</summary>
     public void Dispose() => _hash.Dispose();
 
     /// <summary>Hashes <paramref name="penDir"/>.</summary>
@@ -65,14 +64,12 @@ internal sealed class PenDirHash : IDisposable
     public static PenDirHashResult Compute(string penDir) => Walk(penDir, null);
 
     /// <summary>Copies <paramref name="penDir"/> to <paramref name="copy"/> and hashes the copy.</summary>
-    /// <param name="penDir">The .pen/ to copy.</param>
-    /// <param name="copy">Where to copy it: it must not exist, in a directory only Pen can reach.</param>
     /// <returns>The hash of the copy, or the problem that means there's none.</returns>
     /// <remarks>
-    /// The copy is made under the same refusals, keeping types, modes and modification times. config.toml
-    /// stays out: it isn't hashed, so a build must not read it. It never follows a symlink, and reads each
-    /// file through one descriptor. The hash is of the copy, which can't change afterwards, taken there so
-    /// that symlinks are judged by the tree that gets built.
+    /// <paramref name="copy"/> must not exist yet, and must be in a directory only Pen can reach. The copy is made
+    /// under the same refusals, keeping types, modes and modification times. config.toml stays out: it isn't hashed, so
+    /// a build must not read it. It never follows a symlink, and reads each file through one descriptor. The hash is of
+    /// the copy, which can't change afterwards, taken there so that symlinks are judged by the tree that gets built.
     /// </remarks>
     public static PenDirHashResult Snapshot(string penDir, string copy) =>
         Walk(penDir, copy) is PenDirHashResult.NoHash refused ? refused : Compute(copy);
@@ -105,11 +102,11 @@ internal sealed class PenDirHash : IDisposable
     /// <summary>Describes <paramref name="relativePath"/> for a message, escaped.</summary>
     private static string Describe(string relativePath) => ".pen/" + Out.Field(relativePath);
 
-    /// <summary>Hashes, and copies, the directory at <paramref name="relativePath"/> and all it holds.</summary>
-    /// <param name="relativePath">Its path in .pen/, empty for .pen/ itself.</param>
-    /// <param name="self">The directory, for its mode and modification time.</param>
-    /// <param name="depth">How deep it is in .pen/.</param>
+    /// <summary>
+    /// Hashes, and copies, the directory at <paramref name="relativePath"/> (empty for .pen/ itself) and all it holds.
+    /// </summary>
     /// <returns>Why .pen/ can't have a hash, or null.</returns>
+    /// <remarks><paramref name="self"/> gives the directory's mode and modification time.</remarks>
     private string? HashDirectory(string relativePath, FileSystemInfo self, int depth)
     {
         if (depth > MaxDepth)
@@ -145,10 +142,13 @@ internal sealed class PenDirHash : IDisposable
     private static bool WasFound(FileSystemInfo info) =>
         info.Attributes != (FileAttributes)(-1) && info.UnixFileMode != (UnixFileMode)(-1);
 
-    /// <summary>Lists the directory at <paramref name="relativePath"/>, creating its copy.</summary>
-    /// <param name="relativePath">Its path in .pen/, empty for .pen/ itself.</param>
-    /// <param name="entries">Its entries, in ordinal order of their names.</param>
-    /// <param name="problem">Why it can't be listed in full, or that .pen/ has too many entries.</param>
+    /// <summary>
+    /// Lists the directory at <paramref name="relativePath"/> (empty for .pen/ itself), creating its copy.
+    /// </summary>
+    /// <remarks>
+    /// The entries come in ordinal order of their names. <paramref name="problem"/> says why the directory can't be
+    /// listed in full, or that .pen/ has too many entries.
+    /// </remarks>
     private bool TryListEntries(
         string relativePath,
         [NotNullWhen(true)] out List<FileSystemInfo>? entries,
@@ -191,8 +191,8 @@ internal sealed class PenDirHash : IDisposable
     {
         if (relativePath == ConfigLoader.FileName)
         {
-            // Left out of the hash, so it must really be the file that's meant:
-            // a directory or a link by this name would be an unhashed way in.
+            // Left out of the hash, so it must really be the file that's meant: a directory or a link by this name
+            // would be an unhashed way in.
             return CheckUnhashedFile(relativePath);
         }
         if (entry.LinkTarget is { } target)
@@ -303,7 +303,7 @@ internal sealed class PenDirHash : IDisposable
     /// <returns>The time, or null when it's outside what <see cref="DateTime"/> holds.</returns>
     /// <remarks>
     /// Some file systems keep times far past year 9999, and the agent can set one; .NET's readers throw
-    /// <see cref="ArgumentOutOfRangeException"/> for those, and have no form that doesn't.
+    /// <see cref="ArgumentOutOfRangeException"/> for those and have no form that doesn't.
     /// </remarks>
     private static DateTime? ReadTime(Func<DateTime> read)
     {
@@ -331,8 +331,8 @@ internal sealed class PenDirHash : IDisposable
     /// <summary>Checks that the symlink at <paramref name="relativePath"/> leads straight into .pen/.</summary>
     /// <returns>Why it doesn't, or null when it does.</returns>
     /// <remarks>
-    /// It follows the target by hand: it has to stay in .pen/ at every step and pass only through real
-    /// directories, which also rules out loops and chains.
+    /// It follows the target by hand: it has to stay in .pen/ at every step and pass only through real directories,
+    /// which also rules out loops and chains.
     /// </remarks>
     private string? CheckLink(string relativePath, string target)
     {

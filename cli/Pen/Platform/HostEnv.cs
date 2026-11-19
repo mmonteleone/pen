@@ -23,7 +23,6 @@ internal sealed record HostEnv(string Home, uint Uid, uint Gid, string NuGetPack
     /// <summary>Gets the user's config dir, ~/.config/pen.</summary>
     public string ConfigDir => System.IO.Path.Combine(Home, ".config", "pen");
 
-    /// <summary>Gets the path of the user's config.toml.</summary>
     public string UserConfigPath => System.IO.Path.Combine(ConfigDir, ConfigLoader.FileName);
 
     /// <summary>Gets the home seed dir, ~/.config/pen/home.</summary>
@@ -32,7 +31,6 @@ internal sealed record HostEnv(string Home, uint Uid, uint Gid, string NuGetPack
     /// <summary>Gets the dir holding every project's runtime dir, ~/.local/state/pen.</summary>
     public string StateRoot => System.IO.Path.Combine(Home, ".local", "state", "pen");
 
-    /// <summary>Gets the runtime dir of the project with key <paramref name="projectKey"/>.</summary>
     public string GetRuntimeDir(string projectKey) => System.IO.Path.Combine(StateRoot, projectKey);
 
     /// <summary>Gets an environment variable Pen was started with, or null if it isn't set.</summary>

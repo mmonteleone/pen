@@ -8,13 +8,13 @@ using Tomlyn.Model;
 namespace Pen.Tools;
 
 /// <summary>
-/// A tool's recipe: tools/&lt;name&gt;/tool.toml, its settings, and tools/&lt;name&gt;/install.sh,
-/// which runs as root at image build, with the versions as separate arguments.
+/// A tool's recipe: tools/&lt;name&gt;/tool.toml, its settings, and tools/&lt;name&gt;/install.sh, which runs as root
+/// at image build, with the versions as separate arguments.
 /// </summary>
 /// <remarks>
-/// Recipes are embedded and trusted, and can't depend on each other. A hidden one works
-/// but isn't offered in listings or messages. <c>kind = "agent"</c> marks a recipe
-/// that installs an AI agent, which a command naming it implies (<see cref="ToolSpec.FindImpliedAgent"/>).
+/// Recipes are embedded and trusted, and can't depend on each other. A hidden one works but isn't offered in listings
+/// or messages. <c>kind = "agent"</c> marks a recipe that installs an AI agent, which a command naming it implies
+/// (<see cref="ToolSpec.FindImpliedAgent"/>).
 /// </remarks>
 internal sealed class Recipe
 {
@@ -63,7 +63,6 @@ internal sealed class Recipe
     /// </remarks>
     public bool AcceptsVersion(string version) => MatchesAll(_versionRegex, version);
 
-    /// <summary>Checks whether <paramref name="regex"/> matches all of <paramref name="version"/>.</summary>
     private static bool MatchesAll(Regex regex, string version)
     {
         var match = regex.Match(version);
@@ -71,9 +70,6 @@ internal sealed class Recipe
     }
 
     /// <summary>Parses a tool.toml, the way <see cref="ConfigParser"/> does a config.toml.</summary>
-    /// <param name="name">The recipe's name.</param>
-    /// <param name="text">The text of its tool.toml.</param>
-    /// <param name="script">The text of its install.sh.</param>
     /// <returns>The recipe; anything invalid in tool.toml throws, naming the file.</returns>
     public static Recipe Parse(string name, string text, string script)
     {
@@ -112,7 +108,6 @@ internal sealed class Recipe
         }
     }
 
-    /// <summary>Gets the value of <paramref name="key"/>, which has to be there.</summary>
     private static object Require(TomlTable table, string key, Func<string, PenException> error)
     {
         if (table.TryGetValue(key, out var value))

@@ -9,16 +9,14 @@ namespace Pen.Projects;
 /// <summary>The project Pen runs in: the current directory, by its real path.</summary>
 /// <remarks>
 /// <para>
-/// Its key, pen-&lt;dir&gt;-&lt;hash&gt;, names the project's volumes, image and runtime dir.
-/// It comes from <see cref="RepoDir"/>, so all worktrees of a repo share one
-/// key (logins, caches, sessions and locks), while each keeps its own
-/// <see cref="Dir"/> (mounted as the project, with its own .pen/).
+/// Its key, pen-&lt;dir&gt;-&lt;hash&gt;, names the project's volumes, image and runtime dir. It comes from
+/// <see cref="RepoDir"/>, so all worktrees of a repo share one key (logins, caches, sessions and locks), while each
+/// keeps its own <see cref="Dir"/> (mounted as the project, with its own .pen/).
 /// </para>
 /// <para>
-/// The repo is modeled apart from the dir: <see cref="CommonGitDir"/> is the
-/// git dir holding config, hooks and objects (the dir's own .git, or for a
-/// linked worktree the main checkout's), and <see cref="RepoDir"/> is the main
-/// checkout. For a plain directory both describe the dir itself.
+/// The repo is modeled apart from the dir: <see cref="CommonGitDir"/> is the git dir holding config, hooks and
+/// objects (the dir's own .git, or for a linked worktree the main checkout's), and <see cref="RepoDir"/> is the main
+/// checkout. For a plain directory, <see cref="CommonGitDir"/> is null and <see cref="RepoDir"/> is the dir itself.
 /// </para>
 /// </remarks>
 internal sealed record Project(string Dir, string Key, string? CommonGitDir, string RepoDir)
@@ -29,9 +27,7 @@ internal sealed record Project(string Dir, string Key, string? CommonGitDir, str
     public bool IsRepo => CommonGitDir is not null;
     /// <summary>Whether the dir is a linked worktree: its .git is a file naming another repo's git dir.</summary>
     public bool IsWorktree => CommonGitDir is not null && CommonGitDir != GitDir;
-    /// <summary>The dir's .pen/ path.</summary>
     public string PenDir => Path.Combine(Dir, ".pen");
-    /// <summary>The dir's .pen/config.toml path.</summary>
     public string ProjectConfigPath => Path.Combine(PenDir, ConfigLoader.FileName);
 
     /// <summary>Resolves <paramref name="cwd"/> to the project, applying the directory refusals.</summary>

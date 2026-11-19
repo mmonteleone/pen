@@ -12,9 +12,7 @@ namespace Pen.Platform;
 /// </remarks>
 internal sealed record ProjectFile(RegularFile Contents, IReadOnlyList<FileStatus> Steps)
 {
-    /// <summary>Gets the file's contents.</summary>
     public byte[] Bytes => Contents.Bytes;
 
-    /// <summary>Gets the file's permission bits.</summary>
     public UnixFileMode Mode => Contents.Mode;
 }

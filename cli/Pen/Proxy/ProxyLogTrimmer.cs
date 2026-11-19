@@ -64,7 +64,7 @@ internal sealed class ProxyLogTrimmer : IDisposable
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or PenException)
         {
-            // tried again next tick
+            // The trim is tried again next tick.
         }
         finally
         {
@@ -90,8 +90,8 @@ internal sealed class ProxyLogTrimmer : IDisposable
             var newline = Array.IndexOf(tail, (byte)'\n');
             start = newline < 0 ? tail.Length : newline + 1;
         }
-        // Written aside and renamed, so a reader or a Pen that dies mid-write
-        // never sees half a file. proxy.log.1 isn't mounted anywhere.
+        // Written aside and renamed, so a reader or a Pen that dies mid-write never sees half a file. proxy.log.1 isn't
+        // mounted anywhere.
         var previous = _session.PreviousProxyLog;
         var tmp = previous + ".tmp";
         using (var file = new FileStream(tmp, FileMode.Create, FileAccess.Write))
@@ -109,8 +109,8 @@ internal sealed class ProxyLogTrimmer : IDisposable
     /// </returns>
     internal static byte[]? TailAndTruncateInProxy(SessionDir session, IReadOnlyDictionary<string, string> env)
     {
-        // tail reads to the end and truncate follows at once, so only lines squid
-        // writes between the two are lost. A tail that fails truncates nothing.
+        // tail reads to the end and truncate follows at once, so only lines squid writes between the two are lost. A
+        // tail that fails truncates nothing.
         var output = new ComposeClient(session, env).ExecInProxyCapturingBytes(
             ["sh", "-c", $"tail -c {Keep} \"$1\" && truncate -s 0 \"$1\"", "sh", LogInProxy],
             limit: 4 * Keep, timeout: ExecTimeout);

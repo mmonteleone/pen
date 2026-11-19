@@ -26,7 +26,6 @@ internal static class Embedded
         return reader.ReadToEnd();
     }
 
-    /// <summary>Reads the embedded file <paramref name="name"/>'s bytes.</summary>
     public static byte[] ReadBytes(string name)
     {
         using var stream = Open(name);

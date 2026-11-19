@@ -6,25 +6,23 @@ namespace Pen.Tools;
 
 /// <summary>One tool at one version, always valid for its recipe.</summary>
 /// <remarks>
-/// A sorted, duplicate-free list of these (<see cref="TryCanonicalize"/>) is a set of tools' identity,
-/// so the order they were asked for in never matters.
+/// A sorted, duplicate-free list of these (<see cref="TryCanonicalize"/>) is a set of tools' identity, so the order
+/// they were asked for in never matters.
 /// </remarks>
 internal readonly partial record struct ToolSpec(string Name, string Version)
 {
     /// <summary>Formats the tool as name:version.</summary>
     public override string ToString() => $"{Name}:{Version}";
 
-    /// <summary>Parses "name" (the recipe's default version) or "name:version" into <paramref name="tool"/>.</summary>
-    /// <param name="spec">The tool as written.</param>
-    /// <param name="catalog">The recipes to parse against.</param>
-    /// <param name="tool">The tool when it parsed; otherwise <c>default</c>.</param>
-    /// <param name="error">What's wrong with <paramref name="spec"/> when it didn't parse; otherwise null.</param>
-    /// <returns>Whether <paramref name="spec"/> parsed.</returns>
+    /// <summary>
+    /// Parses "name" (the recipe's default version) or "name:version" into <paramref name="tool"/>, or says in
+    /// <paramref name="error"/> what's wrong with it.
+    /// </summary>
     /// <remarks>
-    /// A version stays as written, since 24.04 and 24.4 are different versions, and a recipe's regex
-    /// rejects the forms it doesn't want. The spec may come from .pen/, which an agent can write, and the
-    /// version ends up as an argument to a root script. So whatever a recipe's regex says, it's held to
-    /// <see cref="IsVersionSyntax"/>: no shell syntax, slash, whitespace or leading dash.
+    /// A version stays as written, since 24.04 and 24.4 are different versions, and a recipe's regex rejects the forms
+    /// it doesn't want. The spec may come from .pen/, which an agent can write, and the version ends up as an argument
+    /// to a root script. So whatever a recipe's regex says, it's held to <see cref="IsVersionSyntax"/>: no shell
+    /// syntax, slash, whitespace or leading dash.
     /// </remarks>
     public static bool TryParse(
         string spec,
@@ -59,13 +57,10 @@ internal readonly partial record struct ToolSpec(string Name, string Version)
     }
 
     /// <summary>Makes <paramref name="canonical"/>: the tools without exact duplicates, sorted ordinally.</summary>
-    /// <param name="tools">The tools, in any order.</param>
-    /// <param name="catalog">The recipes, which say whether a tool allows more than one version.</param>
-    /// <param name="canonical">The canonical list when the tools go together; otherwise empty.</param>
-    /// <param name="error">
-    /// What's wrong when the tools hold two versions of a tool whose recipe doesn't allow that; otherwise null.
-    /// </param>
-    /// <returns>Whether the tools go together.</returns>
+    /// <returns>
+    /// Whether the tools go together: false, with <paramref name="canonical"/> empty, when they hold two versions of a
+    /// tool whose recipe doesn't allow that.
+    /// </returns>
     public static bool TryCanonicalize(
         IEnumerable<ToolSpec> tools,
         RecipeCatalog catalog,

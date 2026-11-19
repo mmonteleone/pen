@@ -6,11 +6,10 @@ namespace Pen.Trust;
 
 /// <summary>A private copy of .pen/ to build the project layer from, or to show and approve.</summary>
 /// <remarks>
-/// What's built is what was hashed, whatever happens to .pen/ meanwhile. The copy lives under the runtime
-/// dir, which <see cref="Project.CheckAllowed"/> keeps out of every sandbox, in a directory only this user
-/// can enter. For a build, the path stays the same for a directory, since BuildKit keeps a cache record per
-/// context path; so builds in one directory take turns, by a lock. One left by a Pen that died is removed
-/// by the next, or by pen clean --stale.
+/// What's built is what was hashed, whatever happens to .pen/ meanwhile. The copy lives under the runtime dir, which
+/// <see cref="Project.CheckAllowed"/> keeps out of every sandbox, in a directory only this user can enter. For a
+/// build, the path stays the same for a directory, since BuildKit keeps a cache record per context path, so builds in
+/// one directory take turns by a lock. One left by a Pen that died is removed by the next, or by pen clean --stale.
 /// </remarks>
 internal sealed class LayerContext : IDisposable
 {
@@ -20,7 +19,7 @@ internal sealed class LayerContext : IDisposable
     private static readonly TimeSpan KeepAbandonedReviews = TimeSpan.FromDays(1);
     private static readonly TimeSpan LockPoll = TimeSpan.FromMilliseconds(200);
 
-    /// <summary>How long to wait for another pen's build here, which holds the lock throughout.</summary>
+    /// <summary>How long to wait for another Pen's build here, which holds the lock throughout.</summary>
     private static readonly TimeSpan LockWait = TimeSpan.FromHours(1);
     private readonly FileLock? _lock;
     private readonly string _parent;
@@ -67,8 +66,8 @@ internal sealed class LayerContext : IDisposable
     /// </summary>
     /// <returns>The copy, kept until disposed, once the user has answered.</returns>
     /// <remarks>
-    /// It isn't locked, since a prompt can wait for hours, and has a path of its own. One abandoned by a
-    /// killed Pen goes when the next review finds it old, or by pen clean --stale.
+    /// It isn't locked, since a prompt can wait for hours, and has a path of its own. One abandoned by a killed Pen
+    /// goes when the next review finds it old, or by pen clean --stale.
     /// </remarks>
     public static LayerContext TakeForReviewRemovingAbandoned(HostEnv host, Project project, TimeProvider clock)
     {

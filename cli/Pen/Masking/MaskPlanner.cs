@@ -58,7 +58,7 @@ internal sealed class MaskPlanner
     /// <see cref="MountPlanner.EnsureTargetsAndPlan"/> returns); only those inside the project are looked at.
     /// </param>
     /// <param name="hide">The hide patterns: the user's, then the project's.</param>
-    /// <param name="replace">The project's [replace] entries, as checked by ConfigParser.</param>
+    /// <param name="replace">The project's [replace] entries, as <see cref="ConfigParser"/> checked them.</param>
     public MaskPlanner(
         string projectDir,
         string? commonGitDir,
@@ -76,13 +76,11 @@ internal sealed class MaskPlanner
     }
 
     /// <summary>A directory entry as its listing reports it (no symlink followed).</summary>
-    /// <param name="Name">The name, with U+FFFD in place of bytes that aren't valid UTF-8.</param>
-    /// <param name="IsDirectory">Whether it's a directory, or a symlink to one.</param>
-    /// <param name="IsLink">Whether it's a symlink.</param>
-    /// <param name="IsUndecodable">
-    /// Whether its name isn't valid UTF-8 and lists the same as another entry's that is, so the path made from it
-    /// names the other entry.
-    /// </param>
+    /// <remarks>
+    /// Name has U+FFFD in place of bytes that aren't valid UTF-8. IsDirectory is set for a symlink to a directory too.
+    /// IsUndecodable marks a name that isn't valid UTF-8 and lists the same as another entry's that is, so the path
+    /// made from it names the other entry.
+    /// </remarks>
     private readonly record struct Entry(string Name, bool IsDirectory, bool IsLink, bool IsUndecodable = false);
 
     /// <summary>
