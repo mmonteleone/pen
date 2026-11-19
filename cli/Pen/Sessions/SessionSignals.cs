@@ -18,24 +18,25 @@ internal sealed class SessionSignals : IDisposable
     private int _stopping;
     private int _stopIssued;
 
-    /// <summary>Sets the running child, after <see cref="Container"/>.</summary>
+    /// <summary>Records the agent's container, which a stop removes first, and then its running child.</summary>
+    /// <param name="container">The container's name, or null when the child has none.</param>
+    /// <param name="child">The running child.</param>
     /// <remarks>
-    /// A stop requested before it was set (a signal between starting the child and setting it) stops it now. The
-    /// exchanges on both sides are full fences, so either the signal sees the child or this setter sees
+    /// The container is recorded before the child, so a stop that sees the child sees the container too. A stop
+    /// requested before the child was recorded (a signal between starting the child and recording it) stops it now.
+    /// The exchanges on both sides are full fences, so either the signal sees the child or this method sees
     /// <see cref="Stopping"/>.
     /// </remarks>
-    public Process? Child
+    public void Track(string? container, Process child)
     {
-        set
-        {
-            Interlocked.Exchange(ref _child, value);
-            if (value is not null && Stopping)
-                StopChild();
-        }
+        _container = container;
+        Interlocked.Exchange(ref _child, child);
+        if (Stopping)
+            StopChild();
     }
 
-    /// <summary>Sets the name of the agent's container, which a stop removes first.</summary>
-    public string? Container { set => _container = value; }
+    /// <summary>Forgets the child, so a later stop leaves it alone: it has ended, or wasn't waited on.</summary>
+    public void Untrack() => Interlocked.Exchange(ref _child, null);
 
     /// <summary>Gets whether SIGHUP or SIGTERM has asked the session to stop.</summary>
     public bool Stopping => Volatile.Read(ref _stopping) == 1;

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Pen.Configuration;
 using Pen.GitProtection;
 using Pen.Masking;
@@ -83,8 +82,7 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
         var command = request.Command.Count > 0
             ? request.Command
             : InteractiveShell.For(context.Host.GetVariable("SHELL"));
-        var startInfo = CreateAgentStartInfo(session, command, prepared.Token, env);
-        var exitCode = RunAgent(session, startInfo, env, signals);
+        var exitCode = new AgentRunner(session, env, signals).Run(command, prepared.Token, context.User.Env);
 
         EndAndRemind(session);
         return exitCode;
@@ -193,67 +191,6 @@ internal sealed class Session(ProjectContext context, Answers answers, RecipeCat
             if (result.ExitStatus.ExitCode != 0)
                 throw new PenException($"can't create volume {Project.Key}_{volume}: {result.StandardError.Trim()}");
         }
-    }
-
-    /// <summary>Creates the docker compose run of the agent, with the secrets in its env.</summary>
-    /// <param name="session">The session.</param>
-    /// <param name="command">The command to run in the sandbox.</param>
-    /// <param name="token">The GitHub token, if there's one.</param>
-    /// <param name="env">The env compose runs with.</param>
-    /// <remarks>Secrets are passed by name only on the command line: their values are never on one.</remarks>
-    private ProcessStartInfo CreateAgentStartInfo(
-        SessionDir session,
-        IReadOnlyList<string> command,
-        string? token,
-        IReadOnlyDictionary<string, string> env)
-    {
-        var secrets = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (token is not null)
-            secrets["GH_TOKEN"] = token;
-        foreach (var (name, value) in context.User.Env)
-            secrets[name] = value;
-
-        var runArgs = new List<string> { "run", "--rm", "--name", session.Container };
-        if (!Native.IsATty(0) || !Native.IsATty(1))
-            runArgs.Add("-T");
-        foreach (var name in secrets.Keys)
-            runArgs.AddRange(["-e", name]); // by name only: values never on a command line
-        runArgs.Add("agent");
-        runArgs.AddRange(command);
-
-        return new ComposeClient(session, env).CreateStartInfo(runArgs, secrets);
-    }
-
-    /// <summary>Runs the agent and waits for it, trimming the proxy log meanwhile.</summary>
-    /// <returns>The agent's exit code, or 1 when it couldn't be started (reported).</returns>
-    /// <remarks>A stop asked for before the start refuses it; one asked for after stops the child.</remarks>
-    private static int RunAgent(
-        SessionDir session,
-        ProcessStartInfo startInfo,
-        IReadOnlyDictionary<string, string> env,
-        SessionSignals signals)
-    {
-        int exitCode;
-        try
-        {
-            if (signals.Stopping)
-                throw new PenException("stopped before the session started");
-            using var child = Proc.Start(startInfo);
-            signals.Container = session.Container;
-            signals.Child = child;
-            using var trimmer = ProxyLogTrimmer.Start(session, env);
-            exitCode = Proc.ToExitCode(child.WaitForExitStatus());
-        }
-        catch (PenException error)
-        {
-            Out.WriteLine(error.Message);
-            exitCode = 1;
-        }
-        finally
-        {
-            signals.Child = null;
-        }
-        return exitCode;
     }
 
     /// <summary>Ends a session that's the only one this command is ending, and gives the signing reminder.</summary>
