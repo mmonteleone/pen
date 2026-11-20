@@ -38,6 +38,11 @@ jobs:
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: cli/global.json
+      - name: Install shells for unit tests
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zsh fish
       - name: Build
         working-directory: cli
         run: dotnet build
