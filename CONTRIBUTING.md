@@ -140,7 +140,9 @@ cli/install.sh
 
 ## Continuous integration
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to `main` and every pull request: `dotnet build` and `dotnet test` on macOS and Linux, then `cli/install.sh` and the full smoke suite on Linux with rootful Docker (no slow checks, no agent credentials). It doesn't cover macOS or rootless Docker smoke runs, so run those yourself before merging, as above.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `dotnet build` and `dotnet test` on macOS and Linux, then `cli/install.sh` and the smoke suite on Linux with rootful Docker and fish. The CI smoke run uses no agent credentials and leaves the slow checks disabled. Run macOS and rootless Docker smoke tests locally as described above.
+
+Pull requests skip the build, unit tests and smoke tests when the entire PR diff touches only Markdown under `docs/`, `README.md` or `CONTRIBUTING.md`, counting both paths of a rename. All other PRs, pushes to `main`, manual runs and release runs use the full CI workflow. The `CI result` check reports the docs-only skip or the test outcomes and is the check to require for merging.
 
 ## Releasing
 
