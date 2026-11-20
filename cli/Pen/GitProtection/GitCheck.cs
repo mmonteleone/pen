@@ -534,10 +534,9 @@ internal sealed class GitCheck
 
     /// <summary>Gets what a shell prompt would run out of its way.</summary>
     /// <remarks>
-    /// The prompt doesn't wait for the user to read a warning, and the agent could have made the directory holding
-    /// it read-only. The order: rename it; add u+w to the directory holding it and rename it (only at session end);
-    /// then the same for the state directory holding it. If none of that works the last move records that it
-    /// couldn't, which makes the check a Failure.
+    /// The prompt doesn't wait for the user to read a warning. Try to rename the file, then the state directory
+    /// holding it. Session teardown can retry each move with more owner permissions. If neither moves, record
+    /// the failure so Pen stops before running host git.
     /// </remarks>
     private void MoveHazard(PromptHazard hazard)
     {
@@ -552,17 +551,25 @@ internal sealed class GitCheck
     }
 
     /// <summary>
-    /// Renames <paramref name="path"/> aside, adding u+w to the directory holding it first if that's what stops it
-    /// and this run may.
+    /// Renames <paramref name="path"/> aside. When this run may change modes, it retries after making the parent
+    /// writable, then after making the directory itself writable if the filesystem requires it.
     /// </summary>
-    /// <returns>Whether it moved; if not, nothing is recorded, so the caller can try something else.</returns>
+    /// <returns>Whether it moved. The caller decides what to do if the rename still fails.</returns>
     private bool TryRenameMakingWritable(string path, string why, bool breakLayout)
     {
         var attempt = GitQuarantine.Move(path, why, breakLayout);
-        if (attempt is Quarantined.Failed && _mayChangeModes
-            && _changes.TryMakeListableRecording(Paths.GetParent(path), write: true))
+        if (attempt is Quarantined.Failed && _mayChangeModes)
         {
-            attempt = GitQuarantine.Move(path, why, breakLayout);
+            if (_changes.TryMakeListableRecording(Paths.GetParent(path), write: true))
+                attempt = GitQuarantine.Move(path, why, breakLayout);
+
+            // Some macOS filesystems require write permission on the directory even for a rename within its parent.
+            if (attempt is Quarantined.Failed && Native.Stat(path, follow: false) is { IsDirectory: true }
+                && FileModes.TryMakeListable(path, write: true, out var change))
+            {
+                attempt = GitQuarantine.Move(path, why, breakLayout);
+                _changes.Add(attempt is Quarantined.Moved moved ? change with { Path = moved.To } : change);
+            }
         }
         if (attempt is Quarantined.Failed)
             return false;
