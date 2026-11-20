@@ -61,6 +61,7 @@ public class HostGitTests
     }
 }
 
+[Collection(nameof(LockAndProcessTests))] // Capturing stderr replaces the process-wide console writer.
 public class SignTests
 {
     /// <summary>

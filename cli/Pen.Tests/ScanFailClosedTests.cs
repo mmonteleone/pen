@@ -7,6 +7,7 @@ namespace Pen.Tests;
 /// refused at the start and quarantined at the end, a FIFO is never opened, and
 /// a git dir that can't be read is "couldn't check".
 /// </summary>
+[Collection(nameof(LockAndProcessTests))] // Capturing stderr replaces the process-wide console writer.
 public class ScanFailClosedTests
 {
     private const UnixFileMode Rwx = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
