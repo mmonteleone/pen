@@ -66,8 +66,12 @@ jobs:
         run: |
           cli/install.sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: Smoke tests
-        working-directory: cli
+      - name: Check session startup
         run: |
           pen --version
-          dotnet run --project Pen.SmokeTests
+          project=$(mktemp -d "$RUNNER_TEMP/pen-smoke-start.XXXXXX")
+          cd "$project"
+          pen run true
+      - name: Smoke tests
+        working-directory: cli
+        run: dotnet run --project Pen.SmokeTests

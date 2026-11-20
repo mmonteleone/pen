@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using Pen.Platform;
 using Pen.Proxy;
 
@@ -18,7 +19,8 @@ internal sealed class AgentRunner(SessionDir session, IReadOnlyDictionary<string
         string? token,
         IReadOnlyList<KeyValuePair<string, string>> userEnv)
     {
-        var startInfo = CreateStartInfo(command, token, userEnv);
+        var compose = new ComposeClient(session, env);
+        var startInfo = CreateStartInfo(compose, command, token, userEnv);
         try
         {
             if (signals.Stopping)
@@ -29,7 +31,10 @@ internal sealed class AgentRunner(SessionDir session, IReadOnlyDictionary<string
             using var child = Proc.Start(startInfo);
             signals.Track(session.Container, child);
             using var trimmer = ProxyLogTrimmer.Start(session, env);
-            return Proc.ToExitCode(child.WaitForExitStatus());
+            var exitCode = Proc.ToExitCode(child.WaitForExitStatus());
+            if (exitCode != 0 && !signals.Stopping)
+                ReportExitedProxy(compose);
+            return exitCode;
         }
         catch (PenException error)
         {
@@ -42,9 +47,40 @@ internal sealed class AgentRunner(SessionDir session, IReadOnlyDictionary<string
         }
     }
 
+    /// <summary>Reports Squid's stderr before teardown removes an exited proxy.</summary>
+    private static void ReportExitedProxy(ComposeClient compose)
+    {
+        try
+        {
+            var timeout = TimeSpan.FromSeconds(2);
+            var container = Proc.CaptureBytes(
+                compose.CreateStartInfo(["ps", "--all", "--status", "exited", "--quiet", "proxy"]),
+                limit: 256, timeout: timeout);
+            if (container is not { End: CaptureEnd.Exited, ExitCode: 0 })
+                return;
+            var id = Encoding.UTF8.GetString(container.Stdout).Trim();
+            if (id.Length == 0 || !id.All(char.IsAsciiHexDigit))
+                return;
+
+            // The image streams its access log to stdout. Report only Squid's own diagnostics from stderr.
+            var logs = Proc.CaptureBytes(Proc.CreateStartInfo("docker", ["logs", "--tail", "30", id]),
+                limit: 16_384, timeout: timeout);
+            if (logs is { End: CaptureEnd.Exited, ExitCode: 0 }
+                && Encoding.UTF8.GetString(logs.Stderr).Trim() is { Length: > 0 } error)
+            {
+                Out.WriteLine("Squid proxy diagnostics:\n" + error);
+            }
+        }
+        catch (Exception error) when (error is PenException or IOException)
+        {
+            // The Compose error was already printed. A failed diagnostic must not change the exit code.
+        }
+    }
+
     /// <summary>Creates the docker compose run of the agent, with the secrets in its env.</summary>
     /// <remarks>Secrets are passed by name only on the command line: their values are never on one.</remarks>
     private ProcessStartInfo CreateStartInfo(
+        ComposeClient compose,
         IReadOnlyList<string> command,
         string? token,
         IReadOnlyList<KeyValuePair<string, string>> userEnv)
@@ -63,6 +99,6 @@ internal sealed class AgentRunner(SessionDir session, IReadOnlyDictionary<string
         runArgs.Add("agent");
         runArgs.AddRange(command);
 
-        return new ComposeClient(session, env).CreateStartInfo(runArgs, secrets);
+        return compose.CreateStartInfo(runArgs, secrets);
     }
 }
