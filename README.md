@@ -1,5 +1,7 @@
 # Pen
 
+[![CI status on main](https://github.com/mmonteleone/pen/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/mmonteleone/pen/actions/workflows/ci.yml)
+
 Run coding agents in a container with your project, the tools they need, and network access you control. Your other host files, SSH keys and signing keys stay outside by default.
 
 ```sh
