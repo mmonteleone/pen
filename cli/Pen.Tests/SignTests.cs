@@ -284,6 +284,23 @@ public class SignTests
     }
 
     [Fact]
+    public void ABranchThatBecameASymbolicRefDuringTheRewrite_IsReplaced_NotWhatItPointsTo()
+    {
+        using var f = new Fixture();
+        var b = f.Head();
+        var c1 = f.Commit("a", "1", "A <a@x.io>", "2026-01-01T00:00:00Z", "one");
+        var map = f.Rewrite(new BranchSigner(f.Git).ListRange(b, c1));
+        f.Git.ReadOutput("update-ref", "refs/tags/v1", c1);
+        f.Git.ReadOutput("symbolic-ref", "refs/heads/main", "refs/tags/v1");
+
+        new BranchSigner(f.Git).UpdateBranch("refs/heads/main", map[c1], c1);
+
+        Assert.Equal(c1, f.Git.ReadOutput("rev-parse", "refs/tags/v1"));
+        Assert.Equal(map[c1], f.Git.ReadOutput("rev-parse", "refs/heads/main"));
+        Assert.Null(f.Git.TryReadOutput("symbolic-ref", "-q", "--no-recurse", "refs/heads/main"));
+    }
+
+    [Fact]
     public void ABranchThatMovedDuringTheRewrite_IsRefused()
     {
         using var f = new Fixture();
@@ -377,10 +394,12 @@ public class SignTests
         var forged = f.Forged(armor);
         Assert.Empty(new SignatureVerifier(f.Git).FindVerified([forged]));
 
-        new BranchSigner(f.Git).Sign(null);
+        var outcome = new BranchSigner(f.Git).Sign(null);
 
         var head = f.Head();
         Assert.NotEqual(forged, head);
+        var signed = Assert.IsType<SignOutcome.Signed>(outcome);
+        Assert.Equal(new SignOutcome.Signed("refs/heads/main", forged, head, [head]), signed, SignedComparer);
         Assert.Equal([b], f.Obj(head).Parents);
         Assert.Equal([head], new SignatureVerifier(f.Git).FindVerified([head]));
     }
@@ -392,9 +411,182 @@ public class SignTests
         SetBase(f);
         var valid = f.SignedBy(f.Key, "valid");
 
-        new BranchSigner(f.Git).Sign(null);
+        var outcome = new BranchSigner(f.Git).Sign(null);
 
         Assert.Equal(valid, f.Head());
+        Assert.Equal(new SignOutcome.AllSigned("refs/remotes/origin/HEAD", 1), outcome);
+    }
+
+    [Fact]
+    public void AnEmptyRange_SignsNothing()
+    {
+        using var f = new Fixture();
+        SetBase(f);
+        var head = f.Head();
+
+        var outcome = new BranchSigner(f.Git).Sign(null);
+
+        Assert.Equal(new SignOutcome.NoCommits("refs/remotes/origin/HEAD"), outcome);
+        Assert.Equal(head, f.Head());
+    }
+
+    private static readonly IEqualityComparer<SignOutcome.Signed> SignedComparer = new SignedEquality();
+
+    /// <summary>Compares <see cref="SignOutcome.Signed"/>s by their values, with the created list element by element.</summary>
+    private sealed class SignedEquality : IEqualityComparer<SignOutcome.Signed>
+    {
+        public bool Equals(SignOutcome.Signed? x, SignOutcome.Signed? y) =>
+            x is not null && y is not null && x.BranchRef == y.BranchRef && x.OldHead == y.OldHead &&
+            x.NewHead == y.NewHead && x.Created.SequenceEqual(y.Created);
+
+        public int GetHashCode(SignOutcome.Signed obj) => obj.NewHead.GetHashCode(StringComparison.Ordinal);
+    }
+
+    private static string CapturingStderr(Action action)
+    {
+        var stderr = Console.Error;
+        var captured = new StringWriter();
+        Console.SetError(captured);
+        try { action(); }
+        finally { Console.SetError(stderr); }
+        return captured.ToString();
+    }
+
+    [Fact]
+    public void Report_SaysWhatSigningDid()
+    {
+        using var f = new Fixture();
+        SetBase(f);
+        Assert.Equal("pen: nothing to sign: no commits in refs/remotes/origin/HEAD..HEAD\n",
+            Plain(ReportOf(f)));
+
+        var valid = f.SignedBy(f.Key, "valid");
+        Assert.Equal("pen: nothing to sign: all 1 commits in refs/remotes/origin/HEAD..HEAD are signed\n",
+            Plain(ReportOf(f)));
+
+        var forged = f.Forged("SSH SIGNATURE");
+        var report = Plain(ReportOf(f));
+        var head = f.Head();
+        Assert.Equal(
+            $"pen: signed: main is now {head[..12]} (was {forged[..12]}; the old commits stay in the reflog)\n", report);
+        Assert.NotEqual(valid, head);
+    }
+
+    [Fact]
+    public void Report_GivesTheHint_WhenWhatItSignedDoesntVerify()
+    {
+        using var f = new Fixture(trustKey: false);
+        SetBase(f);
+        f.Commit("a", "1", "A <a@x.io>", "2026-01-01T00:00:00Z", "one");
+        var old = f.Head();
+
+        var report = Plain(ReportOf(f));
+
+        var head = f.Head();
+        Assert.StartsWith(
+            $"pen: signed: main is now {head[..12]} (was {old[..12]}; the old commits stay in the reflog)\n", report);
+        Assert.Contains("gpg.ssh.allowedSignersFile isn't set", report);
+    }
+
+    /// <summary>What <see cref="SignCommand.Report"/> prints for what signing does now, apart from Sign's own listing.</summary>
+    private static string ReportOf(Fixture f)
+    {
+        var outcome = new BranchSigner(f.Git).Sign(null);
+        return CapturingStderr(() => SignCommand.Report(outcome, f.Git));
+    }
+
+    /// <summary>The text without the colors <see cref="Out"/> may add around fields.</summary>
+    private static string Plain(string text) => System.Text.RegularExpressions.Regex.Replace(text, "\u001b\\[[0-9;]*m", "");
+
+    /// <summary>Every ref with what it points to (symbolic or not), plus HEAD's ref and commit.</summary>
+    private static string Refs(Fixture f) =>
+        f.Git.ReadOutput("for-each-ref", "--format=%(refname) %(symref) %(objectname)") + "\n"
+        + f.Git.ReadOutput("symbolic-ref", "HEAD") + " " + f.Head();
+
+    /// <summary>Points HEAD at <paramref name="target"/>, through refs/heads/alias when <paramref name="viaAlias"/>.</summary>
+    private static void PointHeadAt(Fixture f, string target, bool viaAlias)
+    {
+        if (viaAlias)
+        {
+            f.Git.ReadOutput("symbolic-ref", "refs/heads/alias", target);
+            target = "refs/heads/alias";
+        }
+        f.Git.ReadOutput("symbolic-ref", "HEAD", target);
+    }
+
+    [Theory]
+    [InlineData("refs/x", true, false)]
+    [InlineData("refs/x", false, false)]
+    [InlineData("refs/tags/v1.0", true, false)]
+    [InlineData("refs/x", true, true)]
+    [InlineData("refs/tags/refs/heads/v1", true, false)]
+    [InlineData("refs/headsX/y", true, false)]
+    public void HeadOnARefThatIsntABranch_IsRefused_ChangingNothing(string target, bool withBase, bool viaAlias)
+    {
+        using var f = new Fixture();
+        if (withBase) SetBase(f);
+        var unsigned = f.Commit("a", "1", "A <a@x.io>", "2026-01-01T00:00:00Z", "one");
+        f.Git.ReadOutput("update-ref", target, unsigned);
+        PointHeadAt(f, target, viaAlias);
+        var before = Refs(f);
+
+        PenException? e = null;
+        var stderr = CapturingStderr(() => e = Assert.Throws<PenException>(() => new BranchSigner(f.Git).Sign(null)));
+
+        Assert.Equal($"HEAD is on {target}, which isn't a branch: check out the branch to sign", e!.Message);
+        Assert.Equal(1, e.ExitCode);
+        Assert.Equal("", stderr); // refused before the listing
+        Assert.Equal(before, Refs(f));
+    }
+
+    [Fact]
+    public void HeadOnASymbolicBranchToABranch_SignsThatBranch()
+    {
+        using var f = new Fixture();
+        SetBase(f);
+        var old = f.Commit("a", "1", "A <a@x.io>", "2026-01-01T00:00:00Z", "one");
+        PointHeadAt(f, "refs/heads/main", viaAlias: true);
+
+        var report = Plain(ReportOf(f));
+
+        var head = f.Head();
+        Assert.Equal(
+            $"pen: signed: main is now {head[..12]} (was {old[..12]}; the old commits stay in the reflog)\n", report);
+        Assert.Equal(head, f.Git.ReadOutput("rev-parse", "refs/heads/main"));
+        Assert.Equal("refs/heads/main", f.Git.ReadOutput("symbolic-ref", "--no-recurse", "refs/heads/alias"));
+        Assert.Equal("refs/heads/alias", f.Git.ReadOutput("symbolic-ref", "--no-recurse", "HEAD"));
+        AssertSameButSigned(f, old, head);
+    }
+
+    [Fact]
+    public void TheReminderIsntGiven_WhenHeadIsOnARefThatIsntABranch()
+    {
+        using var f = new Fixture();
+        SetBase(f);
+        f.Global("commit.gpgsign", "true");
+        var unsigned = f.Commit("a", "1", "A <a@x.io>", "2026-01-01T00:00:00Z", "one");
+        const string Reminder = "1 unsigned commit; review, then run pen sign";
+        Assert.Equal(Reminder, new BranchSigner(f.Git).FormatReminder());
+
+        f.Git.ReadOutput("update-ref", "refs/x", unsigned);
+        PointHeadAt(f, "refs/x", viaAlias: false);
+        Assert.Null(new BranchSigner(f.Git).FormatReminder());
+
+        PointHeadAt(f, "refs/heads/main", viaAlias: true);
+        Assert.Equal(Reminder, new BranchSigner(f.Git).FormatReminder());
+    }
+
+    [Fact]
+    public void TheReminderIsntGiven_WhenHeadIsDetached()
+    {
+        using var f = new Fixture();
+        SetBase(f);
+        f.Global("commit.gpgsign", "true");
+        var unsigned = f.Commit("a", "1", "A <a@x.io>", "2026-01-01T00:00:00Z", "one");
+        Assert.Equal("1 unsigned commit; review, then run pen sign", new BranchSigner(f.Git).FormatReminder());
+
+        f.Git.ReadOutput("update-ref", "--no-deref", "HEAD", unsigned);
+        Assert.Null(new BranchSigner(f.Git).FormatReminder());
     }
 
     [Fact]
@@ -857,13 +1049,13 @@ public class SignTests
     [Theory]
     [MemberData(nameof(BadHeaders))]
     public void HeadersGitWouldntWrite_AreRefused(string headers) =>
-        Assert.Throws<PenException>(() => CommitObject.Parse(System.Text.Encoding.UTF8.GetBytes(headers + "\n\nmessage\n")));
+        Assert.Throws<CommitShapeException>(() => CommitObject.Parse(System.Text.Encoding.UTF8.GetBytes(headers + "\n\nmessage\n")));
 
     [Theory]
     [InlineData("\n")]
     [InlineData("")]
     public void NoBlankLineAfterTheHeaders_IsRefused(string end) =>
-        Assert.Throws<PenException>(() => CommitObject.Parse(System.Text.Encoding.UTF8.GetBytes($"tree {Tree1}\n{Author}\n{Committer}{end}")));
+        Assert.Throws<CommitShapeException>(() => CommitObject.Parse(System.Text.Encoding.UTF8.GetBytes($"tree {Tree1}\n{Author}\n{Committer}{end}")));
 
     [Theory]
     [InlineData("author José <a@x.io> 1 +0000\ncommitter C <c@x.io> 1 +0000", "author name")]
@@ -967,6 +1159,55 @@ public class SignTests
 
         Assert.Equal([c1], new CommitReader(f.Git).Read([c2])[c2].Parents);
         Assert.Equal([b], new CommitReader(f.Git).Read([c1])[c1].Parents);
+    }
+
+    private static readonly string ShaA = new('a', 40);
+    private static readonly string ShaB = new('b', 40);
+    private static readonly byte[] Content = System.Text.Encoding.ASCII.GetBytes($"tree {Tree1}\n{Author}\n{Committer}\n\nm\n");
+
+    private static byte[] Batch(params object[] parts) =>
+        [.. parts.SelectMany(p => p as byte[] ?? System.Text.Encoding.ASCII.GetBytes((string)p))];
+
+    [Fact]
+    public void ABatchGitWrites_IsSplitIntoItsCommits()
+    {
+        var read = CommitReader.ParseBatch([ShaA, ShaB], Batch($"{ShaA} commit {Content.Length}\n", Content, "\n", $"{ShaB} commit {Content.Length}\n", Content, "\n"));
+        Assert.Equal(Tree1, read[ShaA].Tree);
+        Assert.Equal("m\n"u8.ToArray(), read[ShaB].Message);
+    }
+
+    /// <summary>
+    /// git writes the size as digits that fit in an int. Anything else used to escape as FormatException,
+    /// OverflowException or ArgumentOutOfRangeException (a negative size), or, with a sign or trailing space, to
+    /// be read as a number; it's refused like any other output Pen can't read.
+    /// </summary>
+    [Theory]
+    [InlineData("abc")]
+    [InlineData("")]
+    [InlineData("99999999999")]
+    [InlineData("-1")]
+    [InlineData("+5")]
+    [InlineData("5\t")]
+    public void ASizeGitWouldntWrite_IsRefused(string size)
+    {
+        var e = Assert.Throws<PenException>(() => CommitReader.ParseBatch([ShaA], Batch($"{ShaA} commit {size}\n", Content, "\n")));
+        Assert.Equal($"git cat-file --batch: unreadable size for {ShaA} ({ShaA} commit {size})", e.Message);
+    }
+
+    /// <summary>Output shorter than its sizes say used to escape as ArgumentOutOfRangeException.</summary>
+    [Fact]
+    public void ASizePastTheEndOfTheOutput_IsTruncatedOutput()
+    {
+        var e = Assert.Throws<PenException>(() => CommitReader.ParseBatch([ShaA], Batch($"{ShaA} commit {Content.Length + 1}\n", Content)));
+        Assert.Equal("git cat-file --batch: truncated output", e.Message);
+    }
+
+    /// <summary>The next header is looked for past the end, which used to escape as ArgumentOutOfRangeException.</summary>
+    [Fact]
+    public void ACommitEndingTheOutputWithMoreToCome_IsTruncatedOutput()
+    {
+        var e = Assert.Throws<PenException>(() => CommitReader.ParseBatch([ShaA, ShaB], Batch($"{ShaA} commit {Content.Length}\n", Content)));
+        Assert.Equal("git cat-file --batch: truncated output", e.Message);
     }
 
     [Fact]

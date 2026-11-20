@@ -5,7 +5,7 @@ namespace Pen.SmokeTests;
 
 /// <summary>The dotnet tool: SDKs by version, PowerShell, NuGet through the proxy into the project's cache volume,
 /// a build shared with the host, and a web app on a forwarded port.</summary>
-/// <remarks>Login checks (log in to claude and codex, still logged in after pen upgrade --clean, logged out in
+/// <remarks>Login checks (log in to claude and codex, still logged in after pen upgrade --no-cache, logged out in
 /// another project) are manual.</remarks>
 public sealed class DotNetTests(DotNetTests.Fixture fixture) : IClassFixture<DotNetTests.Fixture>
 {

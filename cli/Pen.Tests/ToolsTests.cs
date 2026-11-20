@@ -18,16 +18,28 @@ public class ToolsTests
 
     private static ToolSpec Tool(string spec)
     {
-        Assert.Null(ToolSpec.TryParse(spec, Catalog, out var tool));
+        Assert.True(ToolSpec.TryParse(spec, Catalog, out var tool, out var error), error);
+        Assert.Null(error);
         return tool;
     }
 
-    private static string Bad(string spec) =>
-        Assert.IsType<string>(ToolSpec.TryParse(spec, Catalog, out _));
+    private static string Bad(string spec)
+    {
+        Assert.False(ToolSpec.TryParse(spec, Catalog, out var tool, out var error));
+        Assert.Equal(default, tool);
+        return error;
+    }
+
+    private static string Conflict(RecipeCatalog catalog, params ToolSpec[] tools)
+    {
+        Assert.False(ToolSpec.TryCanonicalize(tools, catalog, out var canonical, out var error));
+        Assert.Empty(canonical);
+        return error;
+    }
 
     private static List<string> Canonical(params string[] specs)
     {
-        Assert.Null(ToolSpec.TryCanonicalize(specs.Select(Tool), Catalog, out var canonical));
+        Assert.True(ToolSpec.TryCanonicalize(specs.Select(Tool), Catalog, out var canonical, out var error), error);
         return canonical.Select(t => t.ToString()).ToList();
     }
 
@@ -68,12 +80,11 @@ public class ToolsTests
     [Fact]
     public void OnlyTheFirstWordCounts() => Assert.Null(Implied(["bash", "helper"]));
 
-    /// <summary>What a pen command line implies, as Session.Run sees its command.</summary>
+    /// <summary>What a pen command line implies, as SessionRunner.Run sees its command.</summary>
     private static string? ImpliedBy(params string[] args)
     {
-        var command = CommandParser.Parse(args);
-        Assert.Equal(CommandKind.Run, command.Kind);
-        return ToolSpec.FindImpliedAgent(command.Args, RecipeCatalog.Embedded, command.Tools)?.ToString();
+        var command = Assert.IsType<RunInvocation>(CommandParser.Parse(args, () => null, RecipeCatalog.Embedded));
+        return ToolSpec.FindImpliedAgent(command.Command, RecipeCatalog.Embedded, command.Tools)?.ToString();
     }
 
     [Theory]
@@ -115,7 +126,7 @@ public class ToolsTests
     {
         Assert.Equal(["dotnet:010", "dotnet:10"], Canonical("dotnet:10", "dotnet:010", "dotnet:10"));
         Assert.Contains("go:1.01 and go:1.1 can't be used together",
-            ToolSpec.TryCanonicalize([Tool("go:1.1"), Tool("go:1.01")], Catalog, out _));
+            Conflict(Catalog, Tool("go:1.1"), Tool("go:1.01")));
     }
 
     [Fact]
@@ -126,8 +137,9 @@ public class ToolsTests
             ["tools/x/tool.toml"] = "default = \"8\"\nversion = '^[1-9]\\d*$'\n",
             ["tools/x/install.sh"] = "#!/bin/sh\n",
         });
-        Assert.Null(ToolSpec.TryParse("x:8", catalog, out _));
-        Assert.Contains("\"08\" isn't a valid version of x", ToolSpec.TryParse("x:08", catalog, out _));
+        Assert.True(ToolSpec.TryParse("x:8", catalog, out _, out _));
+        Assert.False(ToolSpec.TryParse("x:08", catalog, out _, out var error));
+        Assert.Contains("\"08\" isn't a valid version of x", error);
     }
 
     [Fact]
@@ -149,7 +161,7 @@ public class ToolsTests
             ["tools/a-b/tool.toml"] = "default = \"1\"\nversion = '^\\d+$'\n",
             ["tools/a-b/install.sh"] = "#!/bin/sh\n",
         });
-        Assert.Null(ToolSpec.TryCanonicalize([new("a", "1"), new("a-b", "1")], catalog, out var canonical));
+        Assert.True(ToolSpec.TryCanonicalize([new("a", "1"), new("a-b", "1")], catalog, out var canonical, out _));
         Assert.Equal(["a-b:1", "a:1"], canonical.Select(t => t.ToString()));
     }
 
@@ -195,7 +207,7 @@ public class ToolsTests
     [Fact]
     public void AVersionTooLongIsRefused_WhateverTheRecipeAllows()
     {
-        Assert.Null(ToolSpec.TryParse("dotnet:" + new string('1', 64), Catalog, out _));
+        Assert.True(ToolSpec.TryParse("dotnet:" + new string('1', 64), Catalog, out _, out _));
         Assert.Contains("isn't a valid version", Bad("dotnet:" + new string('1', 65)));
     }
 
@@ -216,9 +228,9 @@ public class ToolsTests
             ["tools/loose/tool.toml"] = "default = \"1\"\nversion = '\\d+'\n",
             ["tools/loose/install.sh"] = "#!/bin/sh\n",
         });
-        Assert.Null(ToolSpec.TryParse("loose:12", catalog, out _));
-        Assert.NotNull(ToolSpec.TryParse("loose:12-x", catalog, out _));
-        Assert.NotNull(ToolSpec.TryParse("loose:x-12", catalog, out _));
+        Assert.True(ToolSpec.TryParse("loose:12", catalog, out _, out _));
+        Assert.False(ToolSpec.TryParse("loose:12-x", catalog, out _, out _));
+        Assert.False(ToolSpec.TryParse("loose:x-12", catalog, out _, out _));
     }
 
     [Fact]
@@ -237,10 +249,10 @@ public class ToolsTests
     [Fact]
     public void TwoVersionsThatCantCoexistAreRefused()
     {
-        var message = ToolSpec.TryCanonicalize([Tool("go:1.24"), Tool("go:1.25")], Catalog, out _);
+        var message = Conflict(Catalog, Tool("go:1.24"), Tool("go:1.25"));
         Assert.Equal("go:1.24 and go:1.25 can't be used together: only one version of go can be installed", message);
-        Assert.Null(ToolSpec.TryCanonicalize([Tool("go:1.24"), Tool("go")], Catalog, out _));
-        Assert.Null(ToolSpec.TryCanonicalize([Tool("dotnet:8"), Tool("dotnet:10")], Catalog, out _));
+        Assert.True(ToolSpec.TryCanonicalize([Tool("go:1.24"), Tool("go")], Catalog, out _, out _));
+        Assert.True(ToolSpec.TryCanonicalize([Tool("dotnet:8"), Tool("dotnet:10")], Catalog, out _, out _));
     }
 
     [Fact]
@@ -254,7 +266,12 @@ public class ToolsTests
 
     // The embedded test recipe: multiple = false, default 1.
     private static PenException ConfigError(string text, ConfigKind kind) =>
-        Assert.Throws<PenException>(() => Config.Parse(text, "f.toml", kind));
+        Assert.Throws<PenException>(() => ParseTools(text, kind));
+
+    private static IReadOnlyList<ToolSpec> ParseTools(string text, ConfigKind kind) =>
+        kind == ConfigKind.User
+            ? ConfigParser.ParseUser(text, "f.toml", RecipeCatalog.Embedded).Tools
+            : ConfigParser.ParseProject(text, "f.toml", RecipeCatalog.Embedded).Tools;
 
     [Theory]
     [InlineData(true)]
@@ -262,9 +279,9 @@ public class ToolsTests
     public void ToolsAreValidInBothConfigFiles(bool user)
     {
         var kind = user ? ConfigKind.User : ConfigKind.Project;
-        var c = Config.Parse("tools = [\"pen-test\", \"pen-test:1\"]\n", "f.toml", kind);
-        Assert.Equal([new ToolSpec("pen-test", "1")], c.Tools);
-        Assert.Empty(Config.Parse("", "f.toml", kind).Tools);
+        var tools = ParseTools("tools = [\"pen-test\", \"pen-test:1\"]\n", kind);
+        Assert.Equal([new ToolSpec("pen-test", "1")], tools);
+        Assert.Empty(ParseTools("", kind));
 
         Assert.StartsWith("f.toml: tools: unknown tool \"nope\"", ConfigError("tools = [\"nope\"]", kind).Message);
         Assert.Equal("f.toml: tools: \"01\" isn't a valid version of pen-test", ConfigError("tools = [\"pen-test:01\"]", kind).Message);
@@ -281,13 +298,12 @@ public class ToolsTests
     [Fact]
     public void TheFlagAcceptsWhatTheConfigDoes()
     {
-        var c = CommandParser.Parse(["--tool", "pen-test:1", "--tool=pen-test", "--docker", "--port", "80", "claude", "--tool", "x"]);
-        Assert.Equal(CommandKind.Run, c.Kind);
+        var c = Assert.IsType<RunInvocation>(CommandParser.Parse(["--tool", "pen-test:1", "--tool=pen-test", "--docker", "--port", "80", "claude", "--tool", "x"], () => null, RecipeCatalog.Embedded));
         Assert.Equal([new ToolSpec("pen-test", "1")], c.Tools);
         Assert.True(c.Docker);
         Assert.Equal([80], c.Ports);
-        Assert.Equal(["claude", "--tool", "x"], c.Args);
-        Assert.Empty(CommandParser.Parse(["claude"]).Tools);
+        Assert.Equal(["claude", "--tool", "x"], c.Command);
+        Assert.Empty(Assert.IsType<RunInvocation>(CommandParser.Parse(["claude"], () => null, RecipeCatalog.Embedded)).Tools);
     }
 
     [Theory]
@@ -305,14 +321,17 @@ public class ToolsTests
     [InlineData("--tool=list", "ls")]
     [InlineData("--toolx", "pen-test")]
     public void BadFlagsAreUsageErrors(params string[] args) =>
-        Assert.Equal(2, Assert.Throws<PenException>(() => CommandParser.Parse(args)).ExitCode);
+        Assert.Equal(2, Assert.Throws<PenException>(() => CommandParser.Parse(args, () => null, RecipeCatalog.Embedded)).ExitCode);
 
     [Fact]
-    public void ToolListIsItsOwnCommand()
+    public void TheListingIsPenTools_AndToolListIsJustAnUnknownTool()
     {
-        Assert.Equal(CommandKind.ToolList, CommandParser.Parse(["--tool", "list"]).Kind);
-        Assert.Equal(CommandKind.ToolList, CommandParser.Parse(["--tool=list"]).Kind);
-        Assert.Contains("--tool list", HelpText.Usage);
-        Assert.Contains("--tool <spec>", HelpText.Subcommands["run"]);
+        Assert.IsType<ToolsInvocation>(CommandParser.Parse(["tools"], () => null, RecipeCatalog.Embedded));
+        var list = Assert.Throws<PenException>(() => CommandParser.Parse(["--tool", "list"], () => null, RecipeCatalog.Embedded)).Message;
+        Assert.StartsWith("--tool: unknown tool \"list\"", list);
+        Assert.Contains("; pen tools lists them", list);
+        Assert.Contains("\n  tools  ", CliTests.Render("--help"));
+        Assert.Contains("-t, --tool <spec>", CliTests.Render("run", "--help"));
+        Assert.Contains("tools shows what's available", CliTests.Render("run", "--help"));
     }
 }

@@ -1,0 +1,81 @@
+// APIs with one owner each: everything else in cli/Pen goes through it. The owners are exempt from RS0030 in
+// .editorconfig. Each overload is listed, since an entry names one.
+
+P:System.DateTime.Now;Use the TimeProvider that Program passes in
+P:System.DateTime.UtcNow;Use the TimeProvider that Program passes in
+P:System.DateTime.Today;Use the TimeProvider that Program passes in
+P:System.DateTimeOffset.Now;Use the TimeProvider that Program passes in
+P:System.DateTimeOffset.UtcNow;Use the TimeProvider that Program passes in
+P:System.TimeProvider.System;Use the TimeProvider that Program passes in
+
+M:System.Threading.Thread.Sleep(System.Int32);Wait through Retry
+M:System.Threading.Thread.Sleep(System.TimeSpan);Wait through Retry
+
+T:System.Console;Write through Out; only Program reads stdin
+
+M:System.Diagnostics.Process.#ctor;Start processes through Proc
+M:System.Diagnostics.Process.Start;Start processes through Proc
+M:System.Diagnostics.Process.Start(System.String);Start processes through Proc
+M:System.Diagnostics.Process.Start(System.String,System.String);Start processes through Proc
+M:System.Diagnostics.Process.Start(System.String,System.Collections.Generic.IEnumerable{System.String});Start processes through Proc
+M:System.Diagnostics.Process.Start(System.Diagnostics.ProcessStartInfo);Start processes through Proc
+M:System.Diagnostics.Process.Start(System.String,System.String,System.Security.SecureString,System.String);Start processes through Proc
+M:System.Diagnostics.Process.Start(System.String,System.String,System.String,System.Security.SecureString,System.String);Start processes through Proc
+M:System.Diagnostics.Process.Run(System.Diagnostics.ProcessStartInfo,System.Nullable{System.TimeSpan});Start processes through Proc
+M:System.Diagnostics.Process.Run(System.String,System.Collections.Generic.IEnumerable{System.String},System.Boolean,System.Nullable{System.TimeSpan});Start processes through Proc
+M:System.Diagnostics.Process.RunAsync(System.Diagnostics.ProcessStartInfo,System.Threading.CancellationToken);Start processes through Proc
+M:System.Diagnostics.Process.RunAsync(System.String,System.Collections.Generic.IEnumerable{System.String},System.Boolean,System.Threading.CancellationToken);Start processes through Proc
+M:System.Diagnostics.Process.RunAndCaptureText(System.Diagnostics.ProcessStartInfo,System.Nullable{System.TimeSpan});Start processes through Proc
+M:System.Diagnostics.Process.RunAndCaptureText(System.String,System.Collections.Generic.IEnumerable{System.String},System.Nullable{System.TimeSpan});Start processes through Proc
+M:System.Diagnostics.Process.RunAndCaptureTextAsync(System.Diagnostics.ProcessStartInfo,System.Threading.CancellationToken);Start processes through Proc
+M:System.Diagnostics.Process.RunAndCaptureTextAsync(System.String,System.Collections.Generic.IEnumerable{System.String},System.Threading.CancellationToken);Start processes through Proc
+M:System.Diagnostics.Process.StartAndForget(System.Diagnostics.ProcessStartInfo);Start processes through Proc
+M:System.Diagnostics.Process.StartAndForget(System.String,System.Collections.Generic.IEnumerable{System.String});Start processes through Proc
+
+M:System.Environment.GetEnvironmentVariable(System.String);Read the environment through HostEnv
+M:System.Environment.GetEnvironmentVariable(System.String,System.EnvironmentVariableTarget);Read the environment through HostEnv
+M:System.Environment.GetEnvironmentVariables;Read the environment through HostEnv
+M:System.Environment.GetEnvironmentVariables(System.EnvironmentVariableTarget);Read the environment through HostEnv
+M:System.Environment.ExpandEnvironmentVariables(System.String);Read the environment through HostEnv
+M:System.Environment.SetEnvironmentVariable(System.String,System.String);HostEnv owns the environment
+M:System.Environment.SetEnvironmentVariable(System.String,System.String,System.EnvironmentVariableTarget);HostEnv owns the environment
+M:System.Environment.GetFolderPath(System.Environment.SpecialFolder);HostEnv owns the home directory: it reads HOME
+M:System.Environment.GetFolderPath(System.Environment.SpecialFolder,System.Environment.SpecialFolderOption);HostEnv owns the home directory: it reads HOME
+P:System.Environment.CurrentDirectory;HostEnv owns the working directory: use the StartDir that Program passes in
+M:System.IO.Directory.GetCurrentDirectory;HostEnv owns the working directory: use the StartDir that Program passes in
+M:System.IO.Directory.SetCurrentDirectory(System.String);HostEnv owns the working directory
+
+M:System.Threading.Tasks.Task.Wait;Only Proc waits on tasks
+M:System.Threading.Tasks.Task.Wait(System.Int32);Only Proc waits on tasks
+M:System.Threading.Tasks.Task.Wait(System.TimeSpan);Only Proc waits on tasks
+M:System.Threading.Tasks.Task.Wait(System.Threading.CancellationToken);Only Proc waits on tasks
+M:System.Threading.Tasks.Task.Wait(System.Int32,System.Threading.CancellationToken);Only Proc waits on tasks
+M:System.Threading.Tasks.Task.Wait(System.TimeSpan,System.Threading.CancellationToken);Only Proc waits on tasks
+M:System.Threading.Tasks.Task.WaitAll(System.Threading.Tasks.Task[]);Only Proc waits on tasks
+M:System.Threading.Tasks.Task.WaitAll(System.Threading.Tasks.Task[],System.Int32);Only Proc waits on tasks
+M:System.Threading.Tasks.Task.WaitAll(System.Threading.Tasks.Task[],System.TimeSpan);Only Proc waits on tasks
+M:System.Threading.Tasks.Task.WaitAll(System.Threading.Tasks.Task[],System.Threading.CancellationToken);Only Proc waits on tasks
+M:System.Threading.Tasks.Task.WaitAll(System.Threading.Tasks.Task[],System.Int32,System.Threading.CancellationToken);Only Proc waits on tasks
+M:System.Threading.Tasks.Task.WaitAll(System.Collections.Generic.IEnumerable{System.Threading.Tasks.Task},System.Threading.CancellationToken);Only Proc waits on tasks
+M:System.Threading.Tasks.Task.WaitAll(System.ReadOnlySpan{System.Threading.Tasks.Task});Only Proc waits on tasks
+M:System.Threading.Tasks.Task.WaitAny(System.Threading.Tasks.Task[]);Only Proc waits on tasks
+M:System.Threading.Tasks.Task.WaitAny(System.Threading.Tasks.Task[],System.Int32);Only Proc waits on tasks
+M:System.Threading.Tasks.Task.WaitAny(System.Threading.Tasks.Task[],System.TimeSpan);Only Proc waits on tasks
+M:System.Threading.Tasks.Task.WaitAny(System.Threading.Tasks.Task[],System.Threading.CancellationToken);Only Proc waits on tasks
+M:System.Threading.Tasks.Task.WaitAny(System.Threading.Tasks.Task[],System.Int32,System.Threading.CancellationToken);Only Proc waits on tasks
+P:System.Threading.Tasks.Task`1.Result;Only Proc waits on tasks
+P:System.Threading.Tasks.ValueTask`1.Result;Only Proc waits on tasks
+M:System.Threading.Tasks.Task.GetAwaiter;Only Proc waits on tasks
+M:System.Threading.Tasks.Task`1.GetAwaiter;Only Proc waits on tasks
+M:System.Runtime.CompilerServices.TaskAwaiter.GetResult;Only Proc waits on tasks
+M:System.Runtime.CompilerServices.TaskAwaiter`1.GetResult;Only Proc waits on tasks
+M:System.Runtime.CompilerServices.ConfiguredTaskAwaitable.ConfiguredTaskAwaiter.GetResult;Only Proc waits on tasks
+M:System.Runtime.CompilerServices.ConfiguredTaskAwaitable`1.ConfiguredTaskAwaiter.GetResult;Only Proc waits on tasks
+M:System.Threading.Tasks.ValueTask.GetAwaiter;Only Proc waits on tasks
+M:System.Threading.Tasks.ValueTask`1.GetAwaiter;Only Proc waits on tasks
+M:System.Runtime.CompilerServices.ValueTaskAwaiter.GetResult;Only Proc waits on tasks
+M:System.Runtime.CompilerServices.ValueTaskAwaiter`1.GetResult;Only Proc waits on tasks
+M:System.Runtime.CompilerServices.ConfiguredValueTaskAwaitable.ConfiguredValueTaskAwaiter.GetResult;Only Proc waits on tasks
+M:System.Runtime.CompilerServices.ConfiguredValueTaskAwaitable`1.ConfiguredValueTaskAwaiter.GetResult;Only Proc waits on tasks
+
+P:Pen.Tools.RecipeCatalog.Embedded;Use the RecipeCatalog that Program passes in

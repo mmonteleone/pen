@@ -1,0 +1,13 @@
+docker = true
+
+# Pen's own Go recipe build in Docker-in-Docker reads the release list here
+allow = ["go.dev"]
+
+tools = [
+  "dotnet:11",
+  "codegraph",
+  "claude",
+  "codex",
+  "pi",
+  "opencode"
+]

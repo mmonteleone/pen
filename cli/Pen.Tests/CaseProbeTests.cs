@@ -21,7 +21,7 @@ public class CaseProbeTests
     {
         using var t = new TempDir();
         var git = GitDir(t);
-        Assert.Equal(Folds(git), RepoGuard.MayFoldCase(git));
+        Assert.Equal(Folds(git), PathChecks.MayFoldCase(git));
     }
 
     [Fact]
@@ -30,7 +30,7 @@ public class CaseProbeTests
         using var t = new TempDir();
         var git = GitDir(t);
         var before = Listing(git);
-        RepoGuard.MayFoldCase(git);
+        PathChecks.MayFoldCase(git);
         Assert.Equal(before, Listing(git));
     }
 
@@ -44,7 +44,7 @@ public class CaseProbeTests
         File.SetUnixFileMode(git, (UnixFileMode)0b101_101_101);
         try
         {
-            Assert.True(RepoGuard.MayFoldCase(git));
+            Assert.True(PathChecks.MayFoldCase(git));
             Assert.Equal(before, Listing(git));
         }
         finally { File.SetUnixFileMode(git, (UnixFileMode)0b111_101_101); }
@@ -54,7 +54,7 @@ public class CaseProbeTests
     public void AMissingGitDirCountsAsFolding()
     {
         using var t = new TempDir();
-        Assert.True(RepoGuard.MayFoldCase(Path.Combine(t.Path, "gone")));
+        Assert.True(PathChecks.MayFoldCase(Path.Combine(t.Path, "gone")));
     }
 
     [Fact]
@@ -62,12 +62,12 @@ public class CaseProbeTests
     {
         using var t = new TempDir();
         var git = GitDir(t);
-        var name = RepoGuard.GenerateCaseProbeName();
+        var name = PathChecks.GenerateCaseProbeName();
         var upper = Path.Combine(git, name.ToUpperInvariant());
         File.WriteAllText(upper, "someone else's");
         var before = Listing(git);
 
-        Assert.True(RepoGuard.MayFoldCase(git, name));
+        Assert.True(PathChecks.MayFoldCase(git, name));
 
         Assert.Equal("someone else's", File.ReadAllText(upper));
         Assert.Equal(before, Listing(git));
@@ -80,12 +80,12 @@ public class CaseProbeTests
         var git = GitDir(t);
         foreach (var upper in new[] { false, true })
         {
-            var name = RepoGuard.GenerateCaseProbeName();
+            var name = PathChecks.GenerateCaseProbeName();
             var taken = Path.Combine(git, upper ? name.ToUpperInvariant() : name);
             var inside = Path.Combine(taken, "inside");
             Directory.CreateDirectory(inside);
 
-            Assert.True(RepoGuard.MayFoldCase(git, name));
+            Assert.True(PathChecks.MayFoldCase(git, name));
 
             Assert.True(Directory.Exists(inside));
             Directory.Delete(taken, recursive: true);
@@ -100,13 +100,13 @@ public class CaseProbeTests
         var target = Path.Combine(t.Path, "target");
         foreach (var upper in new[] { false, true })
         {
-            var name = RepoGuard.GenerateCaseProbeName();
+            var name = PathChecks.GenerateCaseProbeName();
             var link = Path.Combine(git, upper ? name.ToUpperInvariant() : name);
             File.CreateSymbolicLink(link, target); // dangling, so only lstat sees it
 
-            Assert.True(RepoGuard.MayFoldCase(git, name));
+            Assert.True(PathChecks.MayFoldCase(git, name));
 
-            Assert.True(RepoGuard.IsLink(link));
+            Assert.True(PathChecks.IsLink(link));
             Assert.False(File.Exists(target));
             File.Delete(link);
         }
@@ -118,8 +118,8 @@ public class CaseProbeTests
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
         var git = Path.Combine(repo, ".git");
-        var name = RepoGuard.GenerateCaseProbeName();
-        Assert.NotEqual(name, RepoGuard.GenerateCaseProbeName());
+        var name = PathChecks.GenerateCaseProbeName();
+        Assert.NotEqual(name, PathChecks.GenerateCaseProbeName());
         Assert.NotEqual(name, name.ToUpperInvariant());
         Assert.StartsWith(".", name);
 

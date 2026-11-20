@@ -22,7 +22,7 @@ public class UnreadablePathTests
 
         public void Dispose()
         {
-            foreach (var p in new[] { _path, _path + GitCheck.Suffix })
+            foreach (var p in new[] { _path, _path + GitQuarantine.Suffix })
                 if (Path.Exists(p)) File.SetUnixFileMode(p, Rwx);
         }
     }
@@ -44,14 +44,14 @@ public class UnreadablePathTests
         var repo = RepoWithModule(t, out var foo);
         using var _ = new Chmod(foo);
 
-        var moved = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: thereAtStart ? [foo] : []).Moved;
+        var moved = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: thereAtStart ? [foo] : []).Moved;
 
-        var q = Assert.Single(moved);
+        var q = Assert.IsType<Quarantined.Moved>(Assert.Single(moved));
         Assert.Equal(foo, q.From);
-        Assert.Equal(foo + GitCheck.Suffix, q.To);
+        Assert.Equal(foo + GitQuarantine.Suffix, q.To);
         Assert.Contains("can't be read", q.Why);
         Assert.False(Path.Exists(foo));
-        Assert.Empty(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved);
+        Assert.Empty(GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved);
         RepoGuard.CheckAtStart(repo); // the next pen command works
     }
 
@@ -61,7 +61,7 @@ public class UnreadablePathTests
         using var t = new TempDir();
         var repo = RepoWithModule(t, out var foo);
         using var _ = new Chmod(foo);
-        Assert.Equal(foo, Assert.Single(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved).From);
+        Assert.Equal(foo, Assert.Single(GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved).From);
     }
 
     [Fact]
@@ -76,7 +76,7 @@ public class UnreadablePathTests
         Assert.Equal([module], atStart);
         using var _ = new Chmod(module);
 
-        var moved = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: atStart).Moved.Select(q => RepoGuard.FormatPath(repo, q.From)).ToList();
+        var moved = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: atStart).Moved.Select(q => PathChecks.FormatPath(repo, q.From)).ToList();
 
         Assert.Equal([".git/modules/lib", "lib/.git"], moved);
     }
@@ -102,7 +102,7 @@ public class UnreadablePathTests
         using var _ = new Chmod(dir);
 
         Assert.Contains($"  .git/{name}", Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(repo)).Message);
-        Assert.Equal(dir, Assert.Single(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved).From);
+        Assert.Equal(dir, Assert.Single(GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved).From);
         RepoGuard.CheckAtStart(repo);
     }
 
@@ -117,7 +117,7 @@ public class UnreadablePathTests
     }
 
     [Fact]
-    public void FinishDeadSessionsEndsTheSessionAndTheNextCommandWorks()
+    public void FinishAbandonedEndsTheSessionAndTheNextCommandWorks()
     {
         using var t = new TempDir();
         var repo = RepoWithModule(t, out var foo);
@@ -129,11 +129,11 @@ public class UnreadablePathTests
         using var fake = new FakeDocker(t, """case "$1" in rm|compose) exit 0 ;; *) exit 99 ;; esac""" + "\n");
         using var _ = new Chmod(foo);
 
-        Session.FinishDeadSessions(session.Id, Path.Combine(t.Path, "runtime"));
+        SessionRecovery.FinishAbandoned(session.Id, Path.Combine(t.Path, "runtime"), TimeProvider.System);
 
-        Assert.False(session.IsOpen);
+        Assert.False(session.IsOpen());
         Assert.False(Path.Exists(foo));
-        Assert.True(Directory.Exists(foo + GitCheck.Suffix));
+        Assert.True(Directory.Exists(foo + GitQuarantine.Suffix));
         RepoGuard.CheckAtStart(repo);
     }
 
@@ -167,8 +167,8 @@ public class UnreadablePathTests
         Git.Run(repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", lib, "lib");
         var atStart = RepoScan.FindModuleRepos(Path.Combine(repo, ".git"));
         using var _ = new Chmod(Path.Combine(repo, ".git", "modules", "lib", "config"));
-        var moved = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: atStart).Moved;
-        Assert.Equal("lib/.git", RepoGuard.FormatPath(repo, Assert.Single(moved).From));
+        var moved = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: atStart).Moved;
+        Assert.Equal("lib/.git", PathChecks.FormatPath(repo, Assert.Single(moved).From));
     }
 
     [Theory]

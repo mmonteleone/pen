@@ -411,8 +411,8 @@ public class WorktreeTests
         using var t = new TempDir();
         var (repo, wt, _) = RepoWithWorktree(t);
         Git.Run(repo, "remote", "add", "origin", "git@github.com:acme/widgets.git");
-        Assert.Equal("acme", GitHub.FindProjectOwner(Project.Resolve(wt, t.Host()), Config.Empty));
-        Assert.Null(GitHub.FindProjectOwner(Project.Resolve(t.Sub("plain"), t.Host()), Config.Empty));
+        Assert.Equal("acme", GitHub.FindProjectOwner(Project.Resolve(wt, t.Host()), ProjectConfiguration.Empty));
+        Assert.Null(GitHub.FindProjectOwner(Project.Resolve(t.Sub("plain"), t.Host()), ProjectConfiguration.Empty));
     }
 
     [Fact]
@@ -422,8 +422,8 @@ public class WorktreeTests
         var (_, wt, _) = RepoWithWorktree(t);
         var host = t.Host();
         // Past the repo checks and the locks, to the base: there's no upstream here.
-        Assert.Contains("has no upstream", Assert.Throws<PenException>(() => new SignCommand(host, Project.Resolve(wt, host)).Run(null)).Message);
-        Assert.Contains("isn't a git repo", Assert.Throws<PenException>(() => new SignCommand(host, Project.Resolve(t.Sub("plain"), host)).Run(null)).Message);
+        Assert.Contains("has no upstream", Assert.Throws<PenException>(() => new SignCommand(host, Project.Resolve(wt, host), TimeProvider.System).Run(null)).Message);
+        Assert.Contains("isn't a git repo", Assert.Throws<PenException>(() => new SignCommand(host, Project.Resolve(t.Sub("plain"), host), TimeProvider.System).Run(null)).Message);
     }
 
     // --- B4: running in a linked worktree ------------------------------------------
@@ -524,7 +524,7 @@ public class WorktreeTests
     }
 
     private static List<(string, bool)> Mounts(string dir) =>
-        RepoGuard.PrepareMounts(dir, "/nonexistent-home").Select(m => (m.Path, m.ReadOnly)).ToList();
+        new MountPlanner(dir, "/nonexistent-home").EnsureTargetsAndPlan().Select(m => (m.Path, m.ReadOnly)).ToList();
 
     [Fact]
     public void MountsForAWorktree()
@@ -558,7 +558,7 @@ public class WorktreeTests
     {
         using var t = new TempDir();
         var (repo, wt, _) = RepoWithWorktree(t);
-        var yaml = SessionCompose.GenerateOverride(RepoGuard.PrepareMounts(wt, "/nonexistent-home"), readOnlyRoot: false, dindContainer: "x-dind", ports: null);
+        var yaml = SessionCompose.GenerateOverride(new MountPlanner(wt, "/nonexistent-home").EnsureTargetsAndPlan(), readOnlyRoot: false, dindContainer: "x-dind", ports: null);
         var dind = yaml[yaml.IndexOf("\"dind\"", StringComparison.Ordinal)..];
         Assert.Contains($"\"source\": \"{Path.Combine(repo, ".git")}\"", dind);
         Assert.Contains($"\"source\": \"{Path.Combine(wt, ".git")}\"", dind);
@@ -583,7 +583,7 @@ public class WorktreeTests
         var common = Path.Combine(repo, ".git");
         Git.Run(wt, "commit", "-q", "--allow-empty", "-m", "in wt");
         Git.Run(repo, "worktree", "add", "-q", Path.Combine(wt, ".claude", "worktrees", "y"));
-        Assert.Empty(GitCheck.RunWithoutOpening(wt, startedWithGit: true, common, modulesAtStart: null).Moved);
+        Assert.Empty(GitCheck.RunWithoutSession(wt, startedWithGit: true, common, modulesAtStart: null).Moved);
         Assert.True(File.Exists(Path.Combine(wt, ".git")));
         // Without the common dir, the inner worktree would look foreign.
         Assert.Single(NestedScans.Find(wt));
@@ -599,7 +599,7 @@ public class WorktreeTests
         var m = Directory.CreateDirectory(Path.Combine(common, "modules", "m")).FullName;
         Git.Run(m, "init", "-q", "--bare");
         Git.Run(wt, "init", "-q", "sub");
-        var moved = GitCheck.RunWithoutOpening(wt, startedWithGit: true, common, modulesAtStart: []).Moved.Select(q => q.From).ToList();
+        var moved = GitCheck.RunWithoutSession(wt, startedWithGit: true, common, modulesAtStart: []).Moved.Select(q => q.From).ToList();
         Assert.Equal([Path.Combine(common, "commondir"), Path.Combine(common, "modules", "m"), Path.Combine(wt, "sub", ".git")], moved);
         Assert.True(File.Exists(Path.Combine(wt, ".git")));
     }
@@ -609,11 +609,11 @@ public class WorktreeTests
     {
         using var t = new TempDir();
         var s = new SessionDir("pen-x-00000000", t.Sub("s"));
-        Assert.Equal((false, null), s.ReadGit());
+        Assert.Equal(new GitAtStart(false, null), s.ReadGit());
         File.WriteAllText(s.StartedWithGit, ""); // written by an older Pen
-        Assert.Equal((true, null), s.ReadGit());
+        Assert.Equal(new GitAtStart(true, null), s.ReadGit());
         File.WriteAllText(s.StartedWithGit, "/r/.git\n");
-        Assert.Equal((true, "/r/.git"), s.ReadGit());
+        Assert.Equal(new GitAtStart(true, "/r/.git"), s.ReadGit());
     }
 
     [Fact]
@@ -640,8 +640,8 @@ public class WorktreeTests
         Assert.Equal($"{main.Key}-{Project.HashPath(wt)}:0123456789abcdef", Image.GetProjectLayerName(w, one));
         Assert.Equal($"{main.Key}:fedcba9876543210", Image.GetProjectLayerName(main, other));
         Assert.Equal($"{main.Key}:latest", Image.GetProjectLayerName(main, Image.Name));
-        Assert.True(PruneCommand.IsImageOf(main.Key, Image.GetProjectLayerName(main, one)));
-        Assert.True(PruneCommand.IsImageOf(main.Key, Image.GetProjectLayerName(w, one)));
+        Assert.True(CleanStaleCommand.IsImageOf(main.Key, Image.GetProjectLayerName(main, one)));
+        Assert.True(CleanStaleCommand.IsImageOf(main.Key, Image.GetProjectLayerName(w, one)));
     }
 
     [Fact]

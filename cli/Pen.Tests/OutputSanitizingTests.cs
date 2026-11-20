@@ -58,6 +58,72 @@ public class OutputSanitizingTests
     }
 
     [Fact]
+    public void EachWriterGoesToItsOwnStream()
+    {
+        var (err, stdout) = Capture(() => Out.WriteLine("to stderr"));
+        Assert.Equal(("pen: to stderr\n", ""), (err, stdout));
+        (err, stdout) = Capture(() => Out.WriteRaw("raw"));
+        Assert.Equal(("raw\n", ""), (err, stdout));
+        (err, stdout) = Capture(() => Out.Prompt("question? "));
+        Assert.Equal(("question? ", ""), (err, stdout));
+        (err, stdout) = Capture(() => Out.WriteStdout("to stdout"));
+        Assert.Equal(("", "to stdout"), (err, stdout));
+    }
+
+    [Theory]
+    [InlineData(false, "pen: remove them? [y/N] y\n")]
+    [InlineData(true, "pen: remove them? [y/N] ")]
+    public void ConfirmEchoesTheAnswer_OnlyWhenTheAnswersArentFromATerminal(bool isTerminal, string expected)
+    {
+        var answered = false;
+        var (err, _) = Capture(() => answered = Out.Confirm("remove them?", new Answers(new StringReader("y\n"), isTerminal)));
+        Assert.True(answered);
+        Assert.Equal(expected, err);
+    }
+
+    [Theory]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(UnauthorizedAccessException))]
+    public void WritesDontThrow_AfterTheTerminalIsGone(Type failure)
+    {
+        var (stderr, stdout) = (Console.Error, Console.Out);
+        using var gone = new GoneTerminal((Exception)Activator.CreateInstance(failure)!);
+        Console.SetError(gone);
+        Console.SetOut(gone);
+        try
+        {
+            Out.WriteLine("line");
+            Out.WriteRaw("raw");
+            Out.Prompt("question? ");
+            Out.WriteStdout("text");
+        }
+        finally { Console.SetError(stderr); Console.SetOut(stdout); }
+        Assert.True(gone.Attempts >= 4, $"{gone.Attempts} writes reached the writer");
+    }
+
+    /// <summary>A writer whose terminal hung up: every write and flush throws.</summary>
+    private sealed class GoneTerminal(Exception failure) : TextWriter
+    {
+        public int Attempts { get; private set; }
+
+        public override System.Text.Encoding Encoding => System.Text.Encoding.UTF8;
+
+        public override void Write(char value) => Fail();
+
+        public override void Write(string? value) => Fail();
+
+        public override void WriteLine(string? value) => Fail();
+
+        public override void Flush() => Fail();
+
+        private void Fail()
+        {
+            Attempts++;
+            throw failure;
+        }
+    }
+
+    [Fact]
     public void APermissionErrorsPathIsAField()
     {
         var m = Out.DescribePermissionDenied(new UnauthorizedAccessException("UnauthorizedAccess_IODenied_Path, /a" + Esc + "\nb"));
@@ -70,16 +136,16 @@ public class OutputSanitizingTests
     public void WarningsShowHostileNamesAsFields()
     {
         const string evil = "/p/x\x1b[2J\npen: all clear";
-        var w = GitCheck.Warning("/p", [new(evil + "/.git", evil + "/.git.pen-quarantine", "why")]);
+        var w = GitCheckWording.Warning("/p", [new Quarantined.Moved(evil + "/.git", evil + "/.git.pen-quarantine", "why")]);
         Assert.Contains("  x\\x1b[2J\\npen: all clear/.git → x\\x1b[2J\\npen: all clear/.git.pen-quarantine", w);
         Assert.DoesNotContain("\npen: all clear", w, StringComparison.Ordinal);
         Assert.Equal(w, Out.StripControls(w));
 
-        var n = GitCheck.NotCheckedWarning(evil, "why");
+        var n = GitCheckWording.NotCheckedWarning(evil, "why");
         Assert.False(n.Contains(Esc, StringComparison.Ordinal));
         Assert.DoesNotContain("\npen: all clear", n, StringComparison.Ordinal);
 
-        var (err, _) = Capture(() => GitCheck.Report("/p", new() { Moved = [], Failure = null, Opened = [new(evil, UnixFileMode.None, UnixFileMode.UserRead)] }));
+        var (err, _) = Capture(() => GitCheckReport.Print("/p", new() { Moved = [], Failure = null, ModeChanges = [new(evil, UnixFileMode.None, UnixFileMode.UserRead)] }));
         Assert.False(err.Contains(Esc, StringComparison.Ordinal));
         Assert.DoesNotContain("\npen: all clear", err, StringComparison.Ordinal);
         Assert.Contains("changed x\\x1b", err);
@@ -120,7 +186,7 @@ public class OutputSanitizingTests
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
         Git.Run(repo, "config", "include.path", "../inc" + Esc + "\tname");
-        var m = Assert.Throws<PenException>(() => RepoGuard.PrepareMounts(repo, "/nonexistent-home")).Message;
+        var m = Assert.Throws<PenException>(() => new MountPlanner(repo, "/nonexistent-home").EnsureTargetsAndPlan()).Message;
         Assert.Contains("inc\\x1b\\tname", m);
         Assert.False(m.Contains(Esc, StringComparison.Ordinal));
     }
@@ -149,10 +215,10 @@ public class OutputSanitizingTests
         var host = t.Host();
         Directory.CreateDirectory(host.ConfigDir);
         var project = Project.Resolve(t.Sub("repo"), host);
-        Session.EnsureRuntimeDir(host, project);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
         var dir = t.Sub("home", ".local", "state", "pen", project.Key, "sessions", "12345678");
         File.WriteAllText(Path.Combine(dir, "proxy.log"), $"2026-01-01T00:00:00Z 1.1.1.1 TCP_DENIED/403 CONNECT evil{Esc}[2J.com:443 -\n");
-        var (_, stdout) = Capture(() => new AllowCommand(host, RecipeCatalog.Embedded).ListBlocked(new ProjectContext(host, project, new Config(), new Config())));
+        var (_, stdout) = Capture(() => new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, UserConfiguration.Empty, ProjectConfiguration.Empty)));
         Assert.False(stdout.Contains(Esc, StringComparison.Ordinal));
         Assert.Contains("evil\\x1b[2j.com", stdout); // HostOf lowercases
         Assert.DoesNotContain("pen allow evil", stdout);
@@ -165,12 +231,12 @@ public class OutputSanitizingTests
         var host = t.Host();
         Directory.CreateDirectory(host.ConfigDir);
         var project = Project.Resolve(t.Sub("repo"), host);
-        Session.EnsureRuntimeDir(host, project);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
         var dir = t.Sub("home", ".local", "state", "pen", project.Key, "sessions", "12345678");
         var start = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         File.WriteAllLines(Path.Combine(dir, "proxy.log"), Enumerable.Range(0, 5000).Select(i =>
             $"{start.AddSeconds(i):yyyy-MM-ddTHH:mm:ssZ} 1.1.1.1 TCP_DENIED/403 CONNECT h{i}.example:443 -"));
-        var (_, stdout) = Capture(() => new AllowCommand(host, RecipeCatalog.Embedded).ListBlocked(new ProjectContext(host, project, new Config(), new Config())));
+        var (_, stdout) = Capture(() => new AllowCommand(host, new StartDir(null), RecipeCatalog.Embedded, TimeProvider.System).ListBlocked(new ProjectContext(host, project, UserConfiguration.Empty, ProjectConfiguration.Empty)));
         var lines = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal(1 + Allowlist.MaxListed + 2, lines.Length);
         Assert.StartsWith("  h4999.example ", lines[1]);
@@ -286,12 +352,12 @@ public class RestoreCommandTests
             var repo = Git.Repo(t.Sub("repo"));
             var nested = t.Sub("repo", name);
             Git.Run(nested, "init", "-q");
-            var moved = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved;
-            var q = Assert.Single(moved);
+            var moved = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved;
+            var q = Assert.IsType<Quarantined.Moved>(Assert.Single(moved));
             Assert.Equal(Path.Combine(nested, ".git"), q.From);
             Assert.False(Directory.Exists(q.From));
 
-            var warning = GitCheck.Warning(repo, moved);
+            var warning = GitCheckWording.Warning(repo, moved);
             Assert.Equal(warning, Out.StripControls(warning)); // nothing left for a terminal to act on
             var command = warning.Split('\n').Single(l => l.StartsWith("  mv ", StringComparison.Ordinal)).Trim();
 
@@ -314,8 +380,8 @@ public class RestoreCommandTests
             using var t = new TempDir();
             var work = t.Sub("work");
             File.WriteAllText(Path.Combine(work, "from"), "");
-            RunInShell(file, args, work, $"mv from {GitCheck.Quote(name)}");
-            Assert.True(File.Exists(Path.Combine(work, name)), $"{file} {string.Join(' ', args)}: {GitCheck.Quote(name)}");
+            RunInShell(file, args, work, $"mv from {Shell.Quote(name)}");
+            Assert.True(File.Exists(Path.Combine(work, name)), $"{file} {string.Join(' ', args)}: {Shell.Quote(name)}");
             AssertNothingInjected(t.Path);
         }
     }
@@ -326,14 +392,14 @@ public class RestoreCommandTests
     [InlineData("/p/it's", "'/p/it'\\''s'")]
     [InlineData("/p/é", "'/p/é'")]
     public void WithoutControlCharactersItKeepsTheReadableForm(string path, string quoted) =>
-        Assert.Equal(quoted, GitCheck.Quote(path));
+        Assert.Equal(quoted, Shell.Quote(path));
 
     [Fact]
     public void WithThemItUsesPrintf_WithEveryAwkwardCharacterInOctal()
     {
-        Assert.Equal("\"$(printf '/p/\\033\\047\\044\\140\\045\\134\\041\\012')\"", GitCheck.Quote("/p/\x1b'$`%\\!\n"));
-        Assert.Equal("\"$(printf './-rf\\001')\"", GitCheck.Quote("-rf\x01"));
-        Assert.Equal("\"$(printf '\\342\\200\\256')\"", GitCheck.Quote("\u202e"));
+        Assert.Equal("\"$(printf '/p/\\033\\047\\044\\140\\045\\134\\041\\012')\"", Shell.Quote("/p/\x1b'$`%\\!\n"));
+        Assert.Equal("\"$(printf './-rf\\001')\"", Shell.Quote("-rf\x01"));
+        Assert.Equal("\"$(printf '\\342\\200\\256')\"", Shell.Quote("\u202e"));
     }
 
     [Fact]
@@ -342,8 +408,8 @@ public class RestoreCommandTests
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
         Git.Run(repo, "init", "-q", "--bare", ".git/modules/x\n");
-        var moved = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved;
-        var w = GitCheck.Warning(repo, moved);
+        var moved = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved;
+        var w = GitCheckWording.Warning(repo, moved);
         Assert.Contains("pen can't write a command for", w);
         Assert.Contains("x\\n, since the name ends in a newline", w);
         Assert.DoesNotContain("  mv ", w);

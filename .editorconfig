@@ -119,3 +119,78 @@ dotnet_diagnostic.IDE0044.severity = suggestion
 dotnet_diagnostic.IDE0051.severity = suggestion
 dotnet_diagnostic.IDE0052.severity = suggestion
 dotnet_diagnostic.IDE0060.severity = suggestion
+
+# Modern syntax and simplification rules the code already meets. Enabled for cli/Pen only; the rest of the
+# style table follows once its diagnostics are fixed.
+[cli/Pen/**.cs]
+csharp_style_namespace_declarations = file_scoped
+dotnet_diagnostic.IDE0161.severity = warning
+dotnet_diagnostic.IDE0019.severity = warning
+dotnet_diagnostic.IDE0020.severity = warning
+dotnet_diagnostic.IDE0038.severity = warning
+dotnet_diagnostic.IDE0083.severity = warning
+dotnet_diagnostic.IDE0300.severity = warning
+dotnet_diagnostic.IDE0301.severity = warning
+dotnet_diagnostic.IDE0302.severity = warning
+dotnet_diagnostic.IDE0303.severity = warning
+dotnet_diagnostic.IDE0304.severity = warning
+dotnet_diagnostic.IDE0090.severity = warning
+dotnet_diagnostic.IDE0066.severity = warning
+dotnet_diagnostic.IDE0018.severity = warning
+dotnet_diagnostic.IDE0034.severity = warning
+dotnet_diagnostic.IDE0029.severity = warning
+dotnet_diagnostic.IDE0030.severity = warning
+dotnet_diagnostic.IDE0031.severity = warning
+dotnet_diagnostic.IDE0016.severity = warning
+dotnet_diagnostic.IDE0054.severity = warning
+dotnet_diagnostic.IDE0074.severity = warning
+dotnet_diagnostic.IDE0056.severity = warning
+dotnet_diagnostic.IDE0057.severity = warning
+dotnet_diagnostic.IDE0036.severity = warning
+dotnet_diagnostic.IDE0059.severity = warning
+# Collections built with a comparer keep new(comparer) rather than [with(...)]
+dotnet_diagnostic.IDE0028.severity = suggestion
+dotnet_diagnostic.IDE0305.severity = warning
+dotnet_diagnostic.IDE0032.severity = warning
+dotnet_diagnostic.IDE0270.severity = warning
+csharp_style_var_for_built_in_types = true
+csharp_style_var_when_type_is_apparent = true
+csharp_style_var_elsewhere = true
+dotnet_diagnostic.IDE0007.severity = warning
+
+# The command-line build doesn't report these, so only the IDE enforces them
+dotnet_style_qualification_for_field = false
+dotnet_style_qualification_for_property = false
+dotnet_style_qualification_for_method = false
+dotnet_style_qualification_for_event = false
+dotnet_style_predefined_type_for_locals_parameters_members = true
+dotnet_style_predefined_type_for_member_access = true
+dotnet_diagnostic.IDE0001.severity = warning
+dotnet_diagnostic.IDE0002.severity = warning
+dotnet_diagnostic.IDE0003.severity = warning
+dotnet_diagnostic.IDE0009.severity = warning
+dotnet_diagnostic.IDE0049.severity = warning
+
+# Undisposed IDisposables; everything here is internal, so check all of it
+dotnet_code_quality.api_surface = all
+dotnet_diagnostic.CA2000.severity = warning
+# Exposed mutable collections: results and models hand out read-only snapshots. A private builder's own lists
+# may stay List<T>, so CA1002 looks at every non-private member (internal ones included) and skips private ones.
+dotnet_diagnostic.CA1002.severity = warning
+dotnet_code_quality.CA1002.api_surface = public, internal
+# CA2227 only checks public types, so it has nothing to check in this internal-only assembly today; settable
+# collection properties are kept out by review.
+dotnet_diagnostic.CA2227.severity = warning
+# Multiple enumeration, members that use no instance state, and concrete types where an interface costs a virtual
+# call. CA1859 looks only at locals and private members: a non-private one hands out the read-only interface
+# CA1002 asks for, rather than the List<T> or array behind it.
+dotnet_diagnostic.CA1851.severity = warning
+dotnet_diagnostic.CA1822.severity = warning
+dotnet_diagnostic.CA1859.severity = warning
+dotnet_code_quality.CA1859.api_surface = private
+
+# APIs with one owner each (cli/Pen/BannedSymbols.txt): only their owners may use them.
+dotnet_diagnostic.RS0030.severity = warning
+
+[cli/Pen/{Program.cs,Platform/Out.cs,Platform/Proc.cs,Platform/HostEnv.cs,Platform/Retry.cs}]
+dotnet_diagnostic.RS0030.severity = none

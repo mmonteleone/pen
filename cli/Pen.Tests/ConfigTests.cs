@@ -4,8 +4,8 @@ public class ConfigTests
 {
     private const string UserFile = "~/.config/pen/config.toml";
     private const string ProjFile = ".pen/config.toml";
-    private static Config User(string text) => Config.Parse(text, UserFile, ConfigKind.User);
-    private static Config Proj(string text) => Config.Parse(text, ProjFile, ConfigKind.Project);
+    private static UserConfiguration User(string text) => ConfigParser.ParseUser(text, UserFile, RecipeCatalog.Embedded);
+    private static ProjectConfiguration Proj(string text) => ConfigParser.ParseProject(text, ProjFile, RecipeCatalog.Embedded);
 
     private static string Error(Func<object> f) => Assert.Throws<PenException>(() => f()).Message;
 
@@ -77,6 +77,69 @@ public class ConfigTests
         Assert.StartsWith($"{UserFile}: allow: ", Error(() => User($"allow = [\"ok.com\", {entry}]")));
 
     [Fact]
+    public void ABareTldIsRejectedInProjectAllow() =>
+        Assert.StartsWith($"{ProjFile}: allow: ", Error(() => Proj("allow = [\"ok.com\", \".com\"]")));
+
+    [Fact]
+    public void DenyIsAListOfDomains_InEitherFile()
+    {
+        Assert.Equal(["gist.github.com", ".foo.io"], User("deny = [\"Gist.GitHub.com\", '.foo.io']").Deny);
+        Assert.Equal(["a.com", "b.com"], Proj("deny = [\n  \"a.com\",  # comment\n  \"b.com\",\n]").Deny);
+        Assert.Empty(Proj("deny = []").Deny);
+        Assert.Empty(Proj("deny = [\"a.com\"]").Allow);
+        Assert.Empty(Proj("allow = [\"a.com\"]").Deny);
+        var both = User("allow = [\".github.com\"]\ndeny = [\"gist.github.com\"]");
+        Assert.Equal([".github.com"], both.Allow);
+        Assert.Equal(["gist.github.com"], both.Deny);
+        Assert.Equal($"{ProjFile}: deny must be a list of domains, e.g. deny = [\"example.com\"]",
+            Error(() => Proj("deny = \"a.com\"")));
+    }
+
+    [Theory]
+    [InlineData("\"not a domain\"")]
+    [InlineData("\"1.2.3.4\"")]
+    [InlineData("\".com\"")]
+    [InlineData("\".\"")]
+    [InlineData("\"*.example.com\"")]
+    [InlineData("\"**\"")]
+    [InlineData("\"https://example.com\"")]
+    [InlineData("1")]
+    public void InvalidDenyEntries(string entry)
+    {
+        Assert.StartsWith($"{UserFile}: deny: ", Error(() => User($"deny = [\"ok.com\", {entry}]")));
+        Assert.StartsWith($"{ProjFile}: deny: ", Error(() => Proj($"deny = [\"ok.com\", {entry}]")));
+    }
+
+    [Fact]
+    public void DenyRefusesTheStar()
+    {
+        Assert.Equal($"{UserFile}: deny = [\"*\"] would block everything; remove the allow entries instead",
+            Error(() => User("deny = [\"*\"]")));
+        Assert.Equal($"{ProjFile}: deny = [\"*\"] would block everything; remove the allow entries instead",
+            Error(() => Proj("deny = [\"a.com\", '*']")));
+    }
+
+    [Fact]
+    public void AllowTakesTheStar_InEitherFile()
+    {
+        Assert.Equal(["*"], User("allow = [\"*\"]").Allow);
+        Assert.Equal(["a.com", "*"], Proj("allow = [\"a.com\", '*']").Allow);
+    }
+
+    [Theory]
+    [InlineData("\".\"")]
+    [InlineData("\"*.example.com\"")]
+    [InlineData("\"**\"")]
+    [InlineData("\" *\"")]
+    [InlineData("\"*.\"")]
+    [InlineData("\".*\"")]
+    public void AllowTakesTheStarOnlyAsTheWholeEntry(string entry)
+    {
+        Assert.StartsWith($"{UserFile}: allow: ", Error(() => User($"allow = [{entry}]")));
+        Assert.StartsWith($"{ProjFile}: allow: ", Error(() => Proj($"allow = [{entry}]")));
+    }
+
+    [Fact]
     public void DockerIsAProjectBoolean()
     {
         Assert.Null(Proj("").Docker);
@@ -114,6 +177,129 @@ public class ConfigTests
     public void PortsBelongInTheProjectFile() =>
         Assert.Equal($"{UserFile}: \"ports\" belongs in {ProjFile} (or use pen --port)", Error(() => User("ports = [3000]")));
 
+    [Fact]
+    public void HideIsAListOfPatterns_InEitherFile()
+    {
+        Assert.Empty(Proj("").Hide);
+        Assert.Empty(User("hide = []").Hide);
+        Assert.Equal([".env", "*.ps1", "secrets/"],
+            User("hide = [\".env\", '*.ps1', \"secrets/\"]").Hide.Select(p => p.Text));
+        var project = Proj("hide = [\n  \"/apps/web/.env\",  # comment\n  \".env.*\",\n]").Hide;
+        Assert.Equal(["/apps/web/.env", ".env.*"], project.Select(p => p.Text));
+        Assert.True(project[0].IsLiteral);
+        Assert.True(project[1].IsMatch("a/.env.local", false));
+    }
+
+    [Theory]
+    [InlineData("hide = \".env\"", "hide must be a list of patterns, e.g. hide = [\".env\", \"secrets/\"]")]
+    [InlineData("[hide]\nx = \"y\"", "hide must be a list of patterns")]
+    [InlineData("hide = [3]", "hide: 3 isn't a pattern (put it in quotes)")]
+    [InlineData("hide = [\".env\", true]", "hide: True isn't a pattern")]
+    [InlineData("hide = [[\".env\"]]", "hide: ")]
+    [InlineData("hide = [\"\"]", "hide: \"\": a pattern can't be empty")]
+    [InlineData("hide = [\"ok\", \"[ab]\"]", "hide: \"[ab]\": [, ] and \\ aren't supported in patterns (use * or ?)")]
+    [InlineData("hide = [\"a/../b\"]", "hide: \"a/../b\": a pattern can't have . or .. segments")]
+    [InlineData("hide = [\"sub/.git/config\"]", "hide: \"sub/.git/config\": a pattern can't reach into .git")]
+    [InlineData("hide = [\".pen/\"]", "hide: \".pen/\": a pattern can't start with .pen, Pen's own directory")]
+    [InlineData("hide = [\"**\"]", "hide: \"**\": this pattern would hide the whole project")]
+    public void InvalidHide(string text, string message)
+    {
+        Assert.StartsWith($"{UserFile}: {message}", Error(() => User(text)));
+        Assert.StartsWith($"{ProjFile}: {message}", Error(() => Proj(text)));
+    }
+
+    [Fact]
+    public void ReplaceIsAProjectTableOfPaths_InFileOrder()
+    {
+        Assert.Empty(Proj("").Replacements);
+        var replace = Proj("""
+            [replace]
+            ".env" = ".pen/agent.env"
+            "apps/web/.env.local" = "fixtures/web.env"
+            "README" = '.pen/readme'
+            """).Replacements;
+        Assert.Equal([
+            new(".env", ".pen/agent.env"),
+            new("apps/web/.env.local", "fixtures/web.env"),
+            new("README", ".pen/readme"),
+        ], replace);
+        Assert.Equal([new("a.env", "b")], Proj("replace = { \"a.env\" = \"b\" }").Replacements);
+    }
+
+    [Fact]
+    public void ReplaceBelongsInTheProjectFile() =>
+        Assert.Equal($"{UserFile}: \"replace\" belongs in {ProjFile}",
+            Error(() => User("[replace]\n\".env\" = \".pen/agent.env\"")));
+
+    [Theory]
+    // An unquoted dotted key makes a subtable.
+    [InlineData("[replace]\napps.env = \"x\"", "replace: \"apps\" must be set to a path in quotes")]
+    [InlineData("[replace]\n\".env\" = 1", "replace: \".env\" must be set to a path in quotes, " +
+        "and a target path goes in quotes as one key, e.g. \".env\" = \".pen/agent.env\"")]
+    [InlineData("[replace]\n\".env\" = [\"x\"]", "replace: \".env\" must be set to a path in quotes")]
+    [InlineData("replace = \".env\"", "replace must be a table ([replace])")]
+    [InlineData("replace = [\".env\"]", "replace must be a table ([replace])")]
+    public void ReplaceValuesMustBePaths(string text, string message) =>
+        Assert.StartsWith($"{ProjFile}: {message}", Error(() => Proj(text)));
+
+    [Fact]
+    public void AReplacePathOfAtMost1024CharactersIsAcceptedAndALongerOneRefused()
+    {
+        Assert.Single(Proj($"[replace]\n\"{new string('a', 1024)}\" = \"{new string('b', 1024)}\"").Replacements);
+        var problem = "can't be longer than 1024 characters";
+        Assert.Equal($"{ProjFile}: replace: target \"{new string('a', 1025)}\" {problem}",
+            Error(() => Proj($"[replace]\n\"{new string('a', 1025)}\" = \"src\"")));
+        Assert.Equal($"{ProjFile}: replace: source \"{new string('b', 1025)}\" (for \"t\") {problem}",
+            Error(() => Proj($"[replace]\n\"t\" = \"{new string('b', 1025)}\"")));
+    }
+
+    [Theory]
+    [InlineData("", "is empty")]
+    [InlineData("/etc/passwd", "must be relative to the project, not absolute")]
+    [InlineData("apps/", "must name a file, so it can't end in /")]
+    [InlineData("*.env", "can't have *, ?, [, ] or \\ in it")]
+    [InlineData("a?.env", "can't have *, ?, [, ] or \\ in it")]
+    [InlineData("[a].env", "can't have *, ?, [, ] or \\ in it")]
+    [InlineData("a\\\\b", "can't have *, ?, [, ] or \\ in it")]
+    [InlineData("a//b", "can't have an empty segment (//)")]
+    [InlineData("./.env", "can't have . or .. segments")]
+    [InlineData("../.env", "can't have . or .. segments")]
+    [InlineData("a/../.env", "can't have . or .. segments")]
+    [InlineData(".git/config", "can't be in .git")]
+    [InlineData("sub/.GIT/config", "can't be in .git")]
+    [InlineData(".git", "can't be in .git")]
+    public void InvalidReplacePaths(string path, string problem)
+    {
+        Assert.Equal($"{ProjFile}: replace: target \"{path.Replace("\\\\", "\\")}\" {problem}",
+            Error(() => Proj($"[replace]\n\"{path}\" = \"src\"")));
+        Assert.Equal($"{ProjFile}: replace: source \"{path.Replace("\\\\", "\\")}\" (for \"t\") {problem}",
+            Error(() => Proj($"[replace]\n\"t\" = \"{path}\"")));
+    }
+
+    [Fact]
+    public void AReplacePathWithANulSaysSo()
+    {
+        Assert.Equal($"{ProjFile}: replace: target \"a\\x00b\" contains a NUL character",
+            Error(() => Proj("[replace]\n\"a\\u0000b\" = \"src\"")));
+        Assert.Equal($"{ProjFile}: replace: source \"a\\x00b\" (for \"t\") contains a NUL character",
+            Error(() => Proj("[replace]\n\"t\" = \"a\\u0000b\"")));
+    }
+
+    [Theory]
+    [InlineData(".pen/config.toml")]
+    [InlineData(".PEN/x")]
+    public void AReplaceTargetCantBeInPen_ButASourceCan(string path)
+    {
+        Assert.Equal($"{ProjFile}: replace: target \"{path}\" can't be in .pen, Pen's own directory",
+            Error(() => Proj($"[replace]\n\"{path}\" = \"src\"")));
+        Assert.Equal([new("t", path)], Proj($"[replace]\n\"t\" = \"{path}\"").Replacements);
+    }
+
+    [Fact]
+    public void ReplaceTargetsThatDifferOnlyInCaseAreRefused() =>
+        Assert.Equal($"{ProjFile}: replace: \".env\" and \".ENV\" are the same file where the filesystem ignores case",
+            Error(() => Proj("[replace]\n\".env\" = \"a\"\n\".ENV\" = \"b\"")));
+
     [Theory]
     [InlineData("[github]\nacme = \"t\"")]
     [InlineData("[env]\nFOO = \"x\"")]
@@ -150,16 +336,16 @@ public class ConfigTests
     public void LoadReadsConfigToml_WhichMayBeMissing()
     {
         using var t = new TempDir();
-        Assert.Empty(Config.Load(t.Path, ".pen", ConfigKind.Project).Allow);
+        Assert.Empty(ConfigLoader.LoadProject(t.Path, ".pen", RecipeCatalog.Embedded).Allow);
 
         File.WriteAllText(Path.Combine(t.Path, "config.toml"), "docker = true\nallow = [\"a.com\"]\nports = [3000]\n");
-        var c = Config.Load(t.Path, ".pen", ConfigKind.Project);
+        var c = ConfigLoader.LoadProject(t.Path, ".pen", RecipeCatalog.Embedded);
         Assert.Equal(["a.com"], c.Allow);
         Assert.True(c.Docker);
         Assert.Equal([3000], c.Ports);
 
         File.WriteAllText(Path.Combine(t.Path, "config.toml"), "docker = 1\n");
-        Assert.StartsWith(".pen/config.toml: docker", Error(() => Config.Load(t.Path, ".pen", ConfigKind.Project)));
+        Assert.StartsWith(".pen/config.toml: docker", Error(() => ConfigLoader.LoadProject(t.Path, ".pen", RecipeCatalog.Embedded)));
     }
 
     [Fact]
@@ -167,7 +353,7 @@ public class ConfigTests
     {
         using var t = new TempDir();
         File.WriteAllText(Path.Combine(t.Path, "config"), "allow = a.com\n");
-        var msg = Error(() => Config.Load(t.Path, ".pen", ConfigKind.Project));
+        var msg = Error(() => ConfigLoader.LoadProject(t.Path, ".pen", RecipeCatalog.Embedded));
         Assert.StartsWith(".pen/config is pen's old config format", msg);
         Assert.Contains(".pen/config.toml", msg);
     }
@@ -198,21 +384,67 @@ public class ConfigTests
     {
         using var t = new TempDir();
         var host = t.Host();
-        Config.EnsureUserConfig(host, () => new GitIdentity("T", "t@example.invalid"));
+        UserConfigInitializer.EnsureExists(host, () => new GitIdentity("T", "t@example.invalid"));
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(host.UserConfigPath));
         Assert.Equal(Embedded.ReadText("templates/config.toml"), File.ReadAllText(host.UserConfigPath));
 
         File.WriteAllText(host.UserConfigPath, "[env]\nX = \"mine\"\n");
-        Config.EnsureUserConfig(host, () => new GitIdentity("T", "t@example.invalid"));
+        UserConfigInitializer.EnsureExists(host, () => new GitIdentity("T", "t@example.invalid"));
         Assert.Equal("[env]\nX = \"mine\"\n", File.ReadAllText(host.UserConfigPath));
 
         // A missing config.toml is recreated in an existing dir, but not next to a legacy config.
         File.Delete(host.UserConfigPath);
-        Config.EnsureUserConfig(host, () => new GitIdentity("T", "t@example.invalid"));
+        UserConfigInitializer.EnsureExists(host, () => new GitIdentity("T", "t@example.invalid"));
         Assert.True(File.Exists(host.UserConfigPath));
         File.Delete(host.UserConfigPath);
         File.WriteAllText(Path.Combine(host.ConfigDir, "config"), "");
-        Config.EnsureUserConfig(host, () => new GitIdentity("T", "t@example.invalid"));
+        UserConfigInitializer.EnsureExists(host, () => new GitIdentity("T", "t@example.invalid"));
         Assert.False(File.Exists(host.UserConfigPath));
+    }
+
+    [Fact]
+    public void ParsedSettingsCantBeChangedThroughTheirCollections()
+    {
+        var user = User("allow = [\"a.io\"]\n[github]\nacme = \"t\"\n[env]\nX = \"1\"\n");
+        Assert.Throws<NotSupportedException>(() => ((ICollection<string>)user.Allow).Add("b.io"));
+        Assert.Throws<NotSupportedException>(() => ((ICollection<KeyValuePair<string, string>>)user.Env).Clear());
+        Assert.Throws<NotSupportedException>(() => ((IDictionary<string, string>)user.GitHubTokens)["acme"] = "u");
+        var project = Proj("ports = [3000]\n[replace]\n\"a\" = \"b\"\n");
+        Assert.Throws<NotSupportedException>(() => ((ICollection<int>)project.Ports).Add(3001));
+        Assert.Throws<NotSupportedException>(() => ((ICollection<FileReplacement>)project.Replacements).Clear());
+        Assert.Equal(["a.io"], user.Allow);
+        Assert.Equal([3000], project.Ports);
+    }
+
+    [Fact]
+    public void ConfigurationsTakeTheirOwnCopies()
+    {
+        List<string> allow = ["a.io"];
+        Dictionary<string, string> tokens = new(StringComparer.Ordinal) { ["acme"] = "t" };
+        List<int> ports = [3000];
+        var user = new UserConfiguration(allow, [], [], [], tokens, []);
+        var project = new ProjectConfiguration(allow, [], [], [], [], null, null, ports);
+        allow.Add("b.io");
+        tokens["other"] = "u";
+        ports.Add(3001);
+        Assert.Equal(["a.io"], user.Allow);
+        Assert.Equal(["a.io"], project.Allow);
+        Assert.Equal(["acme"], user.GitHubTokens.Keys);
+        Assert.Equal([3000], project.Ports);
+    }
+
+    [Fact]
+    public void TokenOwnersStayOrdinal()
+    {
+        var user = new UserConfiguration([], [], [], [], new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["acme"] = "t" }, []);
+        Assert.True(user.GitHubTokens.ContainsKey("acme"));
+        Assert.False(user.GitHubTokens.ContainsKey("ACME"));
+    }
+
+    [Fact]
+    public void AUserConfigurationsTextShowsNoSecrets()
+    {
+        var user = User("[github]\nacme = \"github_pat_secret\"\n[env]\nX = \"env-secret\"\n");
+        Assert.DoesNotContain("secret", user.ToString(), StringComparison.Ordinal);
     }
 }

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Pen.GitProtection;
 using Pen.Platform;
 using Pen.Projects;
@@ -7,16 +8,14 @@ using Pen.Sessions;
 namespace Pen.Commands;
 
 /// <summary>Runs pen sign: re-creates the branch's unpushed commits on the host with the same trees, signed.</summary>
-/// <param name="host">The host user's environment.</param>
-/// <param name="project">The project to sign in. Its .pen/config.toml is never read.</param>
 /// <remarks>
-/// The order matters: the locks (project.lock shared, so pen reset can't run, and this dir's worktree lock
-/// exclusive, so no session runs here), then finishing dead sessions, then the session-end check of
-/// <c>.git</c>, and only then any host git, all of it through <see cref="HostGit"/>'s overrides.
+/// It never reads the project's .pen/config.toml. The order matters: the locks (project.lock shared, so pen clean
+/// can't run, and this dir's worktree lock exclusive, so no session runs here), then finishing dead sessions, then the
+/// session-end check of <c>.git</c>, and only then any host git, all of it through <see cref="HostGit"/>'s overrides.
 /// </remarks>
-internal sealed class SignCommand(HostEnv host, Project project)
+internal sealed class SignCommand(HostEnv host, Project project, TimeProvider clock)
 {
-    /// <summary>Checks the repo, then signs the checked-out branch's commits after the base.</summary>
+    /// <summary>Checks the repo, signs the checked-out branch's commits after the base, and says how it went.</summary>
     /// <param name="baseArg">The base named on the command line, or null for the upstream or origin/HEAD.</param>
     /// <returns>0 once signed or when there's nothing to sign; failures throw.</returns>
     /// <exception cref="PenException">
@@ -26,28 +25,53 @@ internal sealed class SignCommand(HostEnv host, Project project)
     {
         if (!project.IsRepo)
             throw new PenException($"{Out.Field(project.Dir)} isn't a git repo");
-        Session.EnsureRuntimeDir(host, project);
+        ProjectRuntime.EnsureRuntimeDir(host, project);
         using var locks = SessionRegistry.TakeForSign(host, project);
-        // This command's own check below takes the module repos there now, so
-        // it can't stand in for an ended session's that didn't finish.
-        if (!Session.FinishDeadSessions(project.Key, host.GetRuntimeDir(project.Key)))
+        // This command's own check below takes the module repos there now, so it can't stand in for an ended session's
+        // that didn't finish.
+        if (!SessionRecovery.FinishAbandoned(project.Key, host.GetRuntimeDir(project.Key), clock).EveryCheckFinished)
             throw new PenException("not signing: deal with the warning above first");
         CheckGitDir();
-        return new BranchSigner(new HostGit(project.Dir)).Sign(baseArg);
+        var git = new HostGit(project.Dir);
+        Report(new BranchSigner(git).Sign(baseArg), git);
+        return 0;
+    }
+
+    /// <summary>Says what signing did, and how to fix the user's setup if what it just signed doesn't verify.</summary>
+    internal static void Report(SignOutcome outcome, HostGit git)
+    {
+        switch (outcome)
+        {
+            case SignOutcome.NoCommits none:
+                Out.WriteLine($"nothing to sign: no commits in {Out.Field(none.BaseName)}..HEAD");
+                break;
+            case SignOutcome.AllSigned all:
+                Out.WriteLine(
+                    $"nothing to sign: all {all.Count} commits in {Out.Field(all.BaseName)}..HEAD are signed");
+                break;
+            case SignOutcome.Signed signed:
+                Out.WriteLine($"signed: {Out.Field(signed.BranchRef["refs/heads/".Length..])} is now " +
+                    $"{signed.NewHead[..12]} (was {signed.OldHead[..12]}; the old commits stay in the reflog)");
+                if (new SignatureVerifier(git).FormatHint(signed.Created) is { } hint)
+                    Out.WriteLine(hint);
+                break;
+            default:
+                throw new UnreachableException();
+        }
     }
 
     /// <summary>Runs the session-end check of <c>.git</c> before any host git, and reports what it found.</summary>
     /// <exception cref="PenException">It moved anything aside or couldn't finish.</exception>
     private void CheckGitDir()
     {
-        var check = GitCheck.RunWithoutOpening(project.Dir, startedWithGit: true, project.CommonGitDir,
+        var check = GitCheck.RunWithoutSession(project.Dir, startedWithGit: true, project.CommonGitDir,
             modulesAtStart: null);
-        if (check.Moved.Count > 0 || check.Failure != null)
+        if (check.Moved.Count > 0 || check.Failure is not null)
         {
-            GitCheck.Report(project.Dir, check);
+            GitCheckReport.Print(project.Dir, check);
             throw new PenException("not signing: deal with the files above first");
         }
         // Paused operations it reports aren't a reason to refuse: signing doesn't continue them.
-        GitCheck.Report(project.Dir, check);
+        GitCheckReport.Print(project.Dir, check);
     }
 }

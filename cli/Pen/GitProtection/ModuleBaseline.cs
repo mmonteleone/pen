@@ -25,64 +25,45 @@ namespace Pen.GitProtection;
 internal static class ModuleBaseline
 {
     /// <summary>
-    /// Splits the module repos in <paramref name="commonGitDir"/> now by the lists the project's open sessions made
-    /// at their start.
+    /// Splits the module repos in the starting session's <paramref name="commonGitDir"/> now by the lists
+    /// <paramref name="open"/> sessions made at their start.
     /// </summary>
-    /// <param name="projectKey">The project's key.</param>
-    /// <param name="runtimeDir">The project's runtime dir.</param>
-    /// <param name="commonGitDir">The common git dir of the session that's starting.</param>
-    /// <param name="dir">The project dir, for the message.</param>
-    /// <returns>The repos found, split.</returns>
     /// <exception cref="PenException">An open session has no list to go by.</exception>
     /// <remarks>
-    /// The lists are read before the scan, so a repo it finds that an open session's agent could have made is missing
+    /// The open sessions (<see cref="SessionRegistry.FindOpen"/>) are found just before this is called, and their
+    /// lists are read before the scan, so a repo it finds that an open session's agent could have made is missing
     /// from that session's list.
     /// </remarks>
-    public static ModuleChoice ChooseAtStart(string projectKey, string runtimeDir, string commonGitDir, string dir)
+    public static ModuleChoice ChooseAtStart(IReadOnlyList<SessionDir> open, string commonGitDir, string dir)
     {
-        var lists = ReadOpenLists(SessionRegistry.FindOpen(projectKey, runtimeDir), commonGitDir, dir);
+        var lists = ReadOpenLists(open, commonGitDir, dir);
         var found = RepoScan.FindModuleRepos(commonGitDir);
         var listed = Choose(found, lists);
-        return new(listed, found.Except(listed, StringComparer.Ordinal).ToList());
+        return new(listed, [.. found.Except(listed, StringComparer.Ordinal)]);
     }
 
     /// <summary>
-    /// Saves <paramref name="session"/>'s protected files (<see cref="ProtectedFiles.Save"/>) with the project's
-    /// sessions open now as their baselines, having narrowed <paramref name="chosen"/> to what those sessions listed,
-    /// then records the common git dir and the narrowed list for the session-end check and later sessions.
+    /// Saves the starting session's protected files (<see cref="ProtectedFiles.Save"/>) with the sessions open now
+    /// as their baselines, having narrowed the chosen module repos to what those sessions listed, then records the
+    /// common git dir and the narrowed list for the session-end check and later sessions.
     /// </summary>
-    /// <param name="session">The session that's starting, not yet open itself.</param>
-    /// <param name="mounts">The session's mounts.</param>
-    /// <param name="chosen">
-    /// What <see cref="ChooseAtStart"/> chose, or <see cref="ModuleChoice.None"/> outside a repo.
-    /// </param>
-    /// <param name="runtimeDir">The project's runtime dir.</param>
-    /// <param name="commonGitDir">The common git dir of the session that's starting; null outside a repo.</param>
-    /// <param name="dir">The project dir.</param>
-    /// <returns>The narrowed choice.</returns>
     /// <exception cref="PenException">An open session has no list to go by, or a file can't be saved.</exception>
     /// <remarks>
-    /// A session that opened after <see cref="ChooseAtStart"/> read the lists but before its scan could have made a
-    /// repo the scan found, so the lists are read again. The same sessions give the protected files their baselines,
-    /// and the repos left out here are unlisted for those too.
+    /// A session that opened after <see cref="ChooseAtStart"/>'s sessions were found but before its scan could have
+    /// made a repo the scan found, so the lists are read again, from sessions found again. The same sessions give
+    /// the protected files their baselines, and the repos left out here are unlisted for those too.
     /// </remarks>
-    public static ModuleChoice NarrowAndSave(
-        SessionDir session,
-        IReadOnlyList<Mount> mounts,
-        ModuleChoice chosen,
-        string runtimeDir,
-        string? commonGitDir,
-        string dir)
+    public static ModuleChoice NarrowAndSave(BaselineRequest request)
     {
-        var open = SessionRegistry.FindOpen(session.ProjectKey, runtimeDir);
+        var (session, mounts, chosen, open, commonGitDir, dir) = request;
         var narrowed = chosen;
-        if (commonGitDir != null)
+        if (commonGitDir is not null)
         {
             var listed = Choose(chosen.Listed, ReadOpenLists(open, commonGitDir, dir));
             narrowed = new(listed, [.. chosen.Unlisted, .. chosen.Listed.Except(listed, StringComparer.Ordinal)]);
         }
         ProtectedFiles.Save(session, mounts, dir, open, narrowed.Unlisted);
-        if (commonGitDir != null)
+        if (commonGitDir is not null)
         {
             File.WriteAllText(session.StartedWithGit, commonGitDir + "\n");
             session.WriteModules(narrowed.Listed);
@@ -90,11 +71,10 @@ internal static class ModuleBaseline
         return narrowed;
     }
 
-    /// <summary>Reads the module repos each of <paramref name="open"/> sessions listed at its start.</summary>
-    /// <param name="open">The project's open sessions (<see cref="SessionRegistry.FindOpen"/>).</param>
-    /// <param name="commonGitDir">The common git dir of the session that's starting.</param>
-    /// <param name="dir">The project dir, for the message.</param>
-    /// <returns>The lists, one per session that's still open.</returns>
+    /// <summary>
+    /// Reads the module repos each of <paramref name="open"/> sessions listed at its start, one list per session
+    /// that's still open.
+    /// </summary>
     /// <exception cref="PenException">
     /// A session that's still open didn't record its module repos, or recorded another common git dir.
     /// </exception>
@@ -102,7 +82,7 @@ internal static class ModuleBaseline
     /// A session's records are deleted after its compose.yaml, which goes once its check has run, so one that's
     /// missing them and is no longer open has ended while this looked, and what its agent made has been dealt with.
     /// </remarks>
-    public static List<IReadOnlyList<string>> ReadOpenLists(
+    public static IReadOnlyList<IReadOnlyList<string>> ReadOpenLists(
         IReadOnlyList<SessionDir> open,
         string commonGitDir,
         string dir)
@@ -113,7 +93,7 @@ internal static class ModuleBaseline
         {
             if (TryReadList(session, commonGitDir) is { } list)
                 lists.Add(list);
-            else if (session.IsOpen)
+            else if (session.IsOpen())
                 unrecorded.Add(session);
         }
         if (unrecorded.Count > 0)
@@ -123,8 +103,10 @@ internal static class ModuleBaseline
 
     /// <summary>Keeps the repos in <paramref name="found"/> that every one of <paramref name="lists"/> has.</summary>
     /// <returns>Those repos, in the order found; compared ordinally.</returns>
-    public static List<string> Choose(IReadOnlyList<string> found, IReadOnlyList<IReadOnlyList<string>> lists) =>
-        found.Where(repo => lists.All(list => list.Contains(repo, StringComparer.Ordinal))).ToList();
+    public static IReadOnlyList<string> Choose(
+        IReadOnlyList<string> found,
+        IReadOnlyList<IReadOnlyList<string>> lists) =>
+        [.. found.Where(repo => lists.All(list => list.Contains(repo, StringComparer.Ordinal)))];
 
     /// <summary>Reads the module repos <paramref name="session"/> listed at its start in this common git dir.</summary>
     /// <returns>The list, or null if it has none for that dir or it can't be read.</returns>
@@ -156,3 +138,18 @@ internal static class ModuleBaseline
             "its pen then ends the session), then rerun";
     }
 }
+
+/// <summary>What <see cref="ModuleBaseline.NarrowAndSave"/> narrows and saves for a session that's starting.</summary>
+/// <remarks>
+/// Session isn't open itself yet. Chosen is what <see cref="ModuleBaseline.ChooseAtStart"/> chose, or
+/// <see cref="ModuleChoice.None"/> outside a repo, where CommonGitDir is null. Open is the project's open sessions
+/// (<see cref="SessionRegistry.FindOpen"/>), found again just before the save, after the scan
+/// <see cref="ModuleBaseline.ChooseAtStart"/> made.
+/// </remarks>
+internal sealed record BaselineRequest(
+    SessionDir Session,
+    IReadOnlyList<Mount> Mounts,
+    ModuleChoice Chosen,
+    IReadOnlyList<SessionDir> Open,
+    string? CommonGitDir,
+    string Dir);

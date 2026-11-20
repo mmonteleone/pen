@@ -10,20 +10,20 @@ internal static class NestedScans
     /// </summary>
     public static NestedScan Scan(string root, string commonGitDir)
     {
-        var moduleRepos = RepoScan.FindModuleRepos(commonGitDir).Where(repo => !RepoGuard.IsLink(repo)).ToList();
-        return RepoScan.ScanNested(root, commonGitDir, moduleRepos, tryOpen: null);
+        var moduleRepos = RepoScan.FindModuleRepos(commonGitDir).Where(repo => !PathChecks.IsLink(repo)).ToList();
+        return RepoScan.ScanNested(root, commonGitDir, moduleRepos, tryMakeListable: null);
     }
 
     /// <summary>Finds every repo below <paramref name="root"/>, with root/.git as the common git dir.</summary>
-    public static List<NestedRepo> Find(string root) =>
+    public static IReadOnlyList<NestedRepo> Find(string root) =>
         Scan(root, Path.Combine(root, ".git")).Repos;
 
     /// <summary>
     /// Finds every repo below <paramref name="root"/>, with root/.git as the common git dir and the checkouts of
     /// <paramref name="moduleRepos"/> as the project's own.
     /// </summary>
-    public static List<NestedRepo> Find(string root, IReadOnlyCollection<string> moduleRepos) =>
-        RepoScan.ScanNested(root, Path.Combine(root, ".git"), moduleRepos, tryOpen: null).Repos;
+    public static IReadOnlyList<NestedRepo> Find(string root, IReadOnlyCollection<string> moduleRepos) =>
+        RepoScan.ScanNested(root, Path.Combine(root, ".git"), moduleRepos, tryMakeListable: null).Repos;
 
     /// <summary>Whether <paramref name="gitFile"/> is the .git file of a worktree of the project itself.</summary>
     public static bool IsProjectWorktree(string root, string gitFile) =>

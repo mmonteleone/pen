@@ -37,7 +37,7 @@ public sealed class BlockedListingTests(BlockedListingTests.Fixture fixture)
     public void ListsAfterANormalExit() => AssertStdoutHas(fixture.AfterExit, "example.org");
 
     [Fact(DisplayName =
-        "pen allow --defaults lists GitHub but no AI providers or npm registry (agents and tools bring those)")]
+        "pen allow --defaults lists GitHub but no AI providers (agents bring those)")]
     public void DefaultsHaveNoProviders()
     {
         var defaults = fixture.Defaults;
@@ -46,7 +46,7 @@ public sealed class BlockedListingTests(BlockedListingTests.Fixture fixture)
             defaults.OutputLines.Contains("github.com")
                 && !Regex.IsMatch(
                     defaults.Output,
-                    @"anthropic|openai|chatgpt|claude\.|opencode|models\.dev|registry\.npmjs|AI provider",
+                    @"anthropic|openai|chatgpt|claude\.|opencode|models\.dev|AI provider",
                     RegexOptions.IgnoreCase),
             defaults.Describe());
     }

@@ -7,18 +7,28 @@ namespace Pen.GitProtection;
 /// which keeps what it finds as it goes.
 /// </summary>
 /// <param name="gitDir">The git dir; its worktree entries and its module repos and theirs are scanned too.</param>
-/// <param name="tryOpen">Opens a worktrees dir or entry that can't be looked in, or null to change no modes.</param>
+/// <param name="tryMakeListable">
+/// Makes a worktrees dir or entry that can't be looked in listable, or null to change no modes.
+/// </param>
 /// <param name="atStart">
 /// What the session saved at its start, at a session's end; null to leave every config.worktree alone.
 /// </param>
 /// <remarks>
 /// <para>
+/// Git's own git-prompt.sh puts the first line of rebase-merge/msgnum and end, and rebase-apply/next and last, into
+/// PS1 unprotected. Where the shell expands PS1 (bash's PROMPT_COMMAND mode, zsh's precmd with PROMPT_SUBST),
+/// "$(cmd)" there runs at the next prompt, with no git command typed, so this can't wait for the user to look.
+/// git-prompt.sh protects head-name, HEAD and describe output from expansion, and only tests whether the rest
+/// (MERGE_HEAD, BISECT_LOG, sequencer/todo) exist, so those run nothing. HEAD is left alone in any case: a branch may
+/// legally be named "$(cmd)", so its content can't tell a planted one from the user's.
+/// </para>
+/// <para>
 /// It looks in the same git dirs as <see cref="PausedGit.Find"/>. A real rebase's own files always pass: see
 /// <see cref="PausedGit.IsCount"/> and <see cref="PausedGit.IsHeadName"/>. A planted symlink counts whatever it
 /// points to, and a state directory Pen can't enter counts too, since the prompt reads it once the user fixes its
 /// mode. Every known name is tried directly, so a directory that can be searched but not listed (git and the prompt
-/// can read through one too) hides nothing. A worktree entry or worktrees dir still closed after
-/// <paramref name="tryOpen"/> goes in <see cref="UnreachableDirs"/>: what's in it can't be vouched for.
+/// can read through one too) hides nothing. A worktree entry or worktrees dir still unlistable after
+/// <paramref name="tryMakeListable"/> goes in <see cref="UnreachableDirs"/>: what's in it can't be vouched for.
 /// </para>
 /// <para>
 /// With <paramref name="atStart"/> (a session's end), so does each config.worktree it doesn't vouch for, wherever git
@@ -28,7 +38,7 @@ namespace Pen.GitProtection;
 /// config.worktree nothing checks, and which was refused at the start so can't have been there then.
 /// </para>
 /// </remarks>
-internal sealed class PromptHazardScan(string gitDir, Func<string, bool>? tryOpen, ProtectedManifest? atStart)
+internal sealed class PromptHazardScan(string gitDir, Func<string, bool>? tryMakeListable, ProtectedManifest? atStart)
 {
     private const string Prompt = "git's shell prompt (git-prompt.sh) can run what's in it, with no git command typed";
 
@@ -45,17 +55,17 @@ internal sealed class PromptHazardScan(string gitDir, Func<string, bool>? tryOpe
     /// <remarks>
     /// If it throws, what it found before stays in <see cref="Hazards"/> and <see cref="UnreachableDirs"/>.
     /// </remarks>
-    public void Run() => GitDirWalk.Visit(gitDir, Visit, AddUnreachable, tryOpen);
+    public void Run() => GitDirWalk.Visit(gitDir, Visit, AddUnreachable, tryMakeListable);
 
     /// <summary>Looks for hazards in one git dir or worktree entry.</summary>
     private void Visit(string dir)
     {
         LookInState(Path.Combine(dir, "rebase-merge"), ["msgnum", "end"]);
         LookInState(Path.Combine(dir, "rebase-apply"), ["next", "last"]);
-        if (atStart == null)
+        if (atStart is null)
             return;
         var config = Path.Combine(dir, "config.worktree");
-        if (RepoGuard.Exists(config) && !atStart.Vouches(config))
+        if (PathChecks.ExistsOrIsLink(config) && !atStart.Vouches(config))
         {
             _hazards.Add(new(config, null, "a config.worktree that wasn't there at the session's start, or that " +
                 "another session could have made: git reads it as config, so a setting in it can run code on " +
@@ -66,23 +76,24 @@ internal sealed class PromptHazardScan(string gitDir, Func<string, bool>? tryOpe
     /// <summary>Records a worktrees dir or entry it couldn't look in.</summary>
     private void AddUnreachable(string path)
     {
-        if (!RepoGuard.IsLink(path))
+        if (!PathChecks.IsLink(path))
         {
             _unreachableDirs.Add(path); // git won't follow a symlink here to a project's worktree: a warning covers it
         }
-        else if (atStart != null)
+        else if (atStart is not null)
         {
             _hazards.Add(new(path, null, "a symlink where git keeps a worktree's " +
                 "files: it points git at a config.worktree in another directory"));
         }
     }
 
-    /// <summary>Looks in a paused rebase's state directory for what the prompt would expand.</summary>
-    /// <param name="stateDir">The state directory.</param>
-    /// <param name="counts">The names in it that git only writes a number in.</param>
+    /// <summary>
+    /// Looks in a paused rebase's state directory for what the prompt would expand. <paramref name="counts"/> are
+    /// the names in it that git only writes a number in.
+    /// </summary>
     private void LookInState(string stateDir, string[] counts)
     {
-        if (RepoGuard.IsLink(stateDir))
+        if (PathChecks.IsLink(stateDir))
         {
             _hazards.Add(new(stateDir, null, $"a symlink where git keeps a paused rebase: {Prompt}"));
             return;
@@ -114,10 +125,10 @@ internal sealed class PromptHazardScan(string gitDir, Func<string, bool>? tryOpe
     {
         try
         {
-            if (RepoGuard.IsLink(path))
+            if (PathChecks.IsLink(path))
                 return false;
             var bytes = Native.ReadProtected(path)?.Bytes;
-            return bytes != null && isValid(bytes);
+            return bytes is not null && isValid(bytes);
         }
         catch (FileNotFoundException)
         {
@@ -134,10 +145,8 @@ internal sealed class PromptHazardScan(string gitDir, Func<string, bool>? tryOpe
     }
 }
 
-/// <summary>A file or state directory a shell prompt would run.</summary>
-/// <param name="Path">The file or directory.</param>
-/// <param name="StateDir">
-/// The state directory holding it, if it's a file: the directory can go aside in its place.
-/// </param>
-/// <param name="Why">Why it's quarantined.</param>
+/// <summary>
+/// A file or state directory a shell prompt would run, and why it's quarantined. StateDir is the state directory
+/// holding it, if it's a file: the directory can go aside in its place.
+/// </summary>
 internal sealed record PromptHazard(string Path, string? StateDir, string Why);

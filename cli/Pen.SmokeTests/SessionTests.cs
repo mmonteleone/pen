@@ -1,8 +1,13 @@
+using System.Text.RegularExpressions;
+
 namespace Pen.SmokeTests;
 
 /// <summary>A session's life: exit codes, terminals, sessions side by side, and what's left once they end.</summary>
 public sealed class SessionTests(SessionTests.Fixture fixture) : IClassFixture<SessionTests.Fixture>
 {
+    private const string InitHint =
+        "pen: no .pen/config.toml here: pen init writes one with this project's tools and hidden files";
+
     private PenCli Cli => fixture.Cli;
 
     [Fact(DisplayName = "the command's exit code passes through")]
@@ -42,9 +47,43 @@ public sealed class SessionTests(SessionTests.Fixture fixture) : IClassFixture<S
     [Fact(DisplayName = "pen with no arguments is an interactive shell")]
     public void NoArgumentsIsAShell()
     {
-        var result = new Pty { TimeoutSeconds = 60 }.SendOn("[$#] $", "echo shell-$((6*7)); exit\\r").Run(Cli);
+        var result = new Pty { TimeoutSeconds = 60 }.SendOn("[$#] $", "echo shell-$((6*7)); exit\\r")
+            .Run(Cli.WithEnvironment("SHELL", "/bin/bash"));
 
         Assert.True(result.Text.Contains("shell-42", StringComparison.Ordinal), result.Describe());
+    }
+
+    [Fact(DisplayName = "...fish when the host's $SHELL is fish (/opt/homebrew/bin/fish)")]
+    public void HostFishIsFish()
+    {
+        var result = new Pty { TimeoutSeconds = 60 }.SendOn("[>#] ", "echo fish-$FISH_VERSION; exit\\r")
+            .Run(Cli.WithEnvironment("SHELL", "/opt/homebrew/bin/fish"));
+
+        Assert.True(Regex.IsMatch(result.Text, "fish-[0-9]+\\.[0-9]+"), result.Describe());
+    }
+
+    [Fact(DisplayName = "...zsh when it's zsh (/bin/zsh), with a prompt on a fresh home, not the new-user menu")]
+    public void HostZshIsZshWithNoNewUserMenu()
+    {
+        // The project is new, so its home volume is too: no .zshrc, which zsh-newuser-install would stop for.
+        var result = new Pty { TimeoutSeconds = 60 }
+            .SendOn("[%#] ", "[ -e ~/.zshrc ] || echo zsh-$((6*7)); exit\\r")
+            .Run(Cli.WithWorkingDirectory(fixture.FreshProject.Dir).WithEnvironment("SHELL", "/bin/zsh"));
+
+        Assert.True(
+            result.Text.Contains("zsh-42", StringComparison.Ordinal)
+                && !result.Text.Contains("zsh-newuser-install", StringComparison.Ordinal)
+                && !result.Text.Contains("Z Shell configuration function for new users", StringComparison.Ordinal),
+            result.Describe());
+    }
+
+    [Fact(DisplayName = "...and bash when it's another shell (/usr/bin/nu)")]
+    public void OtherHostShellIsBash()
+    {
+        var result = new Pty { TimeoutSeconds = 60 }.SendOn("[$#] $", "echo bash-${BASH_VERSINFO[0]}; exit\\r")
+            .Run(Cli.WithEnvironment("SHELL", "/usr/bin/nu"));
+
+        Assert.True(Regex.IsMatch(result.Text, "bash-[0-9]"), result.Describe());
     }
 
     [Fact(DisplayName = "a second session runs alongside the first")]
@@ -78,10 +117,32 @@ public sealed class SessionTests(SessionTests.Fixture fixture) : IClassFixture<S
     public void ProxyLogIsWorldWritable() =>
         Assert.Equal("666", Files.GetMode(Path.Combine(fixture.LastSession, "proxy.log")));
 
-    [Fact(DisplayName = "the runtime dir records the project's real path in project-dir (prune D1)")]
+    [Fact(DisplayName = "the runtime dir records the project's real path in project-dir (clean --stale D1)")]
     public void RuntimeDirRecordsTheProjectDir() =>
         Assert.Equal(
             fixture.Project.Dir, File.ReadAllText(Path.Combine(fixture.RuntimeDir, "project-dir")).TrimEnd('\n'));
+
+    [Fact(DisplayName = "a project's first session suggests pen init")]
+    public void FirstSessionSuggestsInit() =>
+        Assert.True(
+            fixture.HintFirst.ExitCode == 0 && fixture.HintFirst.Output.Contains(InitHint, StringComparison.Ordinal),
+            fixture.HintFirst.Describe());
+
+    [Fact(DisplayName = "...and its next one doesn't")]
+    public void NextSessionDoesNotSuggestInit() =>
+        Assert.True(
+            fixture.HintSecond.ExitCode == 0
+                && fixture.HintSecond.OutputComplete
+                && !fixture.HintSecond.Output.Contains(InitHint, StringComparison.Ordinal),
+            fixture.HintSecond.Describe());
+
+    [Fact(DisplayName = "...nor does a first session where .pen/config.toml exists")]
+    public void ProjectWithConfigIsNotToldToInit() =>
+        Assert.True(
+            fixture.WithConfig.ExitCode == 0
+                && fixture.WithConfig.OutputComplete
+                && !fixture.WithConfig.Output.Contains(InitHint, StringComparison.Ordinal),
+            fixture.WithConfig.Describe());
 
     [Fact(DisplayName = "the project's volumes are named by its key")]
     public void VolumesAreNamedByTheKey()
@@ -101,7 +162,8 @@ public sealed class SessionTests(SessionTests.Fixture fixture) : IClassFixture<S
     }
 
     /// <summary>Runs a session that makes a request after 8 s, and a second one alongside it, then records what's
-    /// left once both have ended.</summary>
+    /// left once both have ended; then runs two sessions in a project with no config and one in a project with
+    /// one, for the pen init hint.</summary>
     public sealed class Fixture : SmokeFixture
     {
         /// <summary>Gets the first session's result, its stdout and stderr together.</summary>
@@ -119,6 +181,18 @@ public sealed class SessionTests(SessionTests.Fixture fixture) : IClassFixture<S
         /// <summary>Gets the newest session dir once both had ended.</summary>
         internal string LastSession { get; private set; } = null!;
 
+        /// <summary>Gets a second project, where no session has run, so its home volume is new.</summary>
+        internal SmokeProject FreshProject { get; private set; } = null!;
+
+        /// <summary>Gets the first session in a project with no .pen/config.toml.</summary>
+        internal CommandResult HintFirst { get; private set; } = null!;
+
+        /// <summary>Gets the second session in that project.</summary>
+        internal CommandResult HintSecond { get; private set; } = null!;
+
+        /// <summary>Gets the first session in a project whose .pen/config.toml exists.</summary>
+        internal CommandResult WithConfig { get; private set; } = null!;
+
         protected override void Prepare()
         {
             var first = Track(Cli.Start("run", "bash", "-c", """
@@ -131,6 +205,15 @@ public sealed class SessionTests(SessionTests.Fixture fixture) : IClassFixture<S
             ContainersAfter = Docker.CountContainers(Key);
             NetworksAfter = Docker.ReadLines("network", "ls", "-q", "--filter", $"name=^{Key}-");
             LastSession = SmokeProject.FindLastSession(RuntimeDir);
+            FreshProject = CreateProject();
+
+            var hintCli = Cli.WithWorkingDirectory(CreateProject().Dir);
+            HintFirst = hintCli.Run("run", "true");
+            HintSecond = hintCli.Run("run", "true");
+            var configured = CreateProject();
+            Directory.CreateDirectory(Path.Combine(configured.Dir, ".pen"));
+            File.WriteAllText(Path.Combine(configured.Dir, ".pen", "config.toml"), "");
+            WithConfig = Cli.WithWorkingDirectory(configured.Dir).Run("run", "true");
         }
     }
 }

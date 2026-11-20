@@ -11,7 +11,7 @@ namespace Pen.Tests;
 [Collection(nameof(LockAndProcessTests))]
 public class PortTests
 {
-    private static (List<int> Forwarded, List<string> Warnings) Choose(IReadOnlyList<Port> ports, params int[] taken)
+    private static (IReadOnlyList<int> Forwarded, List<string> Warnings) Choose(IReadOnlyList<Port> ports, params int[] taken)
     {
         var warnings = new List<string>();
         var forwarded = Port.Choose(ports, taken.Contains, warnings.Add);

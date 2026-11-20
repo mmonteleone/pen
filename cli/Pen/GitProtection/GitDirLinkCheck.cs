@@ -1,4 +1,3 @@
-using System.Text;
 using Pen.Platform;
 
 namespace Pen.GitProtection;
@@ -8,25 +7,9 @@ namespace Pen.GitProtection;
 /// it names is made.
 /// </summary>
 /// <remarks>
-/// <para>
-/// A directory is compared by which file it is (device and inode), not by how its path is spelled: realpath(3) leaves
-/// a macOS firmlink as written, so /System/Volumes/Data/Users/x/.git is the git dir with a different path. From what
-/// a symlink leads to, the walk goes up by "..", which the kernel resolves physically, as far as "/".
-/// </para>
-/// <para>
-/// A symlink that leads nowhere now (or nowhere Pen may look) still counts if it would once something is made: a
-/// later commit makes objects/ab, say, and then .git/objects/ab/../x resolves. So it's resolved as the kernel resolves
-/// it as far as what's there allows (a symlink met on the way spliced in as the kernel splices it), with what's missing
-/// taken as directories yet to be made, and it counts if any directory it stops at is at or inside the git dir.
-/// </para>
-/// <para>
-/// Where Pen can't tell (a target that isn't valid UTF-8 or can't be read, a directory whose ".." can't be searched)
-/// that's its own answer, <see cref="Lead.Unknown"/>, which callers refuse just the same but word differently.
-/// </para>
-/// <para>
-/// Where stat(2) can't be called (<see cref="Native.CanStat"/>), a directory is known by its real path instead,
-/// which is the same on Linux except across bind mounts.
-/// </para>
+/// From what a symlink leads to, the check goes up by "..", which the kernel resolves physically, as far as "/". A
+/// symlink that leads nowhere now still counts if it would lead in once something is made: a later commit makes
+/// objects/ab, say, and then .git/objects/ab/../x resolves.
 /// </remarks>
 internal sealed class GitDirLinkCheck
 {
@@ -38,9 +21,6 @@ internal sealed class GitDirLinkCheck
 
     /// <summary>How many directories up from a target are looked at before Pen can't tell.</summary>
     private const int MaxDepth = 512;
-
-    private static readonly UTF8Encoding StrictUtf8 =
-        new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     /// <summary>The git dirs, each by <see cref="Identify"/>.</summary>
     private readonly HashSet<string> _gitDirs;
@@ -64,13 +44,11 @@ internal sealed class GitDirLinkCheck
     /// Prepares the check for a project's tree: the common git dir, the project's own .git if it's a directory, and
     /// a linked worktree's own entry (both inside the common git dir when Pen accepted them).
     /// </summary>
-    /// <param name="root">The project dir.</param>
-    /// <param name="commonGitDir">The common git dir.</param>
     public static GitDirLinkCheck? ForProject(string root, string commonGitDir)
     {
         var dirs = new List<string> { commonGitDir };
         var own = Path.Combine(root, ".git");
-        if (RepoGuard.IsLink(own))
+        if (PathChecks.IsLink(own))
             return For(dirs);
         if (Directory.Exists(own))
             dirs.Add(own);
@@ -92,6 +70,7 @@ internal sealed class GitDirLinkCheck
         /// Pen can't tell: its target can't be read or isn't valid UTF-8, or a directory on the way up from where it
         /// leads can't be looked at, or the way up is too long to walk.
         /// </summary>
+        /// <remarks>Callers refuse this just as they refuse <see cref="Inside"/>, but word it differently.</remarks>
         Unknown,
     }
 
@@ -142,69 +121,139 @@ internal sealed class GitDirLinkCheck
     private Lead MayLeadIn(string link)
     {
         var target = ReadTarget(link);
-        if (target == null)
+        if (target is null)
             return Lead.Unknown;
-        var reached = target.StartsWith('/') ? "/" : Native.RealPath(Path.GetDirectoryName(link)!);
-        if (reached == null)
+        var start = target.StartsWith('/') ? "/" : Native.RealPath(Paths.GetParent(link));
+        if (start is null)
             return Lead.Unknown;
-        var parts = new List<string>(Split(target));
 
+        var walk = new TargetWalk(start, target);
         var looked = new HashSet<string>(StringComparer.Ordinal);
         var unknown = false;
-        bool LeadsIn(string dir)
+        while (true)
         {
-            if (!looked.Add(dir))
-                return false;
-            var lead = IsAtOrInside(dir);
-            unknown |= lead == Lead.Unknown;
-            return lead == Lead.Inside;
-        }
-
-        var linksMet = 0;
-        var unmade = 0; // directories yet to be made below reached that the walk is in
-        var next = 0;
-        while (next < parts.Count)
-        {
-            var part = parts[next++];
-            if (part == ".")
-                continue;
-            if (unmade > 0)
-            {
-                unmade += part == ".." ? -1 : 1;
-                continue;
-            }
-            var path = reached == "/" ? "/" + part : reached + "/" + part;
-            if (IsDirectory(path))
-            {
-                if (Native.RealPath(path) is not { } real)
-                    return Lead.Unknown;
-                reached = real;
-                continue;
-            }
-            if (part == "..")
-                return Lead.Unknown; // reached's parent can't be looked at
-            if (RepoGuard.IsLink(path))
-            {
-                if (++linksMet > MaxLinks)
-                    return unknown ? Lead.Unknown : Lead.Elsewhere;
-                if (ReadTarget(path) is not { } spliced)
-                    return Lead.Unknown;
-                if (spliced.StartsWith('/'))
-                    reached = "/";
-                parts = [.. Split(spliced), .. parts[next..]];
-                next = 0;
-                continue;
-            }
-            if (LeadsIn(reached))
+            var stop = walk.ResolveExisting();
+            if (stop == WalkStop.Unknown)
+                return Lead.Unknown;
+            if (stop == WalkStop.TooManyLinks)
+                break;
+            var lead = LookOnce(walk.Reached, looked);
+            if (lead == Lead.Inside)
                 return Lead.Inside;
-            unmade = 1;
+            unknown |= lead == Lead.Unknown;
+            if (stop == WalkStop.End || !walk.LeaveUnmade())
+                break;
         }
-        if (unmade == 0 && LeadsIn(reached))
-            return Lead.Inside;
         return unknown ? Lead.Unknown : Lead.Elsewhere;
     }
 
+    /// <summary>
+    /// Whether <paramref name="dir"/> is at or inside a git dir (<see cref="IsAtOrInside"/>), unless it's in
+    /// <paramref name="looked"/> already, which it's added to.
+    /// </summary>
+    /// <returns><see cref="Lead.Elsewhere"/> for a directory looked at before, which told all it could then.</returns>
+    private Lead LookOnce(string dir, HashSet<string> looked) =>
+        looked.Add(dir) ? IsAtOrInside(dir) : Lead.Elsewhere;
+
     private static string[] Split(string target) => target.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+    /// <summary>Why <see cref="TargetWalk.ResolveExisting"/> stopped.</summary>
+    private enum WalkStop
+    {
+        /// <summary>Every component is resolved.</summary>
+        End,
+
+        /// <summary>A component is missing, or isn't a directory: it and those after it are yet to be made.</summary>
+        Missing,
+
+        /// <summary>A component can't be looked at, or a symlink met can't be read.</summary>
+        Unknown,
+
+        /// <summary>More than <see cref="MaxLinks"/> symlinks were met.</summary>
+        TooManyLinks,
+    }
+
+    /// <summary>
+    /// A symlink's target being resolved from the directory reached so far, as a real path, with the components still
+    /// to come.
+    /// </summary>
+    private sealed class TargetWalk(string start, string target)
+    {
+        private List<string> _parts = [.. Split(target)];
+        private int _next;
+        private int _linksMet;
+
+        /// <summary>The directory reached so far, as a real path.</summary>
+        public string Reached { get; private set; } = start;
+
+        /// <summary>
+        /// Resolves the components that are there, descending into each directory and putting each symlink's target
+        /// in place of its name, up to the first that's missing (or isn't a directory) or the end.
+        /// </summary>
+        public WalkStop ResolveExisting()
+        {
+            while (_next < _parts.Count)
+            {
+                var part = _parts[_next++];
+                if (part == ".")
+                    continue;
+                var path = Reached == "/" ? "/" + part : Reached + "/" + part;
+                if (IsDirectory(path))
+                {
+                    if (Native.RealPath(path) is not { } real)
+                        return WalkStop.Unknown;
+                    Reached = real;
+                    continue;
+                }
+                if (part == "..")
+                    return WalkStop.Unknown; // Reached's parent can't be looked at
+                if (!PathChecks.IsLink(path))
+                    return WalkStop.Missing;
+                if (Splice(path) is { } stop)
+                    return stop;
+            }
+            return WalkStop.End;
+        }
+
+        /// <summary>
+        /// Puts the target of <paramref name="link"/>, a symlink met on the way, in place of its name.
+        /// </summary>
+        /// <returns>Why the walk stops, or null if it goes on.</returns>
+        private WalkStop? Splice(string link)
+        {
+            if (++_linksMet > MaxLinks)
+                return WalkStop.TooManyLinks;
+            if (ReadTarget(link) is not { } spliced)
+                return WalkStop.Unknown;
+            if (spliced.StartsWith('/'))
+                Reached = "/";
+            _parts = [.. Split(spliced), .. _parts[_next..]];
+            _next = 0;
+            return null;
+        }
+
+        /// <summary>
+        /// Takes the components after a missing one, each naming a directory yet to be made below
+        /// <see cref="Reached"/> and each ".." leaving one, up to the ".." that leaves the last of them.
+        /// </summary>
+        /// <returns>
+        /// Whether it left them all, so the walk is back in <see cref="Reached"/>; false if the target ends first.
+        /// </returns>
+        public bool LeaveUnmade()
+        {
+            var unmade = 1;
+            while (_next < _parts.Count)
+            {
+                var part = _parts[_next++];
+                if (part == ".")
+                    continue;
+                unmade += part == ".." ? -1 : 1;
+                if (unmade == 0)
+                    return true;
+            }
+            return false;
+        }
+    }
 
     /// <summary>Whether <paramref name="dir"/> is a git dir or inside one, going up by "..".</summary>
     /// <returns>
@@ -220,7 +269,7 @@ internal sealed class GitDirLinkCheck
         var id = Identify(path);
         for (var depth = 0; depth < MaxDepth; depth++)
         {
-            if (id == null)
+            if (id is null)
                 return Lead.Unknown;
             if (_gitDirs.Contains(id))
                 return Lead.Inside;
@@ -228,7 +277,7 @@ internal sealed class GitDirLinkCheck
             var upId = Identify(up);
             if (upId == id)
                 return Lead.Elsewhere; // "/", whose ".." is itself
-            if (upId == null || Native.RealPath(up) is not { } real)
+            if (upId is null || Native.RealPath(up) is not { } real)
                 return Lead.Unknown;
             path = real;
             id = upId;
@@ -238,7 +287,13 @@ internal sealed class GitDirLinkCheck
 
     /// <summary>Names the directory at <paramref name="path"/> by which file it is, or by its real path.</summary>
     /// <returns>The name, or null if it can't be looked at.</returns>
-    private static string? Identify(string path)
+    /// <remarks>
+    /// A directory is compared by device and inode, not by how its path is spelled: realpath(3) leaves a macOS
+    /// firmlink as written, so /System/Volumes/Data/Users/x/.git is the git dir with a different path. Where stat(2)
+    /// can't be called (<see cref="Native.CanStat"/>), the real path stands in, which is the same on Linux except
+    /// across bind mounts.
+    /// </remarks>
+    internal static string? Identify(string path)
     {
         if (!Native.CanStat)
             return Native.RealPath(path);
@@ -257,7 +312,7 @@ internal sealed class GitDirLinkCheck
             try
             {
                 var text = new FileInfo(link).LinkTarget;
-                return text == null || text.Contains('\uFFFD') ? null : text;
+                return text is null || text.Contains('\uFFFD') ? null : text;
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
@@ -266,13 +321,6 @@ internal sealed class GitDirLinkCheck
         }
         if (Native.ReadLink(link) is not { Length: > 0 } bytes)
             return null;
-        try
-        {
-            return StrictUtf8.GetString(bytes);
-        }
-        catch (DecoderFallbackException)
-        {
-            return null;
-        }
+        return StrictUtf8.DecodeOrNull(bytes);
     }
 }

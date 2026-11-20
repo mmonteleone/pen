@@ -15,7 +15,7 @@ internal static class SignatureConfig
     /// <c>/dev/null</c> stands in for a file that isn't set or that the agent could write: no signers are trusted
     /// and no keys are revoked.
     /// </remarks>
-    public static List<string> BuildForVerifying(HostGit git)
+    public static IReadOnlyList<string> BuildForVerifying(HostGit git)
     {
         var config = BuildPrograms(git, git.ReadGlobalValue("gpg.format") ?? "openpgp");
         config.AddRange(FormatSetting("gpg.ssh.allowedSignersFile",
@@ -33,19 +33,19 @@ internal static class SignatureConfig
     /// <returns>The settings as "-c key=value" pairs, already split.</returns>
     /// <exception cref="PenException">The format is ssh, but no key or key command is set globally.</exception>
     /// <remarks>They go on the command line so the repo can't substitute its own signing program.</remarks>
-    public static List<string> BuildForSigning(HostGit git)
+    public static IReadOnlyList<string> BuildForSigning(HostGit git)
     {
         var format = git.ReadGlobalValue("gpg.format") ?? "openpgp";
         var config = BuildPrograms(git, format);
         var key = git.ReadGlobalValue("user.signingkey");
         var keyCommand = git.ReadGlobalValue("gpg.ssh.defaultKeyCommand");
-        if (key != null)
+        if (key is not null)
             config.AddRange(FormatSetting("user.signingkey", key));
-        if (keyCommand != null)
+        if (keyCommand is not null)
             config.AddRange(FormatSetting("gpg.ssh.defaultKeyCommand", keyCommand));
-        // With ssh and no key, git runs gpg.ssh.defaultKeyCommand, which a
-        // repo could set: so one of the two has to come from global config.
-        if (format == "ssh" && key == null && keyCommand == null)
+        // With ssh and no key, git runs gpg.ssh.defaultKeyCommand, which a repo could set, so one of the two has to
+        // come from global config.
+        if (format == "ssh" && key is null && keyCommand is null)
         {
             throw new PenException("gpg.format is ssh but user.signingkey isn't set in your global " +
                 "git config: set it (git config --global user.signingkey ~/.ssh/id_ed25519.pub)");
@@ -63,7 +63,7 @@ internal static class SignatureConfig
     /// <remarks>The agent writes in the working tree, so it could list its own key in such a file.</remarks>
     public static string? KeepIfOutsideTheRepo(string? path)
     {
-        if (path == null)
+        if (path is null)
             return null;
         var name = path.StartsWith(":(optional)", StringComparison.Ordinal) ? path[":(optional)".Length..] : path;
         return name.StartsWith('/') || name.StartsWith('~') || name.StartsWith("%(prefix)/", StringComparison.Ordinal)
@@ -71,9 +71,10 @@ internal static class SignatureConfig
             : null;
     }
 
-    /// <summary>Builds the settings for the format and every program git could run for it.</summary>
-    /// <param name="git">The git whose global config is read.</param>
-    /// <param name="format">The global gpg.format, or "openpgp" if it isn't set.</param>
+    /// <summary>
+    /// Builds the settings for <paramref name="format"/> (the global gpg.format, or "openpgp" if it isn't set) and
+    /// every program git could run for it, from the global config.
+    /// </summary>
     /// <returns>The settings as "-c key=value" pairs, already split.</returns>
     /// <remarks>
     /// All of them, whatever the format: to verify, git picks the program by the type of the signature, which the

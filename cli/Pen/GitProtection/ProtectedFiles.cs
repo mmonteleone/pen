@@ -29,18 +29,19 @@ internal static class ProtectedFiles
 
     private const UnixFileMode Dir700 = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
     private const int ManifestVersion = 1;
+    private const string DamagedManifest = "the saved list of protected files is damaged";
 
     /// <summary>
-    /// Saves the files in <paramref name="mounts"/> marked Verify, refusing the session if one can't be saved whole.
+    /// Saves the files in <paramref name="mounts"/> marked Verify for the session that's starting, refusing the
+    /// session if one can't be saved whole.
     /// </summary>
-    /// <param name="session">The session that's starting.</param>
-    /// <param name="mounts">The session's mounts.</param>
-    /// <param name="dir">The project dir; messages are relative to it.</param>
-    /// <param name="open">The project's other open sessions (<see cref="SessionRegistry.FindOpen"/>).</param>
-    /// <param name="unlistedModules">
-    /// The module repos there now that an open session didn't list at its start (<see cref="ModuleBaseline"/>).
-    /// </param>
     /// <remarks>
+    /// <para>
+    /// Messages are relative to the project dir. <paramref name="open"/> is the project's other open sessions
+    /// (<see cref="SessionRegistry.FindOpen"/>), and <paramref name="unlistedModules"/> the module repos there now
+    /// that an open session didn't list at its start (<see cref="ModuleBaseline"/>).
+    /// </para>
+    /// <para>
     /// A file <paramref name="open"/> sessions already saved keeps their copy, the oldest that still has one: its
     /// agent may have changed the file since, and this session's end would otherwise put that change back after that
     /// session's end had removed it. The file on disk is only taken when no session has a copy, which means none
@@ -48,6 +49,7 @@ internal static class ProtectedFiles
     /// rename on a case-insensitive filesystem), so they're matched by what each name resolves to today. A session
     /// that adopted a file hands that on, since its copy is whatever was there. The manifest goes last, through a
     /// rename, so its presence means the copies are complete.
+    /// </para>
     /// </remarks>
     public static void Save(
         SessionDir session,
@@ -58,7 +60,7 @@ internal static class ProtectedFiles
     {
         // Project.CheckAllowed covers the project dir; this covers every mount, the common git dir among them.
         var realSession = Native.RealPath(session.Path) ?? session.Path;
-        if (RepoGuard.IsInside(dir, realSession) || mounts.Any(m => RepoGuard.IsInside(m.Path, realSession)))
+        if (PathChecks.IsInside(dir, realSession) || mounts.Any(m => PathChecks.IsInside(m.Path, realSession)))
         {
             throw new PenException($"refusing to run in {Out.Field(dir)}: pen's " +
                 $"session dir {Out.Field(realSession)} would be inside the sandbox");
@@ -133,7 +135,7 @@ internal static class ProtectedFiles
             }
             catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
             {
-                // moved just now
+                // The manifest was moved to the restored manifest just now.
             }
             return File.Exists(session.RestoredManifest) ? Parse(File.ReadAllText(session.RestoredManifest)) : null;
         }
@@ -180,7 +182,10 @@ internal static class ProtectedFiles
     }
 
     /// <summary>Reads a manifest written by <see cref="Serialize"/>.</summary>
-    /// <exception cref="PenException">It's from another version of Pen, or a copy's name is damaged.</exception>
+    /// <exception cref="PenException">
+    /// It's from another version of Pen, a path, directory or copy's name isn't a string (a JSON null included), or
+    /// one isn't in the shape <see cref="Save"/> writes it.
+    /// </exception>
     internal static ProtectedManifest Parse(string json)
     {
         using var document = JsonDocument.Parse(json);
@@ -190,14 +195,43 @@ internal static class ProtectedFiles
         var files = new List<ProtectedFile>();
         foreach (var entry in root.GetProperty("files").EnumerateArray())
         {
-            var copy = entry.GetProperty("copy").GetString()!;
+            var copy = ReadString(entry.GetProperty("copy"));
             if (copy.Length == 0 || !copy.All(char.IsAsciiDigit))
-                throw new PenException("the saved list of protected files is damaged");
-            var path = entry.GetProperty("path").GetString()!;
+                throw new PenException(DamagedManifest);
+            var path = ReadPath(entry.GetProperty("path"));
             var mode = (UnixFileMode)(entry.GetProperty("mode").GetInt32() & 0xFFF);
             files.Add(new(path, copy, mode, entry.GetProperty("adopted").GetBoolean()));
         }
-        return new(files, root.GetProperty("readOnlyDirs").EnumerateArray().Select(d => d.GetString()!).ToList());
+        return new(files, [.. root.GetProperty("readOnlyDirs").EnumerateArray().Select(ReadPath)]);
+    }
+
+    /// <summary>
+    /// Reads a string from a manifest, where a JSON null or any other type is damage, not a missing value.
+    /// </summary>
+    /// <exception cref="PenException">It isn't a string.</exception>
+    private static string ReadString(JsonElement element) =>
+        element.ValueKind == JsonValueKind.String && element.GetString() is { } text
+            ? text
+            : throw new PenException(DamagedManifest);
+
+    /// <summary>
+    /// Reads a file's or read-only directory's path from a manifest, which must be in the shape of a real path, as
+    /// <see cref="Save"/> writes them: absolute, with no empty, "." or ".." component, no trailing slash and no NUL,
+    /// and not the root, which is never a protected file or a read-only mount.
+    /// </summary>
+    /// <exception cref="PenException">It's in any other shape, or isn't a string.</exception>
+    /// <remarks>
+    /// Directories are matched by name (<see cref="PathChecks.IsInside"/>), so one such as "/" or "" would contain
+    /// every path and vouch for any config.worktree; a file's path that isn't absolute can't be put back.
+    /// </remarks>
+    private static string ReadPath(JsonElement element)
+    {
+        var path = ReadString(element);
+        var isRealPathShape = Path.IsPathFullyQualified(path)
+            && path.Length > 1
+            && !path.Contains('\0')
+            && path[1..].Split('/').All(component => component is not ("" or "." or ".."));
+        return isRealPathShape ? path : throw new PenException(DamagedManifest);
     }
 
     /// <summary>
@@ -211,7 +245,7 @@ internal static class ProtectedFiles
     private sealed record OlderSessions(
         Dictionary<string, List<SavedCopy>> Files,
         HashSet<string> Adopted,
-        List<List<string>> ReadOnlyDirs,
+        List<IReadOnlyList<string>> ReadOnlyDirs,
         bool Unrecorded);
 
     /// <summary>An open session's saved file.</summary>
@@ -222,16 +256,17 @@ internal static class ProtectedFiles
     {
         var files = new Dictionary<string, List<SavedCopy>>(StringComparer.Ordinal);
         var adopted = new HashSet<string>(StringComparer.Ordinal);
-        var readOnly = new List<List<string>>();
-        bool unrecorded = false;
+        var readOnly = new List<IReadOnlyList<string>>();
+        var unrecorded = false;
         foreach (var session in open.OrderBy(session => session.ReadStarted() ?? DateTime.MaxValue))
         {
             var manifest = ReadRecord(session);
-            if (manifest == null)
+            if (manifest is null)
             {
-                // Its record goes after its compose.yaml, so one that's still open with
-                // no record is from an older Pen or damaged: its agent could write.
-                unrecorded |= session.IsOpen;
+                // A session's record is written before its compose.yaml and deleted after it (by then as
+                // restored-manifest.json), so one that's still open with no record is from an older Pen or damaged,
+                // and its agent could still write.
+                unrecorded |= session.IsOpen();
                 continue;
             }
             readOnly.Add(manifest.ReadOnlyDirs);
@@ -259,7 +294,7 @@ internal static class ProtectedFiles
     /// </remarks>
     private static bool IsAdopted(string path, OlderSessions older, IReadOnlyList<string> unlistedModules)
     {
-        if (unlistedModules.Any(repo => RepoGuard.IsInside(repo, path)))
+        if (unlistedModules.Any(repo => PathChecks.IsInside(repo, path)))
             return true;
         if (older.Adopted.Contains(path))
             return true;
@@ -267,7 +302,7 @@ internal static class ProtectedFiles
             return false;
         if (older.Files.ContainsKey(path))
             return false;
-        return older.Unrecorded || older.ReadOnlyDirs.Any(dirs => !dirs.Any(d => RepoGuard.IsInside(d, path)));
+        return older.Unrecorded || older.ReadOnlyDirs.Any(dirs => !dirs.Any(d => PathChecks.IsInside(d, path)));
     }
 
     /// <summary>
@@ -282,53 +317,51 @@ internal static class ProtectedFiles
             try
             {
                 var copy = Native.ReadProtected(Path.Combine(older.Session.ProtectedDir, older.File.Copy));
-                if (copy != null)
+                if (copy is not null)
                     return new(copy.Bytes, older.File.Mode);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
-                // that session has put its files back
+                // That session has put its files back.
             }
         }
         try
         {
             return Native.ReadProtected(path)
                 ?? throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't save a copy " +
-                    $"of {RepoGuard.FormatPath(dir, path)}: it isn't a regular file of at most 1 MB, so it " +
+                    $"of {PathChecks.FormatPath(dir, path)}: it isn't a regular file of at most 1 MB, so it " +
                     "couldn't be restored at the end of the session. Inspect it and remove it, then rerun");
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't read " +
-                $"{RepoGuard.FormatPath(dir, path)} to save a copy of it: fix its permissions, then rerun");
+                $"{PathChecks.FormatPath(dir, path)} to save a copy of it: fix its permissions, then rerun");
         }
     }
 
     /// <summary>Resolves <paramref name="path"/> as it is on disk, which may differ from it only in case.</summary>
-    /// <returns>The real path.</returns>
     /// <exception cref="PenException">
     /// It resolves anywhere else, which means a symlink was swapped in since it was checked, or it's gone.
     /// </exception>
     private static string RequireRealPath(string dir, string path)
     {
         var real = Native.RealPath(path);
-        if (real == null || !string.Equals(real, path, StringComparison.OrdinalIgnoreCase))
+        if (real is null || !string.Equals(real, path, StringComparison.OrdinalIgnoreCase))
         {
-            throw new PenException($"refusing to run in {Out.Field(dir)}: {RepoGuard.FormatPath(dir, path)} " +
+            throw new PenException($"refusing to run in {Out.Field(dir)}: {PathChecks.FormatPath(dir, path)} " +
                 "isn't where pen expected it (a symlink, or it's gone): inspect it, then rerun");
         }
 
         return real;
     }
 
-    /// <summary>Checks that a path can be written to the manifest and read back the same.</summary>
-    /// <returns>The path.</returns>
+    /// <summary>Checks that a path can be written to the manifest and read back the same, and returns it.</summary>
     /// <remarks>Paths reach here from the file system, as valid UTF-16; one that isn't is refused.</remarks>
     private static string RequireEncodable(string path)
     {
         try
         {
-            _ = new UTF8Encoding(false, throwOnInvalidBytes: true).GetByteCount(path);
+            _ = StrictUtf8.Encoding.GetByteCount(path);
         }
         catch (ArgumentException)
         {

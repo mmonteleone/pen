@@ -59,17 +59,25 @@ public sealed class BaseImageTests(BaseImageTests.Fixture fixture) : IClassFixtu
     public void SshRemoteIsRewrittenToHttps() => AssertPassed("ssh_rewritten");
 
     [Fact(DisplayName =
-        "tools present (git gh rg fd jq curl wget xz openssl less vim unzip bzip2 patch socat tini capsh docker 'docker compose')")]
+        "tools present (git gh rg fd jq curl wget xz openssl less vim unzip bzip2 patch socat tini capsh docker 'docker compose' node npm npx python3 python pip3 uv uvx make gcc g++ fish zsh ssh ssh-keygen)")]
     public void ToolsArePresent() => AssertPassed("tools_present");
 
-    [Fact(DisplayName = "no Python, uv or build tools in the base (python3 python uv uvx make gcc cc)")]
-    public void HasNoPythonOrBuildTools() => AssertPassed("no_python");
+    [Fact(DisplayName = "node is /usr/local/bin/node, an LTS (even) major")]
+    public void NodeIsAnLtsInUsrLocal() => AssertPassed("node_lts");
 
-    [Fact(DisplayName = "no node, npm or npx on PATH in the base")]
-    public void HasNoNodeOnPath() => AssertPassed("no_node");
+    [Fact(DisplayName = "python is Python 3")]
+    public void PythonIsPython3() => AssertPassed("python_3");
 
-    [Fact(DisplayName = "Pen's private Node runs (/opt/pen/node/bin/node)")]
-    public void PrivateNodeRuns() => AssertPassed("private_node");
+    [Fact(DisplayName = "python3 -m venv makes a venv with pip")]
+    public void VenvWorks() => AssertPassed("venv");
+
+    [Fact(DisplayName =
+        "NPM_CONFIG_UPDATE_NOTIFIER=false as the only npm config, and UV_LINK_MODE=copy, " +
+        "in the base's environment")]
+    public void NodeAndUvSettingsAreSet() => AssertPassed("node_uv_env");
+
+    [Fact(DisplayName = "no zsh new-user script (/usr/share/zsh/*/scripts/newuser), so a fresh home gets no menu")]
+    public void HasNoZshNewUserScript() => AssertPassed("no_zsh_newuser");
 
     [Fact(DisplayName = "the npm agent helper is in the base, root's and off PATH (/opt/pen/lib/npm-agent.sh)")]
     public void NpmAgentHelperIsRootsAndOffPath() => AssertPassed("npm_agent_helper");
@@ -90,7 +98,7 @@ public sealed class BaseImageTests(BaseImageTests.Fixture fixture) : IClassFixtu
     public void HasNoCodexOrPi() => AssertPassed("no_codex_pi");
 
     [Fact(DisplayName =
-        "no agents at all in the base (claude codex opencode pi), or /opt/pen/agents, or their settings")]
+        "no agents at all in the base (claude codex opencode pi), or /opt/pen/agents or /opt/pen/node, or their settings")]
     public void HasNoAgents() => AssertPassed("no_agents");
 
     [Fact(DisplayName = "the base's build left nothing in /tmp or root's home (compile caches, agents' first runs)")]
@@ -147,16 +155,22 @@ public sealed class BaseImageTests(BaseImageTests.Fixture fixture) : IClassFixtu
                 [ "$(git ls-remote --get-url git@github.com:octo/repo.git)" = https://github.com/octo/repo.git ]
                 """);
             probe.Add("tools_present", """
-                for c in git gh rg fd jq curl wget xz openssl less vim unzip bzip2 patch socat tini capsh setpriv docker; do command -v $c >/dev/null || { echo "missing $c" >&2; exit 1; }; done; docker compose version >/dev/null
+                for c in git gh rg fd jq curl wget xz openssl less vim unzip bzip2 patch socat tini capsh setpriv docker node npm npx python3 python pip3 uv uvx make gcc g++ fish zsh ssh ssh-keygen; do command -v $c >/dev/null || { echo "missing $c" >&2; exit 1; }; done; docker compose version >/dev/null
                 """);
-            probe.Add("no_python", """
-                for c in python3 python uv uvx make gcc cc; do ! command -v $c >/dev/null || { echo "found $c" >&2; exit 1; }; done
+            probe.Add("node_lts", """
+                [ "$(command -v node)" = /usr/local/bin/node ] && major=$(node -p 'process.versions.node.split(".")[0]') && [ $((major % 2)) = 0 ]
                 """);
-            probe.Add("no_node", """
-                ! command -v node && ! command -v npm && ! command -v npx && ! command -v corepack
+            probe.Add("python_3", """
+                python -c 'import sys; sys.exit(sys.version_info[0] != 3)'
                 """);
-            probe.Add("private_node", """
-                /opt/pen/node/bin/node -e 'process.exit(process.version.startsWith("v") ? 0 : 1)'
+            probe.Add("venv", """
+                dir=$(mktemp -d) && python3 -m venv "$dir/v" && "$dir/v/bin/python" -c 'import sys; sys.exit(sys.prefix == sys.base_prefix)' && "$dir/v/bin/pip" --version
+                """);
+            probe.Add("node_uv_env", """
+                [ "$NPM_CONFIG_UPDATE_NOTIFIER" = false ] && [ "$(env | grep -i '^npm_config_' | cut -d= -f1)" = NPM_CONFIG_UPDATE_NOTIFIER ] && [ "$UV_LINK_MODE" = copy ]
+                """);
+            probe.Add("no_zsh_newuser", """
+                test -d /usr/share/zsh && test -z "$(find /usr/share/zsh -path '*/scripts/newuser')"
                 """);
             probe.Add("npm_agent_helper", """
                 test -x /opt/pen/lib/npm-agent.sh && [ "$(stat -c %U:%a /opt/pen/lib /opt/pen/lib/npm-agent.sh | sort -u)" = root:755 ] && ! command -v npm-agent.sh
@@ -177,7 +191,7 @@ public sealed class BaseImageTests(BaseImageTests.Fixture fixture) : IClassFixtu
                 ! command -v codex && ! command -v pi && ! test -e /opt/pen/codex && ! test -e /opt/pen/pi && ! test -e /etc/codex && ! env | grep -E "^PI_"
                 """);
             probe.Add("no_agents", """
-                for c in claude codex opencode pi; do ! command -v $c >/dev/null && ! test -e /opt/pen/$c || exit 1; done; ! test -e /opt/pen/agents && ! env | grep -E "^(OPENCODE_|NPM_CONFIG_)"
+                for c in claude codex opencode pi; do ! command -v $c >/dev/null && ! test -e /opt/pen/$c || exit 1; done; ! test -e /opt/pen/agents && ! test -e /opt/pen/node && ! env | grep -E "^OPENCODE_"
                 """);
             probe.Add("refresh_recorded", """
                 test -s /etc/pen/refresh

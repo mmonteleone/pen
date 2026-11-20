@@ -16,9 +16,9 @@ public class GitDirRepoTests
     private static SessionDir Started(TempDir t, string dir, string common, string id = "aaaaaaaa")
     {
         RepoGuard.CheckAtStart(dir);
-        // As Session does, with no other session open: every module repo found is listed.
+        // As SessionRunner does, with no other session open: every module repo found is listed.
         var lists = ModuleBaseline.ReadOpenLists([], common, dir);
-        var mounts = RepoGuard.PrepareMounts(dir, "/nonexistent-home");
+        var mounts = new MountPlanner(dir, "/nonexistent-home").EnsureTargetsAndPlan();
         var found = RepoScan.FindModuleRepos(common);
         var modules = ModuleBaseline.Choose(found, lists);
         var s = new SessionDir(Key, t.Sub("runtime", "sessions", id));
@@ -224,9 +224,9 @@ public class GitDirRepoTests
         var check = GitCheck.RunAtSessionEnd(repo, s);
 
         Assert.Null(check.Failure);
-        Assert.Contains(check.Moved, q => q.From == plant && q.To != "");
+        Assert.Contains(check.Moved, q => q.From == plant && q is Quarantined.Moved);
         AssertDoesntFire(dir, marker);
-        Assert.Contains("inside the git dir", GitCheck.Warning(repo, check.Moved));
+        Assert.Contains("inside the git dir", GitCheckWording.Warning(repo, check.Moved));
         RepoGuard.CheckAtStart(repo);
     }
 
@@ -234,16 +234,14 @@ public class GitDirRepoTests
     /// <returns>The removal.</returns>
     private static Quarantined AssertRemoved(string dir, CheckResult check, string link, string target)
     {
-        var removed = Assert.Single(check.Moved, q => q.From == link);
-        Assert.True(removed.Removed);
-        Assert.False(removed.Failed);
+        var removed = Assert.IsType<Quarantined.LinkRemoved>(Assert.Single(check.Moved, q => q.From == link));
         Assert.Equal(target, removed.LinkTarget);
         Assert.Contains("a symlink into the git dir", removed.Why);
-        Assert.False(RepoGuard.Exists(link));
+        Assert.False(PathChecks.ExistsOrIsLink(link));
         Assert.Empty(Directory.GetFileSystemEntries(Path.GetDirectoryName(link)!, Path.GetFileName(link) + "*"));
-        var warning = GitCheck.Warning(dir, check.Moved);
-        Assert.Contains($"{RepoGuard.FormatPath(dir, link)} (a symlink to {target}) removed", warning);
-        Assert.Contains($"  ln -s {GitCheck.Quote(target)} {GitCheck.Quote(link)}\n", warning + "\n");
+        var warning = GitCheckWording.Warning(dir, check.Moved);
+        Assert.Contains($"{PathChecks.FormatPath(dir, link)} (a symlink to {target}) removed", warning);
+        Assert.Contains($"  ln -s {Shell.Quote(target)} {Shell.Quote(link)}\n", warning + "\n");
         return removed;
     }
 
@@ -269,7 +267,7 @@ public class GitDirRepoTests
         var check = GitCheck.RunAtSessionEnd(repo, s);
 
         Assert.Null(check.Failure);
-        Assert.Contains(check.Moved, q => q.From == plant && q.To != "");
+        Assert.Contains(check.Moved, q => q.From == plant && q is Quarantined.Moved);
         AssertRemoved(repo, check, docs, to);
         AssertDoesntFire(Path.Combine(git, target), marker);
         RepoGuard.CheckAtStart(repo);
@@ -309,12 +307,12 @@ public class GitDirRepoTests
         AssertFires(gitRunsIn, marker);
         // What it reaches is named at the start too.
         var refusal = Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(repo)).Message;
-        Assert.Contains(RepoGuard.FormatPath(repo, Path.GetDirectoryName(plant)!), refusal);
+        Assert.Contains(PathChecks.FormatPath(repo, Path.GetDirectoryName(plant)!), refusal);
 
         var check = GitCheck.RunAtSessionEnd(repo, s);
 
         Assert.Null(check.Failure);
-        Assert.Contains(check.Moved, q => q.From == plant && q.To != "");
+        Assert.Contains(check.Moved, q => q.From == plant && q is Quarantined.Moved);
         AssertRemoved(repo, check, path, to);
         AssertDoesntFire(Native.RealPath(to)!, marker);
         RepoGuard.CheckAtStart(repo);
@@ -338,7 +336,7 @@ public class GitDirRepoTests
         var check = GitCheck.RunAtSessionEnd(repo, s);
 
         Assert.Null(check.Failure);
-        Assert.Contains(check.Moved, q => q.From == head && q.To != "");
+        Assert.Contains(check.Moved, q => q.From == head && q is Quarantined.Moved);
         AssertDoesntFire(sub, marker);
         RepoGuard.CheckAtStart(repo);
     }
@@ -388,8 +386,8 @@ public class GitDirRepoTests
 
         Assert.Null(check.Failure);
         Assert.Contains(check.Moved, q => q.From == plant);
-        Assert.Contains(check.Moved, q => q.From == docs && q.Removed);
-        Assert.Contains(check.Moved, q => q.From == entry && q.Removed);
+        Assert.Contains(check.Moved, q => q.From == docs && q is Quarantined.LinkRemoved);
+        Assert.Contains(check.Moved, q => q.From == entry && q is Quarantined.LinkRemoved);
         AssertDoesntFire(Path.Combine(git, "foo"), marker);
         RepoGuard.CheckAtStart(wt);
         RepoGuard.CheckAtStart(repo);
@@ -406,11 +404,11 @@ public class GitDirRepoTests
         Directory.CreateSymbolicLink(docs, Path.Combine(git, "foo", "bar"));
         AssertFires(docs, marker);
 
-        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
+        var check = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
 
         Assert.Null(check.Failure);
         Assert.Contains(check.Moved, q => q.From == plant);
-        Assert.Contains(check.Moved, q => q.From == docs && q.Removed);
+        Assert.Contains(check.Moved, q => q.From == docs && q is Quarantined.LinkRemoved);
         AssertDoesntFire(Path.Combine(git, "foo", "bar"), marker);
     }
 
@@ -429,20 +427,20 @@ public class GitDirRepoTests
         Layout(Path.Combine(outer, "x", ".git"), PlantConfig(hook, t.Sub("plant-worktree")));
         Layout(Path.Combine(outer, "y", "z"), PlantConfig(hook, t.Sub("plant-worktree")));
         var docs = Path.Combine(repo, "docs");
-        Directory.CreateSymbolicLink(docs, Path.Combine(outer + GitCheck.Suffix, "x")); // leads nowhere yet
-        Directory.CreateDirectory(outer + GitCheck.Suffix);
+        Directory.CreateSymbolicLink(docs, Path.Combine(outer + GitQuarantine.Suffix, "x")); // leads nowhere yet
+        Directory.CreateDirectory(outer + GitQuarantine.Suffix);
         AssertFires(Path.Combine(outer, "x"), marker);
         AssertFires(Path.Combine(outer, "y", "z"), marker);
-        Directory.Delete(outer + GitCheck.Suffix);
+        Directory.Delete(outer + GitQuarantine.Suffix);
 
         var check = GitCheck.RunAtSessionEnd(repo, s);
 
         Assert.Null(check.Failure);
-        var aside = outer + GitCheck.Suffix;
-        Assert.Contains(check.Moved, q => q.From == outer && q.To == aside);
+        var aside = outer + GitQuarantine.Suffix;
+        Assert.Contains(check.Moved, q => q.From == outer && q is Quarantined.Moved m && m.To == aside);
         Assert.Contains(check.Moved, q => q.From == Path.Combine(aside, "x", ".git"));
         Assert.Contains(check.Moved, q => q.From == Path.Combine(aside, "y", "z", "HEAD"));
-        Assert.Contains(check.Moved, q => q.From == docs && q.Removed);
+        Assert.Contains(check.Moved, q => q.From == docs && q is Quarantined.LinkRemoved);
         AssertDoesntFire(Path.Combine(aside, "x"), marker);
         AssertDoesntFire(Path.Combine(aside, "y", "z"), marker);
         RepoGuard.CheckAtStart(repo);
@@ -452,7 +450,7 @@ public class GitDirRepoTests
     // ---- What the walk of the git dir finds, and skips ----
 
     private static List<string> Found(string git, IReadOnlyCollection<string>? modules = null) =>
-        RepoScan.ScanGitDir(git, modules ?? RepoScan.FindModuleRepos(git), tryOpen: null).Repos
+        RepoScan.ScanGitDir(git, modules ?? RepoScan.FindModuleRepos(git), tryMakeListable: null).Repos
             .Select(r => Path.GetRelativePath(git, r.Path)).ToList();
 
     [Fact]
@@ -496,9 +494,9 @@ public class GitDirRepoTests
         Directory.CreateDirectory(Path.Combine(git, "modules", "x.pen-quarantine", "modules", "y", ".git"));
         Layout(Path.Combine(git, "foo", ".git.pen-quarantine", "modules", "z"), "");
         var broken = Layout(Path.Combine(git, "foo", ".git.pen-quarantine"), "");
-        File.Move(Path.Combine(broken, "HEAD"), Path.Combine(broken, "HEAD" + GitCheck.Suffix));
+        File.Move(Path.Combine(broken, "HEAD"), Path.Combine(broken, "HEAD" + GitQuarantine.Suffix));
         var brokenBare = Layout(Path.Combine(git, "bar"), "");
-        File.Move(Path.Combine(brokenBare, "HEAD"), Path.Combine(brokenBare, "HEAD" + GitCheck.Suffix));
+        File.Move(Path.Combine(brokenBare, "HEAD"), Path.Combine(brokenBare, "HEAD" + GitQuarantine.Suffix));
 
         Assert.Equal(["foo/.git.pen-quarantine/modules/z/HEAD", "modules/x.pen-quarantine/modules/y/.git"],
             Found(git).Order(StringComparer.Ordinal));
@@ -545,9 +543,9 @@ public class GitDirRepoTests
 
         foreach (var path in new[] { dir, Path.Combine(t.Path, "p", "file") })
         {
-            var attempt = GitCheck.RemoveLink(Path.Combine(t.Path, "p"), path, "why");
+            var attempt = GitQuarantine.RemoveLink(Path.Combine(t.Path, "p"), path, "why");
 
-            Assert.True(attempt.Failed);
+            Assert.IsType<Quarantined.Failed>(attempt);
             Assert.Contains("COULD NOT REMOVE IT (it isn't a symlink any more)", attempt.Why);
         }
         Assert.True(File.Exists(Path.Combine(dir, "f")));
@@ -571,12 +569,12 @@ public class GitDirRepoTests
         Directory.Move(Path.Combine(project, "a"), Path.Combine(project, "a-moved"));
         Directory.CreateSymbolicLink(Path.Combine(project, "a"), Path.Combine(t.Path, "elsewhere"));
 
-        var attempt = GitCheck.RemoveLink(project, link, "why");
+        var attempt = GitQuarantine.RemoveLink(project, link, "why");
 
-        Assert.True(attempt.Failed);
+        Assert.IsType<Quarantined.Failed>(attempt);
         Assert.Contains("isn't a directory any more", attempt.Why);
-        Assert.True(RepoGuard.IsLink(victim));
-        Assert.True(RepoGuard.IsLink(Path.Combine(project, "a-moved", "b", "docs")));
+        Assert.True(PathChecks.IsLink(victim));
+        Assert.True(PathChecks.IsLink(Path.Combine(project, "a-moved", "b", "docs")));
     }
 
     [Fact]
@@ -590,13 +588,13 @@ public class GitDirRepoTests
         File.SetUnixFileMode(shut, UnixFileMode.UserRead | UnixFileMode.UserExecute);
         try
         {
-            var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
+            var check = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
 
             var failed = Assert.Single(check.Moved);
-            Assert.True(failed.Failed);
+            Assert.IsType<Quarantined.Failed>(failed);
             Assert.Contains("COULD NOT REMOVE IT (permission denied", failed.Why);
             Assert.Contains("a file named above couldn't be moved out of git's way, removed or restored", check.Failure);
-            Assert.True(RepoGuard.IsLink(docs));
+            Assert.True(PathChecks.IsLink(docs));
         }
         finally
         {
@@ -612,13 +610,12 @@ public class GitDirRepoTests
         var link = Path.Combine(project, "docs");
         Sh(project, "ln -s \"$(printf '.git/objects/\\377x')\" docs");
 
-        var removed = GitCheck.RemoveLink(project, link, "why");
+        var removed = GitQuarantine.RemoveLink(project, link, "why");
 
-        Assert.True(removed.Removed);
-        Assert.True(removed.LinkTargetEscaped);
-        Assert.Equal(@".git/objects/\377x", removed.LinkTarget);
-        Assert.False(RepoGuard.Exists(link));
-        var warning = GitCheck.Warning(project, [removed]);
+        Assert.True(Assert.IsType<Quarantined.LinkRemoved>(removed).LinkTargetEscaped);
+        Assert.Equal(@".git/objects/\377x", ((Quarantined.LinkRemoved)removed).LinkTarget);
+        Assert.False(PathChecks.ExistsOrIsLink(link));
+        var warning = GitCheckWording.Warning(project, [removed]);
         Assert.Contains("pen: They've been moved out of git's way, or removed:", warning);
         Assert.Contains(@"docs (a symlink to .git/objects/\377x) removed", warning);
         Assert.Contains("since what it held isn't valid UTF-8 (shown above with octal escapes): make it again by hand",
@@ -698,9 +695,9 @@ public class GitDirRepoTests
         File.SetUnixFileMode(shut, UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         try
         {
-            Assert.Equal([shut], RepoScan.ScanGitDir(git, RepoScan.FindModuleRepos(git), tryOpen: null).UnlistableDirs);
+            Assert.Equal([shut], RepoScan.ScanGitDir(git, RepoScan.FindModuleRepos(git), tryMakeListable: null).UnlistableDirs);
             Assert.Contains(".git/foo", Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(repo)).Message);
-            var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
+            var check = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
             Assert.Contains("pen can't list these directories", check.Failure);
             Assert.Contains(".git/foo", check.Failure);
         }
@@ -726,7 +723,7 @@ public class GitDirRepoTests
             var check = GitCheck.RunAtSessionEnd(repo, s);
 
             Assert.Null(check.Failure);
-            Assert.Contains(check.Opened, o => o.Path == shut);
+            Assert.Contains(check.ModeChanges, o => o.Path == shut);
             Assert.Contains(check.Moved, q => q.From == plant);
         }
         finally
@@ -791,6 +788,7 @@ public class GitDirRepoTests
     [InlineData(".git/nothing/x/y", true)]
     [InlineData("missing/../.git/objects/ab", true)] // once missing is made, inside .git
     [InlineData("missing/../.git", true)]
+    [InlineData("missing/./../.git", true)] // "." past a missing directory names nothing to leave
     [InlineData(".git/objects/zz/../../..", true)] // it ends in the project, but it stops at objects
     [InlineData("src/chain/x", true)] // src/chain leads nowhere, but into .git
     [InlineData("src/missing", false)]
@@ -825,6 +823,21 @@ public class GitDirRepoTests
     }
 
     /// <summary>
+    /// A symlink met on the way whose target isn't valid UTF-8 can't be followed, so neither it nor one that leads
+    /// through it can be traced.
+    /// </summary>
+    [Fact]
+    public void ASymlinkThroughOneWhoseTargetIsntUtf8_IsOneThatCantBeTraced()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Sh(repo, "ln -s \"$(printf 'x\\377')\" bad && ln -s bad/../src docs");
+
+        Assert.Empty(Links(repo));
+        Assert.Equal(["bad", "docs"], Untraced(repo));
+    }
+
+    /// <summary>
     /// A dangling symlink met on the way is spliced in as the kernel splices it: x/../.. through x, a symlink to
     /// a/b, is a/b/../.., which leads into .git once a/b is made, though x alone leads nowhere near it.
     /// </summary>
@@ -835,6 +848,25 @@ public class GitDirRepoTests
         var repo = Git.Repo(t.Sub("repo"));
         Directory.CreateDirectory(Path.Combine(repo, ".git", "foo"));
         Directory.CreateSymbolicLink(Path.Combine(repo, "x"), "a/b");
+        var link = Path.Combine(repo, "L");
+        Directory.CreateSymbolicLink(link, "x/../../.git/foo");
+
+        Assert.Equal(["L"], Links(repo));
+        Directory.CreateDirectory(Path.Combine(repo, "a", "b"));
+        Assert.Equal(Native.RealPath(Path.Combine(repo, ".git", "foo")), Native.RealPath(link));
+    }
+
+    /// <summary>
+    /// A dangling symlink met on the way whose target is absolute is spliced in from "/": x/../.. through x, a symlink
+    /// to the absolute path of a/b, leads into .git once a/b is made.
+    /// </summary>
+    [Fact]
+    public void ADanglingSymlinkChainedThroughAnAbsoluteTarget_Counts()
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        Directory.CreateDirectory(Path.Combine(repo, ".git", "foo"));
+        Directory.CreateSymbolicLink(Path.Combine(repo, "x"), Path.Combine(repo, "a", "b"));
         var link = Path.Combine(repo, "L");
         Directory.CreateSymbolicLink(link, "x/../../.git/foo");
 
@@ -860,6 +892,27 @@ public class GitDirRepoTests
         var links = Links(repo);
         Assert.Contains("l00", links);
         Assert.Equal(count, links.Count);
+    }
+
+    /// <summary>
+    /// The symlinks met on the way past the first are followed up to 40: a chain of 41 into .git counts from its
+    /// first, and one of 42 counts from its second on, its first leading nowhere that's looked at.
+    /// </summary>
+    [Theory]
+    [InlineData(41, true)]
+    [InlineData(42, false)]
+    public void ADanglingChainAtTheLinkLimit_CountsFromItsFirst_AndOnePastIt_DoesNot(int count, bool firstCounts)
+    {
+        using var t = new TempDir();
+        var repo = Git.Repo(t.Sub("repo"));
+        for (var i = 0; i < count - 1; i++)
+            Directory.CreateSymbolicLink(Path.Combine(repo, $"l{i:00}"), $"l{i + 1:00}");
+        Directory.CreateSymbolicLink(Path.Combine(repo, $"l{count - 1:00}"), ".git/missing");
+
+        var links = Links(repo);
+        Assert.Equal(firstCounts, links.Contains("l00"));
+        Assert.Equal(firstCounts ? count : count - 1, links.Count);
+        Assert.Empty(Untraced(repo));
     }
 
     /// <summary>
@@ -954,7 +1007,7 @@ public class GitDirRepoTests
 
             Assert.Null(check.Failure);
             var removed = Assert.Single(check.Moved, q => q.From == docs);
-            Assert.True(removed.Removed);
+            Assert.IsType<Quarantined.LinkRemoved>(removed);
             Assert.Contains("a symlink pen can't trace", removed.Why);
         }
         finally
@@ -1041,7 +1094,7 @@ public class GitDirRepoTests
         var check = GitCheck.RunAtSessionEnd(repo, s);
 
         Assert.Null(check.Failure);
-        Assert.Contains(check.Moved, q => q.From == plant && q.To != "");
+        Assert.Contains(check.Moved, q => q.From == plant && q is Quarantined.Moved);
         AssertRemoved(repo, check, docs, $".git/objects/{Path.GetFileName(ab)}/../zz");
         Directory.CreateDirectory(ab);
         AssertDoesntFire(Path.Combine(git, "objects", "zz"), marker);
@@ -1075,7 +1128,7 @@ public class GitDirRepoTests
         var check = GitCheck.RunAtSessionEnd(repo, s);
 
         Assert.Null(check.Failure);
-        Assert.Contains(check.Moved, q => q.From == plant && q.To != "");
+        Assert.Contains(check.Moved, q => q.From == plant && q is Quarantined.Moved);
         AssertRemoved(repo, check, docs, "/System/Volumes/Data" + Path.Combine(git, "objects", "zz"));
         AssertDoesntFire(Path.Combine(git, "objects", "zz"), marker);
     }
@@ -1096,20 +1149,20 @@ public class GitDirRepoTests
         Git.Run(repo, "add", "docs");
         Git.Run(repo, "commit", "-q", "-m", "docs");
         Git.Run(repo, "checkout", "-q", "main");
-        Assert.False(RepoGuard.Exists(docs));
+        Assert.False(PathChecks.ExistsOrIsLink(docs));
         var s = Started(t, repo, git);
         var plant = Plant(t, git, "bare", "objects/zz", hook);
         Git.Run(repo, "checkout", "-q", "evil");
         AssertFires(docs, marker);
         Git.Run(repo, "checkout", "-q", "main");
-        Assert.False(RepoGuard.Exists(docs));
+        Assert.False(PathChecks.ExistsOrIsLink(docs));
         Assert.Contains(".git/objects/zz (laid out as a git dir of its own)",
             Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(repo)).Message);
 
         var check = GitCheck.RunAtSessionEnd(repo, s);
 
         Assert.Null(check.Failure);
-        Assert.Contains(check.Moved, q => q.From == plant && q.To != "");
+        Assert.Contains(check.Moved, q => q.From == plant && q is Quarantined.Moved);
         Git.Run(repo, "checkout", "-q", "evil");
         AssertDoesntFire(docs, marker);
     }
@@ -1136,9 +1189,9 @@ public class GitDirRepoTests
         var check = GitCheck.RunAtSessionEnd(repo, s);
 
         Assert.Null(check.Failure);
-        var aside = Path.Combine(sub, ".git" + GitCheck.Suffix);
-        Assert.Contains(check.Moved, q => q.From == Path.Combine(sub, ".git") && q.To == aside);
-        Assert.Contains(check.Moved, q => q.From == plant && q.To != "");
+        var aside = Path.Combine(sub, ".git" + GitQuarantine.Suffix);
+        Assert.Contains(check.Moved, q => q.From == Path.Combine(sub, ".git") && q is Quarantined.Moved m && m.To == aside);
+        Assert.Contains(check.Moved, q => q.From == plant && q is Quarantined.Moved);
         AssertRemoved(repo, check, Path.Combine(aside, "docs"), Path.Combine(git, "objects", "zz"));
         AssertRemoved(repo, check, Path.Combine(aside, "refs-link"), Path.Combine(git, "refs"));
         AssertDoesntFire(Path.Combine(git, "objects", "zz"), marker);
@@ -1157,7 +1210,7 @@ public class GitDirRepoTests
         var s = Started(t, repo, git);
         var sub = Git.Repo(t.Sub("repo", "sub"));
         var inner = Layout(Path.Combine(sub, ".git", "modules", "x"), PlantConfig(hook, t.Sub("plant-worktree")));
-        var aside = Path.Combine(sub, ".git" + GitCheck.Suffix);
+        var aside = Path.Combine(sub, ".git" + GitQuarantine.Suffix);
         var docs = Path.Combine(repo, "docs");
         Directory.CreateSymbolicLink(docs, Path.Combine(aside, "modules", "x"));
         AssertFires(inner, marker);
@@ -1165,8 +1218,8 @@ public class GitDirRepoTests
         var check = GitCheck.RunAtSessionEnd(repo, s);
 
         Assert.Null(check.Failure);
-        Assert.Contains(check.Moved, q => q.From == Path.Combine(sub, ".git") && q.To == aside);
-        Assert.Contains(check.Moved, q => q.From == Path.Combine(aside, "modules", "x", "HEAD") && q.To != "");
+        Assert.Contains(check.Moved, q => q.From == Path.Combine(sub, ".git") && q is Quarantined.Moved m && m.To == aside);
+        Assert.Contains(check.Moved, q => q.From == Path.Combine(aside, "modules", "x", "HEAD") && q is Quarantined.Moved);
         AssertDoesntFire(docs, marker);
         RepoGuard.CheckAtStart(repo);
     }
@@ -1177,12 +1230,12 @@ public class GitDirRepoTests
     private static void AssertStays(TempDir t, string dir, string? common = null, string id = "aaaaaaaa")
     {
         common ??= Path.Combine(dir, ".git");
-        Assert.Empty(RepoScan.ScanGitDir(common, RepoScan.FindModuleRepos(common), tryOpen: null).Repos);
+        Assert.Empty(RepoScan.ScanGitDir(common, RepoScan.FindModuleRepos(common), tryMakeListable: null).Repos);
         var s = Started(t, dir, common, id);
         var end = GitCheck.RunAtSessionEnd(dir, s);
         Assert.Null(end.Failure);
         Assert.Empty(end.Moved);
-        var sign = GitCheck.RunWithoutOpening(dir, startedWithGit: true, common, modulesAtStart: null);
+        var sign = GitCheck.RunWithoutSession(dir, startedWithGit: true, common, modulesAtStart: null);
         Assert.Null(sign.Failure);
         Assert.Empty(sign.Moved);
         RepoGuard.CheckAtStart(dir);
@@ -1479,8 +1532,8 @@ public class GitDirRepoTests
         Git.Run(super, [.. AllowFile, "submodule", "add", "-q", mid, "libs/mid"]);
         Git.Run(super, "commit", "-q", "-m", "mid");
         Git.Run(super, [.. AllowFile, "submodule", "update", "-q", "--init", "--recursive"]);
-        var first = GitCheck.RunWithoutOpening(super, startedWithGit: true, commonGitDir: null, modulesAtStart: []);
-        Assert.Contains(first.Moved, q => q.To.EndsWith("modules/libs/mid.pen-quarantine", StringComparison.Ordinal));
+        var first = GitCheck.RunWithoutSession(super, startedWithGit: true, commonGitDir: null, modulesAtStart: []);
+        Assert.Contains(first.Moved, q => q is Quarantined.Moved m && m.To.EndsWith("modules/libs/mid.pen-quarantine", StringComparison.Ordinal));
 
         AssertStays(t, super);
     }

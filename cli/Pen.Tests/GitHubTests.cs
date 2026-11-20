@@ -70,9 +70,9 @@ public class GitHubTests
     {
         using var t = new TempDir();
         var p = RepoWithOrigin(t, "https://github.com/acme/r");
-        Assert.Equal("acme", GitHub.FindProjectOwner(p, Config.Empty));
-        Assert.Equal("fork", GitHub.FindProjectOwner(p, Config.Parse("github_owner = \"fork\"", "x", ConfigKind.Project)));
-        Assert.Null(GitHub.FindProjectOwner(RepoWithOrigin(new TempDir(), null), Config.Empty));
+        Assert.Equal("acme", GitHub.FindProjectOwner(p, ProjectConfiguration.Empty));
+        Assert.Equal("fork", GitHub.FindProjectOwner(p, ConfigParser.ParseProject("github_owner = \"fork\"", "x", RecipeCatalog.Embedded)));
+        Assert.Null(GitHub.FindProjectOwner(RepoWithOrigin(new TempDir(), null), ProjectConfiguration.Empty));
     }
 
     [Fact]
@@ -82,19 +82,75 @@ public class GitHubTests
         var host = t.Host();
         var runtime = t.Sub("runtime");
         var marker = Path.Combine(runtime, "token-notice");
-        var none = Config.Empty;
-        var with = Config.Parse("[github]\nACME = \"tok\"", "x", ConfigKind.User);
+        var none = UserConfiguration.Empty;
+        var with = ConfigParser.ParseUser("[github]\nACME = \"tok\"", "x", RecipeCatalog.Embedded);
 
-        Assert.Null(GitHub.SelectToken("acme", none, runtime, host));
+        Assert.Null(GitHub.SelectTokenAndUpdateNotice("acme", none, runtime, host));
         Assert.True(File.Exists(marker));
-        Assert.Null(GitHub.SelectToken("acme", none, runtime, host));
+        Assert.Null(GitHub.SelectTokenAndUpdateNotice("acme", none, runtime, host));
 
-        Assert.Equal("tok", GitHub.SelectToken("Acme", with, runtime, host)); // owner match is case-insensitive
+        Assert.Equal("tok", GitHub.SelectTokenAndUpdateNotice("Acme", with, runtime, host)); // owner match is case-insensitive
         Assert.False(File.Exists(marker));
 
-        Assert.Null(GitHub.SelectToken("acme", none, runtime, host));
+        Assert.Null(GitHub.SelectTokenAndUpdateNotice("acme", none, runtime, host));
         Assert.True(File.Exists(marker));
 
-        Assert.Null(GitHub.SelectToken(null, with, runtime, host));
+        Assert.Null(GitHub.SelectTokenAndUpdateNotice(null, with, runtime, host));
+    }
+}
+
+/// <summary>Which token a session gets, and the notice that's printed once when there's none.</summary>
+[Collection(nameof(LockAndProcessTests))] // it replaces the console's stderr
+public class GitHubTokenNoticeTests
+{
+    private static string? Select(string? owner, UserConfiguration user, string runtimeDir, HostEnv host) =>
+        GitHub.SelectTokenAndUpdateNotice(owner, user, runtimeDir, host);
+
+    private static (string? Token, string Stderr) Capturing(Func<string?> select)
+    {
+        var stderr = Console.Error;
+        var captured = new StringWriter();
+        Console.SetError(captured);
+        try { return (select(), captured.ToString()); }
+        finally { Console.SetError(stderr); }
+    }
+
+    [Fact]
+    public void TheTokenIsTheOwnersIgnoringCase_AndTheNoticeIsPrintedOnceUntilATokenClearsIt()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        var runtime = t.Sub("runtime");
+        var marker = Path.Combine(runtime, "token-notice");
+        var none = ConfigParser.ParseUser("[github]\nother = \"tok_other\"\n", "u", RecipeCatalog.Embedded);
+        var with = ConfigParser.ParseUser("[github]\nAcme = \"tok_acme\"\nother = \"tok_other\"\n", "u", RecipeCatalog.Embedded);
+        var notice = $"pen: no GitHub token for 'Acme': add Acme = \"github_pat_…\" under [github] in {host.Display(host.UserConfigPath)}\n";
+
+        // No owner: no token, no notice and no marker, whatever the user has.
+        Assert.Equal((null, ""), Capturing(() => Select(null, with, runtime, host)));
+        Assert.Equal((null, ""), Capturing(() => Select(null, none, runtime, host)));
+        Assert.False(Path.Exists(marker));
+
+        // A token for the owner: no notice, and no marker is made.
+        Assert.Equal(("tok_acme", ""), Capturing(() => Select("acme", with, runtime, host)));
+        Assert.Equal(("tok_acme", ""), Capturing(() => Select("ACME", with, runtime, host)));
+        Assert.False(Path.Exists(marker));
+
+        // None for the owner: the notice once, naming the owner as given, and an empty marker.
+        Assert.Equal((null, notice), Capturing(() => Select("Acme", none, runtime, host)));
+        Assert.Equal("", File.ReadAllText(marker));
+        Assert.Equal((null, ""), Capturing(() => Select("Acme", none, runtime, host)));
+        Assert.Equal((null, ""), Capturing(() => Select("acme", none, runtime, host)));
+        Assert.True(File.Exists(marker));
+
+        // A token again clears the marker silently, so losing it notices again.
+        Assert.Equal(("tok_acme", ""), Capturing(() => Select("Acme", with, runtime, host)));
+        Assert.False(Path.Exists(marker));
+        Assert.Equal((null, notice), Capturing(() => Select("Acme", none, runtime, host)));
+        Assert.True(File.Exists(marker));
+
+        // The marker is per runtime dir.
+        var otherRuntime = t.Sub("other-runtime");
+        Assert.Equal((null, notice), Capturing(() => Select("Acme", none, otherRuntime, host)));
     }
 }

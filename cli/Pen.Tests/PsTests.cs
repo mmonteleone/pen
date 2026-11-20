@@ -7,7 +7,7 @@ public class PsTests
     private static readonly DateTime Now = new(2026, 11, 6, 12, 0, 0, DateTimeKind.Utc);
 
     /// <summary>An open session under <paramref name="key"/>; its lock is held (running) unless dead.</summary>
-    private static FileLock? Session(HostEnv host, string key, string id, string projectDir, string[]? command, DateTime? started, bool docker = false, bool dead = false, int[]? ports = null, ToolSpec[]? tools = null)
+    private static FileLock? Session(HostEnv host, string key, string id, string projectDir, string[]? command, DateTime? started, bool docker = false, bool dead = false, int[]? ports = null, ToolSpec[]? tools = null, string? openEgress = null)
     {
         var s = new SessionDir(key, Path.Combine(host.GetRuntimeDir(key), "sessions", id));
         Directory.CreateDirectory(s.Path);
@@ -17,6 +17,7 @@ public class PsTests
         if (docker) File.WriteAllText(s.DockerMarker, "");
         if (ports != null) s.WritePorts(ports);
         if (tools != null) s.WriteTools(tools, []);
+        if (openEgress != null) File.WriteAllText(s.OpenEgressFile, openEgress);
         File.WriteAllText(s.ComposeFile, "");
         return dead ? null : FileLock.TryTake(s.LockFile, exclusive: true);
     }
@@ -45,16 +46,16 @@ public class PsTests
         var b = Path.Combine(host.Home, "src", "b");
         using var l1 = Session(host, "pen-b-22222222", "aaaa0001", b, ["claude"], Now.AddMinutes(-5));
         using var l2 = Session(host, "pen-b-22222222", "aaaa0002", b, [], Now.AddHours(-3).AddMinutes(-7), docker: true, tools: [new("a", "1"), new("b", "2")]);
-        using var l3 = Session(host, "pen-a-11111111", "bbbb0001", "/srv/a", ["npm", "run", "dev server"], Now.AddDays(-2).AddHours(-4), ports: [5173, 3000]);
+        using var l3 = Session(host, "pen-a-11111111", "bbbb0001", "/srv/a", ["npm", "run", "dev server"], Now.AddDays(-2).AddHours(-4), ports: [5173, 3000], openEgress: ".\n");
         using var dead = Session(host, "pen-a-11111111", "bbbb0002", "/srv/a", ["dead"], Now, dead: true);
 
         var sessions = SessionRegistry.FindRunningEverywhere(host);
         Assert.Equal(3, sessions.Count);
         Assert.Equal("""
-            PROJECT  SESSION   DOCKER  PORTS      TOOLS    AGE    COMMAND
-            /srv/a   bbbb0001          5173,3000           2d04h  npm run 'dev server'
-            ~/src/b  aaaa0002  docker             a:1,b:2  3h07m  (shell)
-            ~/src/b  aaaa0001                              5m     claude
+            PROJECT  SESSION   DOCKER  EGRESS  PORTS      TOOLS    AGE    COMMAND
+            /srv/a   bbbb0001          open    5173,3000           2d04h  npm run 'dev server'
+            ~/src/b  aaaa0002  docker                     a:1,b:2  3h07m  (shell)
+            ~/src/b  aaaa0001                                      5m     claude
 
             """, PsCommand.Render(host, sessions, Now));
     }
@@ -65,7 +66,22 @@ public class PsTests
         using var t = new TempDir();
         var host = t.Host();
         using var l = Session(host, "pen-a-11111111", "cccc0001", "/srv/a", command: null, started: null);
-        Assert.EndsWith("/srv/a   cccc0001                        ?    ?\n", PsCommand.Render(host, SessionRegistry.FindRunningEverywhere(host), Now));
+        Assert.EndsWith("/srv/a   cccc0001                                ?    ?\n", PsCommand.Render(host, SessionRegistry.FindRunningEverywhere(host), Now));
+    }
+
+    [Fact]
+    public void OnlyAnOpenEgressFileThatOpensMarksTheSession()
+    {
+        using var t = new TempDir();
+        var host = t.Host();
+        using var closed = Session(host, "pen-a-11111111", "dddd0001", "/srv/a", ["a"], Now, openEgress: "");
+        using var open = Session(host, "pen-a-11111111", "dddd0002", "/srv/a", ["b"], Now.AddSeconds(1), openEgress: ".\n");
+        using var old = Session(host, "pen-a-11111111", "dddd0003", "/srv/a", ["c"], Now.AddSeconds(2));
+        var rows = PsCommand.Render(host, SessionRegistry.FindRunningEverywhere(host), Now.AddSeconds(5)).Split('\n');
+        Assert.Equal("PROJECT  SESSION   DOCKER  EGRESS  PORTS  TOOLS  AGE  COMMAND", rows[0]);
+        Assert.Equal("/srv/a   dddd0001                                5s   a", rows[1]);
+        Assert.Equal("/srv/a   dddd0002          open                  4s   b", rows[2]);
+        Assert.Equal("/srv/a   dddd0003                                3s   c", rows[3]);
     }
 
     [Fact]

@@ -83,14 +83,19 @@ public class GitConfigFileTests
         var bad = Path.Combine(t.Path, "bad");
         File.WriteAllText(bad, "[core\n");
         var dir = t.Sub("dir");
+        static IReadOnlyList<GitConfigFile.Entry>? TryParseFile(string path) =>
+            GitConfigFile.TryParseFile(path, out var entries, out _) ? entries : null;
 
-        Assert.Equal([new GitConfigFile.Entry("core", null, "bare", "false")], GitConfigFile.TryParseFile(good));
-        Assert.Empty(GitConfigFile.TryParseFile(Path.Combine(t.Path, "missing"))!);
-        Assert.Empty(GitConfigFile.TryParseFile(Path.Combine(t.Path, "no-dir", "config"))!);
-        Assert.Throws<PenException>(() => GitConfigFile.ParseFile(bad));
-        Assert.Null(GitConfigFile.TryParseFile(bad));
-        Assert.Throws<PenException>(() => GitConfigFile.ParseFile(dir));
-        Assert.Null(GitConfigFile.TryParseFile(dir));
+        Assert.Equal([new GitConfigFile.Entry("core", null, "bare", "false")], TryParseFile(good));
+        Assert.Empty(TryParseFile(Path.Combine(t.Path, "missing"))!);
+        Assert.Empty(TryParseFile(Path.Combine(t.Path, "no-dir", "config"))!);
+        Assert.Null(TryParseFile(bad));
+        Assert.Null(TryParseFile(dir));
+        foreach (var unparseable in new[] { bad, dir })
+        {
+            Assert.False(GitConfigFile.TryParseFile(unparseable, out _, out var error));
+            Assert.Equal(Assert.Throws<PenException>(() => GitConfigFile.ParseFile(unparseable)).Message, error);
+        }
     }
 
     [Fact]
@@ -147,7 +152,7 @@ public class GitConfigFileTests
     [InlineData("%(prefix)x", "%(prefix)x")]
     public void ExpandPath_ExpandsTheHome_AndLeavesOtherValuesAsTheyAre(string value, string expected) =>
         Assert.Equal(
-            new GitConfigFile.ExpandedPath(expected, GitConfigFile.PathRefusal.None),
+            new GitConfigFile.ExpandedPath.Expanded(expected),
             GitConfigFile.ExpandPath(value, "/home/u"));
 
     [Theory]
@@ -158,7 +163,7 @@ public class GitConfigFileTests
     [InlineData("%(prefix)/")]
     public void ExpandPath_RefusesAnotherUsersHomeAndThePrefix(string value) =>
         Assert.Equal(
-            new GitConfigFile.ExpandedPath(null, GitConfigFile.PathRefusal.UnknownForm),
+            new GitConfigFile.ExpandedPath.Refused(GitConfigFile.PathRefusal.UnknownForm),
             GitConfigFile.ExpandPath(value, "/home/u"));
 
     [Theory]
@@ -170,6 +175,6 @@ public class GitConfigFileTests
     [InlineData("\uFFFD")]
     public void ExpandPath_RefusesInvalidUtf8_BeforeAnythingElse(string value) =>
         Assert.Equal(
-            new GitConfigFile.ExpandedPath(null, GitConfigFile.PathRefusal.NotUtf8),
+            new GitConfigFile.ExpandedPath.Refused(GitConfigFile.PathRefusal.NotUtf8),
             GitConfigFile.ExpandPath(value, "/home/u"));
 }

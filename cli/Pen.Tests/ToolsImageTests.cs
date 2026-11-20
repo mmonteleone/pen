@@ -150,6 +150,22 @@ public class ToolsImageTests
     }
 
     [Fact]
+    public void TheDockerfileAndTagOfARecipeWithEnvAndAllowArePinned()
+    {
+        var catalog = Catalog(settings: "default = \"1\"\nversion = '^\\d+$'\nallow = [\"b.example\", \"a.example\"]\n" +
+            "[env]\nZED = \"z\"\nALPHA = \"a\"\nMID = \"m\"\n");
+        ToolSpec[] tools = [new("a", "1"), new("b", "2")];
+        Assert.Equal(
+            "FROM pen:latest\nUSER root\n" +
+                "RUN --mount=type=bind,source=tools/a,target=/pen-recipe [\"/pen-recipe/install.sh\",\"1\"]\n" +
+                "RUN --mount=type=bind,source=tools/b,target=/pen-recipe [\"/pen-recipe/install.sh\",\"2\"]\n" +
+                "ENV ZED=\"z\"\nENV ALPHA=\"a\"\nENV MID=\"m\"\n",
+            ToolsImage.GenerateDockerfile(tools, catalog));
+        Assert.Equal("pen-tools:f2db330ad3282861", ToolsImage.ComputeTag(BaseId, tools, catalog));
+        Assert.Equal(["b.example", "a.example"], ToolSpec.ListDomains(tools, catalog));
+    }
+
+    [Fact]
     public void WithoutTheCacheAnExistingTagIsBuiltAgain()
     {
         using var t = new TempDir();

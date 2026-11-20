@@ -13,10 +13,10 @@ namespace Pen.Trust;
 /// worktree the agent made starts with none. A store is immutable; approving returns the store as written.
 /// </para>
 /// <para>
-/// The file is plain text, a line for each approval. Every value is checked to be a strict shape, when
-/// written and when read, so none can hold a line break and add an approval. Anything else in the file
-/// means it's corrupt, and a corrupt store approves nothing. The file names its directory because
-/// hash(dir) is short enough to collide on purpose.
+/// The file is plain text, a line for each approval. Every value is checked to be a strict shape, when written and
+/// when read, so none can hold a line break and add an approval. Anything else in the file means it's corrupt, and a
+/// corrupt store approves nothing. The file names its directory because hash(dir) is short enough to collide on
+/// purpose.
 /// </para>
 /// </remarks>
 internal sealed class TrustStore
@@ -26,6 +26,13 @@ internal sealed class TrustStore
     private readonly string _path;
     private readonly string _dir;
     private readonly HashSet<string> _domains = new(StringComparer.Ordinal);
+
+    /// <summary>Whether allow = ["*"] is approved.</summary>
+    /// <remarks>
+    /// Kept apart from <see cref="_domains"/>, so it covers only the project's own "*" entry: a domain allowed by
+    /// name reaches private addresses, which open egress doesn't.
+    /// </remarks>
+    private bool _anyDomain;
     private readonly HashSet<string> _owners = new(StringComparer.Ordinal);
     private readonly HashSet<string> _tools = new(StringComparer.Ordinal);
 
@@ -60,13 +67,9 @@ internal sealed class TrustStore
 
     private static TrustStore Read(string path, string dir)
     {
-        string? text = null;
-        try
-        {
-            text = Native.ReadRegularFile(path);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
-        return (text == null ? null : Parse(text, path, dir)) ?? new TrustStore(path, dir);
+        if (Native.ReadRegularFileOrNull(path) is { } text && Parse(text, path, dir) is { } store)
+            return store;
+        return new TrustStore(path, dir);
     }
 
     /// <summary>Parses the store file's <paramref name="text"/>.</summary>
@@ -97,22 +100,22 @@ internal sealed class TrustStore
         var value = space < 0 ? null : line[(space + 1)..];
         switch (kind)
         {
-            case "allow" when value != null && IsDomain(value):
-                _domains.Add(value);
+            case "allow" when value is not null && IsAllowEntry(value):
+                AddAllowEntry(value);
                 return true;
-            case "github_owner" when value != null && IsOwner(value):
+            case "github_owner" when value is not null && IsOwner(value):
                 _owners.Add(value);
                 return true;
-            case "tool" when value != null && ToolSpec.IsCanonicalText(value):
+            case "tool" when value is not null && ToolSpec.IsCanonicalText(value):
                 _tools.Add(value);
                 return true;
-            case "tool-allow" when value != null && IsToolDomain(value):
+            case "tool-allow" when value is not null && IsToolDomain(value):
                 _toolDomains.Add(value);
                 return true;
-            case "docker" when value == null:
+            case "docker" when value is null:
                 Docker = true;
                 return true;
-            case "layer" when value != null && IsHash(value) && LayerHash == null:
+            case "layer" when value is not null && IsHash(value) && LayerHash is null:
                 LayerHash = value;
                 return true;
             default:
@@ -122,17 +125,37 @@ internal sealed class TrustStore
 
     private static bool IsDomain(string value) => Allowlist.IsValidDomain(value);
 
+    /// <summary>
+    /// Whether <paramref name="value"/> may be an allow line's: a domain, or <see cref="Allowlist.AnyDomain"/>.
+    /// </summary>
+    /// <remarks>Only allow lines take "*": a tool-allow line's domain is always a domain.</remarks>
+    private static bool IsAllowEntry(string value) => Allowlist.IsValidAllowEntry(value);
+
+    private void AddAllowEntry(string entry)
+    {
+        if (entry == Allowlist.AnyDomain)
+            _anyDomain = true;
+        else
+            _domains.Add(entry);
+    }
+
     private static bool IsOwner(string value) =>
-        Config.OwnerRegex().IsMatch(value) && value == value.ToLowerInvariant();
+        TomlReader.OwnerRegex().IsMatch(value) && value == value.ToLowerInvariant();
 
     private static bool IsToolDomain(string value) =>
         value.Split(' ') is [var tool, var domain] && ToolSpec.IsCanonicalText(tool) && IsDomain(domain);
 
     private static bool IsHash(string value) => value.Length == 64 && value.All(c => char.IsAsciiHexDigitLower(c));
 
-    /// <summary>Whether <paramref name="domain"/> is approved as written, or under an approved wildcard.</summary>
-    /// <remarks>example.com doesn't cover .example.com.</remarks>
-    public bool CoversDomain(string domain) => Allowlist.IsAllowed(_domains, domain);
+    /// <summary>
+    /// Whether the allow entry <paramref name="domain"/> is approved as written, or under an approved wildcard.
+    /// </summary>
+    /// <remarks>
+    /// example.com doesn't cover .example.com. An approved <see cref="Allowlist.AnyDomain"/> covers that entry and
+    /// nothing else, so it approves no domain by name.
+    /// </remarks>
+    public bool CoversDomain(string domain) =>
+        domain == Allowlist.AnyDomain ? _anyDomain : Allowlist.IsAllowed(_domains, domain);
 
     /// <summary>Whether <paramref name="owner"/> is approved as a github_owner, ignoring case.</summary>
     public bool CoversOwner(string owner) => _owners.Contains(owner.ToLowerInvariant());
@@ -146,36 +169,36 @@ internal sealed class TrustStore
     public bool CoversToolDomain(ToolSpec tool, string domain) => _toolDomains.Contains($"{tool} {domain}");
 
     /// <summary>Selects the project tools approved along with every domain they bring.</summary>
-    public List<ToolSpec> SelectApprovedTools(IEnumerable<ToolSpec> tools, RecipeCatalog catalog) =>
-        tools.Where(tool => CoversTool(tool)
-                && ToolSpec.ListDomains([tool], catalog).All(domain => CoversToolDomain(tool, domain)))
-            .ToList();
-
-    /// <summary>Selects the approved domains of a project's <paramref name="allow"/> list.</summary>
-    /// <returns>All of the list that may reach an allowlist.</returns>
-    public List<string> SelectApprovedDomains(IEnumerable<string> allow) => allow.Where(CoversDomain).ToList();
+    public IReadOnlyList<ToolSpec> SelectApprovedTools(IEnumerable<ToolSpec> tools, RecipeCatalog catalog) =>
+        [.. tools.Where(tool => CoversTool(tool)
+                && ToolSpec.ListDomains([tool], catalog).All(domain => CoversToolDomain(tool, domain)))];
 
     /// <summary>Records everything in <paramref name="request"/>.</summary>
     /// <returns>The store as written.</returns>
     /// <exception cref="PenException">When its layer has a problem, so it can't be approved.</exception>
     public TrustStore Approve(TrustRequest request)
     {
-        if (request.Layer is { Hash: null, Problem: var problem })
+        if (request.Layer is LayerRequest.Uncheckable(var problem))
             throw new PenException($"can't approve .pen/: {problem}");
-        return SaveWith(request.Domains, request.GitHubOwner, request.Docker, request.Layer?.Hash, request.Tools);
+        return SaveWith(
+            domains: request.Domains,
+            owner: request.GitHubOwner,
+            docker: request.Docker,
+            layerHash: (request.Layer as LayerRequest.Unapproved)?.Hash,
+            tools: request.Tools);
     }
 
     /// <summary>Records domains the user typed.</summary>
     /// <returns>The store as written.</returns>
-    public TrustStore ApproveDomains(IEnumerable<string> domains) => SaveWith(domains, null, false, null, []);
+    public TrustStore ApproveDomains(IEnumerable<string> domains) =>
+        SaveWith(domains: domains, owner: null, docker: false, layerHash: null, tools: []);
 
     /// <summary>Saves the file's current approvals together with these.</summary>
     /// <returns>The store as written.</returns>
     /// <exception cref="PenException">When a value isn't its strict shape: then nothing is written.</exception>
     /// <remarks>
-    /// It adds to what the file holds now, since another Pen may have approved something since this store
-    /// was read (losing that would only ask again), and replaces it by rename, so it's never seen
-    /// half-written.
+    /// It adds to what the file holds now, since another Pen may have approved something since this store was read
+    /// (losing that would only ask again), and replaces it by rename, so it's never seen half-written.
     /// </remarks>
     private TrustStore SaveWith(
         IEnumerable<string> domains,
@@ -186,9 +209,9 @@ internal sealed class TrustStore
     {
         var next = Read(_path, _dir);
         next.AddDomains(domains);
-        if (owner != null)
+        if (owner is not null)
             next.AddOwner(owner);
-        if (layerHash != null)
+        if (layerHash is not null)
             next.AddLayerHash(layerHash);
         foreach (var request in tools)
             next.AddTool(request);
@@ -203,9 +226,9 @@ internal sealed class TrustStore
     {
         foreach (var domain in domains)
         {
-            if (!IsDomain(domain))
+            if (!IsAllowEntry(domain))
                 throw new PenException($"can't approve {Out.Field(domain)}: it isn't a domain");
-            _domains.Add(domain);
+            AddAllowEntry(domain);
         }
     }
 
@@ -242,13 +265,15 @@ internal sealed class TrustStore
     private void WriteFile()
     {
         var lines = new List<string> { Header, "dir " + _dir };
+        if (_anyDomain)
+            lines.Add("allow " + Allowlist.AnyDomain);
         lines.AddRange(_domains.Order(StringComparer.Ordinal).Select(domain => "allow " + domain));
         lines.AddRange(_owners.Order(StringComparer.Ordinal).Select(owner => "github_owner " + owner));
         lines.AddRange(_tools.Order(StringComparer.Ordinal).Select(tool => "tool " + tool));
         lines.AddRange(_toolDomains.Order(StringComparer.Ordinal).Select(domain => "tool-allow " + domain));
         if (Docker)
             lines.Add("docker");
-        if (LayerHash != null)
+        if (LayerHash is not null)
             lines.Add("layer " + LayerHash);
 
         var mode = UnixFileMode.UserRead | UnixFileMode.UserWrite;

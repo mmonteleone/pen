@@ -9,8 +9,6 @@ allow = [
   # OpenCode's own services, and the models.dev catalog of providers and models
   ".opencode.ai",
   "models.dev",
-  # OpenCode installs its plugin package (@opencode-ai/plugin) from npm at run time.
-  "registry.npmjs.org",
   # Anthropic: API and OAuth login
   ".anthropic.com",
   ".claude.ai",

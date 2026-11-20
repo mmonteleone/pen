@@ -1,13 +1,12 @@
 using System.Text;
-using Pen.GitProtection;
 using Pen.Platform;
 
 namespace Pen.Configuration;
 
 /// <summary>Creates the home seed, ~/.config/pen/home/: sandbox-wide agent config laid out like $HOME.</summary>
 /// <remarks>
-/// It's mounted read-only at /etc/pen/seed and copied into each project's
-/// home by sync-seed.sh. See docs/usage.md's agent config section for ownership.
+/// It's mounted read-only at /etc/pen/seed and copied into each project's home by sync-seed.sh. See docs/usage.md's
+/// agent config section for ownership.
 /// </remarks>
 internal static class Seed
 {
@@ -21,7 +20,7 @@ internal static class Seed
     public static bool EnsureExists(HostEnv host, GitIdentity identity)
     {
         var seed = host.SeedDir;
-        if (Path.Exists(seed) || RepoGuard.IsLink(seed))
+        if (Path.Exists(seed) || PathChecks.IsLink(seed))
             return false;
 
         // Built next to it, then renamed, so a failure never leaves half a seed.
@@ -33,7 +32,7 @@ internal static class Seed
         {
             var relative = resource[Prefix.Length..];
             var path = Path.Combine(staging, relative);
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            Directory.CreateDirectory(Paths.GetParent(path));
             if (relative == ".gitconfig")
                 File.WriteAllText(path, BuildGitConfig(Embedded.ReadText(resource), identity.Name, identity.Email));
             else
@@ -68,7 +67,7 @@ internal static class Seed
     private static string IdentityLine(string key, string? value, string example) =>
         value is { Length: > 0 } ? $"\t{key} = {Quote(value)}" : $"#\t{key} = {example}";
 
-    /// <summary>A git config value, quoted, with \ and " escaped.</summary>
+    /// <summary>Quotes a git config value, with \ and " escaped.</summary>
     internal static string Quote(string value) =>
         "\""
             + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal)

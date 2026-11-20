@@ -78,7 +78,7 @@ public class ScanFailClosedTests
         Assert.Null(check.Failure);
         Assert.Equal(Path.Combine(sub, "x", ".git"), Assert.Single(check.Moved).From);
         Assert.True(Directory.Exists(Path.Combine(sub, "x", ".git.pen-quarantine")));
-        var c = Assert.Single(check.Opened);
+        var c = Assert.Single(check.ModeChanges);
         Assert.Equal((sub, Mode311), (c.Path, c.Was));
         Assert.Equal(c.Now, File.GetUnixFileMode(sub));
         Assert.True(c.Now.HasFlag(UnixFileMode.UserRead));
@@ -91,7 +91,7 @@ public class ScanFailClosedTests
         var stderr = Console.Error;
         var captured = new StringWriter();
         Console.SetError(captured);
-        try { GitCheck.Report("/p", new CheckResult { Moved = [], Failure = null, Opened = opened }); }
+        try { GitCheckReport.Print("/p", new CheckResult { Moved = [], Failure = null, ModeChanges = opened }); }
         finally { Console.SetError(stderr); }
         Assert.Contains("changed sub from mode 311 to 711", captured.ToString());
     }
@@ -99,21 +99,21 @@ public class ScanFailClosedTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void ADirectoryThatStaysUnlistableIsReported(bool claimsOpened)
+    public void ADirectoryThatStaysUnlistableIsReported(bool claimsMadeListable)
     {
         using var t = new TempDir();
         var repo = RepoWithHiddenRepo(t, out var sub);
         using var _ = new Chmod(sub, Mode311);
-        Assert.Equal([sub], RepoScan.ScanNested(repo, Path.Combine(repo, ".git"), [], p => claimsOpened).UnlistableDirs);
+        Assert.Equal([sub], RepoScan.ScanNested(repo, Path.Combine(repo, ".git"), [], p => claimsMadeListable).UnlistableDirs);
     }
 
     [Fact]
-    public void WithoutOpeningAnUnlistableDirectoryIsAFailure_AndKeepsItsMode()
+    public void WithoutMakingItListable_AnUnlistableDirectoryIsAFailure_AndKeepsItsMode()
     {
         using var t = new TempDir();
         var repo = RepoWithHiddenRepo(t, out var sub);
         using var _ = new Chmod(sub, Mode311);
-        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
+        var check = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
         Assert.Contains("can't list", check.Failure);
         Assert.Contains("sub", check.Failure);
         Assert.Equal(Mode311, File.GetUnixFileMode(sub));
@@ -136,7 +136,7 @@ public class ScanFailClosedTests
 
         Assert.Null(check.Failure);
         Assert.Empty(check.Moved);
-        Assert.Empty(check.Opened);
+        Assert.Empty(check.ModeChanges);
         Assert.Equal(mode, File.GetUnixFileMode(db));
     }
 
@@ -186,7 +186,7 @@ public class ScanFailClosedTests
         var check = Within10s(() => GitCheck.RunAtSessionEnd(repo, Session(t, Path.Combine(repo, ".git"))));
         Assert.Null(check.Failure);
         Assert.Equal(fifo, Assert.Single(check.Moved).From);
-        Assert.False(RepoGuard.Exists(fifo));
+        Assert.False(PathChecks.ExistsOrIsLink(fifo));
     }
 
     [Fact]
@@ -289,28 +289,28 @@ public class ScanFailClosedTests
         using var t = new TempDir();
         var fifo = Path.Combine(t.Path, "fifo");
         MkFifo(fifo);
-        var e = Within10s(() => Assert.Throws<PenException>(() => Config.ReadText(fifo, ".pen/config.toml")));
+        var e = Within10s(() => Assert.Throws<PenException>(() => ConfigLoader.ReadText(fifo, ".pen/config.toml")));
         Assert.Contains(".pen/config.toml isn't a regular file", e.Message);
-        var viaAllow = Within10s(() => Assert.Throws<PenException>(() => AllowCommand.Append(fifo, ".pen/config.toml", ConfigKind.Project, ["a.example"], "")));
+        var viaAllow = Within10s(() => Assert.Throws<PenException>(() => ConfigFileEditor.AddToList(new(fifo, ".pen/config.toml", ConfigKind.Project, ""), ConfigListKey.Allow, ["a.example"], RecipeCatalog.Embedded)));
         Assert.Contains(".pen/config.toml isn't a regular file", viaAllow.Message);
         var huge = Path.Combine(t.Path, "huge");
         Sparse(huge, ThreeGb);
-        Assert.Throws<PenException>(() => Config.ReadText(huge, ".pen/config.toml"));
+        Assert.Throws<PenException>(() => ConfigLoader.ReadText(huge, ".pen/config.toml"));
     }
 
     [Fact]
-    public void TryOpenWontChmodThroughASymlink()
+    public void TryMakeListableWontChmodThroughASymlink()
     {
         using var t = new TempDir();
         var target = t.Sub("target");
         var link = Path.Combine(t.Path, "link");
         File.CreateSymbolicLink(link, target);
         using var _ = new Chmod(target, Mode311);
-        Assert.False(GitCheck.TryOpen(link, write: false, out var opened));
+        Assert.False(FileModes.TryMakeListable(link, write: false, out var opened));
 
         Assert.Null(opened);
         Assert.Equal(Mode311, File.GetUnixFileMode(target));
-        Assert.True(GitCheck.TryOpen(target, write: false, out var reopened)); // the check above is what stopped it
+        Assert.True(FileModes.TryMakeListable(target, write: false, out var reopened)); // the check above is what stopped it
     }
 
     [Fact]
@@ -338,10 +338,10 @@ public class ScanFailClosedTests
 
     private static string Inc(params string[] paths) => string.Concat(paths.Select(p => $"[include]\n\tpath = {p}\n"));
 
-    private static List<Mount> Mounts(TempDir t, string repo) =>
-        Within10s(() => RepoGuard.PrepareMounts(repo, t.Path));
+    private static IReadOnlyList<Mount> Mounts(TempDir t, string repo) =>
+        Within10s(() => new MountPlanner(repo, t.Path).EnsureTargetsAndPlan());
 
-    private static bool ReadOnly(List<Mount> mounts, string path) => mounts.Any(m => m.Path == path && m.ReadOnly);
+    private static bool ReadOnly(IReadOnlyList<Mount> mounts, string path) => mounts.Any(m => m.Path == path && m.ReadOnly);
 
     [Fact]
     public void ASelfIncludingConfigWorktreeDoesntHangStartOrTheChecks()
@@ -352,7 +352,7 @@ public class ScanFailClosedTests
         File.WriteAllText(file, string.Concat(Enumerable.Repeat(Inc("config.worktree"), 64)));
 
         Assert.True(ReadOnly(Mounts(t, repo), file));
-        Assert.Empty(Within10s(() => GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved));
+        Assert.Empty(Within10s(() => GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved));
         Assert.Null(Within10s(() => GitCheck.RunAtSessionEnd(repo, Session(t, Path.Combine(repo, ".git")))).Failure);
     }
 
@@ -410,8 +410,8 @@ public class ScanFailClosedTests
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
         var file = Path.Combine(repo, ".git", "config.worktree");
-        File.WriteAllText(file, Inc(Enumerable.Range(0, RepoGuard.MaxIncludeFiles + 1).Select(i => $"f{i}.inc").ToArray()));
-        var e = Within10s(() => Assert.Throws<PenException>(() => RepoGuard.PrepareMounts(repo, t.Path)));
+        File.WriteAllText(file, Inc(Enumerable.Range(0, GitConfigIncludes.MaxFiles + 1).Select(i => $"f{i}.inc").ToArray()));
+        var e = Within10s(() => Assert.Throws<PenException>(() => new MountPlanner(repo, t.Path).EnsureTargetsAndPlan()));
         Assert.Contains(".git/config.worktree", e.Message);
         Assert.Contains("remove it", e.Message);
     }
@@ -428,20 +428,20 @@ public class ScanFailClosedTests
         var path = include == "LONG" ? new string('n', 300) : include;
         File.WriteAllText(file, Inc(path));
 
-        var e = Assert.Throws<PenException>(() => RepoGuard.PrepareMounts(repo, t.Path));
+        var e = Assert.Throws<PenException>(() => new MountPlanner(repo, t.Path).EnsureTargetsAndPlan());
         Assert.Contains(".git/config.worktree includes", e.Message);
         Assert.Contains(path, e.Message);
         Assert.Contains("remove it", e.Message);
 
         File.Delete(file);
-        RepoGuard.PrepareMounts(repo, t.Path);
+        new MountPlanner(repo, t.Path).EnsureTargetsAndPlan();
     }
 
     [Fact]
-    public void AnOpenDirectoryWithTheBitsAlreadySetRecordsNoChange()
+    public void AnAlreadyListableDirectoryRecordsNoChange()
     {
         using var t = new TempDir();
-        Assert.False(GitCheck.TryOpen(t.Sub("d"), write: false, out var opened));
+        Assert.False(FileModes.TryMakeListable(t.Sub("d"), write: false, out var opened));
         Assert.Null(opened);
     }
 
@@ -451,7 +451,7 @@ public class ScanFailClosedTests
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
         var dirs = Enumerable.Range(0, RepoGuard.MaxListed + 2).Select(i => new Chmod(t.Sub("repo", $"d{i}"), Mode311)).ToList();
-        try { Assert.Contains("and 2 more", GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Failure); }
+        try { Assert.Contains("and 2 more", GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Failure); }
         finally { dirs.ForEach(d => d.Dispose()); }
     }
 
@@ -459,7 +459,7 @@ public class ScanFailClosedTests
     public void AConfigThatsGoneReadsAsNone()
     {
         using var t = new TempDir();
-        Assert.Null(Config.ReadText(Path.Combine(t.Path, "config.toml"), ".pen/config.toml"));
+        Assert.Null(ConfigLoader.ReadText(Path.Combine(t.Path, "config.toml"), ".pen/config.toml"));
     }
 
     [Fact]
@@ -470,11 +470,11 @@ public class ScanFailClosedTests
         var foo = Path.Combine(t.Sub("repo", ".git", "modules"), "foo");
         File.CreateSymbolicLink(foo, t.Sub("elsewhere"));
 
-        Assert.Equal(foo + GitCheck.Suffix, Assert.Single(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved).To);
+        Assert.Equal(foo + GitQuarantine.Suffix, Assert.IsType<Quarantined.Moved>(Assert.Single(GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved)).To);
 
-        Assert.Empty(GitCheck.RunWithoutOpening(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved);
+        Assert.Empty(GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved);
         Assert.Empty(RepoScan.FindModuleRepos(Path.Combine(repo, ".git")));
-        Assert.True(RepoGuard.IsLink(foo + GitCheck.Suffix));
+        Assert.True(PathChecks.IsLink(foo + GitQuarantine.Suffix));
     }
 
     [Fact]
@@ -509,7 +509,7 @@ public class ScanFailClosedTests
         var check = GitCheck.RunAtSessionEnd(repo, session);
 
         Assert.NotNull(check.Failure);
-        Assert.Contains(check.Moved, q => q.From == foo && q.To.Length == 0);
-        Assert.Contains(check.Moved, q => q.From == Path.Combine(repo, "co", ".git") && q.To.Length > 0);
+        Assert.Contains(check.Moved, q => q.From == foo && q is Quarantined.Failed);
+        Assert.Contains(check.Moved, q => q.From == Path.Combine(repo, "co", ".git") && q is Quarantined.Moved);
     }
 }

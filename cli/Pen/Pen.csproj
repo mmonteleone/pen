@@ -33,6 +33,14 @@
   <ItemGroup>
     <!-- TOML config parsing; source-generated metadata only (see TomlContext), so AOT-safe. -->
     <PackageReference Include="Tomlyn" Version="2.10.2" />
+    <!-- The command line's parsing and help; AOT- and trim-safe. -->
+    <PackageReference Include="System.CommandLine" Version="3.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- RS0030: the APIs in BannedSymbols.txt are used only by their owners. Analyzer only, nothing ships. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" PrivateAssets="all" />
+    <AdditionalFiles Include="BannedSymbols.txt" />
   </ItemGroup>
 
   <!-- Everything the CLI needs at runtime is embedded, so it never reads this

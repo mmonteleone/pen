@@ -1,0 +1,85 @@
+# Pen project config (TOML: https://toml.io) for the sessions started in this
+# project. It's usually committed, so it's no place for secrets: GitHub tokens and
+# [env] go in your user config, ~/.config/pen/config.toml.
+# .pen/ is read-only in the sandbox. Since it may come from a clone or an agent's
+# edit, new allow domains, tools, docker = true and a github_owner other than
+# origin's need your approval: the next session asks, or run `pen trust`.
+# Changes apply to the next session; `pen allow` and `pen deny` also apply them to
+# running ones. Everything is optional: uncomment what this project needs.
+# See docs/usage.md, "Project settings".
+
+# --- Tools -------------------------------------------------------------------------
+# Toolchains for this project's sandbox, as name or name:version (dotnet:10,
+# go:1.27); `pen tools` shows them. Each brings the domains it needs. They
+# add to your user config's tools and --tool.
+# Node (with npm) and Python (with pip and uv) are in the base image already.
+# Agents are tools too: `pen claude` brings Claude Code on its own, for that command
+# only, while an agent listed here is in every session, including a shell (`pen`).
+
+# tools = ["go", "rust", "claude"]
+{{base-tools-note}}
+{{tools}}
+
+# --- Network -----------------------------------------------------------------------
+# Extra domains the sandbox may reach, on top of Pen's defaults (GitHub, npm, PyPI,
+# container registries, docs), the domains tools and agents bring and your user
+# config's allow. A leading dot also allows subdomains; "*" on its own allows any
+# domain name (open egress). New domains need approval. `pen allow <domain>` adds
+# them here.
+
+# allow = ["example.com", ".example.org"]
+
+# Domains to block. A deny beats every allow (the defaults, both config files, tool
+# and agent domains, "*"); a leading dot denies subdomains too, and "*" isn't
+# accepted. They add to your user config's deny and need no approval.
+# `pen deny <domain>` adds them here.
+
+# deny = ["gist.github.com"]
+
+# --- Hidden files ------------------------------------------------------------------
+# Files and directories the agent sees as empty; your files are never touched. A
+# name matches at any depth; a leading or inner / anchors to the project; a trailing
+# / means a directory; * ? ** work as in .gitignore, ignoring case. They add to your
+# user config's hide. No approval needed. Not enforced with --docker.
+# See docs/usage.md, "Hiding files from the agent".
+
+# hide = [".env", "secrets/", "/config/prod.yaml"]
+{{hide}}
+
+# replace shows the agent a copy of another file in place of one, e.g. a .env with
+# placeholder values: target = source, both project-relative paths in quotes. The
+# target must be an existing regular file outside .git and .pen; the source a
+# regular file outside .git of at most 1 MB with no other hard links, and not
+# hidden. A target that hide also matches is still replaced, but one inside a
+# directory hide hides is refused. No approval needed. Written as a [replace] table
+# instead, it must come after every other key in this file.
+
+# replace = { ".env" = ".pen/agent.env" }
+{{replace-note}}
+
+# --- Dev servers -------------------------------------------------------------------
+# Ports forwarded from the host's 127.0.0.1 into the sandbox in every session, with
+# the same number on both sides (have the server listen on 0.0.0.0). A port already
+# in use is skipped with a warning; --port adds more.
+
+# ports = [5173]
+
+# --- Docker ------------------------------------------------------------------------
+# A Docker daemon for every session, as with --docker, for Testcontainers, compose
+# or image builds. It runs privileged and the agent controls it, which weakens
+# isolation and lets the agent undo Pen's git protections; hide and replace aren't
+# enforced. It needs approval.
+
+{{docker-note}}
+# docker = true
+
+# For software beyond the tools, add a .pen/Dockerfile starting FROM pen:latest.
+# Its build steps have direct network access, outside the allowlist. It and the
+# rest of .pen/ (except this file) need approval.
+# See docs/usage.md, "Extra software with a Dockerfile".
+
+# --- GitHub ------------------------------------------------------------------------
+# Whose token from [github] in ~/.config/pen/config.toml to use. By default it's
+# the owner of the origin remote; a different owner needs approval.
+
+# github_owner = "my-org"

@@ -20,22 +20,22 @@ internal static class GitDirWalk
     /// <param name="couldntLook">
     /// Called with a worktrees dir if it can't be listed, or each entry in it that can't be looked in.
     /// </param>
-    /// <param name="tryOpen">
-    /// Opens a directory that can't be listed or entered, or null to change no modes. It's tried first.
+    /// <param name="tryMakeListable">
+    /// Makes a directory that can't be listed or entered listable, or null to change no modes. It's tried first.
     /// </param>
     public static void Visit(
         string gitDir,
         Action<string> visit,
         Action<string> couldntLook,
-        Func<string, bool>? tryOpen)
+        Func<string, bool>? tryMakeListable)
     {
         if (!Directory.Exists(gitDir))
             return;
-        VisitWithWorktrees(gitDir, visit, couldntLook, tryOpen);
+        VisitWithWorktrees(gitDir, visit, couldntLook, tryMakeListable);
         foreach (var repo in RepoScan.FindModuleRepos(gitDir))
         {
-            if (!RepoGuard.IsLink(repo))
-                VisitWithWorktrees(repo, visit, couldntLook, tryOpen);
+            if (!PathChecks.IsLink(repo))
+                VisitWithWorktrees(repo, visit, couldntLook, tryMakeListable);
         }
     }
 
@@ -44,26 +44,26 @@ internal static class GitDirWalk
         string gitDir,
         Action<string> visit,
         Action<string> couldntLook,
-        Func<string, bool>? tryOpen)
+        Func<string, bool>? tryMakeListable)
     {
         visit(gitDir);
         var worktrees = Path.Combine(gitDir, "worktrees");
-        if (!RepoGuard.Exists(worktrees))
+        if (!PathChecks.ExistsOrIsLink(worktrees))
             return;
-        if (!RepoGuard.IsLink(worktrees) && Directory.Exists(worktrees) && !Native.CanList(worktrees))
-            tryOpen?.Invoke(worktrees);
-        if (RepoGuard.IsLink(worktrees) || !Directory.Exists(worktrees) || !Native.CanList(worktrees))
+        if (!PathChecks.IsLink(worktrees) && Directory.Exists(worktrees) && !Native.CanList(worktrees))
+            tryMakeListable?.Invoke(worktrees);
+        if (PathChecks.IsLink(worktrees) || !Directory.Exists(worktrees) || !Native.CanList(worktrees))
         {
             couldntLook(worktrees);
             return;
         }
         foreach (var entry in Directory.EnumerateFileSystemEntries(worktrees).Order(StringComparer.Ordinal))
         {
-            // git keeps only directories here. One it can't enter is what it would
-            // read once the user fixes the mode, so it can't pass as empty.
-            if (!RepoGuard.IsLink(entry) && Directory.Exists(entry) && !Native.CanEnter(entry))
-                tryOpen?.Invoke(entry);
-            if (RepoGuard.IsLink(entry) || !Path.Exists(entry) || (Directory.Exists(entry) && !Native.CanEnter(entry)))
+            // Git keeps only directories here. One Pen can't enter is what git would read once the user fixes the
+            // mode, so it can't pass as empty.
+            if (!PathChecks.IsLink(entry) && Directory.Exists(entry) && !Native.CanEnter(entry))
+                tryMakeListable?.Invoke(entry);
+            if (PathChecks.IsLink(entry) || !Path.Exists(entry) || (Directory.Exists(entry) && !Native.CanEnter(entry)))
                 couldntLook(entry);
             else if (Directory.Exists(entry))
                 visit(entry);

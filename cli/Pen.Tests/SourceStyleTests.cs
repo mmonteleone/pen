@@ -54,6 +54,103 @@ public class SourceStyleTests
             $"lines over {MaxLineLength} characters in cli/:\n" + string.Join("\n", offenders));
     }
 
+    // string.Normalize and IsNormalized, which do nothing under the invariant globalization pen is built with.
+    private static readonly Regex StringNormalization =
+        new("\\bIsNormalized\\s*\\(|\\.Normalize\\s*\\(|\\bNormalizationForm\\b", RegexOptions.Compiled);
+
+    [Fact]
+    public void PenNeverNormalizesThroughString_ItDoesNothingUnderInvariantGlobalization()
+    {
+        var pen = Path.Combine(FindCliDir(), "Pen");
+
+        var offenders = new List<string>();
+        var files = Directory.EnumerateFiles(pen, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !IsBuildOutput(Path.GetRelativePath(pen, f)))
+            .OrderBy(f => f, StringComparer.Ordinal);
+        foreach (var file in files)
+        {
+            var lines = File.ReadAllLines(file);
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (!lines[i].TrimStart().StartsWith("//", StringComparison.Ordinal)
+                    && StringNormalization.IsMatch(lines[i]))
+                    offenders.Add($"{Path.GetRelativePath(pen, file)}:{i + 1}");
+            }
+        }
+
+        Assert.True(offenders.Count == 0,
+            "string normalization in cli/Pen (use Native.NormalizeFormC):\n" + string.Join("\n", offenders));
+    }
+
+    // A global using alias elsewhere (for example, aliasing NativeLibrary) isn't caught.
+    private static readonly Regex NativeImport =
+        new("\\b(?:DllImport|LibraryImport|NativeLibrary)\\b|delegate\\s*\\*\\s*unmanaged", RegexOptions.Compiled);
+
+    [Fact]
+    public void OnlyNativeDeclaresNativeCalls()
+    {
+        var offenders = FindCodeLines(NativeImport)
+            .Where(found => found.File != Path.Combine("Platform", "Native.cs"))
+            .Select(found => $"{found.File}:{found.Line}")
+            .ToList();
+
+        Assert.True(offenders.Count == 0,
+            "native calls outside cli/Pen/Platform/Native.cs:\n" + string.Join("\n", offenders));
+    }
+
+    // GitProtection and Masking run at session start and end, when the agent may have planted git config and hooks,
+    // so they read files directly and never run git or any other process. None of their files needs to: Pen's own
+    // host git calls are in Signing (HostGit), and the session end runs them only after GitCheck returns.
+    private static readonly Regex ProcOrHostGit = new("\\b(?:HostGit|Proc)\\b", RegexOptions.Compiled);
+
+    private static readonly string[] NoProcessFolders = ["GitProtection", "Masking"];
+
+    [Fact]
+    public void GitProtectionAndMaskingNeverRunGit()
+    {
+        var pen = Path.Combine(FindCliDir(), "Pen");
+        var scanned = 0;
+        foreach (var folder in NoProcessFolders)
+        {
+            Assert.True(Directory.Exists(Path.Combine(pen, folder)),
+                $"cli/Pen/{folder} moved: update this test to follow it");
+            scanned += Directory.EnumerateFiles(Path.Combine(pen, folder), "*.cs", SearchOption.AllDirectories).Count();
+        }
+        Assert.True(File.Exists(Path.Combine(pen, "GitProtection", "RepoGuard.cs")),
+            "cli/Pen/GitProtection/RepoGuard.cs moved: update this test to follow it");
+        Assert.True(scanned > 0, "no sources found in " + string.Join(", ", NoProcessFolders));
+
+        var offenders = FindCodeLines(ProcOrHostGit)
+            .Where(found => NoProcessFolders.Any(
+                folder => found.File.StartsWith(folder + Path.DirectorySeparatorChar, StringComparison.Ordinal)))
+            .Select(found => $"{found.File}:{found.Line}")
+            .ToList();
+
+        Assert.True(offenders.Count == 0,
+            "GitProtection or Masking refers to HostGit or Proc:\n" + string.Join("\n", offenders));
+    }
+
+    /// <summary>Finds the lines of cli/Pen's sources, outside line comments, that match <paramref name="pattern"/>.</summary>
+    /// <returns>Each file relative to cli/Pen, with its line number.</returns>
+    private static List<(string File, int Line)> FindCodeLines(Regex pattern)
+    {
+        var pen = Path.Combine(FindCliDir(), "Pen");
+        var found = new List<(string File, int Line)>();
+        var files = Directory.EnumerateFiles(pen, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !IsBuildOutput(Path.GetRelativePath(pen, f)))
+            .OrderBy(f => f, StringComparer.Ordinal);
+        foreach (var file in files)
+        {
+            var lines = File.ReadAllLines(file);
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (!lines[i].TrimStart().StartsWith("//", StringComparison.Ordinal) && pattern.IsMatch(lines[i]))
+                    found.Add((Path.GetRelativePath(pen, file), i + 1));
+            }
+        }
+        return found;
+    }
+
     /// <summary>Finds the raw string literal a line ends inside, given the one it starts inside.</summary>
     /// <param name="line">The line.</param>
     /// <param name="closing">The closing quotes of the raw string the line starts inside, or null if none.</param>

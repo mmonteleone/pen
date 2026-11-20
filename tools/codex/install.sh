@@ -2,8 +2,8 @@
 # Installs Codex at the version given (latest, or an exact release such as 0.167.0) with
 # the base's helper for agents from npm (/opt/pen/lib/npm-agent.sh), into /opt/pen/codex.
 # No install scripts run: the native binary comes in this platform's optional package.
-# /usr/local/bin/codex runs the package's launcher on Pen's Node. Codex's update check is
-# off in /etc/codex/managed_config.toml, since only a rebuilt image upgrades it.
+# /usr/local/bin/codex runs the package's launcher on the base's Node. Codex's update
+# check is off in /etc/codex/managed_config.toml, since only a rebuilt image upgrades it.
 set -euo pipefail
 
 install -d -m 0755 /etc/codex

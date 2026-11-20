@@ -1,327 +1,176 @@
 # Using Pen
 
-Run Pen from your project root. For installation, see the [README](../README.md#get-started). Before your first session, read the [limitations](limitations.md).
+Start here for day-to-day use. For installation, see the [README](../README.md#get-started); for sandbox boundaries, read the [limitations](limitations.md).
 
-- [Run an agent or command](#running-commands)
-- [Add tools](#tools), [allow blocked domains](#network) or [open a dev server](#dev-servers)
-- [Use git](#git-in-the-sandbox): [sign commits](#commit-signing), [worktrees](#worktrees), [submodules](#submodules)
-- [Configure Pen](#configuration): [logins](#logins-and-api-keys), [GitHub](#github), [shared agent settings](#agent-config-the-home-seed), [project settings](#project-settings)
-- [Use Docker-in-Docker](#docker-in-docker)
-- [Update or reset Pen](#upgrading-and-resetting), or [troubleshoot host differences](#differences-from-running-on-the-host)
-- [Command reference](#commands), [agent versions and details](#agents), [herdr integration](#running-in-herdr)
+- [Running a session](#running-a-session)
+- [Git in the sandbox](#git-in-the-sandbox)
+- [Network](#network)
+- [Configuration](#configuration): [logins](#logins-and-api-keys), [GitHub](#github), [agent settings](#agent-config-the-home-seed), [project settings](#project-settings), [file hiding](#hiding-files-from-the-agent)
+- [Tools](#tools)
+- [Dev servers](#dev-servers)
+- [Docker-in-Docker](#docker-in-docker)
+- [Upgrading and cleaning up](#upgrading-and-cleaning-up)
+- [Commands](#commands)
+- [Differences from running on the host](#differences-from-running-on-the-host)
 
-## Running commands
+## Running a session
 
-Start an agent, open a shell or run a single command:
+Run Pen from your project root. No `.pen/` config or Dockerfile is required:
 
 ```sh
 pen claude                  # or: pen codex, pen opencode, pen pi
 pen                         # interactive shell
-pen --tool node run npm ci  # run npm with Node installed
-pen --tool python run uv sync
+pen run npm ci              # run one command
+pen ps                      # list sessions across projects (from the host)
 ```
 
-Pen installs the agent you name. A plain `pen` shell has no agents or language toolchains unless you [add them](#tools). Agents run with permission prompts off; the container is the boundary.
+The first session builds the sandbox image and installs the agent you named. Log in inside the sandbox when prompted. Logins, settings and caches persist per repo, including across linked worktrees. A plain `pen` opens bash, zsh or fish to match your host's `$SHELL`, falling back to bash.
 
-Put Pen's options before the command. Everything after the command name goes to that command: `pen --tool node claude --help` passes `--help` to Claude. `pen run <command>` also lets you run a command whose name matches a Pen subcommand, such as `pen run reset`.
+**Project files are live and agents run with permission prompts off.** Keep host Git, IDE Git integrations and Git-aware prompts out of the checkout and all its worktrees until every session ends. See [what Pen protects](limitations.md#while-a-session-runs).
 
-Log in inside the sandbox when prompted; see [logins and API keys](#logins-and-api-keys). Your project files are mounted directly, so edits appear on the host immediately. Logins, sandbox settings and caches persist per project; linked worktrees share them.
+Ctrl-C goes to the program inside the sandbox. When the program exits, Pen ends the session and reports blocked domains and Git warnings. Read the warnings before you review files or commits on the host.
 
-Ctrl-C goes to the agent or command. When it exits, Pen ends the session and reports blocked domains and any git warnings. Read those warnings, then review changes and commits on the host. **Keep host git, IDE git integrations and git-aware prompts out of the repo and all its worktrees until every session ends.** See [Git in the sandbox](#git-in-the-sandbox).
+### Options and arguments
 
-Run `pen ps` in another terminal to see running sessions, their ports and tools across all projects.
-
-## Tools
-
-Add the tools your project needs with `--tool`:
-
-```sh
-pen --tool list                              # list available agents and tools
-pen --tool node claude                       # Node and npm
-pen --tool python codex                      # Python, uv and uvx
-pen --tool dotnet:8 --tool dotnet:10 claude  # two .NET SDKs
-```
-
-Use `name` for the default version or `name:version` to choose one. To keep tools installed for future sessions, add `tools = ["node", "python"]` to your [user or project config](#configuration). The lists and command-line options add together; order and duplicates don't matter. Project tools need [approval](#project-settings).
-
-Each tool also allows the network domains it needs. For example, `node` brings npm's registry access. Tools are built into an image once and reused across projects with the same selection. Use [`pen upgrade`](#upgrading-and-resetting) to refresh them.
-
-| Tool | Default | Accepted versions | Multiple versions together |
-|---|---|---|---|
-| `dotnet` | `10` | `6` to `11` (SDK major version) | yes |
-| `go` | `1.27` | `1.21` to `1.27` | no |
-| `rust` | `stable` | `stable`, a minor version from `1.49` to `1.99` (`1.85` or `1.85.0`), or a patch release the recipe lists (`1.85.1`) | yes |
-| `java` | `21` | `8`, `11`, `17`, `21`, `25` | yes |
-| `node` | `26` | `20`, `22`, `24`, `26` (major version) | no |
-| `python` | `3.15` | `3.9` to `3.15` (minor version) | yes |
-| `codegraph` | `1` | `1` (major version) | no |
-
-Versions are taken literally: `go:1.27` is accepted; `go:1.27.0` isn't. Each selection installs the newest matching release when the image is built. Python uses the newest patch release known to Pen's bundled uv; a newer patch needs a Pen update. New versions outside the table also need a Pen update.
-
-<details>
-<summary>What's included without tools</summary>
-
-The base image has `git`, `gh`, the Docker CLI (with buildx and compose plugins), `curl`, `wget`, `jq`, `ripgrep`, `fd`, `vim`, `less`, `unzip`, `xz`, `bzip2`, `patch`, `gnupg`, `openssl` and `socat`.
-
-Add `node` for `node`, `npm` and `npx`, or `python` for Python, uv and uvx. The base has no C build tools. The `python`, `node` and `rust` tools bring Ubuntu's `build-essential`; `go` brings `gcc` and `libc6-dev`. The `node` tool also includes Ubuntu's `python3` for node-gyp.
-
-Pen has a private Node in `/opt/pen/node` for installing npm recipes and running Codex and Pi. For your own commands, use the `node` tool.
-
-</details>
-
-<details>
-<summary>Domains added by each tool</summary>
-
-| Tool | Domains it adds |
-|---|---|
-| `dotnet` | `.nuget.org`, `builds.dotnet.microsoft.com`, `aka.ms`, `www.microsoft.com`, `crl3.digicert.com`, `ocsp.digicert.com` |
-| `go` | `proxy.golang.org`, `sum.golang.org`, `storage.googleapis.com` |
-| `rust` | `index.crates.io`, `static.crates.io` |
-| `java` | `repo.maven.apache.org`, `repo1.maven.org`, `services.gradle.org`, `downloads.gradle.org`, `plugins.gradle.org`, `plugins-artifacts.gradle.org` |
-| `node` | `registry.npmjs.org`, `registry.yarnpkg.com`, `repo.yarnpkg.com`, `nodejs.org` |
-| `python` | `pypi.org`, `files.pythonhosted.org`, `releases.astral.sh` |
-| `codegraph` | none |
-
-</details>
-
-<details>
-<summary>Tool-specific paths, environment and setup</summary>
-
-### .NET
-
-SDKs install in `/usr/share/dotnet`, with the newest release of each selected major version. PowerShell (`pwsh`) is included at a version pinned by Pen. The NuGet cache uses a project volume at your host's `NUGET_PACKAGES` path, with or without this tool.
-
-The tool sets these environment variables:
-
-| Variable | Value |
-|---|---|
-| `ASPNETCORE_HTTP_PORTS` | `8080` |
-| `DOTNET_RUNNING_IN_CONTAINER` | `true` |
-| `DOTNET_GENERATE_ASPNET_CERTIFICATE` | `false` |
-| `DOTNET_USE_POLLING_FILE_WATCHER` | `true` |
-| `NUGET_XMLDOC_MODE` | `skip` |
-| `POWERSHELL_DISTRIBUTION_CHANNEL` | `PSDocker-DotnetSDK-Ubuntu-24.04` |
-| `DOTNET_NOLOGO` | `1` |
-| `DOTNET_CLI_TELEMETRY_OPTOUT` | `1` |
-
-### Go
-
-Go installs in `/usr/local/go` from the official tarball, with the newest patch release of the selected version. Ubuntu's `gcc` and `libc6-dev` are included, so cgo and `go test -race` work.
-
-If a module needs a newer Go, Go downloads that toolchain through the module proxy into the home volume. The proxy redirects toolchains and large modules to `storage.googleapis.com`. This allows access to any bucket on that domain.
-
-`go install` puts commands in `~/go/bin`, which isn't on `PATH`. Run them by path or add that directory to `PATH` in your shell config.
-
-### Rust
-
-Toolchains install through rustup in `/usr/local/rustup`, with clippy, rustfmt and Ubuntu's `build-essential` for linking and build scripts. The default toolchain is `stable` if selected, otherwise the newest installed version.
-
-A toolchain requested by `rust-toolchain.toml` must be installed in the image; it can't be added during a session. Add it with `--tool` or in config.
-
-Cargo's cache and installed commands go to `~/.cargo` in the home volume. `~/.cargo/bin` isn't on `PATH`; run installed commands by path or add the directory in your shell config.
-
-### Java
-
-Ubuntu's headless JDKs install in `/usr/lib/jvm`. `java` and `javac` use the newest installed version. Use the project's Maven or Gradle wrappers (`mvnw`, `gradlew`); Maven and Gradle aren't installed.
-
-Java ignores `HTTPS_PROXY`, so Pen configures each JDK to use `proxy:3128` and sets `MAVEN_OPTS` for Maven to use those settings. Dockerfile build steps have no proxy: a step that downloads with Java needs `JAVA_TOOL_OPTIONS="-Dhttp.proxyHost= -Dhttps.proxyHost="` to connect directly.
-
-### Node
-
-Node installs in `/usr/local` from the official tarball, with the newest release of the selected major version, npm and npx. Node 20, 22 and 24 also include corepack.
-
-Use `npx`, project dependencies or a `.pen/Dockerfile` for packages. `npm install -g` can't write to the image's `/usr/local` prefix during a session.
-
-Ubuntu's `python3` and `build-essential` are included for node-gyp. `npm_config_nodedir=/usr/local` makes it use the tarball's headers rather than download them. Pen also sets:
-
-- `NODE_OPTIONS=--disable-warning=UNDICI-EHPA` to silence Node 22's experimental proxy warning. Your own `NODE_OPTIONS` replaces it.
-- `NPM_CONFIG_UPDATE_NOTIFIER=false` because npm updates with the image.
-
-Node 20's `fetch()` ignores the proxy and can't reach the network during a session; npm works. MCP servers started with `npx` need this tool in every project that uses them.
-
-### Python
-
-Pen installs uv's managed CPython builds in `/usr/local/share/uv/python`, with `python3.X` and `python3.X-config` on `PATH` for each selected version. `python3`, `python` and `python3-config` use the newest. These take precedence over Ubuntu's Python from the Node tool. Ubuntu's `build-essential` is included for C extensions.
-
-uv and uvx install in `/usr/local/bin` at a version pinned by Pen. Each Python's patch release is the newest that uv version knows, so a newer patch needs a Pen update.
-
-Use a virtual environment (`python3 -m venv`, `uv venv`) for `pip install`: the image's interpreters are read-only and marked `EXTERNALLY-MANAGED`. uv finds installed Pythons on `PATH` for `uv venv`, `uv run` and `uv sync`. If a project needs another Python, uv downloads it into `~/.local/share/uv/python` from `releases.astral.sh` or GitHub and checks its hash.
-
-uv's cache is `~/.cache/uv` in the home volume. `UV_LINK_MODE=copy` avoids attempts to hardlink from that volume into the project. `uv tool install` puts commands in `~/.local/bin`, which isn't on `PATH`; use `uvx`, run them by path or add the directory in your shell config.
-
-MCP servers started with `uvx` need this tool in every project that uses them.
-
-### CodeGraph
-
-[CodeGraph](https://www.npmjs.com/package/@colbymchenry/codegraph) installs from npm into `/opt/pen/codegraph` and runs on its bundled Node. Git ignores `.codegraph/` in every session.
-
-To use it from an agent, add `tools = ["codegraph"]` to your user config and register its MCP server in the [home seed](#agent-config-the-home-seed). For Claude, use `.claude.json`:
-
-```json
-{ "mcpServers": { "codegraph": { "type": "stdio", "command": "codegraph", "args": ["serve", "--mcp"] } } }
-```
-
-For Codex, use `.codex/config.toml`:
-
-```toml
-[mcp_servers.codegraph]
-command = "codegraph"
-args = ["serve", "--mcp"]
-```
-
-</details>
-
-<details>
-<summary>How Pen shares images</summary>
-
-| Project has | Image | Shared? |
-|---|---|---|
-| Nothing | `pen:latest` | All projects |
-| Tools | `pen-tools:<hash>` | Any project with the same tools |
-| `.pen/Dockerfile` | `<key>:latest`, or `<key>-<dirhash>:latest` in a linked worktree | This project or worktree |
-| Tools and `.pen/Dockerfile` | `<key>:<hash>`, or `<key>-<dirhash>:<hash>` in a linked worktree | This project or worktree |
-
-</details>
-
-## Network
-
-If a download or API request is blocked, run `pen allow` in another host terminal from the same project directory:
-
-```sh
-pen allow                       # see recently blocked domains
-pen allow example.com           # allow this domain for the project
-pen allow .example.com          # allow the domain and all its subdomains
-pen allow example.com --global  # allow it in every project
-pen allow --defaults            # list Pen's default allowlist
-```
-
-The change is saved and applied to running sessions in the same directory (`--global`: all projects). Retry the blocked request; you don't need to restart the agent. If a live update fails, repeat `pen allow example.com`, even if the domain is already saved. Blocked domains also appear when a session ends.
-
-Pen's defaults cover GitHub, container registries and developer docs. [Agents](#agents) and [tools](#tools) add their provider and package-registry domains when installed. You can allow other domains with the commands above.
-
-Allowed domains can accept uploads, including with credentials supplied by a prompt injection. The proxy restricts destinations; it doesn't keep your code private from those destinations. See [network limits and the older-Docker DNS caveat](limitations.md#network-and-credentials).
-
-## Dev servers
-
-Forward a port to open a sandbox dev server in your host browser:
-
-```sh
-pen --port 5173 --tool node claude
-```
-
-Have the server listen on `0.0.0.0` inside the sandbox, for example with `vite --host`. Then open `http://localhost:5173` on the host. For ASP.NET Core, set `ASPNETCORE_URLS=http://0.0.0.0:5000` and forward port 5000.
-
-To forward a port in every session, set `ports = [5173]` in [`.pen/config.toml`](#project-settings). Repeat `--port` to forward several ports.
-
-The port number is the same on both sides, and only the host's `127.0.0.1` listens. If the port is already in use, an explicit `--port` fails; a configured port is skipped with a warning. `pen ps` shows ports used by running sessions.
-
-Forwarding goes from the host into the sandbox only. It gives the sandbox no way out.
+- Put Pen's options before the program name. Pen passes everything after that name to the program, so `pen --tool go claude --help` shows Claude's help.
+- Use `pen run` when a program shares a name with a Pen subcommand, such as `pen run clean`. Options can follow `run`, as in `pen run --docker claude`.
+- Use `pen run --` before a program name that begins with a dash.
 
 ## Git in the sandbox
 
-The agent can commit, branch, merge, rebase and fetch inside the sandbox. Review its work and push from the host after every session in the repo has ended. [Host git is unsafe during a session](limitations.md#while-a-session-runs), including in other worktrees and IDE integrations.
+Agents can fetch, commit, branch, merge and rebase. Pen mounts Git config and hooks read-only, so set up remotes, hooks, worktrees and submodules on the host between sessions. That includes commands such as `git remote add` and hook installers.
 
-Repo config and hooks are mounted read-only. Run these setup and maintenance commands on the host between sessions:
+When all sessions in the repo have ended:
 
-- `git init` for a new project;
-- `git config`, `git remote add`, setting upstreams, deleting branches, hook installers (husky);
-- `git submodule add`, `update --init` and `sync` (a submodule repo made while a session is open is moved aside when that session ends, and when any session started alongside it ends);
-- `git worktree prune` and `remove` for worktrees outside the project.
+1. Read Pen's warnings.
+2. Review the changes and commits on the host.
+3. Optionally run [`pen sign`](#commit-signing).
+4. Push from the host.
 
-Read-only tokens prevent sandbox pushes. Pen doesn't block pushes made with write-capable credentials.
+If Pen was killed, run `pen true` from that checkout to finish recovery before using host Git. If Pen reports a cleanup or check failure, follow its recovery advice. See [session-end checks and recovery](git-safety.md#at-session-end).
 
 ### Commit signing
 
-Agent commits are unsigned because your signing key stays on the host. After all sessions end and you've reviewed the work, sign the unpushed commits, then push:
+After all sessions end, sign the agent's unpushed commits with your host signing key:
 
 ```sh
 pen sign
-# or: pen sign <base>
 git push
 ```
 
-Pen uses your normal host signing setup and keeps trees, authors and messages. Commit hashes change. The base defaults to the upstream branch, then `origin/HEAD`. Pen refuses to rewrite pushed commits or commits with headers it can't safely re-create. It also refuses to sign while a session is open in the same directory; wait for sessions in other worktrees too.
+`pen sign` signs commits since the current branch's upstream, or since `origin/HEAD` if there's no upstream. Use `pen sign <base>` to choose the base. Pen keeps trees, authors and messages, but recreated commits get new hashes. It refuses to rewrite commits already on a remote branch, or to run from a detached HEAD.
 
-For SSH signing, set `gpg.ssh.allowedSignersFile` in your global git config to a file outside the repo (an absolute path or `~/…`). Otherwise Pen can't verify the signatures it creates and re-signs the commits on every run, changing their hashes again. Pen explains how to fix this when it happens.
-
-Turning on "Require signed commits" on GitHub catches a forgotten `pen sign` at push time.
-
-<details>
-<summary>How Pen decides a commit is already signed</summary>
-
-A commit whose signature verifies under your global git config is kept, unless a commit below it changes. A `gpgsig` header alone doesn't count. Settings in the repo's own config don't count either, so a repo can't make its own key verify. `gpg.minTrustLevel` is `marginal` unless you set it globally.
-
-</details>
+For SSH signing, set `gpg.ssh.allowedSignersFile` in your global Git config to a file outside the repo, using an absolute path or `~/…`. Pen verifies the signatures it creates with your global Git settings. If it can't verify them, it may sign those commits again on the next run.
 
 ### Worktrees
 
-Run an agent per branch in parallel by starting Pen from each linked worktree. Create the worktrees on the host between sessions:
+Create linked worktrees between sessions, then start an agent from each checkout:
 
 ```sh
-git worktree add ../feat -b feat
-cd ../feat
+git worktree add ../feature -b feature
+cd ../feature
 pen claude
 ```
 
-All worktrees of a repo share logins, caches, `pen reset` and the one-`--docker`-session limit. Each worktree has its own `.pen/` settings and approvals; `pen allow` in one applies only to that worktree.
-
-A linked worktree's sandbox sees its own files and the repo's shared git data (objects and branches). Other checkouts' files stay outside. Because that git data is writable, a session in any worktree makes [host git unsafe](limitations.md#while-a-session-runs) in all of them and in the main checkout. Worktrees of a bare repo aren't supported.
+Worktrees share Git data, logins, caches and the one-session Docker-in-Docker limit. Each has its own `.pen/` settings and approvals, and a local `pen allow` or `pen deny` updates sessions in that worktree only. Wait for **all** worktree sessions to end before running Git or `pen sign` on the host. Worktrees of bare repos are unsupported.
 
 ### Submodules
 
-Set submodules up on the host (`git submodule update --init --recursive`). In the sandbox, the agent can commit inside a submodule and commit the bump in the parent repo. Each submodule's config and `hooks` directory are mounted read-only like the parent's, with the same [gaps](limitations.md#at-session-start), and a submodule's `core.hooksPath` gets no warning. Only the `origin` owner's GitHub token is available, so submodules from another owner can be fetched only if they're public.
+Initialize submodules on the host with `git submodule update --init --recursive` before starting Pen. Agents can work and commit inside an initialized submodule. If Pen refuses a submodule with its own `.git` directory, run `git submodule absorbgitdirs` on the host. Pen supplies only the selected GitHub owner's token, so private submodules under another owner need their own access.
 
-A submodule whose checkout has its own `.git` directory (made by older git, or by cloning in place before `git submodule add`) is refused: `git submodule absorbgitdirs` on the host moves it into the parent's `.git/modules/`.
+## Network
+
+Outbound HTTP and HTTPS traffic goes through a proxy that allows only listed domains. Other outbound protocols are blocked. The defaults cover common developer services including GitHub, npm and PyPI. Agents and tools add the domains they need when selected.
+
+If a download or API call fails, run these commands on the host from the same project directory:
+
+```sh
+pen allow                       # show recently blocked domains
+pen allow example.com           # allow one hostname
+pen allow .example.com          # include subdomains
+pen allow example.com --global  # allow it in every project
+pen allow --defaults            # list Pen's built-in domains
+```
+
+Then retry the request in the agent. Pen saves the rule and updates running sessions in the same directory. With `--global`, it saves the rule in your user config and updates sessions across projects. If a live update fails, repeat the command even if the rule was already saved. To remove a rule, edit the config file that contains it and restart the affected sessions.
+
+Allowed destinations can receive uploads. See [network and credential limits](limitations.md#network-and-credentials).
+
+### Denying domains
+
+```sh
+pen deny gist.github.com
+pen deny                        # list denied domains and where they came from
+```
+
+Deny takes precedence over defaults, tool domains and your own allow rules. An exact deny such as `gist.github.com` blocks that host even when `.github.com` is allowed. Use a leading dot to include subdomains, or `--global` to apply the rule across projects. Like `pen allow`, `pen deny` saves the rule and updates running sessions.
+
+Rules match the hostname requested through the proxy, not what's sent over the connection. See [matching by name](limitations.md#matching-by-name).
+
+### Open egress
+
+If the project needs arbitrary domains, allow all of them with a quoted star. Add `--global` to open egress across projects.
+
+```sh
+pen allow '*'
+```
+
+Open egress still blocks:
+
+- raw IP addresses and names that fail to resolve
+- private destinations reached through the wildcard
+- anything in `deny`
+
+A domain allowed by name can still resolve to a private address. A project asking for `*` needs approval unless your user config already allows `*`. Pen warns at startup and shows `open` under EGRESS in `pen ps`. [Read the limits of open egress](limitations.md#open-egress).
 
 ## Configuration
 
-Pen creates `~/.config/pen/` on first run. A project needs no Pen files unless you want to share its setup.
-
-| Location | Use it for |
+| Location | What goes there |
 |---|---|
-| `~/.config/pen/config.toml` | Your default tools, allowed domains, GitHub tokens and environment variables |
-| `~/.config/pen/home/` | Shared agent instructions and settings, using their usual home-directory paths |
-| `.pen/config.toml` | This project's tools, allowed domains, ports, Docker and GitHub owner; no secrets |
-| `.pen/Dockerfile` | Extra software beyond the built-in tools |
+| `~/.config/pen/config.toml` | Personal tools, network rules, hide patterns, GitHub tokens and environment variables |
+| `~/.config/pen/home/` | Shared agent settings, instructions and shell config |
+| `.pen/config.toml` | Project tools, network rules, hide and replace rules, ports, Docker and GitHub owner |
+| `.pen/Dockerfile` | Extra software the project needs |
 
-Config files use [TOML](https://toml.io): quote strings; unknown keys are errors so typos don't go unnoticed. Put secrets only in your user config:
+Pen creates `~/.config/pen/` on first run. Both config files use TOML and reject unknown keys. Keep secrets in your user config, never in `.pen/`.
+
+The `allow`, `deny`, `tools` and `hide` lists add together across files. Edits take effect at the next session. To change network rules in running sessions, use `pen allow` and `pen deny`.
+
+Keep frequently used tools and shared agent settings in user config; put the setup a project needs in `.pen/`. For example:
+
+```toml
+# .pen/config.toml
+tools = ["go"]
+allow = ["docs.example.com"]
+ports = [5173]
+hide = [".env", "secrets/"]
+```
+
+Run `pen init` for a commented starting point. Review it before committing, then see [project approvals](#approving-project-settings).
+
+### Logins and API keys
+
+Log in inside the sandbox, once per repo. For Claude, start `pen claude` and follow its prompts. For Codex, run `pen codex login --device-auth`.
+
+To pass an API key or token instead, put it under `[env]` in your user config. Every session receives these values.
 
 ```toml
 # ~/.config/pen/config.toml
-tools = ["dotnet:10"]
-allow = ["example.com"]
-
-[github]
-my-org = "github_pat_…"
-
 [env]
 CLAUDE_CODE_OAUTH_TOKEN = "…"
 ```
 
-`allow` and `tools` lists add together across user and project config. `--tool` adds to the tool list; `allow` also includes Pen's defaults. Other keys belong to just one file. Changes apply to the next session, with [approval](#project-settings) where required. `pen allow` also updates running sessions.
-
-### Logins and API keys
-
-Log in to each agent inside the sandbox, once per project:
-
-```sh
-pen claude  # follow Claude's login prompts
-pen codex login --device-auth
-```
-
-Logins persist between sessions and are shared by a repo's linked worktrees. Separate projects have separate logins.
-
-To use an API key, add it under `[env]` in `~/.config/pen/config.toml` as `<NAME> = "<value>"`. To skip Claude's per-project login, run `claude setup-token` and save the result there as `CLAUDE_CODE_OAUTH_TOKEN = "…"`.
+Run `claude setup-token` to get a Claude token for this setup.
 
 ### GitHub
 
-Public repos need no token. For private repos, supply a read-only fine-grained token per owner. Pen passes it to git and `gh` without checking or reducing its permissions: a write-capable token or a sandbox login allows writes. In GitHub → Settings → Developer settings → Fine-grained tokens, choose:
+For private repos, create a fine-grained token for the owner in the `origin` remote:
 
-- **Resource owner:** your account or the org.
-- **Repository access:** only the repos you need.
-- **Permissions:** Contents *Read-only* (optionally Issues and Pull requests *Read-only*).
+- Scope it to the repositories you need.
+- Give it read-only Contents access.
+- Add read-only Issues or Pull requests access if the agent needs those.
 
-Add the token to your user config:
+Add the token to your user config, keyed by owner:
 
 ```toml
 # ~/.config/pen/config.toml
@@ -329,79 +178,65 @@ Add the token to your user config:
 my-org = "github_pat_…"
 ```
 
-Pen picks the token for the owner of the `origin` remote. Only that owner's token is passed to the sandbox. To use another owner, set `github_owner = "<owner>"` in `.pen/config.toml`; a different owner needs [approval](#project-settings).
+Pen supplies only the selected owner's token to Git and `gh`. To select an owner explicitly, set `github_owner = "my-org"` in project config. An owner different from `origin`'s needs approval.
+
+Pen passes the token's permissions through unchanged, so a write-capable token lets the agent push. GitHub SSH remotes are rewritten to HTTPS inside the sandbox so Git can use the token; your host remotes stay as they were.
 
 ### Agent config (the home seed)
 
-Put instructions, settings, MCP servers and shell config that you want in every project under `~/.config/pen/home/`. Pen calls this the **home seed**. Paths in the table are relative to the seed and the sandbox's home directory: for example, `~/.config/pen/home/.codex/AGENTS.md` becomes `~/.codex/AGENTS.md` inside each sandbox. Keep secrets in your [user config](#logins-and-api-keys).
+Put shared settings under `~/.config/pen/home/` using their usual home-relative paths. For example, `~/.config/pen/home/.codex/AGENTS.md` becomes `~/.codex/AGENTS.md` in the sandbox.
 
-| Agent | Instructions | MCP servers |
+| Agent | Instructions | MCP server settings |
 |---|---|---|
 | Claude Code | `.claude/CLAUDE.md` | `mcpServers` in `.claude.json` |
 | Codex | `.codex/AGENTS.md` | `[mcp_servers.<name>]` in `.codex/config.toml` |
 | OpenCode | `.config/opencode/AGENTS.md` | `mcp` in `.config/opencode/opencode.json` |
 | Pi | `.pi/agent/AGENTS.md` | `.pi/agent/mcp.json` |
 
-For project-specific settings, use each agent's usual project files. To change the identity used for sandbox commits, edit `.gitconfig` in the seed.
+Use the seed's `.gitconfig` to set the identity for sandbox commits.
 
-Seed files overwrite matching sandbox files on every start, regardless of modification times. Removing a file from the seed stops managing it but leaves its last sandbox copy; delete that copy inside the sandbox too if you want it removed. Files that aren't in the seed, including logins and session state, stay in the project's home volume.
-
-MCP servers started with `npx` need the [`node` tool](#tools); those started with `uvx` need `python`. Add the tool to your user config so it's in every project that uses the server. The seed Pen creates registers no MCP servers.
-
-<details>
-<summary>Claude MCP settings, credentials and project memory</summary>
-
-Claude's `.claude.json` mixes MCP settings with login state. If the seed has an `mcpServers` map, it replaces the sandbox's whole map while preserving all other fields. Remove servers from the seed map to remove them next session. Remove `.claude.json` from the seed to let each project manage its own servers again; new seeds leave them to the project.
-
-Only the current project's `.claude/projects/<slug>/` seed directory is copied, so other projects' memory stays out.
-
-Known credential paths (`.claude/.credentials.json`, `.codex/auth.json`, `.local/share/opencode/auth.json`, `.pi/agent/auth.json`) and `.docker/` are excluded from seed copying. Docker sessions configure their client proxy separately, preserving other fields.
-
-</details>
-
-<details>
-<summary>If you have an older home seed</summary>
-
-Pen creates the seed once and never updates it. Seeds from before tools were added register CodeGraph in `.claude.json` and `.codex/config.toml`, and disable Claude's commit and PR attribution in `.claude/settings.json`. Edit or remove those settings yourself. CodeGraph needs `tools = ["codegraph"]`; new seeds leave attribution at Claude's default.
-
-</details>
+- Seed files replace matching sandbox copies on each start.
+- Removing a seed file leaves its last sandbox copy. To remove it entirely, delete that copy inside the sandbox too.
+- For Claude's `.claude.json`, which also holds login state, the seed supplies only the `mcpServers` map and leaves other fields alone.
+- Known agent credential files and `.docker/` are skipped.
 
 ### Project settings
 
-Use `.pen/config.toml` to share a project's setup. It is usually committed, so secrets (`[github]` and `[env]`) aren't allowed here. Include only the settings you need:
+Commit `.pen/config.toml` to share tools, network rules and other project settings. Keep tokens and `[env]` in your user config; project config doesn't accept them.
 
-```toml
-# .pen/config.toml
-tools = ["node", "python"]
-allow = [".internal.example.org"]
-ports = [5173]
-docker = true
-github_owner = "my-org"
-```
+#### Starting with `pen init`
 
-The `.pen/` directory is read-only inside the sandbox. Because its contents may have come from a clone or an earlier agent edit, Pen asks you to approve new settings before a session starts:
+`pen init` writes a commented `.pen/config.toml` and leaves an existing file in place. It looks up to three directories deep, skipping common build and dependency directories, and suggests:
 
-| Setting | What needs approval |
-|---|---|
-| `allow` | Domains not already allowed |
-| `tools` | Each tool's version and domains |
-| `docker = true` | Access to Docker-in-Docker |
-| `github_owner` | An owner different from the one in `origin` |
-| `.pen/Dockerfile` | The Dockerfile and everything else in `.pen/` except `config.toml` |
+- tools for .NET, Go, Rust and Java
+- hide rules for files such as `.env`, private keys and `secrets/`, while leaving examples such as `.env.example` visible
+- Docker and replacement settings, as comments
 
-Ports need no approval because they only publish to host loopback. If you decline, the session doesn't start. Without a terminal, settings that need approval are refused.
+Review the file before committing it.
+
+#### Approving project settings
+
+A checkout can contain settings someone else wrote. Pen asks before a session uses any of these from `.pen/`:
+
+- new allowed domains
+- tools and tool versions, with the domains they add
+- `docker = true`
+- a `github_owner` different from `origin`'s owner
+- a `.pen/Dockerfile` and its build context
+
+Port forwarding, deny rules, hiding and replacement need no approval.
 
 ```sh
-pen trust         # review and approve before starting a session
-pen trust --list  # show everything needing approval; approve nothing
-pen trust --yes   # approve without asking, for scripts
+pen trust --list    # show pending requests
+pen trust           # show the requests and ask for approval
+pen trust --yes     # approve all pending requests without prompting
 ```
 
-Approvals are per directory, so a new worktree starts with none. Domains added through `pen allow` count as approved; unapproved domains never reach running sessions. `pen upgrade` skips unapproved project tools and Dockerfiles.
+Approvals are per directory, including for linked worktrees. In a noninteractive session, Pen refuses settings that still need approval. `pen init` creates no approvals. `pen allow <domain>` without `--global` saves and approves the rule for that directory.
 
 #### Extra software with a Dockerfile
 
-For software beyond the built-in tools, add `.pen/Dockerfile`:
+Add `.pen/Dockerfile` for software that isn't available as a [tool](tools.md):
 
 ```dockerfile
 FROM pen:latest
@@ -409,166 +244,149 @@ RUN apt-get update && apt-get install -y --no-install-recommends postgresql-clie
  && rm -rf /var/lib/apt/lists/*
 ```
 
-`FROM pen:latest` includes your selected tools, so build steps can use them. **Build steps have direct network access, outside the session allowlist.**
+`FROM pen:latest` includes your selected tools. Pen starts your requested program or shell instead of the Dockerfile's `CMD`.
 
-Pen shows the Dockerfile and a path to a private snapshot of the build context for review. It builds from the approved snapshot. A change to the Dockerfile or any other build-context file needs approval again. The context excludes `config.toml`, so `COPY config.toml` won't work.
+**Build steps have direct network access, outside the session allowlist.** Pen shows the Dockerfile and a private snapshot of its build context for review, then builds from that approved snapshot. The context is `.pen/`, excluding `config.toml`. Changes to the context need another approval.
+
+### Hiding files from the agent
+
+Use `hide` in user or project config to show empty, read-only files or directories in the sandbox. Use `replace` in project config to show a read-only copy of a different file instead. Neither changes the files on the host.
+
+```toml
+# .pen/config.toml
+hide = [".env", "secrets/", "**/*.pem"]
+replace = { ".env" = ".pen/agent.env" }
+```
+
+This hides files named `.env`, directories named `secrets`, and PEM files at any depth. The project-root `.env` shows the contents of `.pen/agent.env` instead. Create that file yourself with safe values, and make sure the target already exists. A replacement wins over a hide rule for the same file, but a file inside a hidden directory can't be replaced.
+
+Hide patterns match paths like this:
+
+- A slash at the start or in the middle anchors the match to the project root.
+- A trailing slash matches directories.
+- `*` and `?` match within a path segment, and `**` as its own segment spans directories.
+- Matching ignores case.
+
+Pen reports what it hid or replaced when the session starts. These mounts have [filesystem limits and gaps](limitations.md#hidden-and-replaced-files), and Docker-in-Docker can bypass them.
 
 <details>
-<summary>Tool approvals and build-context restrictions</summary>
+<summary>Detailed pattern and replacement rules</summary>
 
-Tool approvals include their domains and are separate from `allow` approvals. A recipe adding a domain later asks again; removing one doesn't. Tools requested through `--tool` or your user config need no project approval and don't create one.
-
-Special files, oversized trees, invalid UTF-8 names and symlinks that don't point directly to a file or directory within `.pen/` prevent Dockerfile approval. Approvals are stored in Pen's state directory, outside the project.
+- Character classes, backslashes, comments, negation, empty segments and `.` or `..` segments are invalid in hide patterns. Pen refuses patterns that hide the whole project or explicitly target `.git` or the top-level `.pen/`.
+- A matched symlink can hide its target inside the project. Pen leaves links to outside the project or to missing paths alone. Hide patterns don't traverse symlinked directories. Read startup warnings for hard links, paths that couldn't be listed, and filesystem case or Unicode behavior.
+- The replacement target and source are project-relative paths. Both must be regular files reached without symlinks. The target must be outside `.git/` and `.pen/`. The source must be outside `.git/`, visible under the hide rules, at most 1 MB, and have no other hard links. Pen copies it at session start.
+- Use the inline `replace = { … }` form above, or put a `[replace]` table after all top-level keys. If you have a `.pen/Dockerfile`, a source in `.pen/` is part of the approved build context.
+- A hide or replace mount can't overlap a mount Pen uses to protect Git. Pen allows up to 1,000 hide and replace mounts together. Hide a directory to cover its contents with one mount.
 
 </details>
+
+## Tools
+
+Node LTS, npm, Python, pip, uv, Git and C build tools are in every session. Add other toolchains for one session with `--tool`, or every time with `tools` in config:
+
+```sh
+pen tools                     # list what's available
+pen --tool go claude
+pen --tool dotnet:10 codex
+```
+
+Pen offers .NET, Go, Rust, Java and CodeGraph as tools. See [tools and agents](tools.md) for versions, agent pinning, Node and Python packages, and setup notes for each toolchain.
+
+## Dev servers
+
+Forward a port, start the server inside the sandbox bound to `0.0.0.0`, and open it on the host:
+
+```sh
+pen --port 5173 claude
+# inside the sandbox:
+npx vite --host 0.0.0.0
+# on the host: http://localhost:5173
+```
+
+Pen binds the same port on host loopback. Repeat `--port` for several ports, or set `ports = [5173]` in `.pen/config.toml` to forward it every time. Run `pen ps` to see active ports.
+
+If a port is already in use, an explicit `--port` fails, while a configured port is skipped with a warning.
+
+For ASP.NET Core on port 5000, forward `--port 5000` and set `ASPNETCORE_URLS=http://0.0.0.0:5000` inside the sandbox.
 
 ## Docker-in-Docker
 
-For Testcontainers, compose or image builds, give the session its own Docker daemon:
+For Testcontainers, Compose or image builds, give the session its own Docker daemon with `pen --docker claude`. To make it the project default, set `docker = true` in `.pen/config.toml`.
 
-```sh
-pen --docker claude
-```
+**The agent controls a privileged daemon in this mode.** It can bypass Git protections and file-hiding mounts. Enable it only for projects that need it. See [Docker-in-Docker limitations](limitations.md#docker-in-docker-and-the-git-protections).
 
-The daemon runs privileged and the agent controls it, which weakens isolation and lets it [defeat the git protections](limitations.md#docker-in-docker-and-the-git-protections). Use it only when the project needs Docker.
+- One Docker-in-Docker session can run per repo, including all its worktrees.
+- The daemon is at `DOCKER_HOST=tcp://dind:2375` and uses the session proxy. Published ports are at `dind:<port>` inside the sandbox.
+- Add service names to `NO_PROXY` when containers need to talk to each other.
+- On rootful Linux, pass `--user` when child containers need to write to the checkout as you.
 
-Set `docker = true` in `.pen/config.toml` to enable it for every session. The daemon is reachable at `DOCKER_HOST=tcp://dind:2375`, with traffic going through the same allowlist.
-
-- One `--docker` session per project at a time.
-- Published ports are at `dind:<port>`, not `localhost`, and only the sandbox reaches them.
-- Containers get proxy env vars. Add service names (e.g. `api`) to `NO_PROXY` in compose files.
-- On rootful Linux, files containers write to the project are owned by root. Pass `--user`.
-
-## Upgrading and resetting
+## Upgrading and cleaning up
 
 ### Update Pen itself
 
-With Homebrew, run `brew upgrade pen`. With a release binary, download the new archive from [Releases](https://github.com/mmonteleone/pen/releases) and replace `pen` as you [installed it](../README.md#install). From a source checkout:
-
-```sh
-git pull
-cli/install.sh
-```
-
-If the bundled image files changed, the next session rebuilds the base image.
+With Homebrew, run `brew upgrade pen`. With a release binary, download the new archive from [Releases](https://github.com/mmonteleone/pen/releases) and replace `pen` as you [installed it](../README.md#install). From a source checkout, run `git pull` and `cli/install.sh`. If the bundled base image files changed, the next session rebuilds the image.
 
 ### Update agents and tools
 
-```sh
-pen upgrade          # refresh the images; keep logins and config
-pen upgrade --clean  # rebuild without the build cache
-```
+Run `pen upgrade` to rebuild the base image and pull newer proxy and Docker-in-Docker images. It rebuilds the tools and agents from your config and from the current project's approved tools and Dockerfile. Other combinations rebuild on their next use. Agents set to `latest` refresh, and exact pins stay pinned. Use `pen upgrade --no-cache` to bypass the build cache. Logins, config and the Pen CLI version stay as they were.
 
-`pen upgrade` rebuilds the base image and pulls newer proxy and Docker-in-Docker images. It doesn't update the Pen CLI.
+### Clean up
 
-Tools and agents in your user config rebuild right away. In a project, its approved tools and Dockerfile rebuild too. Other combinations, including an agent selected only by `pen claude`, rebuild on their next use. Agents at `latest` get the newest release; exact agent versions stay pinned. Tool versions follow the rules in [Tools](#tools).
+Both commands show what they'll remove and ask before deleting project data or old images.
 
-### Reset a project's sandbox
+| Command | Removes |
+|---|---|
+| `pen clean` | This repo's sandbox home, including agent logins and shell history, plus its NuGet cache and Docker-in-Docker data |
+| `pen clean --stale` | State and images left by moved or deleted projects, plus tool images built on an older base |
 
-`pen reset` asks, then removes the project's sandbox home, logins, settings, caches and Docker-in-Docker images. It keeps your project files and `~/.config/pen/`.
+`pen clean` keeps project files, personal config, project approvals and blocked-domain logs. It applies across worktrees and refuses to run while a session or `pen sign` is active in the repo.
 
-Linked worktrees share this state. Reset is refused while a session or `pen sign` runs in the main checkout or any worktree.
+Before running `pen clean --stale`, mount any external drives that hold projects, since a missing mount looks like a deleted project. Pen lists state it can't identify so you can review it manually.
 
-### Remove unused state
+#### Projects with an unfinished session
 
-`pen prune` lists state left by moved or deleted projects and tool images built on an old base, then asks before removing them. State it can't identify is listed with commands to remove it by hand. If you keep projects on an external drive or another mounted filesystem, mount it before pruning: an unavailable project directory looks deleted.
+`pen clean --stale` skips a moved or deleted project whose session hasn't ended, because its saved copies of protected Git files may be the only good ones. **Keep its session files until you've recovered those copies.**
 
-## Differences from running on the host
+1. Exit the agent if it's still running.
+2. If possible, restore the project to its recorded path and run `pen clean` there to finish recovery. Decline the cleanup prompt if you want to keep the sandbox.
+3. If you can't put the project back, use the paths Pen prints to save the protected copies and compare them with the project's Git files. Then follow the printed cleanup steps. This manual path skips Pen's Git check.
 
-- Pasting images into the agent doesn't work. Save the image to the project and pass its path.
-- Servers the agent starts are reachable from the host only on [forwarded ports](#dev-servers).
-- Some git commands must run on the host. See [Git in the sandbox](#git-in-the-sandbox).
-- The image has no `tzdata-legacy`, so old time zone names such as `US/Pacific` don't resolve. Use current ones (`America/Los_Angeles`), or install the package in a `.pen/Dockerfile`.
+If Pen reports an unreadable session, check its permissions and retry.
 
 ## Commands
 
-```
-pen [--docker] [--port <n>]… [--tool <spec>]… [<cmd…>]
-                                shell or command in the sandbox
-pen [--docker] [--port <n>]… [--tool <spec>]… run <cmd…>
-                                same, for a command that clashes with a subcommand name
-pen --tool list                 list the agents and tools pen can install
-pen allow <domain…> [--global]  allow domains for this project (or all projects)
-pen allow                       list recently blocked domains
-pen allow --defaults            list the domains pen allows out of the box
-pen trust [--yes | --list]       review and approve what this project's .pen/ asks for
-pen ps                          list running sessions, ports and tools across projects
-pen sign [<base>]               re-sign your unpushed commits with your own key
-pen upgrade [--clean]           rebuild the base image, agents and tools
-pen reset                       wipe this project's sandbox state (logins, caches)
-pen prune                       remove unused project state and old tool images
-```
+Run `pen --help` for the full CLI help or `pen <subcommand> --help` for one command.
 
-Options go before the agent: `pen --docker --port 5173 claude`. Run `pen --help` for an overview or `pen <subcommand> --help` for details.
+| Command | What it does |
+|---|---|
+| `pen [options] [command…]` | Open a shell or run a program in the sandbox |
+| `pen run [options] [--] <command…>` | Run a program explicitly, including one named like a Pen subcommand |
+| `pen ps`, `pen ls` | List sessions, ports, tools and egress mode across projects |
+| `pen tools` | List available tools, agents and their default versions |
+| `pen init` | Create a project config from a template and detected settings |
+| `pen allow` | List domains blocked in the last seven days that are still restricted |
+| `pen allow --defaults` | List the built-in allowed domains |
+| `pen allow <domain…> [--global]` | Save and apply allow rules |
+| `pen deny` | List denied domains and affected allow rules |
+| `pen deny <domain…> [--global]` | Save and apply deny rules |
+| `pen trust`, `pen trust --list`, `pen trust --yes` | Review or approve requested project settings |
+| `pen sign [<base>]` | Sign unpushed commits with your host key |
+| `pen upgrade [--no-cache]` | Rebuild the base, agent and tool images |
+| `pen clean [--stale]` | Reset this sandbox or clear stale state across projects |
 
-## Agents
+| Option | Short | Applies to |
+|---|---|---|
+| `--docker` | `-d` | Sessions |
+| `--port <port>` | `-p` | Sessions, repeatable |
+| `--tool <name[:version]>` | `-t` | Sessions, repeatable |
+| `--global` | `-g` | `allow`, `deny` |
+| `--yes` | `-y` | `trust` |
 
-`pen claude`, `pen codex`, `pen opencode` and `pen pi` install the named agent at its default version. No config is needed. `pen --tool list` lists the available agents and tools.
+Write short options separately, as in `pen -d -p 5173 claude`.
 
-To pin a release or include an agent in a shell, select it with `--tool`:
+## Differences from running on the host
 
-```sh
-pen --tool claude                 # a shell with Claude installed
-pen --tool claude:2.1.300 claude  # run a pinned release
-```
-
-You can also add agents to `tools` in either config file. If a list already names the agent, that version is used.
-
-Only the command's first word selects an agent automatically. `pen run claude` includes Claude; `pen run timeout 60 claude` doesn't. For a wrapper command, use `pen --tool claude run timeout 60 claude`.
-
-`latest` means the newest release when the image is built. It isn't checked on each session. Run [`pen upgrade`](#upgrading-and-resetting) to rebuild with current releases; pinned releases stay at the requested version.
-
-OpenCode and Pi can reach Anthropic and OpenAI by default. For another provider, use `pen allow` for its API domain. Pi packages from npm (`pi install npm:<pkg>`) also need the `node` tool: without it, the command fails with `spawn npm ENOENT`.
-
-<details>
-<summary>Supported releases and domains</summary>
-
-| Agent | Command | Default | Versions | Domains it adds |
-|---|---|---|---|---|
-| `claude` | `claude` (Claude Code, from npm) | `latest` | `latest` or an exact release, 2.1.113 or later (`2.1.300`) | `.anthropic.com`, `.claude.ai`, `.claude.com` |
-| `codex` | `codex` (Codex, from npm) | `latest` | `latest` or an exact release, 0.1.2504211509 or later (`0.167.0`) | `.openai.com`, `.chatgpt.com` |
-| `opencode` | `opencode` (OpenCode, from npm) | `latest` | `latest` or an exact release, 1.15.1 or later (`1.19.0`) | `.opencode.ai`, `models.dev`, `registry.npmjs.org` (for its plugin package), `.anthropic.com`, `.claude.ai`, `.claude.com`, `.openai.com`, `.chatgpt.com` |
-| `pi` | `pi` (Pi, from npm) | `latest` | `latest` or an exact release, 0.84.3 or later (`1.5.2`) | `.anthropic.com`, `.claude.ai`, `.claude.com`, `.openai.com`, `.chatgpt.com` |
-
-</details>
-
-<details>
-<summary>Agent installation and auto-update settings</summary>
-
-Agents install in `/opt/pen/<agent>`, which sessions can't write. Auto-updaters are off:
-
-- Claude: `DISABLE_AUTOUPDATER=1` and `CLAUDE_CODE_DISABLE_AUTOUPDATE=1`.
-- Codex: `check_for_update_on_startup = false` in `/etc/codex/managed_config.toml`.
-- OpenCode: `OPENCODE_DISABLE_AUTOUPDATE=1`.
-- Pi: `PI_SKIP_VERSION_CHECK=1`.
-
-Claude Code and OpenCode are native binaries. Codex and Pi run on Pen's private Node, so the `node` tool's version doesn't affect them. That private Node's `npm` isn't on the session's `PATH`; add the `node` tool when you need npm.
-
-</details>
-
-## Running in herdr
-
-[herdr](https://herdr.dev) runs agents in terminal panes with a state sidebar. These notes come from tests with herdr 0.9.5 on macOS with OrbStack.
-
-First, remove the sidebar's ahead/behind count in `~/.config/herdr/config.toml`:
-
-```toml
-[ui.sidebar.spaces]
-rows = [["state_icon", "workspace"], ["branch"]]
-```
-
-The count runs host `git rev-list` when refs change, including agent commits, while [`.git` is untrusted](limitations.md#while-a-session-runs). With these rows, no git ran in our tests. The branch name stays; herdr reads it directly from `.git`.
-
-Start an agent with `HERDR_AGENT=claude pen claude` (or `codex`, `opencode`, `pi`). The hint lets herdr recognize the agent behind the foreground `pen` process. It may still show idle; working, blocked and done detection hasn't been checked. Inspect it with `herdr agent get <pane>` and `herdr agent explain <pane>`.
-
-**Exit the agent before closing its pane or stopping herdr.** herdr sends a hangup, then kills pen about a second later. In our tests, the agent was removed and git checked, but session files and possibly the proxy remained. Warnings disappear with the pane, and `pen ps` shows nothing. If this happens, run `pen true` in the project before any host git to finish cleanup. Look for `….pen-quarantine` files in the project and git dir; quarantine notices aren't repeated.
-
-Other things to know:
-
-- Multiple panes work, including one per worktree. Create and remove worktrees between sessions: herdr's worktree actions run host git.
-- Detaching (`ctrl+b q`) or closing the attached terminal leaves sessions running; reattaching finds them again.
-- `herdr agent start --kind claude` types `claude` into the shell, so it runs on the host. To route it through pen, define a host shell function `claude() { HERDR_AGENT=claude command pen claude "$@"; }`. Without the hint, herdr times out while the session keeps running.
-- Splitting a pane running pen opens in `~/.local/state/pen`. Split from a shell or pass `--cwd`.
-- A stopped agent can leave bracketed-paste mode on and garble what herdr types next. Run `reset` in that pane.
-
-Keep herdr's socket out of the sandbox: its API can run host commands. Pen doesn't pass `HERDR_SOCKET_PATH`, `HERDR_BIN_PATH` or `SSH_AUTH_SOCK` through, and our test session had no `HERDR_*` variables or `~/.config/herdr`. Don't add these variables to `[env]` or put herdr's config directory inside the mounted project. Its agent integrations aren't needed for state; leave them out of the [home seed](#agent-config-the-home-seed).
+- Pasting images into the sandboxed agent is unsupported. Save images in the project and give the agent their paths.
+- Forward ports to reach sandbox servers from your browser. See [dev servers](#dev-servers).
+- The proxy carries HTTP and HTTPS only. GitHub SSH remotes are rewritten to HTTPS.
+- Use current time zone names such as `America/Los_Angeles`. To use a legacy name such as `US/Pacific`, install `tzdata-legacy` in a [project Dockerfile](#extra-software-with-a-dockerfile).

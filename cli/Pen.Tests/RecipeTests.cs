@@ -181,83 +181,19 @@ public class RecipeTests
         Assert.Equal(accepted, Get("java").AcceptsVersion(version));
 
     [Fact]
-    public void TheNodeRecipeIsOneMajorVersionWithNpmsRegistries()
-    {
-        var recipe = Get("node");
-        Assert.Equal("26", recipe.Default);
-        Assert.False(recipe.Multiple);
-        Assert.False(recipe.IsAgent);
-        Assert.Equal(["registry.npmjs.org", "registry.yarnpkg.com", "repo.yarnpkg.com", "nodejs.org"], recipe.Allow);
-        Assert.Equal(
-            [new KeyValuePair<string, string>("npm_config_nodedir", "/usr/local"), new KeyValuePair<string, string>("NODE_OPTIONS", "--disable-warning=UNDICI-EHPA"), new KeyValuePair<string, string>("NPM_CONFIG_UPDATE_NOTIFIER", "false")],
-            recipe.Env);
-    }
-
-    [Theory]
-    [InlineData("20", true)]
-    [InlineData("22", true)]
-    [InlineData("24", true)]
-    [InlineData("26", true)]
-    [InlineData("18", false)]
-    [InlineData("21", false)]
-    [InlineData("25", false)]
-    [InlineData("28", false)]
-    [InlineData("v22", false)]
-    [InlineData("22.1", false)]
-    [InlineData("22.1.0", false)]
-    [InlineData("022", false)]
-    [InlineData("lts", false)]
-    [InlineData("latest", false)]
-    public void TheNodeRecipeAcceptsOnlyLtsMajorVersions(string version, bool accepted) =>
-        Assert.Equal(accepted, Get("node").AcceptsVersion(version));
-
-    [Fact]
-    public void NpmsDomainsComeWithTheNodeRecipe_NotTheDefaults()
+    public void NpmAndPyPIAreDefaults_SinceNodeAndPythonAreInTheBase()
     {
         var defaults = Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")).ToList();
-        foreach (var domain in Get("node").Allow)
-            Assert.DoesNotContain(domain, defaults);
-        Assert.Contains("docs.npmjs.com", defaults);
-        Assert.Contains("www.npmjs.com", defaults);
+        string[] expected =
+        [
+            "registry.npmjs.org", "registry.yarnpkg.com", "repo.yarnpkg.com", "nodejs.org",
+            "pypi.org", "files.pythonhosted.org", "releases.astral.sh",
+        ];
+        foreach (var domain in expected)
+            Assert.Contains(domain, defaults);
+        Assert.False(RecipeCatalog.Embedded.TryGet("node", out _));
+        Assert.False(RecipeCatalog.Embedded.TryGet("python", out _));
     }
-
-    [Fact]
-    public void ThePythonRecipeIsSeveralMinorVersionsWithPyPI()
-    {
-        var recipe = Get("python");
-        Assert.Equal("3.15", recipe.Default);
-        Assert.True(recipe.Multiple);
-        Assert.False(recipe.IsAgent);
-        Assert.Equal(["pypi.org", "files.pythonhosted.org", "releases.astral.sh"], recipe.Allow);
-        // No UV_PYTHON_INSTALL_DIR: uv's default, in the home volume, is writable in a session.
-        Assert.Equal([new KeyValuePair<string, string>("UV_LINK_MODE", "copy")], recipe.Env);
-    }
-
-    [Fact]
-    public void PyPIDomainsComeWithThePythonRecipe_NotTheDefaults()
-    {
-        var defaults = Allowlist.ParseList(Embedded.ReadText("proxy/allowlist.txt")).ToList();
-        foreach (var domain in Get("python").Allow)
-            Assert.DoesNotContain(domain, defaults);
-        Assert.Contains("docs.python.org", defaults);
-        Assert.Contains("docs.astral.sh", defaults);
-    }
-
-    [Theory]
-    [InlineData("3.9", true)]
-    [InlineData("3.10", true)]
-    [InlineData("3.13", true)]
-    [InlineData("3.15", true)]
-    [InlineData("3", false)]
-    [InlineData("3.8", false)]
-    [InlineData("3.16", false)]
-    [InlineData("3.13.1", false)]
-    [InlineData("3.013", false)]
-    [InlineData("py3.13", false)]
-    [InlineData("2.7", false)]
-    [InlineData("latest", false)]
-    public void ThePythonRecipeAcceptsOnlyMinorVersionsUvBuilds(string version, bool accepted) =>
-        Assert.Equal(accepted, Get("python").AcceptsVersion(version));
 
     [Fact]
     public void TheCodegraphRecipeIsOneMajorVersionFromNpm()
@@ -331,9 +267,9 @@ public class RecipeTests
         Assert.True(recipe.IsAgent);
         Assert.Equal("latest", recipe.Default);
         Assert.False(recipe.Multiple);
-        // registry.npmjs.org: OpenCode installs its plugin package from npm at run time.
+        // OpenCode installs its plugin package from npm at run time: registry.npmjs.org is a default.
         Assert.Equal(
-            [".opencode.ai", "models.dev", "registry.npmjs.org", ".anthropic.com", ".claude.ai", ".claude.com", ".openai.com", ".chatgpt.com"],
+            [".opencode.ai", "models.dev", ".anthropic.com", ".claude.ai", ".claude.com", ".openai.com", ".chatgpt.com"],
             recipe.Allow);
         Assert.Equal([new KeyValuePair<string, string>("OPENCODE_DISABLE_AUTOUPDATE", "1")], recipe.Env);
     }
@@ -376,7 +312,7 @@ public class RecipeTests
     {
         Assert.Contains($"\nexec /opt/pen/lib/npm-agent.sh {name} ", Embedded.ReadText($"tools/{name}/install.sh"));
         Assert.StartsWith("#!/bin/bash\n", Embedded.ReadText("image/npm-agent.sh"));
-        // Off PATH: in /opt/pen, next to Pen's Node, rather than a bin directory.
+        // Off PATH: in /opt/pen, where the agents go, rather than a bin directory.
         Assert.Contains("\nCOPY --chmod=0755 npm-agent.sh /opt/pen/lib/npm-agent.sh\n", Embedded.ReadText("image/Dockerfile"));
     }
 
@@ -464,10 +400,6 @@ public class RecipeTests
 
     private static RecipeCatalog LoadWith(string extra) =>
         Load(("tools/x/tool.toml", Good), ("tools/x/install.sh", "#!/bin/sh\n"), (extra, ""));
-
-    [Fact]
-    public void NoRecipeCanTakeTheNameOfTheListing() =>
-        Assert.Contains("not part of a recipe", Error(() => Load(("tools/list/tool.toml", Good), ("tools/list/install.sh", "#!/bin/sh\n"))));
 
     [Fact]
     public void TheListingSaysWhatEachToolOffers()

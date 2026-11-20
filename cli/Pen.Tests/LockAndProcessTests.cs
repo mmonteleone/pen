@@ -95,6 +95,16 @@ public class LockAndProcessTests
         Assert.Contains("pen-no-such-binary", e.Message);
     }
 
+    // Signals numbered the same on macOS and Linux. KILL is the trap: PosixSignal.SIGKILL is -11, not 9.
+    [Theory]
+    [InlineData("HUP", 1)]
+    [InlineData("INT", 2)]
+    [InlineData("KILL", 9)]
+    [InlineData("ALRM", 14)]
+    [InlineData("TERM", 15)]
+    public void ExitCodes_ChildEndedBySignal_Is128PlusItsNumber(string signal, int number) =>
+        Assert.Equal(128 + number, Proc.Run("sh", ["-c", $"kill -s {signal} $$"]));
+
     [Fact]
     public void DeadSessionScan_PrunesOldEndedSessions_SkipsLiveOnes()
     {
@@ -107,12 +117,12 @@ public class LockAndProcessTests
         var live = t.Sub("runtime", "sessions", "aaaa0003");
         File.WriteAllText(Path.Combine(live, "compose.yaml"), "");
 
-        var old = DateTime.UtcNow - Session.KeepEndedSessions - TimeSpan.FromHours(1);
+        var old = DateTime.UtcNow - SessionRecovery.KeepEndedSessions - TimeSpan.FromHours(1);
         File.SetLastWriteTimeUtc(Path.Combine(oldEnded, "proxy.log"), old);
         Directory.SetLastWriteTimeUtc(oldEnded, old);
 
         using (FileLock.TryTake(Path.Combine(live, "session.lock"), exclusive: true))
-            Session.FinishDeadSessions("pen-x-00000000", runtime);
+            SessionRecovery.FinishAbandoned("pen-x-00000000", runtime, TimeProvider.System);
 
         Assert.False(Directory.Exists(oldEnded));
         Assert.True(Directory.Exists(recentEnded));

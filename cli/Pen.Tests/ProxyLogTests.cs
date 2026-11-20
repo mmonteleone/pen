@@ -175,7 +175,7 @@ public class ProxyLogTests
             "2026-11-02T10:00:00Z 172.18.0.3 TCP_DENIED/403 CONNECT both.example:443 -\n" +
             "2026-11-02T10:00:01Z 172.18.0.3 TCP_DENIED/403 CONNECT new.example:443 -\n");
         Assert.Equal(["old.example", "both.example", "new.example"], Allowlist.FindBlockedHosts(s.ReadProxyLogLines()));
-        Assert.Equal(["new.example", "both.example", "old.example"], AllowCommand.FindBlockedAcross([s.ReadProxyLogLines()]).Select(b => b.Host));
+        Assert.Equal(["new.example", "both.example", "old.example"], BlockedDomainQuery.FindBlockedAcross([s.ReadProxyLogLines()]).Select(b => b.Host));
 
         File.Delete(s.ProxyLog);
         Assert.Equal(["old.example", "both.example"], Allowlist.FindBlockedHosts(s.ReadProxyLogLines()));

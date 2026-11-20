@@ -12,27 +12,34 @@ namespace Pen.Commands;
 /// </summary>
 /// <param name="host">The host user's environment.</param>
 /// <param name="user">The user's ~/.config/pen/config.toml.</param>
+/// <param name="startDir">The directory Pen was started in, where a project may be.</param>
 /// <param name="catalog">The recipes tools come from.</param>
+/// <param name="clock">The clock PEN_REFRESH and the wait for another project layer build are taken from.</param>
 /// <remarks>
 /// The base always gets a new ID (PEN_REFRESH sets its last layer), so every tools image, the agents'
 /// included, rebuilds on it: the ones from config here now, any other on its next use. pen upgrade never
 /// asks for approval, so it builds only what's already approved from .pen/.
 /// </remarks>
-internal sealed class UpgradeCommand(HostEnv host, Config user, RecipeCatalog catalog)
+internal sealed class UpgradeCommand(
+    HostEnv host,
+    UserConfiguration user,
+    StartDir startDir,
+    RecipeCatalog catalog,
+    TimeProvider clock)
 {
-    /// <summary>Upgrades the images, without the build cache when <paramref name="clean"/> (--clean).</summary>
+    /// <summary>Upgrades the images, without the build cache when <paramref name="noCache"/> (--no-cache).</summary>
     /// <returns>0; a failure throws.</returns>
-    public int Run(bool clean)
+    public int Run(bool noCache)
     {
-        Out.WriteLine($"upgrading {Image.Name}{(clean ? " from scratch (--clean)" : "")}");
-        var refresh = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
-        Image.Build(Embedded.ComputeImageHash(), refresh: refresh, pull: true, noCache: clean);
+        Out.WriteLine($"upgrading {Image.Name}{(noCache ? " from scratch (--no-cache)" : "")}");
+        var refresh = clock.GetUtcNow().ToUnixTimeSeconds().ToString();
+        Image.Build(Embedded.ComputeImageHash(), refresh: refresh, pull: true, noCache: noCache);
 
         // The project layer too, when run in a project that has one.
         var project = TryResolveProject();
-        var tools = ToolsImage.Ensure(SelectTools(project), catalog, noCache: clean);
-        if (project != null)
-            RebuildProjectLayer(project, clean, tools);
+        var tools = ToolsImage.Ensure(SelectTools(project), catalog, noCache: noCache);
+        if (project is not null)
+            RebuildProjectLayer(project, noCache, tools);
 
         PullSidecarImages();
         Out.WriteLine("upgrade done");
@@ -45,10 +52,13 @@ internal sealed class UpgradeCommand(HostEnv host, Config user, RecipeCatalog ca
     {
         try
         {
-            return Project.Resolve(StartDir.Get(), host);
+            return Project.Resolve(startDir.Get(), host);
         }
         catch (PenException)
         {
+            // StartDir.Get's and Project.Resolve's refusals, RepoScan's included, are the only statement of what counts
+            // as a project, so a refusal here is the wanted "no project": pen upgrade works from anywhere, rebuilding
+            // the base and the user's tools alone.
             return null;
         }
     }
@@ -61,12 +71,12 @@ internal sealed class UpgradeCommand(HostEnv host, Config user, RecipeCatalog ca
     /// <remarks>pen upgrade doesn't ask, so unapproved tools from .pen/ are skipped rather than built.</remarks>
     internal IReadOnlyList<ToolSpec> SelectTools(Project? project)
     {
-        if (project == null)
+        if (project is null)
             return user.Tools;
         ProjectContext context;
         try
         {
-            context = ProjectContext.Load(host, project, user);
+            context = ProjectContext.Load(host, project, user, catalog);
         }
         catch (PenException exception)
         {
@@ -84,7 +94,7 @@ internal sealed class UpgradeCommand(HostEnv host, Config user, RecipeCatalog ca
         }
 
         var approved = user.Tools.Concat(context.ProjectConfig.Tools.Except(unapproved));
-        if (ToolSpec.TryCanonicalize(approved, catalog, out var tools) is { } conflict)
+        if (!ToolSpec.TryCanonicalize(approved, catalog, out var tools, out var conflict))
         {
             Out.WriteLine($"skipping this project's tools: {conflict}");
             return user.Tools;
@@ -94,28 +104,28 @@ internal sealed class UpgradeCommand(HostEnv host, Config user, RecipeCatalog ca
 
     /// <summary>
     /// Rebuilds <paramref name="project"/>'s layer on <paramref name="baseImage"/>, if it has one and it's
-    /// approved, without the build cache when <paramref name="clean"/>.
+    /// approved, without the build cache when <paramref name="noCache"/>.
     /// </summary>
     /// <remarks>pen upgrade doesn't ask, so an unapproved .pen/ is skipped rather than built.</remarks>
-    internal void RebuildProjectLayer(Project project, bool clean, string baseImage)
+    internal void RebuildProjectLayer(Project project, bool noCache, string baseImage)
     {
         if (!TrustGate.HasDockerfile(project))
             return;
-        if (TrustGate.FindUnapprovedLayer(project, TrustStore.For(host, project)) != null)
+        if (TrustGate.FindUnapprovedLayer(project, TrustStore.For(host, project)) is not null)
         {
             Out.WriteLine("skipping the project layer: .pen/ isn't approved (pen trust reviews it)");
             return;
         }
         Out.WriteLine($"rebuilding the project layer {Image.GetProjectLayerName(project, baseImage)}");
-        Image.EnsureProjectLayer(host, project, noCache: clean, baseImage: baseImage);
+        Image.EnsureProjectLayer(host, project, clock, baseImage: baseImage, noCache: noCache);
     }
 
     /// <summary>Pulls newer proxy and dind images for the embedded compose.yaml.</summary>
     private static void PullSidecarImages()
     {
         Out.WriteLine("pulling sidecar images");
-        // compose reads the embedded compose.yaml from stdin. Its required
-        // variables only need values for interpolation; nothing is started.
+        // compose reads the embedded compose.yaml from stdin. Its required variables only need values for
+        // interpolation; nothing is started.
         var env = new Dictionary<string, string>
         {
             ["PROJECT_DIR"] = "/nonexistent",

@@ -26,7 +26,7 @@ public sealed class SessionLockTests(SessionLockTests.Fixture fixture) : IClassF
     [Fact(DisplayName = "project.lock is held shared: another shared lock is fine")]
     public void ProjectLockIsShared() => Assert.True(fixture.ProjectLockSharedFree);
 
-    [Fact(DisplayName = "...and an exclusive one (pen reset) is refused")]
+    [Fact(DisplayName = "...and an exclusive one (pen clean) is refused")]
     public void ProjectLockRefusesExclusive() => Assert.False(fixture.ProjectLockExclusiveFree);
 
     [Fact(DisplayName = "this dir's worktree lock is held shared too")]

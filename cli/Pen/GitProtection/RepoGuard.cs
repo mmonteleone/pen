@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text;
 using Pen.Platform;
 using Pen.Projects;
@@ -14,9 +13,6 @@ internal static class RepoGuard
 {
     /// <summary>How many paths a message lists before "… and N more".</summary>
     internal const int MaxListed = 10;
-
-    /// <summary>How many config files one walk of includes follows before it's refused.</summary>
-    internal const int MaxIncludeFiles = 100;
 
     /// <summary>The warning that the repo's git dir may fold case.</summary>
     internal const string CaseWarning = "warning: this repo's git dir isn't known to be case-sensitive, " +
@@ -51,9 +47,9 @@ internal static class RepoGuard
         RequireReadableModules(dir, modules);
         // Defence in depth: ResolveModuleCheckout already rejects a checkout whose gitdir resolves through a symlink
         // (it requires the gitdir's real path to be the path it reads as), and planning the mounts refuses the symlink.
-        var moduleRepos = modules.Repos.Where(repo => !IsLink(repo)).ToList();
-        var scan = RepoScan.ScanNested(dir, common, moduleRepos, tryOpen: null);
-        var inGitDir = RepoScan.ScanGitDir(common, moduleRepos, tryOpen: null);
+        var moduleRepos = modules.Repos.Where(repo => !PathChecks.IsLink(repo)).ToList();
+        var scan = RepoScan.ScanNested(dir, common, moduleRepos, tryMakeListable: null);
+        var inGitDir = RepoScan.ScanGitDir(common, moduleRepos, tryMakeListable: null);
         RequireDecodableNames(dir, common, modules, scan, inGitDir);
         RequireListable(dir, scan, inGitDir);
         RequireNoNestedRepos(dir, git, scan.Repos);
@@ -67,9 +63,9 @@ internal static class RepoGuard
     /// </returns>
     private static string ResolveCheckableGitDir(string dir, string git)
     {
-        if (IsLink(git))
+        if (PathChecks.IsLink(git))
         {
-            throw new PenException($"{FormatPath(dir, git)} is a symlink, which " +
+            throw new PenException($"{PathChecks.FormatPath(dir, git)} is a symlink, which " +
                 "pen doesn't support: run pen in the repo it points to");
         }
 
@@ -79,7 +75,7 @@ internal static class RepoGuard
         if (Directory.Exists(common) && !Native.CanList(common))
         {
             throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't read " +
-                $"{FormatPath(dir, common)}, so it can't protect it: fix its permissions, then rerun");
+                $"{PathChecks.FormatPath(dir, common)}, so it can't protect it: fix its permissions, then rerun");
         }
 
         return common;
@@ -90,9 +86,9 @@ internal static class RepoGuard
     private static void RequireNoCommondir(string dir, string common)
     {
         var commondir = Path.Combine(common, "commondir");
-        if (Exists(commondir))
+        if (PathChecks.ExistsOrIsLink(commondir))
         {
-            throw new PenException($"{FormatPath(dir, commondir)} exists, which a normal repo never " +
+            throw new PenException($"{PathChecks.FormatPath(dir, commondir)} exists, which a normal repo never " +
                 "has: it makes git read config and hooks from another directory. Inspect it and remove it, then rerun");
         }
     }
@@ -107,7 +103,7 @@ internal static class RepoGuard
         {
             throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't read these " +
                 "directories where git keeps submodule repos, so it can't protect what's in them:\n"
-                + string.Join('\n', unreadable.Select(u => "  " + FormatPath(dir, u)))
+                + string.Join('\n', unreadable.Select(u => "  " + PathChecks.FormatPath(dir, u)))
                 + "\nfix their permissions or remove them, then rerun");
         }
     }
@@ -135,7 +131,7 @@ internal static class RepoGuard
         // A repo renamed there would be adopted as a submodule's at the next start.
         if (modules.BadNames.Count > 0)
         {
-            gitDirNote = $"\ninspect any under {FormatPath(dir, common)} first and prefer removing them: " +
+            gitDirNote = $"\ninspect any under {PathChecks.FormatPath(dir, common)} first and prefer removing them: " +
                 "a repo renamed there is trusted as a submodule's repo at the next start";
         }
 
@@ -153,39 +149,39 @@ internal static class RepoGuard
         var unlistable = inGitDir.UnlistableDirs.Concat(scan.UnlistableDirs).ToList();
         if (unlistable.Count == 0)
             return;
-        var listed = ListFirst(unlistable, MaxListed, u => FormatPath(dir, u));
+        var listed = CappedList.FormatLines(unlistable, MaxListed, u => PathChecks.FormatPath(dir, u));
         throw new PenException($"refusing to run in {Out.Field(dir)}: pen can't list these directories, " +
             "though git on this machine can still enter them, so it can't see a repo inside one:\n"
             + string.Join('\n', listed.Select(line => "  " + line))
             + "\nfix their permissions (chmod u+rx) or remove them, then rerun");
     }
 
-    /// <summary>Refuses repos inside the project, whose config and hooks Pen can't protect.</summary>
-    /// <param name="dir">The project dir.</param>
-    /// <param name="git">The project's .git, which decides the message's wording.</param>
-    /// <param name="nested">The repos found inside the project.</param>
-    private static void RequireNoNestedRepos(string dir, string git, List<NestedRepo> nested)
+    /// <summary>
+    /// Refuses repos inside the project, whose config and hooks Pen can't protect. The project's .git decides the
+    /// message's wording.
+    /// </summary>
+    private static void RequireNoNestedRepos(string dir, string git, IReadOnlyList<NestedRepo> nested)
     {
         if (nested.Count == 0)
             return;
         var message = new StringBuilder(FormatNestedHeading(dir, git));
-        bool anySubmodule = false;
-        bool anyOther = false;
         // Only the repos listed are looked at for the advice; any not listed may be other repos.
-        bool anyQuarantined = false;
-        var listed = ListFirst(nested, MaxListed, repo =>
+        var shown = nested.Take(MaxListed).ToList();
+        var submodules = shown.Where(repo => repo.Kind == NestedKind.GitDir && IsSubmodulePath(dir, repo.RepoDir))
+            .ToHashSet(ReferenceEqualityComparer.Instance);
+        var anySubmodule = submodules.Count > 0;
+        var anyQuarantined = shown.Any(repo => IsInQuarantine(dir, repo.RepoDir));
+        var anyOther = nested.Count > MaxListed
+            || shown.Any(repo => !submodules.Contains(repo) && !IsInQuarantine(dir, repo.RepoDir));
+        var listed = CappedList.FormatLines(nested, MaxListed, repo =>
         {
-            bool submodule = repo.Kind == NestedKind.GitDir && IsSubmodulePath(dir, repo.RepoDir);
-            bool quarantined = IsInQuarantine(dir, repo.RepoDir);
-            anySubmodule |= submodule;
-            anyQuarantined |= quarantined;
-            anyOther |= !submodule && !quarantined;
-            var kind = submodule ? " (a submodule with its own .git dir)" : Describe(repo.Kind);
-            return FormatPath(dir, repo.RepoDir) + kind;
+            var kind = submodules.Contains(repo)
+                ? " (a submodule with its own .git dir)"
+                : NestedRepoWording.DescribeRefused(repo.Kind);
+            return PathChecks.FormatPath(dir, repo.RepoDir) + kind;
         });
         foreach (var line in listed)
             message.Append("\n  ").Append(line);
-        anyOther |= nested.Count > MaxListed;
         if (anySubmodule)
         {
             message.Append("\nfor a submodule, run git submodule absorbgitdirs here on this machine: " +
@@ -200,28 +196,24 @@ internal static class RepoGuard
     }
 
     /// <summary>Refuses repos in the git dir where git keeps none (<see cref="RepoScan.ScanGitDir"/>).</summary>
-    /// <param name="dir">The project dir.</param>
-    /// <param name="common">The common git dir, which the repos found are inside.</param>
-    /// <param name="found">The repos found in the git dir.</param>
     /// <remarks>
     /// Only the repos listed are looked at for the advice: one in refs/ or logs/ is made by ref names, which
     /// renaming fixes, and a worktree entry may be a stale one, which git can tidy.
     /// </remarks>
-    private static void RequireNoGitDirRepos(string dir, string common, List<NestedRepo> found)
+    private static void RequireNoGitDirRepos(string dir, string common, IReadOnlyList<NestedRepo> found)
     {
         if (found.Count == 0)
             return;
-        bool anyRefs = false;
-        bool anyEntry = false;
-        bool anyQuarantined = false;
-        var listed = ListFirst(found, MaxListed, repo =>
+        var shown = found.Take(MaxListed).ToList();
+        var anyRefs = shown.Any(IsMadeByRefNames);
+        var anyEntry = shown.Any(repo => repo is { Region: GitDirRegion.WorktreeEntry, Kind: NestedKind.Bare });
+        var anyQuarantined = shown.Any(repo => IsInQuarantine(common, repo.RepoDir));
+        var listed = CappedList.FormatLines(found, MaxListed, repo =>
         {
-            var refs = repo is { Place: GitDirPlace.Refs, Kind: NestedKind.Bare };
-            anyRefs |= refs;
-            anyQuarantined |= IsInQuarantine(common, repo.RepoDir);
-            anyEntry |= repo is { Place: GitDirPlace.WorktreeEntry, Kind: NestedKind.Bare };
-            return FormatPath(dir, repo.RepoDir) + (refs ? " (ref names that lay it out as a git dir)" :
-                DescribeInGitDir(repo));
+            var kind = IsMadeByRefNames(repo)
+                ? " (ref names that lay it out as a git dir)"
+                : NestedRepoWording.DescribeRefusedInGitDir(repo);
+            return PathChecks.FormatPath(dir, repo.RepoDir) + kind;
         });
         var message = new StringBuilder($"refusing to run in {Out.Field(dir)}: its git dir has repos where git " +
             "keeps none, whose config and hooks pen can't protect, and git run in their directories (through a " +
@@ -248,15 +240,16 @@ internal static class RepoGuard
         throw new PenException(message.ToString());
     }
 
+    /// <summary>Whether a repo in the git dir is laid out by ref names, in refs/ or logs/.</summary>
+    private static bool IsMadeByRefNames(NestedRepo repo) =>
+        repo is { Region: GitDirRegion.Refs, Kind: NestedKind.Bare };
+
     /// <summary>
     /// Refuses symlinks in the tree that lead into the git dir, or would once a directory they name is made, and
     /// those Pen can't tell lead elsewhere (<see cref="GitDirLinkCheck"/>).
     /// </summary>
-    /// <param name="dir">The project dir.</param>
-    /// <param name="links">The symlinks that lead into the git dir.</param>
-    /// <param name="untraced">The symlinks Pen can't trace.</param>
     /// <remarks>Git run through one starts in the git dir, where the sandbox could put a repo for it to use.</remarks>
-    private static void RequireNoGitDirLinks(string dir, List<string> links, List<string> untraced)
+    private static void RequireNoGitDirLinks(string dir, IReadOnlyList<string> links, IReadOnlyList<string> untraced)
     {
         if (links.Count == 0 && untraced.Count == 0)
             return;
@@ -265,7 +258,7 @@ internal static class RepoGuard
         {
             message.Append("these symlinks lead into its git dir (or would, once a directory they name is made), so " +
                 "git run through one would use any repo the sandbox puts there:");
-            foreach (var line in ListFirst(links, MaxListed, link => FormatPath(dir, link)))
+            foreach (var line in CappedList.FormatLines(links, MaxListed, link => PathChecks.FormatPath(dir, link)))
                 message.Append("\n  ").Append(line);
         }
         if (untraced.Count > 0)
@@ -275,7 +268,7 @@ internal static class RepoGuard
             message.Append(" (a directory on the way can't be searched, or a target can't be read or isn't valid " +
                 "UTF-8), so they may lead into its git dir, where git run through one would use any repo the " +
                 "sandbox puts there:");
-            foreach (var line in ListFirst(untraced, MaxListed, link => FormatPath(dir, link)))
+            foreach (var line in CappedList.FormatLines(untraced, MaxListed, link => PathChecks.FormatPath(dir, link)))
                 message.Append("\n  ").Append(line);
         }
         message.Append("\nremove them, then rerun");
@@ -283,18 +276,19 @@ internal static class RepoGuard
     }
 
     /// <summary>The advice for a repo found in something Pen quarantined (<see cref="IsInQuarantine"/>).</summary>
-    private const string QuarantineHint = "\nthose under a name holding " + GitCheck.Suffix + " are inside what " +
-        "pen put aside at the end of an earlier session (a repo in it was left intact): inspect them and remove them";
+    private const string QuarantineHint = "\nthose under a name holding " + GitQuarantine.Suffix +
+        " are inside what pen put aside at the end of an earlier session (a repo in it was left intact): " +
+        "inspect them and remove them";
 
     /// <summary>
     /// Whether <paramref name="repoDir"/> is inside something Pen quarantined: a component of its path below
-    /// <paramref name="dir"/> holds <see cref="GitCheck.Suffix"/>, which Pen adds when it moves a thing aside (with
-    /// -2, -3, … after it when the name is taken).
+    /// <paramref name="dir"/> holds <see cref="GitQuarantine.Suffix"/>, which Pen adds when it moves a thing aside
+    /// (with -2, -3, … after it when the name is taken).
     /// </summary>
     /// <remarks>Components above <paramref name="dir"/>, should the repo be outside it, don't count.</remarks>
     private static bool IsInQuarantine(string dir, string repoDir) =>
         Path.GetRelativePath(dir, repoDir).Split('/').SkipWhile(part => part == "..")
-            .Any(part => part.Contains(GitCheck.Suffix, StringComparison.Ordinal));
+            .Any(part => part.Contains(GitQuarantine.Suffix, StringComparison.Ordinal));
 
     /// <summary>Formats the first line of the nested-repo refusal, worded for a repo or a plain directory.</summary>
     private static string FormatNestedHeading(string dir, string git)
@@ -310,22 +304,9 @@ internal static class RepoGuard
 
     /// <summary>Formats the first few of <paramref name="names"/> for a message, and how many more there are.</summary>
     /// <returns>One line per name listed, without indent, then "… and N more" if any weren't.</returns>
-    internal static List<string> FormatBadNames(string dir, IReadOnlyList<BadName> names) =>
-        ListFirst(names, MaxListed, n => FormatPath(dir, n.DisplayPath) + (n.EndsInNewline ? " " +
-            "(it ends in a newline, so no command can name it here: rename it by hand)" : ""));
-
-    /// <summary>
-    /// Formats the first <paramref name="max"/> of <paramref name="items"/>, then how many more there are.
-    /// </summary>
-    /// <returns>One line per item listed, without indent, then "… and N more" if any weren't.</returns>
-    /// <remarks>Formats only the items listed, each once and in order, before returning.</remarks>
-    internal static List<string> ListFirst<T>(IReadOnlyCollection<T> items, int max, Func<T, string> format)
-    {
-        var lines = items.Take(max).Select(format).ToList();
-        if (items.Count > max)
-            lines.Add($"… and {items.Count - max} more");
-        return lines;
-    }
+    internal static IReadOnlyList<string> FormatBadNames(string dir, IReadOnlyList<BadName> names) =>
+        CappedList.FormatLines(names, MaxListed, n => PathChecks.FormatPath(dir, n.DisplayPath) + (n.EndsInNewline
+            ? " (it ends in a newline, so no command can name it here: rename it by hand)" : ""));
 
     /// <summary>
     /// Whether <paramref name="repoDir"/> is a submodule's checkout by the .gitmodules of the project or of a
@@ -333,17 +314,10 @@ internal static class RepoGuard
     /// submodule.*.path.
     /// </summary>
     /// <remarks>Only for the refusal's advice, so a forged entry changes nothing but the wording.</remarks>
-    internal static bool IsSubmodulePath(string dir, string repoDir)
-    {
-        for (var super = Path.GetDirectoryName(repoDir);
-            super != null && IsInside(dir, super);
-            super = Path.GetDirectoryName(super))
-        {
-            if (ListsSubmodulePath(super, repoDir))
-                return true;
-        }
-        return false;
-    }
+    internal static bool IsSubmodulePath(string dir, string repoDir) =>
+        Paths.EnumerateAncestors(repoDir)
+            .TakeWhile(super => PathChecks.IsInside(dir, super))
+            .Any(super => ListsSubmodulePath(super, repoDir));
 
     /// <summary>
     /// Whether <paramref name="super"/>'s own .gitmodules lists <paramref name="repoDir"/> as a path.
@@ -351,12 +325,12 @@ internal static class RepoGuard
     private static bool ListsSubmodulePath(string super, string repoDir)
     {
         var gitmodules = Path.Combine(super, ".gitmodules");
-        if (!File.Exists(gitmodules) || IsLink(gitmodules))
+        if (!File.Exists(gitmodules) || PathChecks.IsLink(gitmodules))
             return false;
         var relative = Path.GetRelativePath(super, repoDir);
         // No advice from a file that can't be read.
-        return GitConfigFile.TryParseFile(gitmodules)?.Any(e =>
-            e.Section == "submodule" && e.Key == "path" && e.Value.TrimEnd('/') == relative) ?? false;
+        return GitConfigFile.TryParseFile(gitmodules, out var entries, out _) && entries.Any(e =>
+            e.Section == "submodule" && e.Key == "path" && e.Value.TrimEnd('/') == relative);
     }
 
     /// <summary>Finds the common git dir of the linked worktree whose .git file is <paramref name="git"/>.</summary>
@@ -373,7 +347,7 @@ internal static class RepoGuard
                 "moved), which pen doesn't support. For a submodule, run pen in the repo that " +
                 "has it; for a worktree, git worktree repair in the main checkout may fix it");
         // ResolveWorktree requires the path to be real already; this is belt and braces.
-        if (IsLink(common) || !Directory.Exists(common) || Native.RealPath(common) != common)
+        if (PathChecks.IsLink(common) || !Directory.Exists(common) || Native.RealPath(common) != common)
         {
             throw new PenException($"this worktree's git dir {Out.Field(common)} " +
                 "isn't a real directory, which pen doesn't support");
@@ -400,33 +374,13 @@ internal static class RepoGuard
         // extensions.worktreeConfig is on); one the agent planted is quarantined by the session-end check.
         // Only core.bare itself: git ignores a bare key in a subsection such as [core "x"].
         var bare = GitConfigFile.FindLast(GitConfigFile.ParseFile(Path.Combine(common, "config")), "core", "bare");
-        return bare == null || !GitConfigFile.IsTrue(bare);
+        return bare is null || !GitConfigFile.IsTrue(bare);
     }
 
-    /// <summary>Describes what makes a nested repo one, for the refusal; nothing for a plain .git dir.</summary>
-    private static string Describe(NestedKind kind) => kind switch
-    {
-        NestedKind.Bare => " (a bare repo)",
-        NestedKind.GitFile => " (a .git file that isn't one of this repo's worktrees or submodules)",
-        NestedKind.GitLink => " (a .git symlink)",
-        _ => "",
-    };
-
-    /// <summary>Describes what makes a repo in the git dir one, for the refusal.</summary>
-    private static string DescribeInGitDir(NestedRepo repo) => repo switch
-    {
-        { Place: GitDirPlace.WorktreeEntry, Kind: NestedKind.Bare } =>
-            " (a worktree entry whose commondir doesn't lead back to this repo)",
-        { Kind: NestedKind.Bare } => " (laid out as a git dir of its own)",
-        { Kind: NestedKind.GitFile } => " (a .git file that isn't one of this repo's worktrees or submodules)",
-        { Kind: NestedKind.GitLink } => " (a .git symlink)",
-        _ => " (a .git dir)",
-    };
-
-    /// <summary>Warns once if the repo's common git dir may fold case.</summary>
-    /// <param name="project">The project; a plain directory has no git dir to probe, so no warning.</param>
-    /// <param name="warn">Where the warning goes.</param>
-    /// <param name="probe">Whether a git dir may fold case: <see cref="MayFoldCase(string)"/> in production.</param>
+    /// <summary>
+    /// Warns once if the repo's common git dir may fold case, by <paramref name="probe"/>
+    /// (<see cref="PathChecks.MayFoldCase(string)"/> in production). A plain directory has no git dir to probe.
+    /// </summary>
     /// <remarks>
     /// The common git dir is where config and hooks are, for a linked worktree too. On a folding file system the
     /// agent could change .git/config by writing .git/CONFIG, past its single-file mount. This warns on every
@@ -436,139 +390,5 @@ internal static class RepoGuard
     {
         if (project.CommonGitDir is { } common && probe(common))
             warn(CaseWarning);
-    }
-
-    /// <summary>Whether <paramref name="gitDir"/> may fold case, by probing it with a new random name.</summary>
-    internal static bool MayFoldCase(string gitDir) => MayFoldCase(gitDir, GenerateCaseProbeName());
-
-    /// <summary>Generates a random name for the case probe.</summary>
-    /// <remarks>
-    /// It's a name git has no use for: the files it reads in a git dir have fixed names, and the only other names it
-    /// takes there as refs are all caps with no dot. Lower case, so the upper-case form is a different name.
-    /// </remarks>
-    internal static string GenerateCaseProbeName() =>
-        ".pen-case-probe-" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
-
-    /// <summary>
-    /// Whether <paramref name="gitDir"/> may fold case: an empty file created there is also found under its
-    /// upper-case name.
-    /// </summary>
-    /// <returns>False only for a clean "no".</returns>
-    /// <remarks>
-    /// Anything short of a clean "no" counts as yes: either name there already (it isn't this probe's to touch), the
-    /// file not being created, or it having gone by the time it's looked for. Exclusive creation doesn't follow a
-    /// symlink, and the file is removed on every path once creating it has been tried.
-    /// </remarks>
-    internal static bool MayFoldCase(string gitDir, string name)
-    {
-        var probe = Path.Combine(gitDir, name);
-        var upper = Path.Combine(gitDir, name.ToUpperInvariant());
-        try
-        {
-            if (Exists(probe) || Exists(upper))
-                return true;
-            try
-            {
-                new FileStream(probe, new FileStreamOptions
-                {
-                    Mode = FileMode.CreateNew,
-                    Access = FileAccess.Write,
-                    UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
-                }).Dispose();
-                return Exists(upper) || !Exists(probe);
-            }
-            finally
-            {
-                File.Delete(probe);
-            }
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            return true;
-        }
-    }
-
-    /// <summary>
-    /// Plans the mounts over the project mount, creating what must exist to be mounted (.pen/, .git/hooks, and a few
-    /// files inside .git) so that the agent can't create them instead.
-    /// </summary>
-    /// <param name="dir">The project dir, checked by <see cref="CheckAtStart"/> first.</param>
-    /// <param name="hostHome">The host user's home, for includes of ~/ paths.</param>
-    /// <returns>The mounts, in order, one per path (see <see cref="MountPlanner.Plan"/>).</returns>
-    public static List<Mount> PrepareMounts(string dir, string hostHome) => new MountPlanner(dir, hostHome).Plan();
-
-    /// <summary>
-    /// Resolves the real path of <paramref name="path"/>, or of its deepest existing ancestor plus the rest.
-    /// </summary>
-    /// <returns>The resolved path, or <paramref name="path"/> itself if no ancestor resolves.</returns>
-    internal static string ResolveExisting(string path)
-    {
-        var rest = new Stack<string>();
-        var current = path;
-        while (true)
-        {
-            var real = Native.RealPath(current);
-            if (real != null)
-                return rest.Aggregate(real, Path.Combine);
-            var parent = Path.GetDirectoryName(current);
-            if (parent == null)
-                return path;
-            rest.Push(Path.GetFileName(current));
-            current = parent;
-        }
-    }
-
-    /// <summary>
-    /// Creates <paramref name="path"/> as a directory to be mounted, refusing a symlink or a file there.
-    /// </summary>
-    /// <param name="dir">The project dir, for messages.</param>
-    /// <param name="path">The directory.</param>
-    internal static void EnsureDirectory(string dir, string path)
-    {
-        RequireNotLink(dir, path);
-        if (File.Exists(path))
-        {
-            throw new PenException($"{FormatPath(dir, path)} is a file, not a " +
-                "directory: pen needs to mount it read-only as a directory");
-        }
-
-        Directory.CreateDirectory(path);
-    }
-
-    /// <summary>Refuses a symlink at <paramref name="path"/>, which Pen has to mount read-only.</summary>
-    /// <param name="dir">The project dir, for messages.</param>
-    /// <param name="path">The path to be mounted.</param>
-    internal static void RequireNotLink(string dir, string path)
-    {
-        if (IsLink(path))
-        {
-            throw new PenException($"{FormatPath(dir, path)} is a symlink, which " +
-                "pen doesn't support here: it has to mount it read-only");
-        }
-    }
-
-    /// <summary>Whether <paramref name="path"/> is a symlink, dangling or not.</summary>
-    internal static bool IsLink(string path) => new FileInfo(path).LinkTarget != null;
-
-    /// <summary>Whether <paramref name="path"/> exists, including as a dangling symlink.</summary>
-    internal static bool Exists(string path) => Path.Exists(path) || IsLink(path);
-
-    /// <summary>
-    /// Whether <paramref name="path"/> is <paramref name="dir"/> or below it, comparing names exactly.
-    /// </summary>
-    internal static bool IsInside(string dir, string path) =>
-        path == dir || path.StartsWith(dir.TrimEnd('/') + "/", StringComparison.Ordinal);
-
-    /// <summary>
-    /// Formats <paramref name="path"/> for a message: relative to <paramref name="dir"/> when it's inside, and safe to
-    /// print (<see cref="Out.Field"/>).
-    /// </summary>
-    internal static string FormatPath(string dir, string path)
-    {
-        if (path == dir)
-            return Out.Field(".");
-        if (IsInside(dir, path))
-            return Out.Field(path[(dir.TrimEnd('/').Length + 1)..]);
-        return Out.Field(path);
     }
 }

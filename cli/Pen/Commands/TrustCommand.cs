@@ -1,6 +1,6 @@
+using Pen.CommandLine;
 using Pen.Platform;
 using Pen.Projects;
-using Pen.Sessions;
 using Pen.Tools;
 using Pen.Trust;
 
@@ -10,19 +10,18 @@ namespace Pen.Commands;
 /// <param name="context">The project and both configs.</param>
 /// <param name="answers">Where the user's approval comes from.</param>
 /// <param name="catalog">The recipes that say which domains a tool brings.</param>
-internal sealed class TrustCommand(ProjectContext context, Answers answers, RecipeCatalog catalog)
+/// <param name="clock">The clock that says when an abandoned review copy is old enough to delete.</param>
+internal sealed class TrustCommand(ProjectContext context, Answers answers, RecipeCatalog catalog, TimeProvider clock)
 {
     private const string NothingNew = "nothing new to approve in .pen/";
 
-    private readonly TrustGate _gate = new(context, answers, catalog);
+    private readonly TrustGate _gate = new(context, answers, catalog, clock);
 
-    /// <summary>Lists (<paramref name="list"/>) or approves what .pen/ asks for.</summary>
-    /// <param name="yes">Approve without asking (--yes).</param>
-    /// <param name="list">List everything asked for and approve nothing (--list).</param>
+    /// <summary>Approves what .pen/ asks for, or lists it, as <paramref name="mode"/> says.</summary>
     /// <returns>0, or 1 when the user declines; a refusal throws.</returns>
-    public int Run(bool yes, bool list)
+    public int Run(TrustMode mode)
     {
-        Session.EnsureRuntimeDir(context.Host, context.Project);
+        ProjectRuntime.EnsureRuntimeDir(context.Host, context.Project);
         var store = TrustStore.For(context.Host, context.Project);
         var request = _gate.FindUnapproved(store, []);
         if (request.IsEmpty)
@@ -30,7 +29,9 @@ internal sealed class TrustCommand(ProjectContext context, Answers answers, Reci
             Out.WriteLine(NothingNew);
             return 0;
         }
-        return list ? ListAll(request, store) : Approve(request, store, yes);
+        return mode == TrustMode.List
+            ? ListAll(request, store)
+            : Approve(request, store, yes: mode == TrustMode.ApproveAll);
     }
 
     /// <summary>Writes every item in <paramref name="request"/> to stdout, with no limit.</summary>
@@ -41,10 +42,10 @@ internal sealed class TrustCommand(ProjectContext context, Answers answers, Reci
     /// </remarks>
     private int ListAll(TrustRequest request, TrustStore store)
     {
-        using var look = request.Layer is { Hash: not null }
-            ? LayerContext.Review(context.Host, context.Project)
+        using var look = request.Layer is LayerRequest.Unapproved
+            ? LayerContext.TakeForReviewRemovingAbandoned(context.Host, context.Project, clock)
             : null;
-        if (look != null)
+        if (look is not null)
             request = TrustGate.WithReviewedLayer(request, look, store, showCopy: false);
         foreach (var line in request.FormatAllLines())
             Out.WriteStdout(line + "\n");
@@ -66,8 +67,10 @@ internal sealed class TrustCommand(ProjectContext context, Answers answers, Reci
                 "terminal to ask on: use pen trust --yes to approve them"));
         }
 
-        using var review = request.Layer != null ? LayerContext.Review(context.Host, context.Project) : null;
-        if (review != null)
+        using var review = request.Layer is not null
+            ? LayerContext.TakeForReviewRemovingAbandoned(context.Host, context.Project, clock)
+            : null;
+        if (review is not null)
             request = TrustGate.WithReviewedLayer(request, review, store, showCopy: !yes);
         if (request.IsEmpty)
         {
@@ -77,7 +80,7 @@ internal sealed class TrustCommand(ProjectContext context, Answers answers, Reci
         TrustGate.RequireCheckable(request);
 
         TrustGate.WriteRequest(request);
-        if (!yes && !Out.Confirm(request.Question, answers.Input))
+        if (!yes && !Out.Confirm(request.Question, answers))
         {
             Out.WriteLine("nothing approved");
             return 1;

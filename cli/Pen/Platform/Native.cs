@@ -1,10 +1,13 @@
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Unicode;
 using Microsoft.Win32.SafeHandles;
 
 namespace Pen.Platform;
 
-/// <summary>The few libc calls Pen needs. Same signatures on macOS and Linux.</summary>
+/// <summary>
+/// The few libc calls Pen needs, same signatures on macOS and Linux, and CoreFoundation's normalization on macOS.
+/// </summary>
 internal static partial class Native
 {
     private const string Libc = "libc";
@@ -26,10 +29,9 @@ internal static partial class Native
     [LibraryImport(Libc, EntryPoint = "isatty")]
     private static partial int IsATtyNative(int fd);
 
-    // open(2) is variadic, and on Apple arm64 variadic arguments go on the
-    // stack, so a mode passed as a fixed argument arrives as garbage. So this
-    // binding never passes O_CREAT (the mode is never read), and creat(2),
-    // which isn't variadic, makes missing files.
+    // open(2) is variadic, and on Apple arm64 variadic arguments go on the stack, so a mode passed as a fixed argument
+    // arrives as garbage. So this binding never passes O_CREAT (the mode is never read), and creat(2), which isn't
+    // variadic, makes missing files.
     [LibraryImport(Libc, EntryPoint = "open", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
     private static partial int OpenNative(string path, int flags);
 
@@ -110,11 +112,10 @@ internal static partial class Native
 
     /// <summary>Lists the entries of <paramref name="dir"/> whose names aren't valid UTF-8.</summary>
     /// <returns>
-    /// The entries, or null if that can't be found out (including on a platform whose dirent
-    /// layout isn't known).
+    /// The entries, or null if that can't be found out (including on a platform whose dirent layout isn't known).
     /// </returns>
     /// <remarks>Only readdir(3) sees the real bytes: .NET's listing has U+FFFD in place of the bad ones.</remarks>
-    public static List<UndecodableEntry>? ListUndecodable(string dir)
+    public static IReadOnlyList<UndecodableEntry>? ListUndecodable(string dir)
     {
         if (GetDirentLayout() is not { } layout)
             return null;
@@ -152,6 +153,9 @@ internal static partial class Native
     private const int O_RDONLY = 0, O_WRONLY = 1, O_RDWR = 2, ENOENT = 2, EPERM = 1, EACCES = 13, ENOTDIR = 20;
     private static int O_CLOEXEC => OperatingSystem.IsMacOS() ? 0x1000000 : 0x80000;
     private static int O_NONBLOCK => OperatingSystem.IsMacOS() ? 0x4 : 0x800;
+    private const int ENXIO = 6, ENODEV = 19;
+    private static int EOPNOTSUPP => OperatingSystem.IsMacOS() ? 102 : 95;
+    private static int ELOOP => OperatingSystem.IsMacOS() ? 62 : 40;
     private static int O_NOFOLLOW
     {
         get
@@ -167,15 +171,17 @@ internal static partial class Native
 
     /// <summary>Reads a regular file's text, through a symlink if it's one.</summary>
     /// <returns>The text, or null if it's anything but a regular file or over <see cref="MaxTextFile"/>.</returns>
+    /// <exception cref="FileNotFoundException">Nothing is at the path.</exception>
+    /// <exception cref="UnauthorizedAccessException">Permission is denied.</exception>
+    /// <exception cref="IOException">Reading fails.</exception>
     /// <remarks>
-    /// Opening a FIFO for reading blocks until a writer comes, and a sparse file costs nothing to
-    /// make and runs Pen out of memory. The non-blocking open returns at once, and the size check
-    /// and read use that same descriptor.
+    /// Opening a FIFO for reading blocks until a writer comes, and a sparse file costs nothing to make and runs Pen out
+    /// of memory. The non-blocking open returns at once, and the size check and read use that same descriptor.
     /// </remarks>
     public static string? ReadRegularFile(string path)
     {
         using var handle = OpenRegular(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-        if (handle == null)
+        if (handle is null)
             return null;
         var length = RandomAccess.GetLength(handle);
         if (length > MaxTextFile)
@@ -183,8 +189,25 @@ internal static partial class Native
         using var reader = new StreamReader(new FileStream(handle, FileAccess.Read));
         // One spare char: filling it means the file grew past what was checked.
         var chars = new char[length + 1];
-        int read = reader.ReadBlock(chars, 0, chars.Length);
+        var read = reader.ReadBlock(chars, 0, chars.Length);
         return read > length ? null : new string(chars, 0, read);
+    }
+
+    /// <summary>Reads a regular file as <see cref="ReadRegularFile"/> does, giving null where that throws.</summary>
+    /// <returns>
+    /// The text, or null if it's anything but a regular file, over <see cref="MaxTextFile"/>, or can't be read
+    /// (missing, permission denied or any other I/O error).
+    /// </returns>
+    public static string? ReadRegularFileOrNull(string path)
+    {
+        try
+        {
+            return ReadRegularFile(path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Reads a regular file's exact bytes, through a symlink if it's one.</summary>
@@ -192,25 +215,24 @@ internal static partial class Native
     public static byte[]? ReadRegularBytes(string path)
     {
         using var handle = OpenRegular(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-        return handle == null ? null : ReadBounded(handle);
+        return handle is null ? null : ReadBounded(handle);
     }
 
     /// <summary>Opens the regular file at <paramref name="path"/> without blocking.</summary>
     /// <returns>
-    /// The handle, or null if it's anything else, a symlink too when the flags say O_NOFOLLOW (a
-    /// FIFO with no reader, a directory for writing and a socket can't be opened at all, and are
-    /// null as well).
+    /// The handle, or null if it's anything else, a symlink too when the flags say O_NOFOLLOW (a FIFO with no reader, a
+    /// directory for writing and a socket can't be opened at all, and are null as well).
     /// </returns>
     /// <exception cref="UnauthorizedAccessException">Permission is denied.</exception>
     /// <exception cref="FileNotFoundException">Nothing is at the path.</exception>
     private static SafeFileHandle? OpenRegular(string path, int flags)
     {
-        int fd = OpenNative(path, flags);
+        var fd = OpenNative(path, flags);
         if (fd < 0)
         {
-            int errno = Marshal.GetLastPInvokeError();
+            var errno = Marshal.GetLastPInvokeError();
             if (errno is EACCES or EPERM)
-                throw new UnauthorizedAccessException($"Access to the path '{path}' is denied.");
+                throw AccessDenied(path);
             if (errno is ENOENT or ENOTDIR)
                 throw new FileNotFoundException(path);
             return null;
@@ -231,7 +253,7 @@ internal static partial class Native
     public static RegularFile? ReadProtected(string path)
     {
         using var handle = OpenRegular(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
-        if (handle == null)
+        if (handle is null)
             return null;
         return ReadBounded(handle) is { } bytes ? new(bytes, File.GetUnixFileMode(handle)) : null;
     }
@@ -245,10 +267,10 @@ internal static partial class Native
             return null;
         // One spare byte: filling it means the file grew past what was checked.
         var bytes = new byte[length + 1];
-        int total = 0;
+        var total = 0;
         while (total < bytes.Length)
         {
-            int read = RandomAccess.Read(handle, bytes.AsSpan(total), total);
+            var read = RandomAccess.Read(handle, bytes.AsSpan(total), total);
             if (read == 0)
                 break;
             total += read;
@@ -257,16 +279,16 @@ internal static partial class Native
     }
 
     /// <summary>
-    /// Opens the regular file at <paramref name="path"/>, never through a symlink at that name, for
-    /// changing it through the descriptor.
+    /// Opens the regular file at <paramref name="path"/>, never through a symlink at that name, for changing it through
+    /// the descriptor.
     /// </summary>
     /// <returns>The handle, or null if it's anything else.</returns>
     public static SafeFileHandle? OpenProtected(string path, bool write) =>
         OpenRegular(path, (write ? O_WRONLY : O_RDONLY) | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
 
     /// <summary>
-    /// Opens the file at <paramref name="path"/> for reading if it's a regular file, never following
-    /// a symlink there, and returning at once for a FIFO.
+    /// Opens the file at <paramref name="path"/> for reading if it's a regular file, never following a symlink there,
+    /// and returning at once for a FIFO.
     /// </summary>
     /// <returns>The handle, or null for anything else or any failure.</returns>
     /// <remarks>Type and contents then come from one descriptor, so swapping the file changes nothing.</remarks>
@@ -306,15 +328,21 @@ internal static partial class Native
         }
     }
 
-    // stat(2) and friends. struct stat differs by platform and architecture, so: on macOS fstatat(2),
-    // whose 64-bit-inode struct has one layout on arm64 and x64 (where the symbol is fstatat$INODE64);
-    // on Linux statx(2), whose struct has one layout on every architecture.
+    // stat(2) and friends. struct stat differs by platform and architecture, so: on macOS fstatat(2), whose
+    // 64-bit-inode struct has one layout on arm64 and x64 (where the symbol is fstatat$INODE64); on Linux statx(2),
+    // whose struct has one layout on every architecture.
     [LibraryImport(Libc, EntryPoint = "fstatat", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
     private static unsafe partial int FStatAtMacArm64(int dirfd, string path, byte* buffer, int flags);
 
     [LibraryImport(Libc, EntryPoint = "fstatat$INODE64", StringMarshalling = StringMarshalling.Utf8,
         SetLastError = true)]
     private static unsafe partial int FStatAtMacX64(int dirfd, string path, byte* buffer, int flags);
+
+    [LibraryImport(Libc, EntryPoint = "fstat", SetLastError = true)]
+    private static unsafe partial int FStatMacArm64(int fd, byte* buffer);
+
+    [LibraryImport(Libc, EntryPoint = "fstat$INODE64", SetLastError = true)]
+    private static unsafe partial int FStatMacX64(int fd, byte* buffer);
 
     [LibraryImport(Libc, EntryPoint = "statx", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
     private static unsafe partial int StatxNative(int dirfd, string path, int flags, uint mask, byte* buffer);
@@ -341,8 +369,8 @@ internal static partial class Native
         }
     }
 
-    // S_IFMT, S_IFDIR and S_IFLNK, the same on both platforms.
-    private const int ModeTypeMask = 0xF000, ModeDirectory = 0x4000, ModeSymlink = 0xA000;
+    // S_IFMT, S_IFDIR, S_IFLNK and S_IFREG, the same on both platforms.
+    private const int ModeTypeMask = 0xF000, ModeDirectory = 0x4000, ModeSymlink = 0xA000, ModeRegular = 0x8000;
 
     /// <summary>The size of the buffer given to fstatat or statx: more than either struct needs.</summary>
     private const int StatBufferSize = 512;
@@ -352,7 +380,7 @@ internal static partial class Native
     {
         try
         {
-            return StatAt(AT_FDCWD, "/", follow: true) != null;
+            return StatAt(AT_FDCWD, "/", follow: true) is not null;
         }
         catch (Exception exception) when (exception is EntryPointNotFoundException or DllNotFoundException)
         {
@@ -372,35 +400,55 @@ internal static partial class Native
 
     /// <summary>Gets what's at <paramref name="path"/> relative to the directory <paramref name="dirfd"/>.</summary>
     /// <returns>What's there, or null if the call failed or the platform's layout isn't known.</returns>
-    private static unsafe FileStatus? StatAt(int dirfd, string path, bool follow)
+    private static FileStatus? StatAt(int dirfd, string path, bool follow) =>
+        ReadStatus(dirfd, path, follow ? 0 : AT_SYMLINK_NOFOLLOW);
+
+    /// <summary>Gets what the open descriptor <paramref name="fd"/> is, with fstat(2) or statx(2).</summary>
+    /// <returns>What it is, or null if the call failed or the platform's layout isn't known.</returns>
+    private static FileStatus? StatOpen(int fd) => ReadStatus(fd, null, 0);
+
+    /// <summary>
+    /// Stats <paramref name="path"/> relative to the directory <paramref name="fd"/> with fstatat or statx, or, when
+    /// <paramref name="path"/> is null, the descriptor itself with fstat or statx's AT_EMPTY_PATH.
+    /// </summary>
+    /// <returns>What's there, or null if the call failed or the platform's layout isn't known.</returns>
+    private static unsafe FileStatus? ReadStatus(int fd, string? path, int flags)
     {
-        var flags = follow ? 0 : AT_SYMLINK_NOFOLLOW;
         var buffer = stackalloc byte[StatBufferSize];
         var bytes = new ReadOnlySpan<byte>(buffer, StatBufferSize);
         ulong device;
         ulong inode;
+        ulong links;
         int mode;
         if (OperatingSystem.IsMacOS())
         {
-            var result = RuntimeInformation.ProcessArchitecture switch
+            var result = (RuntimeInformation.ProcessArchitecture, path) switch
             {
-                Architecture.Arm64 => FStatAtMacArm64(dirfd, path, buffer, flags),
-                Architecture.X64 => FStatAtMacX64(dirfd, path, buffer, flags),
+                (Architecture.Arm64, null) => FStatMacArm64(fd, buffer),
+                (Architecture.X64, null) => FStatMacX64(fd, buffer),
+                (Architecture.Arm64, _) => FStatAtMacArm64(fd, path, buffer, flags),
+                (Architecture.X64, _) => FStatAtMacX64(fd, path, buffer, flags),
                 _ => -1,
             };
             if (result != 0)
                 return null;
-            // st_dev (int32) at 0, st_mode (uint16) at 4, st_ino (uint64) at 8.
+            // st_dev (int32) at 0, st_mode (uint16) at 4, st_nlink (uint16) at 6, st_ino (uint64) at 8.
             device = MemoryMarshal.Read<uint>(bytes);
             mode = MemoryMarshal.Read<ushort>(bytes[4..]);
+            links = MemoryMarshal.Read<ushort>(bytes[6..]);
             inode = MemoryMarshal.Read<ulong>(bytes[8..]);
         }
         else if (OperatingSystem.IsLinux())
         {
-            const uint STATX_TYPE = 0x1, STATX_INO = 0x100;
-            if (StatxNative(dirfd, path, flags, STATX_TYPE | STATX_INO, buffer) != 0)
+            const uint STATX_TYPE = 0x1, STATX_NLINK = 0x4, STATX_INO = 0x100;
+            const int AT_EMPTY_PATH = 0x1000;
+            if (path is null)
+                flags |= AT_EMPTY_PATH;
+            if (StatxNative(fd, path ?? "", flags, STATX_TYPE | STATX_NLINK | STATX_INO, buffer) != 0)
                 return null;
-            // stx_mode (uint16) at 28, stx_ino (uint64) at 32, stx_dev_major and stx_dev_minor (uint32) at 136.
+            // stx_nlink (uint32) at 16, stx_mode (uint16) at 28, stx_ino (uint64) at 32, stx_dev_major and
+            // stx_dev_minor (uint32) at 136.
+            links = MemoryMarshal.Read<uint>(bytes[16..]);
             mode = MemoryMarshal.Read<ushort>(bytes[28..]);
             inode = MemoryMarshal.Read<ulong>(bytes[32..]);
             device = ((ulong)MemoryMarshal.Read<uint>(bytes[136..]) << 32) | MemoryMarshal.Read<uint>(bytes[140..]);
@@ -409,7 +457,8 @@ internal static partial class Native
         {
             return null;
         }
-        return new(device, inode, (mode & ModeTypeMask) == ModeDirectory, (mode & ModeTypeMask) == ModeSymlink);
+        var type = mode & ModeTypeMask;
+        return new(device, inode, type == ModeDirectory, type == ModeSymlink, links, type == ModeRegular);
     }
 
     /// <summary>The largest symlink target <see cref="ReadLink"/> reads: PATH_MAX on Linux, above macOS's.</summary>
@@ -449,12 +498,8 @@ internal static partial class Native
     /// </remarks>
     public static byte[] RemoveSymlink(string root, string path)
     {
-        // O_NOFOLLOW and O_DIRECTORY differ by architecture on Linux, so this fails closed where they aren't known.
-        if (!CanStat || (!OperatingSystem.IsMacOS()
-            && RuntimeInformation.ProcessArchitecture is not (Architecture.X64 or Architecture.Arm64)))
-        {
+        if (!CanWalkDescriptors)
             throw new IOException("pen can't remove a symlink safely on this platform");
-        }
         var relative = Path.GetRelativePath(root, path);
         if (relative == "." || relative == ".." || relative.StartsWith("../", StringComparison.Ordinal)
             || Path.IsPathRooted(relative))
@@ -462,27 +507,15 @@ internal static partial class Native
             throw new IOException($"it isn't below {root}");
         }
         var parts = relative.Split('/');
-        int fd = OpenNative(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-        if (fd < 0)
-            throw ErrnoException(root);
+        var (fd, at) = OpenDirectoriesDown(root, parts, (failed, _) => RemoveSymlinkException(failed), opened: null);
         try
         {
-            var at = root;
-            foreach (var part in parts[..^1])
-            {
-                at = Path.Combine(at, part);
-                int next = OpenAtNative(fd, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-                if (next < 0)
-                    throw ErrnoException(at);
-                CloseNative(fd);
-                fd = next;
-            }
             var name = parts[^1];
             if (StatAt(fd, name, follow: false) is not { IsSymlink: true })
                 throw new IOException("it isn't a symlink any more");
             var target = ReadLinkAt(fd, name) ?? throw new IOException("what it holds can't be read");
             if (UnlinkAtNative(fd, name, 0) != 0)
-                throw ErrnoException(at);
+                throw RemoveSymlinkException(at);
             return target;
         }
         finally
@@ -491,17 +524,155 @@ internal static partial class Native
         }
     }
 
-    /// <summary>Turns the last call's errno into the exception for <paramref name="path"/>.</summary>
-    private static Exception ErrnoException(string path)
+    /// <summary>
+    /// Reads the regular file at <paramref name="relative"/> below <paramref name="root"/>, opening each directory on
+    /// the way down from <paramref name="root"/>, and the file itself, without following a symlink.
+    /// </summary>
+    /// <param name="root">A directory to start from, opened as named.</param>
+    /// <param name="relative">
+    /// The file, relative to <paramref name="root"/>, with no empty, "." or ".." component.
+    /// </param>
+    /// <returns>
+    /// The file's bytes and mode, both read through the one descriptor, and what each directory on the way and the
+    /// file are, from the descriptors opened.
+    /// </returns>
+    /// <exception cref="UnauthorizedAccessException">Permission is denied, naming the path.</exception>
+    /// <exception cref="FileNotFoundException">Nothing is at the path, or a directory on the way is gone.</exception>
+    /// <exception cref="IOException">
+    /// Anything else stopped it: the path isn't below <paramref name="root"/>, a directory on the way isn't one (a
+    /// symlink, say), the file is a symlink, isn't a regular file or is over 1 MB, a descriptor can't be stat'ed, or
+    /// the platform's flags aren't known.
+    /// </exception>
+    /// <remarks>
+    /// The project can be written by an agent while this runs, so a path checked and then read could have a directory
+    /// on the way swapped for a symlink in between, and the read would copy whatever that leads to. Through
+    /// descriptors, each step is taken in the directory reached without a symlink. The final open doesn't block, so a
+    /// FIFO opens at once and is refused by its type, and type, size, bytes and mode all come from that descriptor.
+    /// </remarks>
+    public static ProjectFile ReadInsideProject(string root, string relative)
     {
-        int errno = Marshal.GetLastPInvokeError();
+        if (!CanWalkDescriptors)
+            throw new IOException("pen can't read a file in the project safely on this platform");
+        var parts = relative.Split('/');
+        if (Path.IsPathRooted(relative) || relative.Contains('\0') || parts.Any(part => part is "" or "." or ".."))
+            throw new IOException($"{relative} isn't a path below {root}");
+        var steps = new List<FileStatus>();
+        var (fd, _) = OpenDirectoriesDown(root, parts,
+            (failed, isRoot) => ReadInsideException(
+                failed, isRoot ? "isn't a directory" : "isn't a directory (a symlink, say)"),
+            (opened, at) => steps.Add(StatOpen(opened) ?? throw new IOException($"{at} can't be stat'ed")));
+        try
+        {
+            var path = Path.Combine(root, relative);
+            var file = OpenAtNative(fd, parts[^1], O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+            if (file < 0)
+                throw ReadInsideException(path, "is a symlink");
+            using var handle = new SafeFileHandle(file, ownsHandle: true);
+            if (handle.Type != System.IO.FileHandleType.RegularFile)
+                throw new IOException($"{path} isn't a regular file");
+            var bytes = ReadBounded(handle)
+                ?? throw new IOException($"{path} is over 1 MB or changed while it was read");
+            steps.Add(StatOpen(file) ?? throw new IOException($"{path} can't be stat'ed"));
+            return new(new(bytes, File.GetUnixFileMode(handle)), steps);
+        }
+        finally
+        {
+            CloseNative(fd);
+        }
+    }
+
+    /// <summary>Whether the open flags a walk down through descriptors needs are known here, and stat works.</summary>
+    /// <remarks>
+    /// O_NOFOLLOW and O_DIRECTORY differ by architecture on Linux, so a walk fails closed where they aren't known.
+    /// </remarks>
+    private static bool CanWalkDescriptors =>
+        CanStat && (OperatingSystem.IsMacOS()
+            || RuntimeInformation.ProcessArchitecture is Architecture.X64 or Architecture.Arm64);
+
+    /// <summary>
+    /// Opens the directory that holds the last of <paramref name="parts"/>: <paramref name="root"/> as named, then
+    /// each directory below it from the one before, without following a symlink.
+    /// </summary>
+    /// <param name="root">A directory to start from, opened as named.</param>
+    /// <param name="parts">The path below <paramref name="root"/>, split at /; the last part isn't opened.</param>
+    /// <param name="refuse">
+    /// Gives the exception for an open that failed, from its errno: the path, and whether it's <paramref name="root"/>.
+    /// </param>
+    /// <param name="opened">Called with each directory below root, its descriptor and path, once it's opened.</param>
+    /// <returns>The last directory's descriptor, which the caller closes, and its path.</returns>
+    /// <remarks>
+    /// Each step is taken in the directory reached without a symlink, so a directory on the way swapped for a
+    /// symlink can't lead the walk elsewhere. Every descriptor but the one returned is closed, whatever stops it.
+    /// </remarks>
+    private static (int Fd, string Path) OpenDirectoriesDown(
+        string root,
+        string[] parts,
+        Func<string, bool, Exception> refuse,
+        Action<int, string>? opened)
+    {
+        var fd = OpenNative(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        if (fd < 0)
+            throw refuse(root, true);
+        var at = root;
+        try
+        {
+            foreach (var part in parts[..^1])
+            {
+                at = Path.Combine(at, part);
+                var next = OpenAtNative(fd, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+                if (next < 0)
+                    throw refuse(at, false);
+                CloseNative(fd);
+                fd = next;
+                opened?.Invoke(fd, at);
+            }
+        }
+        catch
+        {
+            CloseNative(fd);
+            throw;
+        }
+        return (fd, at);
+    }
+
+    /// <summary>
+    /// Turns the last call's errno, in <see cref="ReadInsideProject"/>, into the exception for <paramref name="path"/>,
+    /// the path the step opened, which says <paramref name="refused"/> if O_NOFOLLOW or O_DIRECTORY refused it.
+    /// </summary>
+    private static Exception ReadInsideException(string path, string refused)
+    {
+        var errno = Marshal.GetLastPInvokeError();
+        if (errno == ENOENT)
+            return new FileNotFoundException($"{path} doesn't exist", path);
+        // A socket or device node can't be opened for reading: ENXIO, EOPNOTSUPP or ENODEV.
+        if (errno is ENXIO or ENODEV || errno == EOPNOTSUPP)
+            return new IOException($"{path} isn't a regular file");
+        return ErrnoException(path, errno, refused);
+    }
+
+    /// <summary>
+    /// Turns the last call's errno, in <see cref="RemoveSymlink"/>, into the exception for <paramref name="path"/>.
+    /// </summary>
+    private static Exception RemoveSymlinkException(string path) =>
+        ErrnoException(path, Marshal.GetLastPInvokeError(), "isn't a directory any more (a symlink, say)");
+
+    /// <summary>
+    /// Turns <paramref name="errno"/>, from a call on <paramref name="path"/>, into an exception, which says
+    /// <paramref name="refused"/> about the path if O_NOFOLLOW or O_DIRECTORY refused it.
+    /// </summary>
+    private static Exception ErrnoException(string path, int errno, string refused)
+    {
         if (errno is EACCES or EPERM)
-            return new UnauthorizedAccessException($"Access to the path '{path}' is denied.");
-        // ELOOP (62 on macOS, 40 on Linux), or ENOTDIR: O_NOFOLLOW met a symlink, or O_DIRECTORY something else.
-        if (errno == (OperatingSystem.IsMacOS() ? 62 : 40) || errno == ENOTDIR)
-            return new IOException($"{path} isn't a directory any more (a symlink, say)");
+            return AccessDenied(path);
+        // ELOOP or ENOTDIR: O_NOFOLLOW met a symlink, or O_DIRECTORY something else.
+        if (errno == ELOOP || errno == ENOTDIR)
+            return new IOException($"{path} {refused}");
         return new IOException($"{path}: {Marshal.GetPInvokeErrorMessage(errno)}");
     }
+
+    /// <summary>The exception for EACCES or EPERM on <paramref name="path"/>, worded as .NET words its own.</summary>
+    private static UnauthorizedAccessException AccessDenied(string path) =>
+        new($"Access to the path '{path}' is denied.");
 
     /// <summary>Checks whether the file descriptor <paramref name="fd"/> is a terminal, with isatty(3).</summary>
     public static bool IsATty(int fd) => IsATtyNative(fd) == 1;
@@ -511,11 +682,11 @@ internal static partial class Native
     /// <remarks>Not through .NET's file APIs: their own advisory locking would interfere with flock below.</remarks>
     public static SafeFileHandle OpenLockFile(string path)
     {
-        int fd = OpenNative(path, O_RDWR | O_CLOEXEC);
+        var fd = OpenNative(path, O_RDWR | O_CLOEXEC);
         if (fd < 0 && Marshal.GetLastPInvokeError() == ENOENT)
         {
             // Truncating a lock file is harmless, and racing creators both succeed.
-            int created = CreatNative(path, 0b110_000_000);
+            var created = CreatNative(path, 0b110_000_000);
             if (created >= 0)
                 CloseNative(created);
             fd = OpenNative(path, O_RDWR | O_CLOEXEC);
@@ -530,13 +701,13 @@ internal static partial class Native
     /// <exception cref="IOException">flock(2) failed for another reason.</exception>
     public static bool Flock(SafeFileHandle handle, int operation)
     {
-        bool added = false;
+        var added = false;
         handle.DangerousAddRef(ref added);
         try
         {
             if (FlockNative((int)handle.DangerousGetHandle(), operation) == 0)
                 return true;
-            int errno = Marshal.GetLastPInvokeError();
+            var errno = Marshal.GetLastPInvokeError();
             // EWOULDBLOCK is 35 on macOS and 11 on Linux.
             if (errno == (OperatingSystem.IsMacOS() ? 35 : 11))
                 return false;
@@ -549,8 +720,70 @@ internal static partial class Native
         }
     }
 
-    /// <summary>Where struct dirent keeps d_type and d_name.</summary>
-    /// <param name="Type">The offset of d_type.</param>
-    /// <param name="Name">The offset of d_name.</param>
+    private const string CoreFoundation = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
+
+    // CFStringNormalizationForm is a CFIndex; kCFStringNormalizationFormC is 2.
+    private const nint CFStringNormalizationFormC = 2;
+
+    /// <summary>A CFRange: where a range of a CFString starts and how long it is, both CFIndex.</summary>
+    private readonly record struct CFRange(nint Location, nint Length);
+
+    [LibraryImport(CoreFoundation, EntryPoint = "CFStringCreateMutable")]
+    private static partial nint CFStringCreateMutable(nint allocator, nint maxLength);
+
+    [LibraryImport(CoreFoundation, EntryPoint = "CFStringAppendCharacters")]
+    private static unsafe partial void CFStringAppendCharacters(nint text, char* characters, nint count);
+
+    [LibraryImport(CoreFoundation, EntryPoint = "CFStringNormalize")]
+    private static partial void CFStringNormalize(nint text, nint form);
+
+    [LibraryImport(CoreFoundation, EntryPoint = "CFStringGetLength")]
+    private static partial nint CFStringGetLength(nint text);
+
+    [LibraryImport(CoreFoundation, EntryPoint = "CFStringGetCharacters")]
+    private static unsafe partial void CFStringGetCharacters(nint text, CFRange range, char* buffer);
+
+    [LibraryImport(CoreFoundation, EntryPoint = "CFRelease")]
+    private static partial void CFRelease(nint value);
+
+    /// <summary>Gets a name in Unicode normalization form C on macOS, and as it is elsewhere.</summary>
+    /// <returns>The name in form C; <paramref name="text"/> itself when it's all ASCII or not on macOS.</returns>
+    /// <remarks>
+    /// <para>
+    /// Pen runs with invariant globalization, where string.Normalize returns its input unchanged, so this asks
+    /// CoreFoundation, which every macOS has. macOS file systems (APFS, HFS+) treat NFC and NFD spellings as one
+    /// name, so names compared in form C match as they do there.
+    /// </para>
+    /// <para>
+    /// Linux file systems treat NFC and NFD spellings as different names, so there names are compared by their
+    /// exact code points, as the file system does.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="OutOfMemoryException">CoreFoundation couldn't make the string.</exception>
+    public static unsafe string NormalizeFormC(string text)
+    {
+        if (!OperatingSystem.IsMacOS() || Ascii.IsValid(text))
+            return text;
+        var mutable = CFStringCreateMutable(0, 0);
+        if (mutable == 0)
+            throw new OutOfMemoryException("CoreFoundation couldn't make a string to normalize");
+        try
+        {
+            fixed (char* characters = text)
+                CFStringAppendCharacters(mutable, characters, text.Length);
+            CFStringNormalize(mutable, CFStringNormalizationFormC);
+            var length = (int)CFStringGetLength(mutable);
+            var buffer = new char[length];
+            fixed (char* destination = buffer)
+                CFStringGetCharacters(mutable, new CFRange(0, length), destination);
+            return new string(buffer);
+        }
+        finally
+        {
+            CFRelease(mutable);
+        }
+    }
+
+    /// <summary>The offsets of d_type and d_name in struct dirent.</summary>
     private readonly record struct DirentOffsets(int Type, int Name);
 }

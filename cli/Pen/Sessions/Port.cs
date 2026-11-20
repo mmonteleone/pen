@@ -14,10 +14,9 @@ internal readonly record struct Port(int Number, bool FromFlag)
     /// <summary>Tells whether <paramref name="number"/> is a TCP port, 1 to 65535.</summary>
     public static bool IsValid(long number) => number is >= 1 and <= 65535;
 
-    /// <summary>Merges the config's ports and the flag's.</summary>
-    /// <returns>The config's ports, then the flag's, without duplicates (lists append).</returns>
+    /// <summary>Merges the config's ports and then the flag's, without duplicates.</summary>
     /// <remarks>A port in both counts as from the flag.</remarks>
-    public static List<Port> Merge(IEnumerable<int> config, IEnumerable<int> flag)
+    public static IReadOnlyList<Port> Merge(IReadOnlyList<int> config, IReadOnlyList<int> flag)
     {
         var fromFlag = flag.ToHashSet();
         var merged = new List<Port>();
@@ -29,16 +28,13 @@ internal readonly record struct Port(int Number, bool FromFlag)
         return merged;
     }
 
-    /// <summary>Chooses the ports to forward: those free on the host.</summary>
-    /// <param name="ports">The ports asked for.</param>
-    /// <param name="isTaken">Tells whether a port is taken on the host.</param>
-    /// <param name="warn">Writes a warning.</param>
-    /// <returns>The free ones, in order; a taken --port throws.</returns>
+    /// <summary>Chooses the ports to forward: those free on the host, in order.</summary>
+    /// <exception cref="PenException">A port from --port is taken.</exception>
     /// <remarks>
     /// A taken config port is skipped with a warning (another session of the project usually forwards it
     /// already). Ports are never remapped.
     /// </remarks>
-    public static List<int> Choose(IReadOnlyList<Port> ports, Func<int, bool> isTaken, Action<string> warn)
+    public static IReadOnlyList<int> Choose(IReadOnlyList<Port> ports, Func<int, bool> isTaken, Action<string> warn)
     {
         var taken = ports.Where(port => isTaken(port.Number)).ToList();
         var flagTaken = taken.Where(port => port.FromFlag).Select(port => port.Number).ToList();
@@ -57,7 +53,7 @@ internal readonly record struct Port(int Number, bool FromFlag)
                 "already in use on this machine, maybe by another pen session (pen ps)");
         }
 
-        return ports.Where(port => !taken.Contains(port)).Select(port => port.Number).ToList();
+        return [.. ports.Where(port => !taken.Contains(port)).Select(port => port.Number)];
     }
 
     /// <summary>Tells whether something on the host already has <paramref name="port"/> on 127.0.0.1.</summary>
@@ -81,14 +77,49 @@ internal readonly record struct Port(int Number, bool FromFlag)
         }
         catch (SocketException) { }
 
+        return CanConnect(endpoint, TimeSpan.FromMilliseconds(500));
+    }
+
+    /// <summary>
+    /// Tells whether a TCP connection to <paramref name="endpoint"/> succeeds within <paramref name="timeout"/>.
+    /// </summary>
+    private static bool CanConnect(IPEndPoint endpoint, TimeSpan timeout)
+    {
         try
         {
             using var client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            return client.ConnectAsync(endpoint).Wait(TimeSpan.FromMilliseconds(500)) && client.Connected;
+            return Connect(client, endpoint, timeout);
         }
-        catch (AggregateException)
+        catch (SocketException)
         {
             return false;
+        }
+    }
+
+    private static bool Connect(Socket client, IPEndPoint endpoint, TimeSpan timeout)
+    {
+        try
+        {
+            client.Blocking = false;
+            client.Connect(endpoint);
+            return true;
+        }
+        catch (SocketException error)
+            when (error.SocketErrorCode is SocketError.WouldBlock or SocketError.InProgress)
+        {
+            // Pending: decided below.
+        }
+        catch (SocketException)
+        {
+            return false;
+        }
+
+        try
+        {
+            // Writable means the connect finished, but it's writable after a refusal too, so the socket's
+            // error says which.
+            return client.Poll(timeout, SelectMode.SelectWrite)
+                && client.GetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Error) is 0;
         }
         catch (SocketException)
         {

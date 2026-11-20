@@ -10,26 +10,24 @@ namespace Pen.Sessions;
 internal static class SessionCompose
 {
     /// <summary>
-    /// Generates the session's compose override (session.yaml), which adds the mounts to the agent service.
+    /// Generates the session's compose override (session.yaml): the mounts over the project mount, and the dind and
+    /// ports services when the session has them.
     /// </summary>
     /// <param name="mounts">The mounts over the project mount.</param>
-    /// <param name="readOnlyRoot">Make the agent's root filesystem read-only.</param>
+    /// <param name="readOnlyRoot">
+    /// Make the agent's root filesystem read-only: under rootless Docker the agent is container root and would
+    /// otherwise own the image's files.
+    /// </param>
     /// <param name="dindContainer">In a docker session, the name of the dind container.</param>
     /// <param name="ports">The ports to forward; none adds no ports service.</param>
     /// <returns>The override, as indented JSON and a final newline.</returns>
     /// <remarks>
     /// <para>It's JSON, which YAML reads as is, so any path is quoted correctly; $ is doubled, since compose
     /// interpolates it.</para>
-    /// <para><paramref name="readOnlyRoot"/> is for rootless Docker, where the agent is container root and would
-    /// otherwise own the image's files.</para>
-    /// <para><paramref name="dindContainer"/> names the dind container, gives dind the same mounts (so containers
-    /// the agent starts with -v $PWD:… can't write what the agent can't), and points the agent at dind once it's
-    /// healthy.</para>
-    /// <para><paramref name="ports"/>, when it has any, adds the ports service: the agent's network is internal,
-    /// and Docker publishes no ports there, so a socat per port on both the sandbox network and a non-internal
-    /// ports network relays 127.0.0.1:&lt;p&gt; on the host to &lt;p&gt; on the agent. It runs pen:latest as
-    /// nobody with no capabilities on a read-only root; the agent can reach it, but only to be relayed back to
-    /// itself.</para>
+    /// <para>Dind gets the agent's mounts, so containers the agent starts with -v $PWD:… can't write what the agent
+    /// can't.</para>
+    /// <para>Forwarded ports need a service of their own because the agent's network is internal and Docker
+    /// publishes no ports there. The agent can reach that service, but only to be relayed back to itself.</para>
     /// </remarks>
     public static string GenerateOverride(
         IReadOnlyList<Mount> mounts,
@@ -48,12 +46,12 @@ internal static class SessionCompose
                 "this session's mounts over the project mount and its services, written by pen");
             writer.WriteStartObject("services");
             WriteAgentService(writer, mounts, readOnlyRoot, dindContainer, ports);
-            if (dindContainer != null)
+            if (dindContainer is not null)
                 WriteDindService(writer, mounts, dindContainer);
-            if (ports != null)
+            if (ports is not null)
                 WritePortsService(writer, ports);
             writer.WriteEndObject();
-            if (ports != null)
+            if (ports is not null)
                 WritePortsNetwork(writer);
             writer.WriteEndObject();
         }
@@ -73,15 +71,15 @@ internal static class SessionCompose
         writer.WriteStartObject("agent");
         if (readOnlyRoot)
             writer.WriteBoolean("read_only", true);
-        if (dindContainer != null)
+        if (dindContainer is not null)
         {
             writer.WriteStartObject("environment");
             writer.WriteString("DOCKER_HOST", "tcp://dind:2375");
             writer.WriteString("PEN_DOCKER", "1");
             writer.WriteEndObject();
         }
-        if (dindContainer != null || ports != null)
-            WriteAgentDependencies(writer, hasDind: dindContainer != null, hasPorts: ports != null);
+        if (dindContainer is not null || ports is not null)
+            WriteAgentDependencies(writer, hasDind: dindContainer is not null, hasPorts: ports is not null);
         WriteMounts(writer, mounts);
         writer.WriteEndObject();
     }
@@ -167,11 +165,12 @@ internal static class SessionCompose
         writer.WriteStartArray("volumes");
         foreach (var mount in mounts)
         {
-            var path = mount.Path.Replace("$", "$$", StringComparison.Ordinal);
+            var source = (mount.Source ?? mount.Path).Replace("$", "$$", StringComparison.Ordinal);
+            var target = mount.Path.Replace("$", "$$", StringComparison.Ordinal);
             writer.WriteStartObject();
             writer.WriteString("type", "bind");
-            writer.WriteString("source", path);
-            writer.WriteString("target", path);
+            writer.WriteString("source", source);
+            writer.WriteString("target", target);
             writer.WriteBoolean("read_only", mount.ReadOnly);
             // A missing source is an error, never created (as root, on Linux).
             writer.WriteStartObject("bind");

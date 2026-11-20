@@ -6,8 +6,7 @@ using Pen.Sessions;
 namespace Pen.Commands;
 
 /// <summary>Runs pen ps: lists every project's running sessions.</summary>
-/// <param name="host">The host user's environment.</param>
-internal sealed partial class PsCommand(HostEnv host)
+internal sealed partial class PsCommand(HostEnv host, TimeProvider clock)
 {
     private const int MaxCommand = 80;
 
@@ -21,7 +20,7 @@ internal sealed partial class PsCommand(HostEnv host)
             Out.WriteLine("no sessions running");
             return 0;
         }
-        Out.WriteStdout(Render(host, sessions, DateTime.UtcNow));
+        Out.WriteStdout(Render(host, sessions, clock.GetUtcNow().UtcDateTime));
         return 0;
     }
 
@@ -40,7 +39,7 @@ internal sealed partial class PsCommand(HostEnv host)
             .OrderBy(row => row.Project, StringComparer.Ordinal)
             .ThenBy(row => row.Started ?? DateTime.MaxValue)
             .Select(row => row.Cells.Prepend(row.Project).ToArray())
-            .Prepend(["PROJECT", "SESSION", "DOCKER", "PORTS", "TOOLS", "AGE", "COMMAND"])
+            .Prepend(["PROJECT", "SESSION", "DOCKER", "EGRESS", "PORTS", "TOOLS", "AGE", "COMMAND"])
             .ToList();
 
         var widths = Enumerable.Range(0, rows[0].Length).Select(i => rows.Max(row => row[i].Length)).ToArray();
@@ -63,6 +62,7 @@ internal sealed partial class PsCommand(HostEnv host)
         [
             Out.Field(session.Id),
             File.Exists(session.DockerMarker) ? "docker" : "",
+            session.HasOpenEgress() ? "open" : "",
             string.Join(',', session.ReadPorts()),
             string.Join(',', session.ReadTools().Select(Out.Field)),
             started is { } time ? FormatAge(now - time) : "?",
@@ -92,7 +92,7 @@ internal sealed partial class PsCommand(HostEnv host)
     /// </returns>
     internal static string Describe(string[]? command)
     {
-        if (command == null)
+        if (command is null)
             return "?";
         if (command.Length == 0)
             return "(shell)";

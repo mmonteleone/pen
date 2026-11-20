@@ -64,7 +64,7 @@ internal sealed class ProxyLogTrimmer : IDisposable
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or PenException)
         {
-            // tried again next tick
+            // The trim is tried again next tick.
         }
         finally
         {
@@ -80,18 +80,18 @@ internal sealed class ProxyLogTrimmer : IDisposable
         if (!log.Exists || log.Length <= Limit)
             return false;
         var tail = _tailAndTruncate();
-        if (tail == null)
+        if (tail is null)
             return false;
 
         // The tail starts mid-file, so its first line is most likely cut: dropped.
-        int start = 0;
+        var start = 0;
         if (tail.Length >= Keep)
         {
-            int newline = Array.IndexOf(tail, (byte)'\n');
+            var newline = Array.IndexOf(tail, (byte)'\n');
             start = newline < 0 ? tail.Length : newline + 1;
         }
-        // Written aside and renamed, so a reader or a Pen that dies mid-write
-        // never sees half a file. proxy.log.1 isn't mounted anywhere.
+        // Written aside and renamed, so a reader or a Pen that dies mid-write never sees half a file. proxy.log.1 isn't
+        // mounted anywhere.
         var previous = _session.PreviousProxyLog;
         var tmp = previous + ".tmp";
         using (var file = new FileStream(tmp, FileMode.Create, FileAccess.Write))
@@ -103,45 +103,18 @@ internal sealed class ProxyLogTrimmer : IDisposable
     /// <summary>
     /// Reads the log's last <see cref="Keep"/> bytes and truncates it, in the session's proxy container.
     /// </summary>
-    /// <returns>The bytes, or null if either failed or took too long.</returns>
+    /// <returns>
+    /// The bytes, or null if either failed, took longer than <see cref="ExecTimeout"/> or wrote more than four
+    /// times <see cref="Keep"/> to stdout or stderr (the exec is then killed).
+    /// </returns>
     internal static byte[]? TailAndTruncateInProxy(SessionDir session, IReadOnlyDictionary<string, string> env)
     {
-        // tail reads to the end and truncate follows at once, so only lines squid
-        // writes between the two are lost. A tail that fails truncates nothing.
-        var startInfo = Proc.CreateStartInfo("docker", session.BuildComposeArgs("exec", "-T", "proxy", "sh", "-c",
-            $"tail -c {Keep} \"$1\" && truncate -s 0 \"$1\"", "sh", LogInProxy), env);
-        startInfo.RedirectStandardOutput = startInfo.RedirectStandardError = true;
-        Session.ScrubComposeEnv(startInfo);
-        using var process = Proc.Start(startInfo);
-        _ = process.StandardError.ReadToEndAsync();
-        var read = Task.Run(() => ReadCapped(process.StandardOutput.BaseStream, 4 * Keep));
-        bool exited = process.WaitForExit(ExecTimeout);
-        if (!exited || read.Wait(ExecTimeout) is false || read.Result == null)
-        {
-            try
-            {
-                process.Kill(entireProcessTree: true);
-            }
-            catch (InvalidOperationException) { }
-            return null;
-        }
-        return process.ExitCode == 0 ? read.Result : null;
-    }
-
-    /// <summary>Reads the whole of <paramref name="stream"/>.</summary>
-    /// <returns>The bytes, or null once they pass <paramref name="cap"/>.</returns>
-    private static byte[]? ReadCapped(Stream stream, int cap)
-    {
-        var buffer = new MemoryStream();
-        var chunk = new byte[81920];
-        int count;
-        while ((count = stream.Read(chunk)) > 0)
-        {
-            if (buffer.Length + count > cap)
-                return null;
-            buffer.Write(chunk, 0, count);
-        }
-        return buffer.ToArray();
+        // tail reads to the end and truncate follows at once, so only lines squid writes between the two are lost. A
+        // tail that fails truncates nothing.
+        var output = new ComposeClient(session, env).ExecInProxyCapturingBytes(
+            ["sh", "-c", $"tail -c {Keep} \"$1\" && truncate -s 0 \"$1\"", "sh", LogInProxy],
+            limit: 4 * Keep, timeout: ExecTimeout);
+        return output is { End: CaptureEnd.Exited, ExitCode: 0 } ? output.Stdout : null;
     }
 
     /// <summary>Stops the timer and waits for a trim in progress, so the end path reads finished files.</summary>

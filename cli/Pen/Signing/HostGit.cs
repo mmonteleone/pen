@@ -12,7 +12,10 @@ namespace Pen.Signing;
 /// agent deleted. Replace refs are off too, so an object read by its hash is that object's own bytes. That doesn't
 /// cover history walks: .git/info/grafts and .git/shallow can still change which parents one follows.
 /// </remarks>
-internal sealed class HostGit
+/// <param name="dir">The repo to run in, or null for a call that reads only global config.</param>
+/// <param name="config">Extra "-c key=value" pairs, already split (e.g. the signing settings).</param>
+/// <param name="env">Extra environment for every call, such as another HOME, or null for none.</param>
+internal sealed class HostGit(string? dir, IReadOnlyList<string> config, IReadOnlyDictionary<string, string>? env)
 {
     /// <summary>The overrides in every call, after any -C &lt;dir&gt; and before every other argument.</summary>
     public static readonly IReadOnlyList<string> Overrides =
@@ -34,26 +37,14 @@ internal sealed class HostGit
     public static readonly IReadOnlyList<string> LogEachArgs =
         ["log", "--no-walk=unsorted", "--stdin", "--no-show-signature", "--no-notes"];
 
-    private readonly string? _dir;
-    private readonly IReadOnlyList<string> _config;
-    private readonly IReadOnlyDictionary<string, string>? _env;
+    private readonly string? _dir = dir;
+    private readonly IReadOnlyList<string> _config = config;
+    private readonly IReadOnlyDictionary<string, string>? _env = env;
 
     /// <summary>Creates a HostGit for <paramref name="dir"/> with no extra settings or environment.</summary>
-    /// <param name="dir">The repo to run in, or null for a call that reads only global config.</param>
     public HostGit(string? dir)
         : this(dir, [], null)
     {
-    }
-
-    /// <summary>Creates a HostGit for <paramref name="dir"/> with extra settings and environment.</summary>
-    /// <param name="dir">The repo to run in, or null for a call that reads only global config.</param>
-    /// <param name="config">Extra "-c key=value" pairs, already split (e.g. the signing settings).</param>
-    /// <param name="env">Extra environment for every call, such as another HOME, or null for none.</param>
-    public HostGit(string? dir, IReadOnlyList<string> config, IReadOnlyDictionary<string, string>? env)
-    {
-        _dir = dir;
-        _config = config;
-        _env = env;
     }
 
     /// <summary>A HostGit for global-config reads: it runs from /, so no repo is discovered at all.</summary>
@@ -66,10 +57,10 @@ internal sealed class HostGit
     /// <returns>
     /// <c>-C</c> and the dir if there is one, then the overrides, the extra settings and the arguments.
     /// </returns>
-    public List<string> BuildArgs(IEnumerable<string> args)
+    public IReadOnlyList<string> BuildArgs(IEnumerable<string> args)
     {
         var all = new List<string>();
-        if (_dir != null)
+        if (_dir is not null)
             all.AddRange(["-C", _dir]);
         all.AddRange(Overrides);
         all.AddRange(_config);
@@ -82,37 +73,24 @@ internal sealed class HostGit
     /// <param name="stdin">What to write to git's stdin, or null to close it straight away.</param>
     /// <param name="env">Environment for this call only, or null for none.</param>
     /// <returns>git's exit code and output, whether it succeeded or not.</returns>
+    /// <remarks>
+    /// There's no timeout or limit: git runs to its end, however long it takes and however much it writes (a
+    /// cat-file of a large blob is held whole).
+    /// </remarks>
     public GitResult Run(
         IEnumerable<string> args,
         byte[]? stdin = null,
         IReadOnlyDictionary<string, string>? env = null)
     {
-        using var process = Proc.Start(CreateStartInfo(args, env));
-        var stderr = process.StandardError.ReadToEndAsync();
-        var stdout = new MemoryStream();
-        var copy = process.StandardOutput.BaseStream.CopyToAsync(stdout);
-        try
-        {
-            using var input = process.StandardInput.BaseStream;
-            if (stdin != null)
-                input.Write(stdin);
-        }
-        catch (IOException)
-        {
-            // git exited without reading it; its exit code says why
-        }
-
-        copy.Wait();
-        process.WaitForExit();
-        return new GitResult(process.ExitCode, stdout.ToArray(), stderr.Result);
+        var output = Proc.CaptureBytes(CreateStartInfo(args, env), stdin);
+        return new GitResult(output.ExitCode, output.Stdout, DecodeStderr(output.Stderr));
     }
 
     /// <summary>Runs git with <paramref name="args"/> and nothing on stdin, capturing its output.</summary>
     /// <returns>git's exit code and output, whether it succeeded or not.</returns>
     public GitResult Run(params string[] args) => Run((IEnumerable<string>)args);
 
-    /// <summary>Runs git and reads its stdout.</summary>
-    /// <returns>The trimmed stdout.</returns>
+    /// <summary>Runs git and reads its stdout, trimmed.</summary>
     /// <exception cref="PenException">git failed; the message has its error.</exception>
     public string ReadOutput(params string[] args)
     {
@@ -122,8 +100,7 @@ internal sealed class HostGit
         return result.Text.Trim();
     }
 
-    /// <summary>Runs git and reads the lines of its stdout.</summary>
-    /// <returns>The non-empty lines of stdout.</returns>
+    /// <summary>Runs git and reads the non-empty lines of its stdout.</summary>
     /// <exception cref="PenException">git failed; the message names its subcommand and has its error.</exception>
     public IEnumerable<string> ReadLines(params string[] args)
     {
@@ -162,7 +139,7 @@ internal sealed class HostGit
         IReadOnlyDictionary<string, string>? env)
     {
         var startInfo = Proc.CreateStartInfo("git", BuildArgs(args), _env);
-        if (env != null)
+        if (env is not null)
         {
             foreach (var (name, value) in env)
                 startInfo.Environment[name] = value;
@@ -172,18 +149,24 @@ internal sealed class HostGit
             startInfo.Environment.Remove(name);
         foreach (var name in ForcedEnv)
             startInfo.Environment[name] = "1";
-        if (_dir == null)
+        if (_dir is null)
             startInfo.WorkingDirectory = "/";
-        startInfo.RedirectStandardOutput = startInfo.RedirectStandardError = true;
-        startInfo.RedirectStandardInput = true;
         return startInfo;
+    }
+
+    /// <summary>
+    /// Decodes git's stderr as Process decodes a redirected stream by default on Unix: UTF-8, unless a byte order
+    /// mark at the start says otherwise.
+    /// </summary>
+    private static string DecodeStderr(byte[] stderr)
+    {
+        using var reader = new StreamReader(new MemoryStream(stderr), Encoding.Default,
+            detectEncodingFromByteOrderMarks: true);
+        return reader.ReadToEnd();
     }
 }
 
 /// <summary>The result of a git call: exit code, raw stdout, and stderr text.</summary>
-/// <param name="ExitCode">git's exit code.</param>
-/// <param name="Stdout">What git wrote to stdout, as bytes.</param>
-/// <param name="Stderr">What git wrote to stderr.</param>
 internal sealed record GitResult(int ExitCode, byte[] Stdout, string Stderr)
 {
     /// <summary>Whether git exited with 0.</summary>

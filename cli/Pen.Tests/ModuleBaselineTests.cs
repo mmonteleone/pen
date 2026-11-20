@@ -24,29 +24,29 @@ public sealed class ModuleBaselineTests : IDisposable
     }
 
     /// <summary>
-    /// Starts a session as Session does: the refusals, the module repos chosen by the open sessions' lists, its lock,
+    /// Starts a session as SessionRunner does: the refusals, the module repos chosen by the open sessions' lists, its lock,
     /// the choice narrowed with the protected files and git records saved, then compose.yaml last.
     /// </summary>
     private SessionDir Start(string dir, string common, string id)
     {
         RepoGuard.CheckAtStart(dir);
-        var mounts = RepoGuard.PrepareMounts(dir, "/nonexistent-home");
-        var chosen = ModuleBaseline.ChooseAtStart(Key, Runtime, common, dir);
+        var mounts = new MountPlanner(dir, "/nonexistent-home").EnsureTargetsAndPlan();
+        var chosen = ModuleBaseline.ChooseAtStart(SessionRegistry.FindOpen(Key, Runtime), common, dir);
 
         var s = new SessionDir(Key, _t.Sub("runtime", "sessions", id));
         _locks[id] = FileLock.TryTake(s.LockFile, exclusive: true)!;
-        ModuleBaseline.NarrowAndSave(s, mounts, chosen, Runtime, common, dir);
+        ModuleBaseline.NarrowAndSave(new(s, mounts, chosen, SessionRegistry.FindOpen(Key, Runtime), common, dir));
         File.WriteAllText(s.ComposeFile, "");
         return s;
     }
 
-    /// <summary>Ends a session as Session does: the check, then its files, compose.yaml first.</summary>
+    /// <summary>Ends a session as SessionRunner does: the check, then its files, compose.yaml first.</summary>
     private CheckResult End(string dir, SessionDir s)
     {
         var check = GitCheck.RunAtSessionEnd(dir, s);
         Assert.Null(check.Failure);
         Assert.False(check.RestoreIncomplete);
-        Session.DeleteSessionFiles(s);
+        SessionFiles.Delete(s);
         Die(s);
         return check;
     }
@@ -118,7 +118,7 @@ public sealed class ModuleBaselineTests : IDisposable
     }
 
     private static void AssertMoved(CheckResult check, string module) =>
-        Assert.Contains(check.Moved, q => q.From == module && q.To.Length > 0);
+        Assert.Contains(check.Moved, q => q.From == module && q is Quarantined.Moved);
 
     // ---- Replays ----
 
@@ -216,7 +216,15 @@ public sealed class ModuleBaselineTests : IDisposable
         var (repo, git) = Repo();
         var a = Start(repo, git, "aaaaaaaa");
         Die(a);
-        Assert.Empty(SessionRegistry.FindRunning(Key, Runtime));
+        // On macOS, Process.Start forks: a parallel test's child, until it execs, shares the lock's open file
+        // description and keeps the flock held for a moment after the release.
+        var released = SessionRegistry.FindRunning(Key, Runtime).Count == 0;
+        for (var tried = 1; !released && tried < 250; tried++)
+        {
+            Thread.Sleep(20);
+            released = SessionRegistry.FindRunning(Key, Runtime).Count == 0;
+        }
+        Assert.True(released, "the released session still looks running");
         var (module, checkout) = Plant(git, Path.Combine(repo, "evil"), hook);
         AssertFires(checkout, marker);
 
@@ -245,7 +253,7 @@ public sealed class ModuleBaselineTests : IDisposable
 
         Assert.DoesNotContain(check.Moved, q => q.From == config);
         Assert.DoesNotContain(check.Restored, r => r.Path == config);
-        var moved = Assert.Single(check.Moved, q => q.From == module).To;
+        var moved = Assert.IsType<Quarantined.Moved>(Assert.Single(check.Moved, q => q.From == module)).To;
         Assert.Equal("[core]\n\tbare = false\n", File.ReadAllText(Path.Combine(moved, "config")));
         AssertDoesntFire(checkout, marker);
     }
@@ -418,7 +426,7 @@ public sealed class ModuleBaselineTests : IDisposable
         Die(Start(repo, git, "aaaaaaaa"));
         var (module, _) = Plant(git, Path.Combine(repo, "evil"), hook);
 
-        var chosen = ModuleBaseline.ChooseAtStart(Key, Runtime, git, repo);
+        var chosen = ModuleBaseline.ChooseAtStart(SessionRegistry.FindOpen(Key, Runtime), git, repo);
 
         Assert.Equal([kept], chosen.Listed);
         Assert.Equal([module], chosen.Unlisted);
@@ -430,8 +438,8 @@ public sealed class ModuleBaselineTests : IDisposable
         var (hook, _) = Canary();
         var (repo, git) = Repo();
         var (module, _) = Plant(git, Path.Combine(repo, "evil"), hook);
-        var mounts = RepoGuard.PrepareMounts(repo, "/nonexistent-home");
-        var chosen = ModuleBaseline.ChooseAtStart(Key, Runtime, git, repo);
+        var mounts = new MountPlanner(repo, "/nonexistent-home").EnsureTargetsAndPlan();
+        var chosen = ModuleBaseline.ChooseAtStart(SessionRegistry.FindOpen(Key, Runtime), git, repo);
         Assert.Equal([module], chosen.Listed);
         // A session that opened after that read, listing nothing (its Pen has died since): the repo the scan found
         // is one its agent could have made.
@@ -441,12 +449,13 @@ public sealed class ModuleBaselineTests : IDisposable
         File.WriteAllText(a.ComposeFile, "");
         var s = new SessionDir(Key, _t.Sub("runtime", "sessions", "bbbbbbbb"));
 
-        var narrowed = ModuleBaseline.NarrowAndSave(s, mounts, chosen, Runtime, git, repo);
+        var narrowed = ModuleBaseline.NarrowAndSave(
+            new(s, mounts, chosen, SessionRegistry.FindOpen(Key, Runtime), git, repo));
 
         Assert.Empty(narrowed.Listed);
         Assert.Equal([module], narrowed.Unlisted);
         Assert.Empty(s.ReadModules()!);
-        Assert.Equal((true, git), s.ReadGit());
+        Assert.Equal(new GitAtStart(true, git), s.ReadGit());
         Assert.True(Assert.Single(ProtectedFiles.Read(s)!.Files, f => f.Path == Path.Combine(module, "config")).Adopted);
     }
 

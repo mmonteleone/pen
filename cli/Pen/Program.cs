@@ -1,12 +1,9 @@
-using System.Reflection;
 using Pen.CommandLine;
 using Pen.Commands;
 using Pen.Configuration;
 using Pen.Platform;
 using Pen.Projects;
-using Pen.Sessions;
 using Pen.Tools;
-using Pen.Trust;
 
 // Pen drives Docker on macOS and Linux only.
 [assembly: System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
@@ -21,9 +18,8 @@ internal static class Program
     /// <summary>Runs <paramref name="run"/>, showing expected failures as one line.</summary>
     /// <returns>The exit code <paramref name="run"/> returned, or the failure's.</returns>
     /// <remarks>
-    /// Only what no caller handled gets here; a session it interrupts is finished by
-    /// the next run, as when Pen dies. Other exceptions are Pen's bugs and keep
-    /// their stack traces.
+    /// Only what no caller handled gets here; a session it interrupts is finished by the next run, as when Pen dies.
+    /// Other exceptions are Pen's bugs and keep their stack traces.
     /// </remarks>
     internal static int RunGuarded(Func<int> run)
     {
@@ -50,8 +46,7 @@ internal static class Program
 
     /// <summary>Describes a file error that nothing handled, for the user.</summary>
     /// <remarks>
-    /// The exception's own text can't be shown: the AOT build (UseSystemResourceKeys)
-    /// has it as a resource key.
+    /// The exception's own text can't be shown: the AOT build (UseSystemResourceKeys) has it as a resource key.
     /// </remarks>
     internal static string DescribeFileFailure(IOException exception) =>
         $"a file operation failed ({exception.GetType().Name}): check that the disk has space " +
@@ -59,104 +54,72 @@ internal static class Program
 
     /// <summary>Runs the command <paramref name="args"/> ask for.</summary>
     /// <remarks>
-    /// Each step needs more than the one before, and each command runs as soon as it has
-    /// what it needs: help and listings need nothing, pen ps and pen prune the host,
-    /// pen upgrade and pen allow &lt;domain…&gt; the user config, the rest the project.
-    /// Only a session, pen allow (listing) and pen trust load the project config.
+    /// Each step needs more than the one before, and each command runs as soon as it has what it needs: help and
+    /// listings need only the embedded recipes (no host, config or project), pen ps and pen clean --stale the host,
+    /// pen upgrade, pen allow &lt;domain…&gt; and pen deny &lt;domain…&gt; the user config, the rest the project.
+    /// Of the project commands, only a session, the pen allow and pen deny listings and pen trust load the project
+    /// config; pen upgrade, pen allow &lt;domain…&gt; and pen deny &lt;domain…&gt; read it tolerantly or only to
+    /// apply to running sessions.
     /// </remarks>
     private static int Run(string[] args)
     {
-        var command = CommandParser.Parse(args);
-        switch (command.Kind)
+        var catalog = RecipeCatalog.Embedded;
+        var clock = TimeProvider.System;
+        var invocation = CommandParser.Parse(args, HostEnv.TryReadWorkingDirectory, catalog);
+        switch (invocation)
         {
-            case CommandKind.Help:
-                return WriteHelp(command);
-            case CommandKind.ToolList:
-                Console.Out.Write(RecipeCatalog.Embedded.FormatListing());
+            case BuiltinInvocation builtin:
+                CommandTree.InvokeBuiltin(builtin.ParseResult, Console.Out);
                 return 0;
-            case CommandKind.Allow when command.Defaults:
+            case ToolsInvocation:
+                Console.Out.Write(catalog.FormatListing());
+                return 0;
+            case ListDefaultDomainsInvocation:
                 Console.Out.Write(AllowCommand.FormatDefaults());
                 return 0;
-            case CommandKind.Version:
-                return WriteVersion();
         }
 
         var host = HostEnv.FromProcess();
-        StartDir.Leave(host);
-        switch (command.Kind)
+        var startDir = new StartDir(host.LeaveWorkingDirectory());
+        switch (invocation)
         {
-            case CommandKind.Ps:
-                return new PsCommand(host).Run();
-            case CommandKind.Prune:
-                return new PruneCommand(host, Console.In).Run();
+            case PsInvocation:
+                return new PsCommand(host, clock).Run();
+            case CleanStaleInvocation:
+                return new CleanStaleCommand(host, ReadAnswersFromStdin()).Run();
         }
 
-        Config.EnsureUserConfig(host, GitIdentity.ReadFromHost);
-        var user = Config.Load(host.ConfigDir, host.Display(host.ConfigDir), ConfigKind.User);
-        switch (command.Kind)
+        UserConfigInitializer.EnsureExists(host, GitIdentity.ReadFromHost);
+        var user = ConfigLoader.LoadUser(host.ConfigDir, host.Display(host.ConfigDir), catalog);
+        switch (invocation)
         {
-            case CommandKind.Upgrade:
-                return new UpgradeCommand(host, user, RecipeCatalog.Embedded).Run(command.Clean);
-            case CommandKind.Allow when command.Args.Count > 0:
-                return new AllowCommand(host, RecipeCatalog.Embedded).Run(command.Args, command.Global);
+            case UpgradeInvocation upgrade:
+                return new UpgradeCommand(host, user, startDir, catalog, clock).Run(upgrade.NoCache);
+            case AllowDomainsInvocation allow:
+                return new AllowCommand(host, startDir, catalog, clock).Run(allow.Domains, allow.Global);
+            case DenyDomainsInvocation deny:
+                return new DenyCommand(host, startDir, catalog, clock).Run(deny.Domains, deny.Global);
         }
 
-        var project = Project.Resolve(StartDir.Get(), host);
-        return command.Kind switch
+        var project = Project.Resolve(startDir.Get(), host);
+        return invocation switch
         {
-            CommandKind.Run => RunSession(ProjectContext.Load(host, project, user), command),
-            CommandKind.Allow => ListBlocked(ProjectContext.Load(host, project, user)),
-            CommandKind.Trust => RunTrust(ProjectContext.Load(host, project, user), command),
-            CommandKind.Sign => RunSign(host, project, command),
-            CommandKind.Reset => new ResetCommand(host, project, Console.In).Run(),
-            _ => throw new InvalidOperationException($"unhandled command {command.Kind}"),
+            RunInvocation run => new RunCommand(
+                ProjectContext.Load(host, project, user, catalog), ReadAnswersFromStdin(), catalog, clock).Run(run),
+            ListBlockedInvocation => new AllowCommand(host, startDir, catalog, clock)
+                .ListBlocked(ProjectContext.Load(host, project, user, catalog)),
+            ListDeniedInvocation => new DenyCommand(host, startDir, catalog, clock)
+                .List(ProjectContext.Load(host, project, user, catalog)),
+            TrustInvocation trust => new TrustCommand(
+                ProjectContext.Load(host, project, user, catalog), ReadAnswersFromStdin(), catalog, clock)
+                .Run(trust.Mode),
+            InitInvocation => new InitCommand(host, project, catalog).Run(),
+            SignInvocation sign => new SignCommand(host, project, clock).Run(sign.Base),
+            CleanInvocation => new CleanCommand(host, project, ReadAnswersFromStdin(), clock).Run(),
+            _ => throw new InvalidOperationException($"unhandled invocation {invocation}"),
         };
     }
 
-    /// <summary>Writes pen --help, or a subcommand's help, to stdout.</summary>
-    private static int WriteHelp(Command command)
-    {
-        var text = command.Args.Count > 0 ? HelpText.Subcommands[command.Args[0]] + "\n" : HelpText.Usage;
-        Console.Out.Write(text);
-        return 0;
-    }
-
-    /// <summary>Writes pen --version to stdout.</summary>
-    private static int WriteVersion()
-    {
-        var version = typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-            ?.InformationalVersion;
-        Console.Out.WriteLine("pen " + (version ?? "?"));
-        return 0;
-    }
-
-    /// <summary>Runs a session in the project's sandbox.</summary>
-    /// <remarks>
-    /// --docker turns Docker-in-Docker on for one session; docker = true in
-    /// .pen/config.toml for every session. Nothing turns it off per session.
-    /// --port adds to ports in .pen/config.toml.
-    /// --tool adds to tools in both config files.
-    /// </remarks>
-    private static int RunSession(ProjectContext context, Command command)
-    {
-        var request = new SessionRequest(command.Args)
-        {
-            Docker = command.Docker || context.ProjectConfig.Docker == true,
-            Ports = Port.Merge(context.ProjectConfig.Ports, command.Ports),
-            FlagTools = command.Tools,
-        };
-        return new Session(context, Answers.FromProcess(), RecipeCatalog.Embedded).Run(request);
-    }
-
-    /// <summary>Runs pen allow without domains: lists the recently blocked ones.</summary>
-    private static int ListBlocked(ProjectContext context) =>
-        new AllowCommand(context.Host, RecipeCatalog.Embedded).ListBlocked(context);
-
-    /// <summary>Runs pen trust.</summary>
-    private static int RunTrust(ProjectContext context, Command command) =>
-        new TrustCommand(context, Answers.FromProcess(), RecipeCatalog.Embedded).Run(command.Yes, command.List);
-
-    /// <summary>Runs pen sign, against the base given or the default one.</summary>
-    private static int RunSign(HostEnv host, Project project, Command command) =>
-        new SignCommand(host, project).Run(command.Args.Count > 0 ? command.Args[0] : null);
+    /// <summary>Gets this process's stdin, and whether it's a terminal.</summary>
+    private static Answers ReadAnswersFromStdin() => new(Console.In, Native.IsATty(0));
 }

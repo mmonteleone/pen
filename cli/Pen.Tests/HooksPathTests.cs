@@ -246,6 +246,18 @@ public class HooksPathTests
     }
 
     [Fact]
+    public void IncludesPastGitsDepthLimit_CantBeFollowed()
+    {
+        using var f = new Fixture();
+        // 11 includes deep, past git's limit of 10, in far fewer reads than the budget.
+        for (var i = 1; i <= 10; i++)
+            File.WriteAllText(Path.Combine(f.GitDir, $"inc{i}"), $"[include]\n\tpath = inc{i + 1}\n");
+        File.WriteAllText(Path.Combine(f.GitDir, "inc11"), "[core]\n\thooksPath = /dev/null\n");
+        f.Add("[include]\n\tpath = inc1\n");
+        Assert.Contains("(its config includes go too deep or too wide to follow)", f.Warning());
+    }
+
+    [Fact]
     public void AConditionalInclude_WarnsForTheBranchItCouldApplyTo()
     {
         using var f = new Fixture();

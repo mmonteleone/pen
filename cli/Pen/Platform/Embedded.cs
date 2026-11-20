@@ -26,7 +26,6 @@ internal static class Embedded
         return reader.ReadToEnd();
     }
 
-    /// <summary>Reads the embedded file <paramref name="name"/>'s bytes.</summary>
     public static byte[] ReadBytes(string name)
     {
         using var stream = Open(name);
@@ -36,11 +35,10 @@ internal static class Embedded
     }
 
     /// <summary>Lists the embedded names under a prefix such as "image/", sorted ordinally.</summary>
-    public static List<string> ListUnder(string prefix) =>
-        ResourceAssembly.GetManifestResourceNames()
+    public static IReadOnlyList<string> ListUnder(string prefix) =>
+        [.. ResourceAssembly.GetManifestResourceNames()
             .Where(n => n.StartsWith(prefix, StringComparison.Ordinal))
-            .Order(StringComparer.Ordinal)
-            .ToList();
+            .Order(StringComparer.Ordinal)];
 
     /// <summary>Computes the image hash: SHA-256 over every embedded image/ file's path and content.</summary>
     /// <returns>The hash's first 16 hex digits.</returns>

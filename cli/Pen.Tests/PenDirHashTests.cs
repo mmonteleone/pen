@@ -27,9 +27,7 @@ public class PenDirHashTests
 
     private static string Hash(string pen)
     {
-        var r = PenDirHash.Compute(pen);
-        Assert.Null(r.Problem);
-        return Assert.IsType<string>(r.Hash);
+        return Assert.IsType<PenDirHashResult.Hashed>(PenDirHash.Compute(pen)).Hash;
     }
 
     /// <summary>Fails instead of hanging the suite if something blocks, and returns the problem.</summary>
@@ -37,8 +35,7 @@ public class PenDirHashTests
     {
         var task = Task.Factory.StartNew(() => PenDirHash.Compute(pen), TaskCreationOptions.LongRunning);
         Assert.True(task.Wait(TimeSpan.FromSeconds(20)), "the hash hung");
-        Assert.Null(task.Result.Hash);
-        return Assert.IsType<string>(task.Result.Problem);
+        return Assert.IsType<PenDirHashResult.NoHash>(task.Result).Problem;
     }
 
     private static void Sh(string dir, string script)
@@ -130,9 +127,9 @@ public class PenDirHashTests
 
         var before = Hash(a);
         File.SetLastWriteTimeUtc(Path.Combine(a, "x"), DateTime.UnixEpoch);
-        File.WriteAllText(Path.Combine(a, Config.FileName), "allow = [\"a.example\"]\n");
+        File.WriteAllText(Path.Combine(a, ConfigLoader.FileName), "allow = [\"a.example\"]\n");
         Assert.Equal(before, Hash(a));
-        File.WriteAllText(Path.Combine(a, Config.FileName), "# edited\n");
+        File.WriteAllText(Path.Combine(a, ConfigLoader.FileName), "# edited\n");
         Assert.Equal(before, Hash(a));
     }
 
@@ -153,7 +150,7 @@ public class PenDirHashTests
         var hash = PenDirHash.Snapshot(pen, copy);
         try
         {
-            Assert.Equal(Hash(pen), hash.Hash);
+            Assert.Equal(Hash(pen), Assert.IsType<PenDirHashResult.Hashed>(hash).Hash);
             Assert.Equal(Hash(pen), Hash(copy));
             Assert.False(Path.Exists(Path.Combine(copy, "config.toml")));
             Assert.Equal("secret\n", File.ReadAllText(Path.Combine(copy, ".dockerignore")));
@@ -181,7 +178,7 @@ public class PenDirHashTests
         var copy = Path.Combine(t.Sub("private"), "context");
         var result = await Task.Factory.StartNew(() => PenDirHash.Snapshot(pen, copy), TaskCreationOptions.LongRunning)
             .WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken); // throws if it hung
-        Assert.Null(result.Hash);
+        Assert.IsType<PenDirHashResult.NoHash>(result);
         Assert.False(File.Exists(Path.Combine(copy, "huge")), what);
     }
 
@@ -267,8 +264,8 @@ public class PenDirHashTests
         try { Refused(pen); }
         finally { File.SetUnixFileMode(d, Rwx); }
 
-        File.WriteAllText(Path.Combine(pen, Config.FileName), "");
-        File.SetUnixFileMode(Path.Combine(pen, Config.FileName), UnixFileMode.None);
+        File.WriteAllText(Path.Combine(pen, ConfigLoader.FileName), "");
+        File.SetUnixFileMode(Path.Combine(pen, ConfigLoader.FileName), UnixFileMode.None);
         Refused(pen);
     }
 
@@ -296,5 +293,219 @@ public class PenDirHashTests
         var pen = Pen(t);
         Sh(pen, "mkdir -p d/e; ln -s ../setup.sh d/link; ln -s d dirlink; ln -s ../.. d/e/up");
         Hash(pen);
+    }
+
+    // Byte-identical hashes and exact refusals for fixed trees, so a change to the walk can't shift either unseen.
+
+    /// <summary>The hash of <paramref name="pen"/>, or "no hash: " and the problem.</summary>
+    private static string Outcome(string pen) => Describe(PenDirHash.Compute(pen));
+
+    /// <summary>The hash of a copy of <paramref name="pen"/>, or "no hash: " and the problem.</summary>
+    private static string SnapshotOutcome(TempDir t, string pen)
+    {
+        var copy = Path.Combine(t.Sub("private-" + Guid.NewGuid().ToString("N")), "context");
+        try { return Describe(PenDirHash.Snapshot(pen, copy)); }
+        finally { Sh(t.Path, "chmod -R u+rwx ."); }
+    }
+
+    private static string Describe(PenDirHashResult result) =>
+        result switch
+        {
+            PenDirHashResult.Hashed(var hash) => hash,
+            PenDirHashResult.NoHash(var problem) => "no hash: " + problem,
+            _ => throw new InvalidOperationException(),
+        };
+
+    /// <summary>A tree with a subdirectory, an empty one, symlinks, a dot file, odd names and every mode set.</summary>
+    private static string Varied(TempDir t)
+    {
+        var pen = Pen(t);
+        void Write(string name, string content, UnixFileMode mode)
+        {
+            File.WriteAllText(Path.Combine(pen, name), content);
+            File.SetUnixFileMode(Path.Combine(pen, name), mode);
+        }
+        void Dir(string name, UnixFileMode mode)
+        {
+            Directory.CreateDirectory(Path.Combine(pen, name));
+            File.SetUnixFileMode(Path.Combine(pen, name), mode);
+        }
+        Dir("d", Rwx | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+        Dir("d/empty", Rwx);
+        Dir("sub", Rwx | UnixFileMode.GroupRead | UnixFileMode.GroupExecute);
+        Write("d/f", "x", Rw | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+        Write("run.sh", "#!/bin/sh\n", Rwx | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.SetUser);
+        Write(".dockerignore", "*\n", Rw);
+        Write("config.toml", "allow = [\"x.example\"]\n", Rw);
+        Write("d/config.toml", "n", Rw);
+        Write("odd\tname é\n", "u", Rw);
+        Write("sub/über", "", Rw);
+        File.CreateSymbolicLink(Path.Combine(pen, "link"), "setup.sh");
+        File.CreateSymbolicLink(Path.Combine(pen, "d", "uplink"), "../setup.sh");
+        File.CreateSymbolicLink(Path.Combine(pen, "dirlink"), "d");
+        File.CreateSymbolicLink(Path.Combine(pen, "sub", "around"), "../d/./empty");
+        return pen;
+    }
+
+    [Fact]
+    public void TheHashOfAFixedTreeIsPinned()
+    {
+        using var t = new TempDir();
+        var pen = Pen(t);
+        Assert.Equal(PinnedPlain, Outcome(pen));
+        Assert.Equal(PinnedPlain, SnapshotOutcome(t, pen));
+    }
+
+    [Fact]
+    public void TheHashOfAVariedTreeIsPinned()
+    {
+        using var t = new TempDir();
+        var pen = Varied(t);
+        Assert.Equal(PinnedVaried, Outcome(pen));
+        Assert.Equal(PinnedVaried, SnapshotOutcome(t, pen));
+    }
+
+    private const string PinnedPlain = "25d15f84fcface8d0e207c838047bc4199f898c93700c754a540b4813f47f271";
+    private const string PinnedVaried = "648a7c9b2263dbd33927388cecf777fa447e6efb9e78a4a0425f59d3d332efb0";
+
+    public static TheoryData<string, string> PinnedRefusals => new()
+    {
+        { "mkfifo pipe", ".pen/pipe isn't a regular file pen can read" },
+        { "mkdir d; mkfifo \"d/$(printf 'p\\033q')\"", ".pen/d/p\\x1bq isn't a regular file pen can read" },
+        { "mkfifo config.toml", ".pen/config.toml isn't a regular file pen can read" },
+        { "mkdir config.toml", ".pen/config.toml isn't a regular file pen can read" },
+        { "ln -s setup.sh config.toml", ".pen/config.toml isn't a regular file pen can read" },
+        { "ln -s ../outside link", ".pen/link is a symlink that doesn't lead straight to a file or directory in .pen/" },
+        { "ln -s /etc/passwd link", ".pen/link is a symlink that doesn't lead straight to a file or directory in .pen/" },
+        { "ln -s nothing link", ".pen/link is a symlink that doesn't lead straight to a file or directory in .pen/" },
+        { "ln -s setup.sh one; ln -s one two", ".pen/two is a symlink that doesn't lead straight to a file or directory in .pen/" },
+        { ": >config.toml; ln -s CONFIG.TOML link", ".pen/link is a symlink that doesn't lead straight to a file or directory in .pen/" },
+        { "dd if=/dev/null of=huge bs=1 seek=1099511627776 2>/dev/null", ".pen/ is over 256 MiB, at .pen/huge" },
+        { "i=0; d=.; while [ $i -lt 33 ]; do d=$d/d; mkdir $d; i=$((i+1)); done", ".pen/" + string.Join('/', Enumerable.Repeat("d", 33)) + " is nested too deeply" },
+    };
+
+    [Theory]
+    [MemberData(nameof(PinnedRefusals))]
+    public void EachRefusalIsPinned_ForAHashAndACopy(string plant, string problem)
+    {
+        using var t = new TempDir();
+        var pen = Pen(t);
+        Sh(pen, plant);
+        Assert.Equal("no hash: " + problem, Outcome(pen));
+        Assert.Equal("no hash: " + problem, SnapshotOutcome(t, pen));
+    }
+
+    [Fact]
+    public void TheRefusalsOfTheDirItselfArePinned()
+    {
+        using var t = new TempDir();
+        Assert.Equal("no hash: .pen/ can't be listed, or has a name that isn't valid UTF-8", Outcome(Path.Combine(t.Path, "nothing")));
+        Assert.Equal("no hash: .pen/ can't be listed, or has a name that isn't valid UTF-8", SnapshotOutcome(t, Path.Combine(t.Path, "nothing")));
+        var real = t.Sub("elsewhere");
+        var link = Path.Combine(t.Sub("repo"), ".pen");
+        File.CreateSymbolicLink(link, real);
+        Assert.Equal("no hash: .pen is a symlink", Outcome(link));
+        Assert.Equal("no hash: .pen is a symlink", SnapshotOutcome(t, link));
+
+        // A copy that can't be made: an I/O error anywhere in the walk means no hash.
+        using var other = new TempDir();
+        var file = Path.Combine(other.Path, "a-file");
+        File.WriteAllText(file, "");
+        Assert.Equal("no hash: part of .pen/ can't be read", Describe(PenDirHash.Snapshot(Pen(other), file)));
+    }
+
+    [Fact]
+    public void TheRefusalsOfWhatCantBeReadArePinned()
+    {
+        Assert.SkipWhen(Native.GetUid() == 0, "root reads everything");
+        using var t = new TempDir();
+        var pen = Pen(t);
+        File.SetUnixFileMode(Path.Combine(pen, "setup.sh"), UnixFileMode.None);
+        Assert.Equal("no hash: .pen/setup.sh isn't a regular file pen can read", Outcome(pen));
+        Assert.Equal("no hash: .pen/setup.sh isn't a regular file pen can read", SnapshotOutcome(t, pen));
+        File.SetUnixFileMode(Path.Combine(pen, "setup.sh"), Rw);
+
+        var d = t.Sub("repo", ".pen", "d");
+        File.SetUnixFileMode(d, UnixFileMode.None);
+        try
+        {
+            Assert.Equal("no hash: .pen/d can't be listed, or has a name that isn't valid UTF-8", Outcome(pen));
+            Assert.Equal("no hash: .pen/d can't be listed, or has a name that isn't valid UTF-8", SnapshotOutcome(t, pen));
+        }
+        finally { File.SetUnixFileMode(d, Rwx); }
+    }
+
+    /// <summary>
+    /// macOS lets a symlink's target be empty. It's hashed as one, but can't be copied, so a copy has no hash.
+    /// </summary>
+    [Fact]
+    public void ASymlinkWithAnEmptyTargetHashes_ButItsCopyHasNone()
+    {
+        using var t = new TempDir();
+        var pen = Pen(t);
+        var r = Process.RunAndCaptureText(new ProcessStartInfo("ln", ["-s", "", "empty"]) { WorkingDirectory = pen, RedirectStandardOutput = true, RedirectStandardError = true });
+        Assert.SkipWhen(r.ExitStatus.ExitCode != 0, "the file system refuses an empty symlink target");
+        Assert.Equal(PinnedEmptyLink, Outcome(pen));
+        Assert.Equal("no hash: part of .pen/ can't be read", SnapshotOutcome(t, pen));
+    }
+
+    private const string PinnedEmptyLink = "2dbfc4f3e7e49699a0aaef25731ab3117b664b2d3b5f76b12292257f930d8d20";
+
+    /// <summary>
+    /// The agent can remove a directory and make it again while .pen/ is read. Gone when its status is read and
+    /// back when it's listed, it reads to .NET as an entry with no mode or type; that means no hash, not a crash.
+    /// </summary>
+    [Fact]
+    public void ADirectoryRemadeWhileItsReadHasAHashOrNone_NeverAnException()
+    {
+        using var t = new TempDir();
+        var pen = Pen(t);
+        var dirs = Enumerable.Range(0, 8).Select(i => Path.Combine(pen, "d" + i)).ToArray();
+        foreach (var dir in dirs)
+            Directory.CreateDirectory(dir);
+        var copies = t.Sub("private");
+        var stop = false;
+        var toggler = new Thread(() =>
+        {
+            while (!Volatile.Read(ref stop))
+            {
+                foreach (var dir in dirs)
+                {
+                    try
+                    {
+                        Directory.Delete(dir);
+                        Directory.CreateDirectory(dir);
+                    }
+                    catch (IOException) { }
+                }
+            }
+        });
+        toggler.Start();
+        var escaped = new List<Exception>();
+        var clock = Stopwatch.StartNew();
+        try
+        {
+            for (var i = 0; i < 500 && clock.Elapsed < TimeSpan.FromSeconds(10); i++)
+            {
+                try
+                {
+                    Assert.True(PenDirHash.Compute(pen) is PenDirHashResult.Hashed or PenDirHashResult.NoHash);
+                    var copy = Path.Combine(copies, "c" + i);
+                    Assert.True(PenDirHash.Snapshot(pen, copy) is PenDirHashResult.Hashed or PenDirHashResult.NoHash);
+                    if (Directory.Exists(copy))
+                        Directory.Delete(copy, recursive: true);
+                }
+                catch (Exception exception) when (exception is not Xunit.Sdk.XunitException)
+                {
+                    escaped.Add(exception);
+                }
+            }
+        }
+        finally
+        {
+            Volatile.Write(ref stop, true);
+            toggler.Join();
+        }
+        Assert.True(escaped.Count == 0, $"{escaped.Count} escaped, the first: {escaped.FirstOrDefault()}");
     }
 }

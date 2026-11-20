@@ -11,10 +11,10 @@ public class ConfigWorktreeQuarantineTests
 
     private static SessionDir Started(TempDir t, string dir, string common, string id = "aaaaaaaa", IReadOnlyList<SessionDir>? running = null)
     {
-        // As Session does: the module repos every open session listed, and the rest unlisted.
+        // As SessionRunner does: the module repos every open session listed, and the rest unlisted.
         var open = running ?? [];
         var lists = ModuleBaseline.ReadOpenLists(open, common, dir);
-        var mounts = RepoGuard.PrepareMounts(dir, "/nonexistent-home");
+        var mounts = new MountPlanner(dir, "/nonexistent-home").EnsureTargetsAndPlan();
         var found = RepoScan.FindModuleRepos(common);
         var modules = ModuleBaseline.Choose(found, lists);
         var s = new SessionDir(Key, t.Sub("runtime", "sessions", id));
@@ -97,12 +97,12 @@ public class ConfigWorktreeQuarantineTests
         var check = GitCheck.RunAtSessionEnd(repo, s);
 
         Assert.Null(check.Failure);
-        var q = Assert.Single(check.Moved);
+        var q = Assert.IsType<Quarantined.Moved>(Assert.Single(check.Moved));
         Assert.Equal(file, q.From);
         Assert.Equal(Fsmonitor(hook), File.ReadAllText(q.To));
         Assert.False(File.Exists(file));
         AssertDoesntFire(checkout, marker);
-        Assert.Contains("mv ", GitCheck.Warning(repo, check.Moved));
+        Assert.Contains("mv ", GitCheckWording.Warning(repo, check.Moved));
         Assert.True(File.Exists(Path.Combine(checkout, ".git")), "the worktree itself stays");
     }
 
@@ -472,7 +472,7 @@ public class ConfigWorktreeQuarantineTests
         var a = StartedAt(t, repo, git, "aaaaaaaa", 10);
         var b = StartedAt(t, repo, git, "bbbbbbbb", 5, a);
         Assert.Empty(GitCheck.RunAtSessionEnd(repo, a).Moved);
-        Assert.True(a.IsOpen);
+        Assert.True(a.IsOpen());
 
         File.AppendAllText(config, Fsmonitor(hook)); // b's agent, by a case variant of the name
         AssertFires(repo, marker);
@@ -643,8 +643,8 @@ public class ConfigWorktreeQuarantineTests
 
         Assert.Contains(check.Moved, q => q.From == link);
         Assert.Contains(check.Moved, q => q.From == entryLink);
-        Assert.False(RepoGuard.Exists(link));
-        Assert.False(RepoGuard.Exists(entryLink));
+        Assert.False(PathChecks.ExistsOrIsLink(link));
+        Assert.False(PathChecks.ExistsOrIsLink(entryLink));
         Assert.True(File.Exists(Path.Combine(evil, "config.worktree")), "only the symlink moves");
         Assert.True(File.Exists(own));
     }
@@ -663,7 +663,7 @@ public class ConfigWorktreeQuarantineTests
         var check = GitCheck.RunAtSessionEnd(repo, s);
 
         Assert.Contains(check.Moved, q => q.From == link);
-        Assert.False(RepoGuard.Exists(link));
+        Assert.False(PathChecks.ExistsOrIsLink(link));
     }
 
     // ---- chmod ----
@@ -689,7 +689,7 @@ public class ConfigWorktreeQuarantineTests
             Assert.Null(check.Failure);
             Assert.Contains(check.Moved, q => q.From == file);
             Assert.False(File.Exists(file));
-            if (mode != 0b011_001_001) Assert.Contains(check.Opened, o => o.Path == entry); // 311 is enough to rename in
+            if (mode != 0b011_001_001) Assert.Contains(check.ModeChanges, o => o.Path == entry); // 311 is enough to rename in
         }
         finally { File.SetUnixFileMode(entry, Dir755); }
         AssertDoesntFire(checkout, marker);
@@ -772,14 +772,14 @@ public class ConfigWorktreeQuarantineTests
     }
 
     [Fact]
-    public void AnEntryPenCantOpen_IsAFailureNotASilentPass()
+    public void AnEntryPenCantList_IsAFailureNotASilentPass()
     {
         using var t = new TempDir();
         var (repo, git) = Repo(t);
         TurnOn(repo, git, "directly");
         ForgeWorktree(repo, git, "forged", "[core]\n");
         var entry = Path.Combine(git, "worktrees", "forged");
-        var scan = new PromptHazardScan(git, tryOpen: null, new ProtectedManifest([], []));
+        var scan = new PromptHazardScan(git, tryMakeListable: null, new ProtectedManifest([], []));
         scan.Run();
         var hazards = scan.Hazards;
         Assert.Contains(hazards, h => h.Path == Path.Combine(entry, "config.worktree"));
@@ -787,7 +787,7 @@ public class ConfigWorktreeQuarantineTests
         File.SetUnixFileMode(entry, UnixFileMode.None);
         try
         {
-            var reached = new PromptHazardScan(git, tryOpen: null, new ProtectedManifest([], []));
+            var reached = new PromptHazardScan(git, tryMakeListable: null, new ProtectedManifest([], []));
             reached.Run();
             Assert.Contains(entry, reached.UnreachableDirs);
         }
@@ -824,7 +824,7 @@ public class ConfigWorktreeQuarantineTests
         File.WriteAllText(file, "[user]\n\tname = mine\n");
         var (_, forged) = ForgeWorktree(repo, git, "forged", "[user]\n\tname = mine\n");
 
-        var check = GitCheck.RunWithoutOpening(repo, startedWithGit: true, git, modulesAtStart: null);
+        var check = GitCheck.RunWithoutSession(repo, startedWithGit: true, git, modulesAtStart: null);
 
         Assert.Null(check.Failure);
         Assert.Empty(check.Moved);

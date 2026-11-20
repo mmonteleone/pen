@@ -1,6 +1,6 @@
 # Contributing to Pen
 
-Build, run unit tests, reinstall pen, then run the relevant smoke tests. Smoke tests use the installed binary, so reinstall before testing a change, including changes to `compose.yaml`, `image/`, `proxy/`, `templates/` and `tools/`, which are embedded in it.
+For code changes, build and run unit tests, rebuild the CLI, then run the affected smoke tests. Container files, templates and tool recipes are embedded in the CLI, so changes to those need a rebuild too.
 
 For installation and everyday use, start with the [README](README.md#get-started). Commands below run from the repo root unless shown otherwise. Everyone taking part is expected to follow the [code of conduct](CODE_OF_CONDUCT.md).
 
@@ -22,7 +22,7 @@ Check `command -v pen` and `pen --version` to confirm you're using the binary yo
 
 ## Test a change
 
-After building, running unit tests and reinstalling:
+After building, running unit tests and rebuilding the binary to test:
 
 ```sh
 cd cli
@@ -31,7 +31,18 @@ dotnet run --project Pen.SmokeTests -- --filter-class "*CliDispatchTests"  # one
 dotnet run --project Pen.SmokeTests -- --filter-method "*Symlink*"         # methods by name, in any class
 ```
 
-The smoke tests are the classes in [`cli/Pen.SmokeTests`](cli/Pen.SmokeTests), named for what they cover; run the classes your change touches, and the full suite before finishing a larger change. Filters go after `--`. For tools, run `ToolsImageTests` and `ToolRecipeTests` (and `AgentTests` for agents); for .NET, also `DotNetTests`. They test the installed pen, or `$PEN`, so set `PEN=/absolute/path/to/pen` to test a different binary. They need Docker, so `dotnet test` leaves them out. They use throwaway projects and a throwaway `HOME` for config checks, and each class gets its own, so any class runs on its own; they don't edit your existing `~/.config/pen` (a first run may create it).
+Smoke tests need Docker and run against the installed `pen`, or the binary named by `PEN`. Rebuild before testing. To leave your installed binary alone, use `cli/install.sh --out DIR`, then set `PEN=/absolute/path/to/pen` when running the suite.
+
+Run the classes affected by your change, and the full suite for larger changes:
+
+| Change | Smoke test classes |
+|---|---|
+| Tools | `ToolsImageTests`, `ToolRecipeTests` |
+| Agents | The tool classes above, plus `AgentTests` |
+| .NET | The tool classes above, plus `DotNetTests` |
+| `image/` | `BaseImageTests`, `BaseRuntimeTests` |
+
+See [`cli/Pen.SmokeTests`](cli/Pen.SmokeTests) for the other classes. Filters go after `--`. Each class uses its own throwaway projects and, for config checks, a throwaway `HOME`, so classes run independently. The tests don't edit your existing `~/.config/pen`; a first run may create it.
 
 Each check's description is its test's display name, so `--filter-display-name "refuses*"` picks checks by description, and `--output detailed` lists each one as it passes. Checks that need credentials are skipped without them, and the slow ones (trait `Category=Slow`) are skipped unless `SMOKE_SLOW=1`; `--filter-trait "Category=Slow"` selects them.
 
@@ -68,19 +79,36 @@ Before merging, run the suite on macOS arm64 and Linux amd64, with both rootful 
 
 **Container files and templates are embedded in the CLI.** The installed pen never reads this checkout. Reinstall after changing `compose.yaml`, `image/`, `proxy/`, `templates/` or `tools/`, just as you would after a CLI change. Changes under `image/` trigger an image rebuild on the next session.
 
-[AGENTS.md](AGENTS.md) explains command flow, sessions, locking and git protection. Read it before changing session handling or anything that touches the host repo.
+See [Entry points in AGENTS.md](AGENTS.md#entry-points) for command dispatch, configuration approval, session locking and host Git safeguards.
 
 Keep code AOT/trim-safe: use source-generated serialization rather than reflection-based APIs. Native calls belong in `Native.cs`. Tests access internals through `InternalsVisibleTo`; use the `TempDir` and `Git` helpers in `Pen.TestSupport`.
 
-Tool recipes pair a `tool.toml` (default version, accepted versions, domains and environment) with an `install.sh` that receives versions as separate arguments and runs as root during the image build. Recipes must work independently. To add one, create `tools/<name>/` with those two files, reinstall and try `pen --tool <name>`. `kind = "agent"` marks a recipe that installs an AI agent: `pen --tool list` shows it apart from tools, and a command that starts with its name (`pen <name>`) brings it in at its default version. `hidden = true` keeps a recipe out of listings, as for `pen-test` and `pen-test-b`, which the tests use. An agent distributed through npm needs only a few lines of `install.sh`: the base's `/opt/pen/lib/npm-agent.sh` (from `image/npm-agent.sh`, off `PATH`) installs the package with Pen's private Node into `/opt/pen/<command>`, links its native binary or wraps its JavaScript entry into `/usr/local/bin`, refuses releases older than the oldest supported one and checks `<command> --version` against a pinned version; its header documents the flags, and the `claude`, `codex`, `opencode` and `pi` recipes show both kinds. The recipe exports its agent's auto-update switches before running it and keeps anything else of its own (Codex's managed config) in its `install.sh`. Changing the helper rebuilds the base, so every agent reinstalls on next use. When adding or changing one, update the [tools reference](docs/usage.md#tools) and run `ToolsImageTests`, `ToolRecipeTests` and, for an agent, `AgentTests` under rootful and rootless Docker.
+### Add a tool or agent
+
+Create `tools/<name>/` with two files:
+
+- `tool.toml` defines the default and accepted versions, allowed domains and environment variables.
+- `install.sh` receives versions as separate arguments and runs as root during the image build. Recipes must work independently.
+
+Rebuild the CLI and try `pen --tool <name>`. Set `kind = "agent"` for an agent: `pen tools` lists it separately, and `pen <name>` selects it automatically. Set `hidden = true` for test-only recipes such as `pen-test` and `pen-test-b`.
+
+For npm-distributed agents, use `/opt/pen/lib/npm-agent.sh`. It installs with the base image's Node into `/opt/pen/<command>`, then links a native binary or wraps a JavaScript entry in `/usr/local/bin`. It also enforces the oldest supported release and verifies pinned versions. See the [helper's header](image/npm-agent.sh) for flags and the existing agent recipes for examples.
+
+Keep agent-specific setup, including auto-update switches and managed config, in the recipe's `install.sh`. Changing the shared helper rebuilds the base and reinstalls all agents on next use.
+
+Update the [tools reference](docs/tools.md) and run the relevant smoke classes under rootful and rootless Docker.
 
 ## Code style
 
-These rules apply to `cli/Pen/`, `cli/Pen.SmokeTests/` and `cli/Pen.TestSupport/`. The build enforces what it can: each of their project files sets `EnforceCodeStyleInBuild`, and their section of [`.editorconfig`](.editorconfig) puts its rules (usings, formatting, embedded statements, braces, blank lines, field naming, accessibility modifiers, readonly fields, unused members and parameters, expression bodies) at warning, which the build treats as an error. `SourceStyleTests` fails on any line over 120 characters in those projects, outside raw strings and, in `cli/Pen.SmokeTests/`, lines that hold only a string literal. `cli/Pen.Tests/` isn't held to this style: its `.editorconfig` section turns these diagnostics down to suggestions, and the test build doesn't check code style.
+Use the C# conventions in [AGENTS.md](AGENTS.md#c-engineering-guidelines). The rules below apply to `cli/Pen/`, `cli/Pen.SmokeTests/` and `cli/Pen.TestSupport/`; unit tests in `cli/Pen.Tests/` have looser formatting rules.
+
+The build enforces formatting and style through [`.editorconfig`](.editorconfig) and treats warnings as errors. `SourceStyleTests` also checks line length, restricts native imports to `Platform/Native.cs`, and keeps `RepoGuard` from calling `HostGit` or `Proc`.
+
+In the host CLI, [`BannedSymbols.txt`](cli/Pen/BannedSymbols.txt) restricts APIs to their owners. Use `Proc` for processes and task waits, `HostEnv` for the environment and working directory, `Out` for console output, `Retry` for delays, and the supplied `TimeProvider` for the clock. Pass the recipe catalog from `Program`. The analyzer's owner exemptions live in `.editorconfig`; test projects aren't covered.
 
 - **Files:** one main top-level type per file, named after the type (small records and enums used with it may live alongside it), in a folder matching its namespace. A small type used only by one class may be nested in it.
 - **Static or instance:** static for stateless helpers (`Allowlist.IsValidDomain`, `Out.Field`, `Native`, `Proc`); instances wherever there's context or accumulated state.
-- **Commands:** each subcommand other than run is a sealed `…Command` class in `Pen.Commands` (run is `Session`, in `Pen.Sessions`). Each gets its context and dependencies through its constructor and has one `Run(...)` returning the exit code. Code that needs the host, project, user config and project config takes one `ProjectContext`.
+- **Commands:** each subcommand is a sealed `…Command` class in `Pen.Commands`, as is run, pen's default command (`RunCommand`, which hands the session to `SessionRunner` in `Pen.Sessions`). Each gets its context and dependencies through its constructor and has one `Run(...)` returning the exit code. Code that needs the host, project, user config and project config takes one `ProjectContext`.
 - **Collected results:** a check or planner that collects results keeps them in its own fields and returns a result object, instead of taking lists to fill in. A step that runs inside a check may record into a collector its owner passes in, so what it did is kept if it stops part way (`ProtectedFileRestore` records into `CheckChanges` this way).
 - **Dependencies:** whatever production code would otherwise get by default (`Answers`, `RecipeCatalog`, stdin) is passed explicitly, through constructors. No optional parameters as test seams.
 - **Signatures:** at most about 5 parameters, or a parameter object. Records with more than 3 optional members use `init` properties instead of positional optionals. Return a result type rather than a tuple whenever the meaning of its parts isn't obvious.
@@ -89,7 +117,7 @@ These rules apply to `cli/Pen/`, `cli/Pen.SmokeTests/` and `cli/Pen.TestSupport/
 - **Method and property names:** methods are verbs (`FindUnapproved`, `SaveWith`), or `Is`/`Has`/`Try` predicates. Properties are nouns.
 - **Local and parameter names:** words (`result`, `dindLock`). Single letters are fine only for short lambda parameters and loop indices.
 - **Field names:** private instance fields are `_camelCase`; constants and static readonly fields are `PascalCase`.
-- **Doc comments:** `<summary>` says in one plain sentence what the member does or is. `<returns>` is there when the return value isn't obvious, especially for null, false or a "problem" string. The why (attack scenarios, races) goes in `<remarks>` or in an inline comment by the code it explains. For example, `TrustGate.ReadOriginOwner` has the `<summary>` "Gets the GitHub owner of the project's origin remote.", the `<returns>` "The owner, or null if there's no GitHub origin or git config can't be read." and the `<remarks>` "Null makes any github_owner in .pen/ count as differing from origin, so it needs approval."
+- **Doc comments:** use one plain sentence for `<summary>`. Add `<returns>` when null, false or another result needs explanation. Put intent, security constraints and platform quirks in `<remarks>` or a short inline comment.
 
 ## Build and update options
 
@@ -101,7 +129,7 @@ cli/install.sh --container --out DIR  # build a Linux binary in a container, eve
 
 Container builds target the host machine's architecture. To install on another machine, build there or copy a binary built for the same OS and architecture to its `~/.local/bin/pen`.
 
-The first session builds `pen:latest` locally from the embedded Dockerfile and supporting files. Agents and tools are recipes built on top of it, in `pen-tools:<hash>` images. Run `pen upgrade` to build it ahead of time or rebuild it: the base always gets a new ID, so the tools and agents in your config are rebuilt right away (in a project, also its approved tools and `.pen/Dockerfile`), and any other set of tools, such as the agent `pen claude` brings, on its next use. Logins and config persist across image rebuilds.
+The first session builds `pen:latest` from the embedded files. Tool recipes build on that base in `pen-tools:<hash>` images. `pen upgrade` rebuilds the base with a new ID, then rebuilds configured tools and the current project's approved tools and Dockerfile. Other tool combinations rebuild on their next use. Logins and config persist.
 
 To update a source installation, pull this repo and reinstall:
 
