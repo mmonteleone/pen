@@ -1,42 +1,35 @@
 # Pen
 
-Run Claude Code, Codex, OpenCode or Pi in Docker, with your project mounted inside and network access limited to allowed domains.
+Run coding agents in a container with your project, the tools they need, and network access you control. Your other host files, SSH keys and signing keys stay outside by default.
 
 ```sh
-cd ~/source/repos/myproject
-pen claude
+cd ~/myproject
+pen claude                  # or: pen codex, pen opencode, pen pi
 ```
 
-Agents run with permission prompts off. When they finish, review their edits and commits on the host, then push. Logins and caches persist per project, and your repo needs no Pen-specific files.
+No project config or Dockerfile is needed to start. Pen builds the environment, installs the agent and manages the session's containers and network proxy.
 
-## What it does
+Agents run with permission prompts off, so they can install dependencies, run tests and make commits without approval for each command. You choose the sandbox's access, then review the result on the host.
 
-- Mounts your project read-write, leaving your other host files and credentials outside the container.
-- Sends outbound traffic through a domain allowlist. `pen allow` adds domains without restarting, and `pen deny` blocks them over any allow.
-- Mounts repo config and `.git/hooks` read-only and checks git metadata at session end for known ways to make host git run code. [Limitations apply.](docs/limitations.md)
-- Can [hide files from the agent](docs/usage.md#hiding-files-from-the-agent) (`.env`, `secrets/`) or show it a placeholder copy instead, without touching them on the host.
-- Passes in the GitHub token you supply for the repo's owner. Use a read-only token; your host SSH and signing keys stay outside.
-- Keeps agent logins, settings and caches between sessions. Several agents can run at once, including in linked worktrees.
-- Has Node, Python and C build tools preinstalled. Adds [toolchains](docs/usage.md#tools) (.NET, Go, Rust, Java), a [project Dockerfile](docs/usage.md#project-settings), [dev-server ports](docs/usage.md#dev-servers) or [Docker-in-Docker](docs/usage.md#docker-in-docker) as needed.
+## What you get
 
-Pen gives these terminal agents a shared container setup, network restrictions and host git checks. If your existing agent sandbox or dev container covers those needs, you may not need Pen. Containers share a kernel; use a VM if you need a separate one.
+- **A working development environment.** Node, Python, Git and C build tools are included. Add .NET, Go, Rust or Java, forward dev server ports, or enable Docker-in-Docker for Testcontainers and Compose.
+- **Control over project secrets.** [Hide specific files or directories, or substitute safe copies](docs/usage.md#hiding-files-from-the-agent): the agent can see an empty `.env` or one with placeholder values while your host keeps the real file.
+- **Control over outbound traffic.** Common developer services are allowed by default. Inspect blocked domains and change the rules while the agent works.
+- **Persistent logins and settings.** Log in once per repo; settings and caches survive container and image rebuilds. Keep shared agent instructions, MCP settings and shell config in one [home seed](docs/usage.md#agent-config-the-home-seed).
+- **Git without your host keys.** Agents can commit, branch and rebase. Use separate Git worktrees for parallel sessions. Give agents a scoped GitHub token for private repos and `gh`; sign and push from the host afterwards.
+- **Optional project defaults.** Commit tools, network rules and file-hiding settings in `.pen/config.toml` to share the setup. Pen asks before using project settings that expand access.
 
-The project is a live mount, so keep backups, and keep host git (including IDE integrations and git-aware prompts) out of the repo and its worktrees while a session runs. [Read the limitations](docs/limitations.md) before relying on Pen.
+The checkout is a live, read-write mount: changes appear immediately, and an agent can delete work. Keep backups and keep host Git, including IDE integrations and Git-aware prompts, out of the repo until all sessions end.
 
-## Requirements
-
-Pen runs on **macOS or Linux** with **Docker and Compose v2**. On macOS, OrbStack and Colima are options. Linux supports rootful and rootless Docker and needs glibc 2.34+ (Ubuntu 22.04+, Debian 12+, etc.).
-
-Installation is from source for now:
-
-- **macOS:** install the .NET 11 SDK pinned in [`cli/global.json`](cli/global.json) and Xcode command-line tools (`xcode-select --install`).
-- **Linux:** the installer builds in a container; no host .NET SDK is needed.
-
-Homebrew and standalone release binaries are planned.
+Pen mounts Git config and hooks read-only and checks for known hazards at session end. Git and file-hiding protections are best-effort; Docker-in-Docker can bypass them. Allowed sites can receive uploads, and Pen doesn't protect against container escapes. Read the [limitations](docs/limitations.md) before relying on Pen.
 
 ## Get started
 
-### Install from source
+Pen currently installs from source. You need macOS or Linux, Docker running, and Compose v2.
+
+- **macOS:** install the .NET SDK pinned in [`cli/global.json`](cli/global.json) and Xcode command-line tools (`xcode-select --install`).
+- **Linux:** the installer builds in a container; no host .NET SDK is needed. The binary needs glibc 2.34 or later. Rootful and rootless Docker both work.
 
 ```sh
 git clone https://github.com/mmonteleone/pen.git
@@ -44,75 +37,45 @@ cd pen
 cli/install.sh
 ```
 
-This installs `pen` to `~/.local/bin/`. Make sure that directory is in your `PATH`.
-
-### Start a session
-
-From your project root, choose an agent:
+Add `~/.local/bin` to your `PATH`, then start an agent from your project root:
 
 ```sh
-cd ~/source/repos/myproject
-pen claude  # or: pen codex, pen opencode, pen pi
+cd ~/myproject
+pen claude
 ```
 
-The first session builds the sandbox image and installs your chosen agent. This may take a few minutes; later sessions reuse the images. Run `pen upgrade` to refresh agents and tools.
+The first session builds the image and installs the agent, which can take a few minutes. Log in inside the sandbox when prompted. For Codex, use `pen codex login --device-auth`. For private repositories, configure a [read-only GitHub token](docs/usage.md#github).
 
-Log in to your agent inside the sandbox when prompted. Each project keeps its own login. The first run also creates `~/.config/pen/`; put shared instructions and settings in [`~/.config/pen/home/`](docs/usage.md#agent-config-the-home-seed), using their usual home-directory paths.
+Exit the agent to end the session. Read Pen's warnings, wait for any other sessions in the repo to end, then review changes on the host. Use [`pen sign`](docs/usage.md#commit-signing) if you want to sign the agent's commits before pushing.
 
-For private GitHub access, [supply a read-only token](docs/usage.md#github) for the project's owner. Pen passes its permissions through unchanged, so a write-capable token allows writes.
+## Everyday commands
 
-When all sessions in the repo have ended, read any warnings, then review changes and commits on the host. Run `pen sign` if you sign commits, then push as usual. Run git setup commands such as `git remote add` on the host between sessions: `.git/config` is read-only in the sandbox.
+| Task | Command |
+|---|---|
+| Open a sandbox shell | `pen` |
+| Run a build or install dependencies | `pen run npm ci` |
+| See blocked domains | `pen allow` |
+| Allow a domain | `pen allow example.com` |
+| Deny a domain, overriding allow rules | `pen deny example.com` |
+| Add a toolchain for one session | `pen --tool go claude` |
+| Forward a dev server port | `pen --port 5173 claude` |
+| List sessions across projects | `pen ps` |
+| Create project settings | `pen init` |
 
-### Allowing a blocked domain
+Run `pen allow` and `pen deny` from another host terminal in the same project directory; they save the rules and apply them to running sessions.
 
-If a download is blocked, run `pen allow` in another host terminal from the same project directory:
+A forwarded dev server must listen on `0.0.0.0` inside the sandbox, then you can open `http://localhost:5173` on the host.
 
-```sh
-pen allow                # list recently blocked domains
-pen allow example.com    # allow one, including in running sessions
-```
+When a project needs its own defaults, run `pen init` and review the generated `.pen/config.toml` before committing it. Keep personal tokens, shared agent settings and hide rules for all projects under [`~/.config/pen/`](docs/usage.md#configuration).
 
-Retry the request in the agent; no restart is needed. Blocked domains also appear when a session ends. [Tools](docs/usage.md#tools) add their own package-registry domains automatically.
+## Documentation
 
-## Commands
-
-```sh
-pen                          # shell in the sandbox
-pen run git status           # run a command in the sandbox
-pen run npm ci               # ...such as npm, with Node preinstalled
-pen init                     # write a starting .pen/config.toml for this project
-pen allow                    # show recently blocked domains
-pen allow example.com        # allow a domain, including in running sessions
-pen tools                    # list the agents and tools Pen can install
-pen --tool dotnet:10 claude  # add a toolchain for this session
-pen --port 5173 claude       # reach a sandbox dev server at localhost:5173
-pen --docker claude          # give the session its own Docker daemon
-pen trust                    # review what this project's .pen/ asks for
-pen ps                       # list running sessions across projects
-pen sign                     # sign unpushed commits on the host
-pen upgrade                  # rebuild the base image, agents and tools
-pen clean                    # start this project's sandbox fresh (logins, caches)
-pen clean --stale            # remove moved/deleted projects' state and old tool images
-```
-
-Options go before the agent name. Dev servers must listen on `0.0.0.0` inside the sandbox. Linked worktrees share the repo's logins and caches.
-
-For a new project, run `pen init` to write a starting `.pen/config.toml` with the toolchains and secret files it finds (review it and commit it; it never overwrites). Or try a restore or build first, such as `pen run npm ci`, adding a toolchain the base lacks with `--tool` (`pen --tool go run go build ./...`). A repo's [`.pen/` settings](docs/usage.md#project-settings) need your approval before they can add domains, tools, Docker, a Dockerfile or a different owner's token.
-
-## Limitations
-
-Pen tries to limit damage from mistakes and prompt injection. Its git protections are best-effort, and it doesn't protect against a deliberate container escape. Besides keeping host git out of running sessions:
-
-- Review changes before running them on the host, including [agent and editor config](docs/limitations.md#project-files-host-tools-act-on) and ignored files. They can run commands with your host credentials.
-- Use Docker-in-Docker only when needed. Its privileged daemon lets the agent [defeat the git protections](docs/limitations.md#docker-in-docker-and-the-git-protections), including planting hooks that Pen won't detect.
-
-See [all limitations](docs/limitations.md) for the known gaps and host precautions.
-
-## More
-
-- [Usage](docs/usage.md): commands, settings and workflows, including [herdr](docs/usage.md#running-in-herdr).
-- [Limitations](docs/limitations.md): what Pen doesn't protect against.
-- [Contributing](CONTRIBUTING.md): building, testing and development.
+- [Usage](docs/usage.md): sessions, GitHub access, network rules, configuration and commands.
+- [Limitations](docs/limitations.md): what the sandbox protects and where you still need care.
+- [Tools and agents](docs/tools.md): versions, agent settings and toolchain notes.
+- [Git precautions and recovery](docs/git-safety.md): checks, quarantine notices and recovery failures.
+- [Running in herdr](docs/herdr.md): terminal multiplexer setup and session cleanup.
+- [Contributing](CONTRIBUTING.md): building, testing and adding tools.
 - [Security](SECURITY.md): reporting vulnerabilities.
-- [Code of conduct](CODE_OF_CONDUCT.md).
-- [MIT License](LICENSE).
+
+[MIT License](LICENSE) · [Code of conduct](CODE_OF_CONDUCT.md)
