@@ -84,17 +84,23 @@ Use [`pen sign`](docs/usage.md#commit-signing) if you want to sign the agent's c
 
 | Task | Command |
 |---|---|
+| Start Claude Code | `pen claude` |
+| Continue the last conversation | `pen claude --continue` |
+| Start another agent | `pen codex`, `pen opencode`, `pen pi` |
 | Open a sandbox shell | `pen` |
-| Install npm dependencies | `pen run npm ci` |
+| Run one command in the sandbox | `pen run npm ci` |
 | See blocked domains | `pen allow` |
 | Allow a domain | `pen allow example.com` |
-| Deny a domain, overriding allow rules | `pen deny example.com` |
-| Add a toolchain for one session | `pen --tool go claude` |
 | Forward a dev server port | `pen --port 5173 claude` |
+| Add a toolchain for one session | `pen --tool go claude` |
 | List sessions across projects | `pen ps` |
-| Create project settings | `pen init` |
+| Sign the agent's commits | `pen sign` |
 
-Run `pen allow` and `pen deny` from another host terminal in the same project directory; they save the rule and apply it to running sessions.
+Put Pen's options before the agent name; Pen passes everything after the name to the agent.
+
+Run `pen allow` from another host terminal in the same project directory; it saves the rule and applies it to running sessions.
+
+See [all commands](docs/usage.md#commands) for project settings, deny rules, upgrades and cleanup.
 
 ## Configuration
 
