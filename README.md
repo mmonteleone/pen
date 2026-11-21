@@ -2,7 +2,7 @@
 
 # Pen
 
-[![CI status on main](https://github.com/mmonteleone/pen/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/mmonteleone/pen/actions/workflows/ci.yml)
+[![CI status on main](https://github.com/mmonteleone/pen/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mmonteleone/pen/actions/workflows/ci.yml)
 
 Run coding agents in a container with access only to your project, the tools they need, and the network resources you allow. Your other host files, keys, secrets, and protected in-project files stay out of reach. Pen runs alongside your existing setup without changing your workflow.
 
