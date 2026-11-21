@@ -182,7 +182,7 @@ public sealed class BaseImageTests(BaseImageTests.Fixture fixture) : IClassFixtu
                 ! command -v dotnet && ! command -v pwsh && ! command -v codegraph && ! test -e /usr/share/dotnet
                 """);
             probe.Add("no_dotnet_env", """
-                ! env | grep -E "^(DOTNET|ASPNETCORE|NUGET_XMLDOC|POWERSHELL)_"
+                ! env | grep -E "^(APP_UID=|VSTEST_ARTIFACTS_BASE_DIRECTORY=|(DOTNET|ASPNETCORE|NUGET_XMLDOC|POWERSHELL)_)"
                 """);
             probe.Add("no_claude", """
                 ! command -v claude && ! test -e /opt/pen/claude && ! env | grep -E "^(DISABLE_AUTOUPDATER|CLAUDE_CODE_)"

@@ -389,4 +389,4 @@ Write short options separately, as in `pen -d -p 5173 claude`.
 - Pasting images into the sandboxed agent is unsupported. Save images in the project and give the agent their paths.
 - Forward ports to reach sandbox servers from your browser. See [dev servers](#dev-servers).
 - The proxy carries HTTP and HTTPS only. GitHub SSH remotes are rewritten to HTTPS.
-- Use current time zone names such as `America/Los_Angeles`. To use a legacy name such as `US/Pacific`, install `tzdata-legacy` in a [project Dockerfile](#extra-software-with-a-dockerfile).
+- Use current time zone names such as `America/Los_Angeles`. To use a legacy name such as `US/Pacific`, select the [.NET tool](tools.md#net), which includes `tzdata-legacy`, or install that package in a [project Dockerfile](#extra-software-with-a-dockerfile).

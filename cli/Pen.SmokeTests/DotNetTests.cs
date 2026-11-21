@@ -52,13 +52,66 @@ public sealed class DotNetTests(DotNetTests.Fixture fixture) : IClassFixture<Dot
     {
         string[] settings =
         [
-            "ASPNETCORE_HTTP_PORTS=8080", "DOTNET_RUNNING_IN_CONTAINER=true",
+            "APP_UID=1654", "ASPNETCORE_HTTP_PORTS=8080", "DOTNET_RUNNING_IN_CONTAINER=true",
             "DOTNET_GENERATE_ASPNET_CERTIFICATE=false", "DOTNET_USE_POLLING_FILE_WATCHER=true",
+            "VSTEST_ARTIFACTS_BASE_DIRECTORY=/tmp",
             "NUGET_XMLDOC_MODE=skip", "POWERSHELL_DISTRIBUTION_CHANNEL=", "DOTNET_NOLOGO=1",
             "DOTNET_CLI_TELEMETRY_OPTOUT=1",
         ];
 
         Assert.DoesNotContain(settings, setting => !fixture.Env.Stdout.Contains(setting, StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "the tools image has the SDK's optional app user, group, home and shell")]
+    public void HasTheSdkAppAccount() =>
+        Assert.True(fixture.AppAccount.ExitCode == 0, fixture.AppAccount.Describe());
+
+    [Fact(DisplayName = "the SDK runs as app when explicitly selected")]
+    public void SdkRunsAsApp() =>
+        Assert.True(fixture.SdkAsApp.ExitCode == 0, fixture.SdkAsApp.Describe());
+
+    [Fact(DisplayName = "SDK 11 exposes dnx on PATH")]
+    public void HasDnx() =>
+        Assert.True(fixture.Dnx.ExitCode == 0, fixture.Dnx.Describe());
+
+    [Theory(DisplayName = "the app account does not prevent Pen from using the host UID/GID")]
+    [InlineData("1654", "1654", "app")]
+    [InlineData("1654", "20", "app")]
+    [InlineData("501", "1654", "agent")]
+    public void AppAccountDoesNotPreventSessionIdentity(string uid, string gid, string user)
+    {
+        var result = Docker.Run(
+            "run", "--rm", "--network", "none", "--cap-drop", "ALL",
+            "--cap-add", "CHOWN", "--cap-add", "SETUID", "--cap-add", "SETGID", "--cap-add", "SETPCAP",
+            "--security-opt", "no-new-privileges:true", "--tmpfs", "/home/agent",
+            "-e", $"PEN_UID={uid}", "-e", $"PEN_GID={gid}", "-e", "PROJECT_DIR=/tmp",
+            fixture.ToolsImage, "bash", "-ec", """
+                echo "$(id -u):$(id -g):$(id -un):$USER:$LOGNAME:$HOME"
+                getent passwd "$(id -u)" | cut -d: -f6
+                stat -c %u:%g "$HOME"
+                touch "$HOME/writable"
+                grep -E '^(CapEff|CapBnd|NoNewPrivs):' /proc/self/status
+                dotnet --list-sdks
+                """);
+
+        Assert.True(result.ExitCode == 0, result.Describe());
+        Assert.True(result.HasStdoutLine($"{uid}:{gid}:{user}:{user}:{user}:/home/agent"), result.Describe());
+        Assert.True(result.HasStdoutLine("/home/agent"), result.Describe());
+        Assert.True(result.HasStdoutLine($"{uid}:{gid}"), result.Describe());
+        Assert.True(result.HasStdoutLine("CapEff:\t0000000000000000"), result.Describe());
+        Assert.True(result.HasStdoutLine("CapBnd:\t0000000000000000"), result.Describe());
+        Assert.True(result.HasStdoutLine("NoNewPrivs:\t1"), result.Describe());
+    }
+
+    [Fact(DisplayName = "Pen still refuses a host UID taken by an unrelated image account")]
+    public void RefusesAnUnrelatedUidCollision()
+    {
+        var result = Docker.Run(
+            "run", "--rm", "--network", "none", "-e", "PEN_UID=1", "-e", "PEN_GID=1",
+            "-e", "PROJECT_DIR=/tmp", fixture.ToolsImage, "true");
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("UID 1 is already taken in the image by 'daemon'", result.Output, StringComparison.Ordinal);
     }
 
     [Fact(DisplayName = "dotnet new console, a NuGet restore and dotnet run work")]
@@ -166,6 +219,14 @@ public sealed class DotNetTests(DotNetTests.Fixture fixture) : IClassFixture<Dot
 
         internal CommandResult Env { get; private set; } = null!;
 
+        internal string ToolsImage { get; private set; } = null!;
+
+        internal CommandResult AppAccount { get; private set; } = null!;
+
+        internal CommandResult SdkAsApp { get; private set; } = null!;
+
+        internal CommandResult Dnx { get; private set; } = null!;
+
         internal CommandResult ConsoleApp { get; private set; } = null!;
 
         internal CommandResult SecondRestore { get; private set; } = null!;
@@ -184,12 +245,30 @@ public sealed class DotNetTests(DotNetTests.Fixture fixture) : IClassFixture<Dot
             Home.MakeToolFree();
             WithoutTool = Cli.Run("run", "bash", "-c", $"command -v dotnet pwsh || echo none; {NuGetFunction}; nuget");
             DotNet8 = Cli.Run("--tool", "dotnet:8", "run", "bash", "-c", """
+                test ! -e /usr/bin/dnx && [ "$(id -u app)" = "$APP_UID" ] || exit 1
                 readlink -f $(command -v pwsh); pwsh -NoProfile -Command '$PSVersionTable.PSVersion.Major'; dotnet --list-sdks
                 """);
             NuGet = RunWithDotNet($"{NuGetFunction}; nuget");
             DefaultSdks = RunWithDotNet("dotnet --list-sdks");
             BothSdks = RunWithDotNet("dotnet --list-sdks", "--tool", "dotnet:8");
             Env = RunWithDotNet("env");
+            var shim = new DockerShim(Path.Combine(Scratch, "docker-shim"));
+            ToolsImage = shim.RunSessionImage(Cli, "--tool", "dotnet");
+            AppAccount = Docker.Run("run", "--rm", "--network", "none", "--entrypoint", "bash", ToolsImage, "-ec", """
+                [ "$APP_UID" = 1654 ]
+                [ "$(getent passwd app | cut -d: -f3-7)" = '1654:1654::/home/app:/bin/sh' ]
+                [ "$(getent group app | cut -d: -f3)" = 1654 ]
+                [ "$(stat -c %u:%g /home/app)" = 1654:1654 ]
+                [ "$(passwd -S app | cut -d' ' -f2)" = L ]
+                [ "$(id -u)" = 0 ]
+                """);
+            SdkAsApp = Docker.Run(
+                "run", "--rm", "--network", "none", "--user", "app", "--entrypoint", "bash", ToolsImage, "-ec", """
+                    [ "$(id -u):$(id -g):$HOME" = 1654:1654:/home/app ]
+                    cd "$HOME"
+                    dotnet new console --no-restore
+                    """);
+            Dnx = RunWithDotNet("test \"$(readlink -f /usr/bin/dnx)\" = /usr/share/dotnet/dnx && dnx --help");
 
             ConsoleApp = RunWithDotNet("""
                 mkdir -p app && cd app && dotnet new console -o . --force >/dev/null && dotnet add package Humanizer.Core >/dev/null && dotnet run

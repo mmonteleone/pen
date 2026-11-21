@@ -26,9 +26,14 @@ esac
 # What the SDKs and PowerShell need at run time, and what this script uses.
 apt-get update
 apt-get install -y --no-install-recommends \
-  ca-certificates curl gnupg jq tzdata \
+  ca-certificates curl gnupg jq tzdata tzdata-legacy \
   libc6 libgcc-s1 libgssapi-krb5-2 libicu78 libssl3t64 libstdc++6 zlib1g
 rm -rf /var/lib/apt/lists/*
+
+# Match the SDK image's optional non-root account; Pen still chooses its session
+# identity in the entrypoint. APP_UID is also published in this recipe's [env].
+groupadd --gid=1654 app
+useradd --no-log-init --uid=1654 --gid=1654 --create-home app
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -62,6 +67,10 @@ for v in $(printf '%s\n' "$@" | sort -n); do
   sdks+=("$sdk")
 done
 ln -sfn "$ROOT/dotnet" /usr/bin/dotnet
+# SDK 10+ ships dnx; older SDK-only images must not advertise a missing command.
+if [ -x "$ROOT/dnx" ]; then
+  ln -sfn "$ROOT/dnx" /usr/bin/dnx
+fi
 listed=$(dotnet --list-sdks)
 for sdk in ${sdks[@]+"${sdks[@]}"}; do
   grep -q "^$sdk " <<<"$listed" || { echo "dotnet: SDK $sdk didn't install" >&2; exit 1; }

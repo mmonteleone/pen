@@ -63,14 +63,22 @@ For a different system Node or Python, use a [project Dockerfile](usage.md#extra
 
 SDKs install in `/usr/share/dotnet`, with the newest release of each selected major version. The default is .NET 11. PowerShell (`pwsh`) is included at a version pinned by Pen. The NuGet cache uses a project volume at your host's `NUGET_PACKAGES` path, with or without this tool.
 
+The tool follows the [Ubuntu .NET SDK image's defaults](https://github.com/dotnet/dotnet-docker/tree/main/src/sdk), including an optional `app` user and group with UID/GID `1654`, home `/home/app`, shell `/bin/sh`, and a locked password. Like the SDK image, the tools image defaults to `root`. A project Dockerfile can use `USER app` or `USER $APP_UID` for build steps, then switch back to `USER root` for Pen's entrypoint.
+
+Pen sessions run with the host's UID/GID and home `/home/agent`; if the host UID is `1654`, Pen reuses `app` with that session home, `/bin/bash`, and the host's primary GID. SDK 10 and later also expose `dnx` on `PATH`.
+
+Pen keeps telemetry disabled and omits `DOTNET_VERSION`, `ASPNET_VERSION` and `DOTNET_SDK_VERSION`, since multiple SDK versions can coexist.
+
 The tool sets these environment variables:
 
 | Variable | Value |
 |---|---|
+| `APP_UID` | `1654` |
 | `ASPNETCORE_HTTP_PORTS` | `8080` |
 | `DOTNET_RUNNING_IN_CONTAINER` | `true` |
 | `DOTNET_GENERATE_ASPNET_CERTIFICATE` | `false` |
 | `DOTNET_USE_POLLING_FILE_WATCHER` | `true` |
+| `VSTEST_ARTIFACTS_BASE_DIRECTORY` | `/tmp` |
 | `NUGET_XMLDOC_MODE` | `skip` |
 | `POWERSHELL_DISTRIBUTION_CHANNEL` | `PSDocker-DotnetSDK-Ubuntu-26.04` |
 | `DOTNET_NOLOGO` | `1` |
