@@ -91,6 +91,8 @@ jobs:
   integration:
     name: Integration tests (Linux, rootful Docker)
     needs: unit
+    # changes is skipped outside PRs; override that inherited skip after unit succeeds.
+    if: ${{ !cancelled() && needs.unit.result == 'success' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 90
     steps:
