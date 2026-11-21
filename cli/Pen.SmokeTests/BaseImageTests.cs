@@ -22,8 +22,8 @@ public sealed class BaseImageTests(BaseImageTests.Fixture fixture) : IClassFixtu
         Assert.True(Probes.Session.HasStdoutLine($"uname={hostArch}"), $"uname -m matches the host ({hostArch})");
     }
 
-    [Fact(DisplayName = "Ubuntu 24.04")]
-    public void IsUbuntu2404() => AssertPassed("ubuntu");
+    [Fact(DisplayName = "Ubuntu 26.04")]
+    public void IsUbuntu2604() => AssertPassed("ubuntu");
 
     [Fact(DisplayName = "no users or groups with ID 1000–60000 in the image")]
     public void HasNoUsersOrGroupsInTheUserRange() => AssertPassed("no_user_ids");
@@ -137,7 +137,7 @@ public sealed class BaseImageTests(BaseImageTests.Fixture fixture) : IClassFixtu
                 test -z "$(find /tmp /root/.cache /root/.config /root/.local /root/.npm -mindepth 1 2>/dev/null)"
                 """);
             probe.Add("ubuntu", """
-                . /etc/os-release && [ "$ID" = ubuntu ] && [ "$VERSION_ID" = 24.04 ]
+                . /etc/os-release && [ "$ID" = ubuntu ] && [ "$VERSION_ID" = 26.04 ]
                 """);
             probe.Add("no_user_ids", """
                 ! getent passwd | awk -F: "\$3>=1000 && \$3<=60000" | grep . && ! getent group | awk -F: "\$3>=1000 && \$3<=60000" | grep .

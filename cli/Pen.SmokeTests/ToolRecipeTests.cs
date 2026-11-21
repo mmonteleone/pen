@@ -171,7 +171,7 @@ public sealed class ToolRecipeTests(ToolRecipeTests.Fixture fixture) : IClassFix
                 work=$(mktemp -d)
                 trap 'rm -rf -- "$work"' EXIT
                 mvn=https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.16/apache-maven-3.9.16-bin.tar.gz
-                curl -fsSL --retry 3 --retry-max-time 60 --max-time 30 -o "$work/maven.tar.gz" "$mvn"
+                curl -fsSL --retry 3 --retry-all-errors --retry-max-time 60 --max-time 30 -o "$work/maven.tar.gz" "$mvn"
                 tar -xzf "$work/maven.tar.gz" -C "$work"
                 cd jv
                 "$work/apache-maven-3.9.16/bin/mvn" -B -q package

@@ -35,6 +35,9 @@ On macOS, [OrbStack](https://orbstack.dev) is a great option. On Linux, the bina
 
 ### Install from a package
 
+> [!NOTE]
+> Homebrew packages are not yet available, but are coming soon.
+
 _With [Homebrew](https://brew.sh) on macOS or Linux:_
 
 ```sh

@@ -20,7 +20,7 @@ env:
 jobs:
   check:
     name: Check tag against version
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       version: ${{ steps.version.outputs.version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
@@ -57,8 +57,8 @@ jobs:
         include:
           - { rid: osx-arm64, os: macos-15, arch: arm64 }
           - { rid: osx-x64, os: macos-15-intel, arch: x86_64 }
-          - { rid: linux-x64, os: ubuntu-24.04, arch: x86-64 }
-          - { rid: linux-arm64, os: ubuntu-24.04-arm, arch: aarch64 }
+          - { rid: linux-x64, os: ubuntu-26.04, arch: x86-64 }
+          - { rid: linux-arm64, os: ubuntu-26.04-arm, arch: aarch64 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
@@ -102,7 +102,7 @@ jobs:
   release:
     name: Publish GitHub release
     needs: [check, build]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
       id-token: write
@@ -138,7 +138,7 @@ jobs:
     name: Update Homebrew tap
     needs: [check, release]
     if: needs.check.outputs.prerelease == 'false'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # Holds HOMEBREW_TAP_TOKEN; restrict it to v* tags in the repo settings.
     environment: release
     env:

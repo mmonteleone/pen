@@ -39,13 +39,13 @@ public sealed class DotNetTests(DotNetTests.Fixture fixture) : IClassFixture<Dot
             string.Join('\n', fixture.NuGet.StdoutLines.Select(line => FieldOf(line, 0))) == "200",
             fixture.NuGet.Describe());
 
-    [Fact(DisplayName = "dotnet alone lists the SDK of the default version, 10")]
-    public void DefaultVersionIs10() =>
-        Assert.True(FormatMajors(fixture.DefaultSdks.StdoutLines) == "10 ", fixture.DefaultSdks.Describe());
+    [Fact(DisplayName = "dotnet alone lists the SDK of the default version, 11")]
+    public void DefaultVersionIs11() =>
+        Assert.True(FormatMajors(fixture.DefaultSdks.StdoutLines) == "11 ", fixture.DefaultSdks.Describe());
 
-    [Fact(DisplayName = "dotnet:8 with dotnet:10 lists both SDKs")]
+    [Fact(DisplayName = "dotnet:8 with dotnet:11 lists both SDKs")]
     public void TwoVersionsListBothSdks() =>
-        Assert.True(FormatMajors(fixture.BothSdks.StdoutLines) == "8 10 ", fixture.BothSdks.Describe());
+        Assert.True(FormatMajors(fixture.BothSdks.StdoutLines) == "8 11 ", fixture.BothSdks.Describe());
 
     [Fact(DisplayName = "...with the ASP.NET and container settings")]
     public void HasTheAspNetSettings()
@@ -204,7 +204,7 @@ public sealed class DotNetTests(DotNetTests.Fixture fixture) : IClassFixture<Dot
                 WebApp = RunWebApp();
         }
 
-        /// <summary>Runs a session with the dotnet tool (dotnet:10 unless the options add another).</summary>
+        /// <summary>Runs a session with the dotnet tool (dotnet:11 unless the options add another).</summary>
         private CommandResult RunWithDotNet(string script, params string[] options) =>
             Cli.Run(["--tool", "dotnet", .. options, "run", "bash", "-c", script]);
 

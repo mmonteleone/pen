@@ -39,7 +39,7 @@ public class RecipeTests
         Assert.True(RecipeCatalog.Embedded.TryGet("dotnet", out var recipe));
         Assert.False(recipe.Hidden);
         Assert.True(recipe.Multiple);
-        Assert.Equal("10", recipe.Default);
+        Assert.Equal("11", recipe.Default);
         Assert.Contains("dotnet", RecipeCatalog.Embedded.DescribeAvailable());
         Assert.Equal(
             [".nuget.org", "builds.dotnet.microsoft.com", "aka.ms", "www.microsoft.com", "crl3.digicert.com", "ocsp.digicert.com"],

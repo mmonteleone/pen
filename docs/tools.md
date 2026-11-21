@@ -61,7 +61,7 @@ For a different system Node or Python, use a [project Dockerfile](usage.md#extra
 
 ## .NET
 
-SDKs install in `/usr/share/dotnet`, with the newest release of each selected major version. PowerShell (`pwsh`) is included at a version pinned by Pen. The NuGet cache uses a project volume at your host's `NUGET_PACKAGES` path, with or without this tool.
+SDKs install in `/usr/share/dotnet`, with the newest release of each selected major version. The default is .NET 11. PowerShell (`pwsh`) is included at a version pinned by Pen. The NuGet cache uses a project volume at your host's `NUGET_PACKAGES` path, with or without this tool.
 
 The tool sets these environment variables:
 
@@ -72,7 +72,7 @@ The tool sets these environment variables:
 | `DOTNET_GENERATE_ASPNET_CERTIFICATE` | `false` |
 | `DOTNET_USE_POLLING_FILE_WATCHER` | `true` |
 | `NUGET_XMLDOC_MODE` | `skip` |
-| `POWERSHELL_DISTRIBUTION_CHANNEL` | `PSDocker-DotnetSDK-Ubuntu-24.04` |
+| `POWERSHELL_DISTRIBUTION_CHANNEL` | `PSDocker-DotnetSDK-Ubuntu-26.04` |
 | `DOTNET_NOLOGO` | `1` |
 | `DOTNET_CLI_TELEMETRY_OPTOUT` | `1` |
 

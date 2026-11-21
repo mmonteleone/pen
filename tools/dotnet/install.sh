@@ -27,7 +27,7 @@ esac
 apt-get update
 apt-get install -y --no-install-recommends \
   ca-certificates curl gnupg jq tzdata \
-  libc6 libgcc-s1 libgssapi-krb5-2 libicu74 libssl3t64 libstdc++6 zlib1g
+  libc6 libgcc-s1 libgssapi-krb5-2 libicu78 libssl3t64 libstdc++6 zlib1g
 rm -rf /var/lib/apt/lists/*
 
 work=$(mktemp -d)
