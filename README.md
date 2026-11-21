@@ -1,4 +1,4 @@
-<div style="text-align:center"><img src="docs/assets/pen-logo.png" alt="Pen logo" width="256" style="border:0;padding:0;margin:0"></div>
+<p align="center"><img src="docs/assets/pen-logo.png" alt="Pen logo" width="256"></p>
 
 # Pen
 
