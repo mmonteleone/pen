@@ -24,7 +24,7 @@ Sessions see each other only when they're started through the same path. On macO
 
 Pen warns about two gaps without blocking the session:
 
-- **Case-insensitive filesystems** (macOS's default). Writing `.git/CONFIG` can change `.git/config` despite its read-only mount. Pen probes the Git directory and warns if names are case-insensitive or the check fails. It restores the file at session end, but host Git would read the changed version until then. Directory mounts (`.git/hooks`, `.pen/`) resisted alternate spellings in smoke tests on OrbStack; this hasn't been tested on Docker Desktop.
+- **Case-insensitive filesystems** (macOS's default). Writing `.git/CONFIG` can change `.git/config` despite its read-only mount. Pen probes the Git directory and warns if names are case-insensitive or the check fails. It restores the file at session end, but host Git would read the changed version until then. Directory mounts (`.git/hooks`, `.pen/`) resisted alternate spellings in integration tests on OrbStack; this hasn't been tested on Docker Desktop.
 - **`core.hooksPath` inside the repo.** Hooks outside `.git/hooks`, such as Husky's `.husky`, are ordinary files the agent can change. Pen follows system, global and repo settings and includes, and warns if the path is writable from the sandbox or can't be resolved. Check those hooks before using host Git. Mounting them read-only wouldn't protect the project files they might call.
 
 The hooks warning covers the main repo only. Submodules can have the same problem without a warning. Pen's own git calls disable hooks.

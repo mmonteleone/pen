@@ -5,7 +5,7 @@ Pen's host CLI lives in `cli/Pen/` and ships as a .NET Native AOT binary. See [C
 ## Verifying changes
 
 - Run `dotnet build` and `dotnet test` from `cli/` for code changes. The SDK is pinned in `cli/global.json` and warnings fail the build.
-- Smoke tests need Docker and run against the installed binary or the binary named by `PEN`. Rebuild before running affected classes with `dotnet run --project Pen.SmokeTests -- --filter-class "*CliDispatchTests"` from `cli/`. Run the full suite for larger changes. `cli/install.sh --out DIR` builds a test binary without replacing the installed one.
+- Integration tests need Docker and run against the installed binary or the binary named by `PEN`. Rebuild before running affected classes with `dotnet run --project Pen.IntegrationTests -- --filter-class "*CliDispatchTests"` from `cli/`. Run the full suite for larger changes. `cli/install.sh --out DIR` builds a test binary without replacing the installed one.
 - The CLI embeds `compose.yaml`, `image/`, `proxy/`, `templates/` and `tools/`. Rebuild the CLI to test edits to any of them. Changes under `image/` trigger a base image rebuild on the next session.
 
 ## Entry points

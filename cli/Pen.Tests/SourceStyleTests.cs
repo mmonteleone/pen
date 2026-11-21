@@ -7,19 +7,19 @@ public class SourceStyleTests
     private const int MaxLineLength = 120;
 
     // The project whose lines may hold nothing but a long string literal.
-    private const string LoneLiteralProject = "Pen.SmokeTests";
+    private const string LoneLiteralProject = "Pen.IntegrationTests";
 
     // A run of three or more quotes, with any $ in front: opens a raw string literal, or closes one.
     private static readonly Regex RawDelimiter = new("\\$*(\"{3,})", RegexOptions.Compiled);
 
     // A line that holds nothing but one regular string literal, and the brackets, comma or semicolon that close
-    // it: a smoke check's description is one literal, and some are longer than a line. Only the smoke tests'
-    // sources may have one.
+    // it: an integration check's description is one literal, and some are longer than a line. Only the integration
+    // tests' sources may have one.
     private static readonly Regex LoneStringLiteral =
         new("^\\s*\"(?:[^\"\\\\]|\\\\.)*\"[)\\]]*[,;]?$", RegexOptions.Compiled);
 
     // The projects held to the code style in CONTRIBUTING.md (Pen.Tests isn't).
-    private static readonly string[] StyledProjects = ["Pen", "Pen.SmokeTests", "Pen.TestSupport"];
+    private static readonly string[] StyledProjects = ["Pen", "Pen.IntegrationTests", "Pen.TestSupport"];
 
     [Fact]
     public void NoLineInTheCliSourcesIsOverMaxLength()

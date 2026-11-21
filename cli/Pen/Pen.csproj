@@ -27,7 +27,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Pen.Tests" />
     <InternalsVisibleTo Include="Pen.TestSupport" />
-    <InternalsVisibleTo Include="Pen.SmokeTests" />
+    <InternalsVisibleTo Include="Pen.IntegrationTests" />
   </ItemGroup>
 
   <ItemGroup>
