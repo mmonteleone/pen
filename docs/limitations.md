@@ -86,7 +86,7 @@ Use [read-only GitHub tokens](usage.md#github), scoped to the repos you need. Pe
 
 External names shouldn't resolve inside the sandbox; the proxy resolves them. Older Docker Engines forwarded DNS from internal networks when the host resolver used a loopback address such as systemd-resolved's `127.0.0.53`. That lets DNS queries carry data out (CVE-2024-29018).
 
-The fix is in 23.0.11 and later 23.0 releases, 25.0.5 and later 25.0 releases, and 26.0 onward, but no 24.x release. Docker Desktop was never affected. The smoke suite checks that external names don't resolve.
+The fix is in 23.0.11 and later 23.0 releases, 25.0.5 and later 25.0 releases, and 26.0 onward, but no 24.x release. Docker Desktop was never affected. The integration suite checks that external names don't resolve.
 
 </details>
 

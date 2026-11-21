@@ -40,7 +40,7 @@ indent_style = tab
 indent_size = 2
 
 # Style enforced in the build (EnforceCodeStyleInBuild in each of these projects).
-[cli/{Pen,Pen.SmokeTests,Pen.TestSupport}/**.cs]
+[cli/{Pen,Pen.IntegrationTests,Pen.TestSupport}/**.cs]
 # Unnecessary usings and formatting.
 dotnet_diagnostic.IDE0005.severity = warning
 dotnet_diagnostic.IDE0055.severity = warning

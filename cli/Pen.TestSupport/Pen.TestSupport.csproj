@@ -17,7 +17,7 @@
       <_Parameter1>windows</_Parameter1>
     </AssemblyAttribute>
     <InternalsVisibleTo Include="Pen.Tests" />
-    <InternalsVisibleTo Include="Pen.SmokeTests" />
+    <InternalsVisibleTo Include="Pen.IntegrationTests" />
   </ItemGroup>
 
   <ItemGroup>

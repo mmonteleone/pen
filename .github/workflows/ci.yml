@@ -1,8 +1,8 @@
 name: CI
 
-# Build, unit tests on macOS and Linux, then the smoke suite on Linux (rootful
+# Build, unit tests on macOS and Linux, then the integration suite on Linux (rootful
 # Docker). Only docs-only PRs skip these jobs. The release workflow calls this
-# too. Rootless Docker and macOS smoke runs stay manual (CONTRIBUTING.md).
+# too. Rootless Docker and macOS integration runs stay manual (CONTRIBUTING.md).
 
 on:
   push:
@@ -88,8 +88,8 @@ jobs:
         working-directory: cli
         run: dotnet test
 
-  smoke:
-    name: Smoke tests (Linux, rootful Docker)
+  integration:
+    name: Integration tests (Linux, rootful Docker)
     needs: unit
     runs-on: ubuntu-26.04
     timeout-minutes: 90
@@ -100,7 +100,7 @@ jobs:
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: cli/global.json
-      - name: Install fish for smoke tests
+      - name: Install fish for integration tests
         run: |
           sudo apt-get update
           sudo apt-get install -y fish
@@ -111,16 +111,16 @@ jobs:
       - name: Check session startup
         run: |
           pen --version
-          project=$(mktemp -d "$RUNNER_TEMP/pen-smoke-start.XXXXXX")
+          project=$(mktemp -d "$RUNNER_TEMP/pen-integration-start.XXXXXX")
           cd "$project"
           pen run true
-      - name: Smoke tests
+      - name: Integration tests
         working-directory: cli
-        run: dotnet run --project Pen.SmokeTests
+        run: dotnet run --project Pen.IntegrationTests
 
   result:
     name: CI result
-    needs: [changes, unit, smoke]
+    needs: [changes, unit, integration]
     if: ${{ always() }}
     runs-on: ubuntu-26.04
     steps:
@@ -131,11 +131,11 @@ jobs:
           CHANGES_RESULT: ${{ needs.changes.result }}
           CI_MODE: ${{ needs.changes.outputs.mode }}
           UNIT_RESULT: ${{ needs.unit.result }}
-          SMOKE_RESULT: ${{ needs.smoke.result }}
+          INTEGRATION_RESULT: ${{ needs.integration.result }}
         run: |
           if [[ "$CHANGES_RESULT" == success && "$CI_MODE" == docs-only &&
-                "$UNIT_RESULT" == skipped && "$SMOKE_RESULT" == skipped ]]; then
-            echo 'Docs-only PR. Unit and smoke tests skipped.' >> "$GITHUB_STEP_SUMMARY"
+                "$UNIT_RESULT" == skipped && "$INTEGRATION_RESULT" == skipped ]]; then
+            echo 'Docs-only PR. Unit and integration tests skipped.' >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
@@ -144,8 +144,8 @@ jobs:
             echo '::warning::Could not classify the full PR diff. Checking the full test run.'
           fi
 
-          echo "Build and unit tests: $UNIT_RESULT. Smoke tests: $SMOKE_RESULT." >> "$GITHUB_STEP_SUMMARY"
-          if [[ "$UNIT_RESULT" != success || "$SMOKE_RESULT" != success ]]; then
-            echo "::error::Build and unit tests: $UNIT_RESULT. Smoke tests: $SMOKE_RESULT."
+          echo "Build and unit tests: $UNIT_RESULT. Integration tests: $INTEGRATION_RESULT." >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$UNIT_RESULT" != success || "$INTEGRATION_RESULT" != success ]]; then
+            echo "::error::Build and unit tests: $UNIT_RESULT. Integration tests: $INTEGRATION_RESULT."
             exit 1
           fi

@@ -1,19 +1,19 @@
 # Contributing to Pen
 
-For code changes, build and run unit tests, rebuild the CLI, then run the affected smoke tests. Container files, templates and tool recipes are embedded in the CLI, so changes to those need a rebuild too.
+For code changes, build and run unit tests, rebuild the CLI, then run the affected integration tests. Container files, templates and tool recipes are embedded in the CLI, so changes to those need a rebuild too.
 
 For installation and everyday use, start with the [README](README.md#get-started). Commands below run from the repo root unless shown otherwise. Everyone taking part is expected to follow the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## Development setup
 
-You need Docker with Compose v2, Python 3 for the smoke tests that need a terminal, and the .NET 11 SDK pinned in [`cli/global.json`](cli/global.json). On macOS, also install Xcode command-line tools (`xcode-select --install`).
+You need Docker with Compose v2, Python 3 for the integration tests that need a terminal, and the .NET 11 SDK pinned in [`cli/global.json`](cli/global.json). On macOS, also install Xcode command-line tools (`xcode-select --install`).
 
 On Linux, the installer can build without a host SDK, but the `dotnet` commands below need one. The default installer image is Azure Linux 3.0; its binary runs on glibc 2.34+ (Ubuntu 22.04+, Debian 12+). Set `PEN_BUILD_IMAGE` to use a different build image.
 
 ```sh
 cd cli
 dotnet build      # warnings are errors
-dotnet test       # unit tests (not the smoke tests)
+dotnet test       # unit tests (not the integration tests)
 cd ..
 cli/install.sh    # install the dev build to ~/.local/bin/pen
 ```
@@ -26,25 +26,25 @@ After building, running unit tests and rebuilding the binary to test:
 
 ```sh
 cd cli
-dotnet run --project Pen.SmokeTests                                        # every class: the full suite
-dotnet run --project Pen.SmokeTests -- --filter-class "*CliDispatchTests"  # one class
-dotnet run --project Pen.SmokeTests -- --filter-method "*Symlink*"         # methods by name, in any class
+dotnet run --project Pen.IntegrationTests                                        # every class: the full suite
+dotnet run --project Pen.IntegrationTests -- --filter-class "*CliDispatchTests"  # one class
+dotnet run --project Pen.IntegrationTests -- --filter-method "*Symlink*"         # methods by name, in any class
 ```
 
-Smoke tests need Docker and run against the installed `pen`, or the binary named by `PEN`. Rebuild before testing. To leave your installed binary alone, use `cli/install.sh --out DIR`, then set `PEN=/absolute/path/to/pen` when running the suite.
+Integration tests need Docker and run against the installed `pen`, or the binary named by `PEN`. Rebuild before testing. To leave your installed binary alone, use `cli/install.sh --out DIR`, then set `PEN=/absolute/path/to/pen` when running the suite.
 
 Run the classes affected by your change, and the full suite for larger changes:
 
-| Change | Smoke test classes |
+| Change | Integration test classes |
 |---|---|
 | Tools | `ToolsImageTests`, `ToolRecipeTests` |
 | Agents | The tool classes above, plus `AgentTests` |
 | .NET | The tool classes above, plus `DotNetTests` |
 | `image/` | `BaseImageTests`, `BaseRuntimeTests` |
 
-See [`cli/Pen.SmokeTests`](cli/Pen.SmokeTests) for the other classes. Filters go after `--`. Each class uses its own throwaway projects and, for config checks, a throwaway `HOME`, so classes run independently. The tests don't edit your existing `~/.config/pen`; a first run may create it.
+See [`cli/Pen.IntegrationTests`](cli/Pen.IntegrationTests) for the other classes. Filters go after `--`. Each class uses its own throwaway projects and, for config checks, a throwaway `HOME`, so classes run independently. The tests don't edit your existing `~/.config/pen`; a first run may create it.
 
-Each check's description is its test's display name, so `--filter-display-name "refuses*"` picks checks by description, and `--output detailed` lists each one as it passes. Checks that need credentials are skipped without them, and the slow ones (trait `Category=Slow`) are skipped unless `SMOKE_SLOW=1`; `--filter-trait "Category=Slow"` selects them.
+Each check's description is its test's display name, so `--filter-display-name "refuses*"` picks checks by description, and `--output detailed` lists each one as it passes. Checks that need credentials are skipped without them, and the slow ones (trait `Category=Slow`) are skipped unless `INTEGRATION_SLOW=1`; `--filter-trait "Category=Slow"` selects them.
 
 To narrow unit tests or run the CLI without installing (from `cli/`):
 
@@ -54,9 +54,9 @@ dotnet test --filter-method "*Name*"
 dotnet run --project Pen/Pen.csproj -- <args>
 ```
 
-Optional smoke checks:
+Optional integration checks:
 
-- `SMOKE_SLOW=1` also runs the slow checks, such as `pen upgrade`.
+- `INTEGRATION_SLOW=1` also runs the slow checks, such as `pen upgrade`.
 - `CLAUDE_CODE_OAUTH_TOKEN` and `OPENAI_API_KEY` enable agent-prompt checks, which are skipped without them. The suite writes them only to a throwaway config file (mode 600) and removes it on exit.
 - [`tests/pty-run.py`](tests/pty-run.py) runs commands on a real pseudo-terminal for signal and hangup checks; see its header for options.
 
@@ -68,14 +68,14 @@ Before merging, run the suite on macOS arm64 and Linux amd64, with both rootful 
 |---|---|
 | `cli/Pen/` | Host CLI (.NET 11, Native AOT) |
 | `cli/Pen.Tests/` | Unit tests (xunit v3 on Microsoft.Testing.Platform) |
-| `cli/Pen.SmokeTests/` | Smoke tests against the installed pen (xunit v3, run with `dotnet run`) |
+| `cli/Pen.IntegrationTests/` | Integration tests against the installed pen (xunit v3, run with `dotnet run`) |
 | `cli/Pen.TestSupport/` | Helpers both test projects share (`TempDir`, `Git`) |
 | `compose.yaml` | Agent, proxy and optional Docker-in-Docker services |
 | `image/` | Base image and entrypoint |
 | `proxy/` | Squid proxy config and default domain allowlist |
 | `templates/` | Initial user config and agent home seed |
 | `tools/` | Tool and agent recipes: `tools/<name>/tool.toml` and `install.sh` |
-| `tests/` | Helpers for the smoke tests (`pty-run.py`) |
+| `tests/` | Helpers for the integration tests (`pty-run.py`) |
 
 **Container files and templates are embedded in the CLI.** The installed pen never reads this checkout. Reinstall after changing `compose.yaml`, `image/`, `proxy/`, `templates/` or `tools/`, just as you would after a CLI change. Changes under `image/` trigger an image rebuild on the next session.
 
@@ -96,11 +96,11 @@ For npm-distributed agents, use `/opt/pen/lib/npm-agent.sh`. It installs with th
 
 Keep agent-specific setup, including auto-update switches and managed config, in the recipe's `install.sh`. Changing the shared helper rebuilds the base and reinstalls all agents on next use.
 
-Update the [tools reference](docs/tools.md) and run the relevant smoke classes under rootful and rootless Docker.
+Update the [tools reference](docs/tools.md) and run the relevant integration classes under rootful and rootless Docker.
 
 ## Code style
 
-Use the C# conventions in [AGENTS.md](AGENTS.md#c-engineering-guidelines). The rules below apply to `cli/Pen/`, `cli/Pen.SmokeTests/` and `cli/Pen.TestSupport/`; unit tests in `cli/Pen.Tests/` have looser formatting rules.
+Use the C# conventions in [AGENTS.md](AGENTS.md#c-engineering-guidelines). The rules below apply to `cli/Pen/`, `cli/Pen.IntegrationTests/` and `cli/Pen.TestSupport/`; unit tests in `cli/Pen.Tests/` have looser formatting rules.
 
 The build enforces formatting and style through [`.editorconfig`](.editorconfig) and treats warnings as errors. `SourceStyleTests` also checks line length, restricts native imports to `Platform/Native.cs`, and keeps `RepoGuard` from calling `HostGit` or `Proc`.
 
@@ -113,7 +113,7 @@ In the host CLI, [`BannedSymbols.txt`](cli/Pen/BannedSymbols.txt) restricts APIs
 - **Dependencies:** whatever production code would otherwise get by default (`Answers`, `RecipeCatalog`, stdin) is passed explicitly, through constructors. No optional parameters as test seams.
 - **Signatures:** at most about 5 parameters, or a parameter object. Records with more than 3 optional members use `init` properties instead of positional optionals. Return a result type rather than a tuple whenever the meaning of its parts isn't obvious.
 - **Statements:** one statement per line, and an embedded statement goes on its own line. A multi-line body has braces. No one-line `try { } catch { }`, nested ternaries or conditional collection spreads (`[.. (c ? new[] { … } : [])]`): use `if`, `yield` or a list.
-- **Line length:** at most 120 characters. Raw strings are exempt (help text, multi-line messages, scripts), as is, in `cli/Pen.SmokeTests/` only, a line that holds nothing but one string literal (a smoke check's description must stay one literal, and a few are longer than a line).
+- **Line length:** at most 120 characters. Raw strings are exempt (help text, multi-line messages, scripts), as is, in `cli/Pen.IntegrationTests/` only, a line that holds nothing but one string literal (an integration check's description must stay one literal, and a few are longer than a line).
 - **Method and property names:** methods are verbs (`FindUnapproved`, `SaveWith`), or `Is`/`Has`/`Try` predicates. Properties are nouns.
 - **Local and parameter names:** words (`result`, `dindLock`). Single letters are fine only for short lambda parameters and loop indices.
 - **Field names:** private instance fields are `_camelCase`; constants and static readonly fields are `PascalCase`.
@@ -140,9 +140,9 @@ cli/install.sh
 
 ## Continuous integration
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `dotnet build` and `dotnet test` on macOS and Linux, then `cli/install.sh` and the smoke suite on Linux with rootful Docker and fish. The CI smoke run uses no agent credentials and leaves the slow checks disabled. Run macOS and rootless Docker smoke tests locally as described above.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `dotnet build` and `dotnet test` on macOS and Linux, then `cli/install.sh` and the integration suite on Linux with rootful Docker and fish. The CI integration run uses no agent credentials and leaves the slow checks disabled. Run macOS and rootless Docker integration tests locally as described above.
 
-Pull requests skip the build, unit tests and smoke tests when the entire PR diff touches only Markdown under `docs/`, `README.md` or `CONTRIBUTING.md`, counting both paths of a rename. All other PRs, pushes to `main`, manual runs and release runs use the full CI workflow. The `CI result` check reports the docs-only skip or the test outcomes and is the check to require for merging.
+Pull requests skip the build, unit tests and integration tests when the entire PR diff touches only Markdown under `docs/`, `README.md` or `CONTRIBUTING.md`, counting both paths of a rename. All other PRs, pushes to `main`, manual runs and release runs use the full CI workflow. The `CI result` check reports the docs-only skip or the test outcomes and is the check to require for merging.
 
 ## Releasing
 
