@@ -1,3 +1,5 @@
+<div style="text-align:center"><img src="docs/assets/pen-logo.png" alt="Pen logo" width="256" style="border:0;padding:0;margin:0"></div>
+
 # Pen
 
 [![CI status on main](https://github.com/mmonteleone/pen/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/mmonteleone/pen/actions/workflows/ci.yml)
