@@ -138,14 +138,23 @@ git pull
 cli/install.sh
 ```
 
-## Release plan
+## Continuous integration
 
-Releases aren't published or automated yet. The intended process is:
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `dotnet build` and `dotnet test` on macOS and Linux, then `cli/install.sh` and the smoke suite on Linux with rootful Docker and fish. The CI smoke run uses no agent credentials and leaves the slow checks disabled. Run macOS and rootless Docker smoke tests locally as described above.
 
-1. Bump `<Version>` in `cli/Pen/Pen.csproj` and tag `vX.Y.Z`.
-2. Publish AOT binaries for `osx-arm64`, `osx-x64`, `linux-x64` and `linux-arm64` to GitHub Releases.
-3. Update the formula in [`mmonteleone/homebrew-tap`](https://github.com/mmonteleone/homebrew-tap).
+Pull requests skip the build, unit tests and smoke tests when the entire PR diff touches only Markdown under `docs/`, `README.md` or `CONTRIBUTING.md`, counting both paths of a rename. All other PRs, pushes to `main`, manual runs and release runs use the full CI workflow. The `CI result` check reports the docs-only skip or the test outcomes and is the check to require for merging.
 
-Releases distribute the CLI only. Each binary embeds the Dockerfile and supporting files; Docker builds the base image on the user's machine.
+## Releasing
 
-When switching to Homebrew after releases are available, remove `~/.local/bin/pen` or put Homebrew earlier on your `PATH`. Config, logins and project volumes don't depend on the installation method.
+Only a pushed `vX.Y.Z` tag releases; other pushes never do.
+
+1. Bump `<Version>` in `cli/Pen/Pen.csproj` and commit.
+2. Tag and push: `git tag vX.Y.Z && git push origin main vX.Y.Z`.
+
+[`.github/workflows/release.yml`](.github/workflows/release.yml) then checks that the tag matches `<Version>`, runs CI, builds Native AOT binaries natively for `osx-arm64`, `osx-x64`, `linux-x64` and `linux-arm64` with `cli/install.sh --out` (Linux in its Azure Linux container, so glibc 2.34+), checks each one's architecture and `pen --version`, and publishes `pen-X.Y.Z-<rid>.tar.gz` archives, `SHA256SUMS` and build provenance attestations to a GitHub release with generated notes. Last, it renders the formula with [`packaging/homebrew/render-formula.sh`](packaging/homebrew/render-formula.sh) and commits it to `Formula/pen.rb` in [`mmonteleone/homebrew-tap`](https://github.com/mmonteleone/homebrew-tap). A version with a `-` suffix (`0.2.0-rc.1`) is published as a prerelease and doesn't touch the tap.
+
+One-time setup: create the `mmonteleone/homebrew-tap` repo with a default branch; create a fine-grained token with Contents read and write on that repo only; in this repo's settings add an environment named `release`, limit its deployments to `v*` tags, and store the token there as `HOMEBREW_TAP_TOKEN`.
+
+Releases distribute the CLI only. Each binary embeds the Dockerfile and supporting files; Docker builds the base image on the user's machine. Binaries aren't signed with a Developer ID or notarized; Homebrew doesn't quarantine what it installs, but a binary downloaded in a browser needs `xattr -d com.apple.quarantine pen`.
+
+When switching to Homebrew from a source installation, remove `~/.local/bin/pen` or put Homebrew earlier on your `PATH`. Config, logins and project volumes don't depend on the installation method.

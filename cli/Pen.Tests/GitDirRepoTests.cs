@@ -964,7 +964,8 @@ public class GitDirRepoTests
     public void ADanglingSymlinkWithALongTarget_ThroughALiveSymlink_Resolves(string via, bool inside)
     {
         using var t = new TempDir();
-        var repo = Git.Repo(t.Sub("repo"));
+        // Keep the combined path long enough even when the temporary directory has a short path.
+        var repo = Git.Repo(t.Sub(new string('d', 80), "repo"));
         var git = Path.Combine(repo, ".git");
         Directory.CreateDirectory(Path.Combine(git, "a"));
         Directory.CreateDirectory(Path.Combine(repo, "src", "a"));

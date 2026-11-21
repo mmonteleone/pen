@@ -33,6 +33,9 @@ internal sealed class CheckChanges
     /// <summary>Records a protected file that changed with nothing to set aside in Restored.</summary>
     public void Add(RestoredFile restored) => _restored.Add(restored);
 
+    /// <summary>Records a directory mode change in ModeChanges.</summary>
+    public void Add(ModeChange change) => _modeChanges.Add(change);
+
     /// <summary>Records a directory whose mode kept a protected file from being put back in Blocked.</summary>
     public void AddBlocked(string directory) => _blocked.Add(directory);
 
@@ -45,7 +48,7 @@ internal sealed class CheckChanges
     {
         if (!FileModes.TryMakeListable(path, write, out var change))
             return false;
-        _modeChanges.Add(change);
+        Add(change);
         return true;
     }
 }

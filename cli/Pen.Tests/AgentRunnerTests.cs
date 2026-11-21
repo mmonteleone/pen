@@ -86,6 +86,28 @@ public class AgentRunnerTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AFailedRunReportsOnlyTheExitedProxysDiagnostic(bool proxyExited)
+    {
+        using var t = new TempDir();
+        using var fake = new FakeDocker(t, $$"""
+            case " $* " in
+              *" run --rm "*) exit 1 ;;
+              *" ps --all --status exited --quiet proxy "*) {{(proxyExited ? "echo deadbeef" : ":")}} ;;
+              " logs --tail 30 deadbeef ") echo 'access log'; echo 'squid failed to start' >&2 ;;
+            esac
+            """);
+        using var signals = new SessionSignals();
+
+        var (exit, stderr) = RunCapturingStderr(() =>
+            new AgentRunner(NewSession(t), new Dictionary<string, string>(), signals).Run(["true"], null, []));
+
+        Assert.Equal(1, exit);
+        Assert.Equal(proxyExited ? "pen: Squid proxy diagnostics:\nsquid failed to start\n" : "", stderr);
+    }
+
     [Fact]
     public void AStopBeforeTheStartNeverStartsTheAgent()
     {

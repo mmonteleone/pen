@@ -58,9 +58,9 @@ public sealed class BaseRuntimeTests(BaseRuntimeTests.Fixture fixture) : IClassF
     [Fact(DisplayName = "...with nothing blocked")]
     public void PythonHasNothingBlocked() => AssertNothingBlocked(fixture.Python);
 
-    [Fact(DisplayName = "uv venv -p 3.14 downloads that Python into the home volume (~/.local/share/uv/python)")]
+    [Fact(DisplayName = "uv venv -p 3.13 downloads that Python into the home volume (~/.local/share/uv/python)")]
     public void UvDownloadsAnotherPython() =>
-        AssertMatches(fixture.OtherPython, @"^v14=/home/agent/\.local/share/uv/python/cpython-3\.14");
+        AssertMatches(fixture.OtherPython, @"^v13=/home/agent/\.local/share/uv/python/cpython-3\.13");
 
     [Fact(DisplayName = "...with nothing blocked")]
     public void OtherPythonHasNothingBlocked() => AssertNothingBlocked(fixture.OtherPython);
@@ -191,8 +191,8 @@ public sealed class BaseRuntimeTests(BaseRuntimeTests.Fixture fixture) : IClassF
                 Delete(name);
 
             OtherPython = Cli.Run("run", "bash", "-c", """
-                uv venv -q -p 3.14 v14 && v14/bin/python -c "import sys; print(\"v14=\" + sys.base_prefix)"; uv python uninstall -q 3.14
-                rm -rf v14
+                uv venv -q -p 3.13 v13 && v13/bin/python -c "import sys; print(\"v13=\" + sys.base_prefix)"; uv python uninstall -q 3.13
+                rm -rf v13
                 """);
         }
     }

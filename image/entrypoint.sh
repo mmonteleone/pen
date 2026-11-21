@@ -50,11 +50,21 @@ if [ "$(id -u)" = 0 ] && [ "${PEN_PHASE:-}" != agent ]; then
     groupadd -K GID_MIN=1 -g "$PEN_GID" agent
   fi
   if existing=$(getent passwd "$PEN_UID"); then
-    die "UID $PEN_UID is already taken in the image by '${existing%%:*}'"
+    # The .NET recipe supplies the SDK image's app (1654). Reuse that account
+    # when it matches the host, with Pen's home, shell and primary group, so
+    # passwd-based home lookups still find the session volume. Other UID/name
+    # combinations remain errors.
+    if [ "$PEN_UID" = 1654 ] && [ "${existing%%:*}" = app ]; then
+      usermod -d /home/agent -s /bin/bash -g "$PEN_GID" app
+      export USER=app LOGNAME=app
+    else
+      die "UID $PEN_UID is already taken in the image by '${existing%%:*}'"
+    fi
+  else
+    # -M: the home dir is a volume, don't create it. UID_MIN=1: the Mac's 501
+    # is below Ubuntu's default range.
+    useradd -M -K UID_MIN=1 -u "$PEN_UID" -g "$PEN_GID" -d /home/agent -s /bin/bash agent
   fi
-  # -M: the home dir is a volume, don't create it. UID_MIN=1: the Mac's 501
-  # is below Ubuntu's default range.
-  useradd -M -K UID_MIN=1 -u "$PEN_UID" -g "$PEN_GID" -d /home/agent -s /bin/bash agent
 
   # New volumes start out root-owned (the image has nothing at these paths).
   # Not recursive: a new volume is empty, and an existing one is already ours.

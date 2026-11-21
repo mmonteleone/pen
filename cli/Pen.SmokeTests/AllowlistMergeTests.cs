@@ -45,7 +45,10 @@ public sealed class AllowlistMergeTests(AllowlistMergeTests.Fixture fixture)
             fixture.WildcardProxyLog);
 
     [Fact(DisplayName = "...and api.github.com is reachable")]
-    public void WildcardReachesApiGitHub() => AssertStdout(fixture.Wildcard, "200");
+    public void WildcardReachesApiGitHub() =>
+        Assert.True(fixture.Wildcard.ExitCode == 0
+            && Regex.IsMatch(fixture.Wildcard.CapturedStdout, "^CONNECT 200, HTTPS [1-5][0-9]{2}$"),
+            fixture.Wildcard.Describe());
 
     [Fact(DisplayName = "...and the proxy starts with empty deny and open-egress files, warning about each")]
     public void EmptyDenyAndOpenFilesStartFine() =>
@@ -208,7 +211,8 @@ public sealed class AllowlistMergeTests(AllowlistMergeTests.Fixture fixture)
 
             Home.WriteConfig("allow = [\".github.com\"]");
             var session = Track(Cli.Start("run", "bash", "-c", """
-                sleep 5; curl -s -o /dev/null -w "%{http_code}" -I https://api.github.com
+                sleep 5
+                curl -sS -o /dev/null -w "CONNECT %{http_connect}, HTTPS %{http_code}" -I https://api.github.com
                 """));
             var proxyName = $"^{Key}-.*-proxy-1$";
             if (!Polling.WaitForContainer(proxyName))

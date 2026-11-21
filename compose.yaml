@@ -80,7 +80,10 @@ services:
     volumes:
       - type: tmpfs
         target: /var/log/squid
-        tmpfs: {size: 16m, mode: 01777}
+        # Squid opens the bind-mounted access.log with O_CREAT. Linux can
+        # reject that in a writable sticky directory when the file belongs
+        # to the host user. Squid only needs the file itself to be writable.
+        tmpfs: {size: 16m, mode: 0755}
       - type: tmpfs
         target: /var/spool/squid
         tmpfs: {size: 16m, mode: 01777}

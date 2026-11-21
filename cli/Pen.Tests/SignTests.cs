@@ -61,6 +61,7 @@ public class HostGitTests
     }
 }
 
+[Collection(nameof(LockAndProcessTests))] // Capturing stderr replaces the process-wide console writer.
 public class SignTests
 {
     /// <summary>
@@ -896,7 +897,8 @@ public class SignTests
         SetBase(f);
         f.Global("commit.gpgsign", "true");
         var valid = f.SignedBy(f.Key, "valid");
-        var forged = f.Forged("SSH SIGNATURE", new string('x', 2_000_000));
+        // Keep the signed input large and the subject printed by Sign short.
+        var forged = f.Forged("SSH SIGNATURE", "forged\n\n" + new string('x', 2_000_000));
 
         Assert.Equal("1 unsigned commit; review, then run pen sign", new BranchSigner(f.Git).FormatReminder());
         Assert.Equal([valid], new SignatureVerifier(f.Git).FindVerified([valid, forged]));

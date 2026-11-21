@@ -165,10 +165,17 @@ public sealed class ToolRecipeTests(ToolRecipeTests.Fixture fixture) : IClassFix
 
                 """);
             Java = RunWithTool("java", """
-                mvn=https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.16/apache-maven-3.9.16-bin.tar.gz
-                curl -fsSL "$mvn" | tar -xz -C /tmp && cd jv && /tmp/apache-maven-3.9.16/bin/mvn -B -q package &&
-                java -cp "target/hi-1.jar:$(ls ~/.m2/repository/org/apache/commons/commons-lang3/3.17.0/*.jar)" hi.Hi && java -version &&
+                set -euo pipefail
+                java -version
                 java -XshowSettings:properties -version 2>&1 | grep -E "^ +user\.home = "
+                work=$(mktemp -d)
+                trap 'rm -rf -- "$work"' EXIT
+                mvn=https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.16/apache-maven-3.9.16-bin.tar.gz
+                curl -fsSL --retry 3 --retry-all-errors --retry-max-time 60 --max-time 30 -o "$work/maven.tar.gz" "$mvn"
+                tar -xzf "$work/maven.tar.gz" -C "$work"
+                cd jv
+                "$work/apache-maven-3.9.16/bin/mvn" -B -q package
+                java -cp "target/hi-1.jar:$HOME/.m2/repository/org/apache/commons/commons-lang3/3.17.0/commons-lang3-3.17.0.jar" hi.Hi
                 """);
             Delete("jv");
         }

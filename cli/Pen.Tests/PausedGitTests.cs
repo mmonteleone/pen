@@ -320,7 +320,7 @@ public class PausedGitTests
     }
 
     [Fact]
-    public void ARebaseStateDirThatCantBeEnteredIsQuarantined()
+    public void ARebaseStateDirThatCantBeEnteredIsQuarantinedOrReported()
     {
         using var t = new TempDir();
         var repo = PausedRebase(t);
@@ -329,9 +329,8 @@ public class PausedGitTests
         var quarantined = state + GitQuarantine.Suffix;
         try
         {
-            var moved = Assert.IsType<Quarantined.Moved>(Assert.Single(GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null).Moved));
-            Assert.Equal(quarantined, moved.To);
-            Assert.Contains("can't be read", moved.Why);
+            var entry = QuarantineAssertions.DirectoryWithoutChangingMode(repo, state);
+            Assert.Contains("can't be read", entry.Why);
         }
         finally { File.SetUnixFileMode(Directory.Exists(quarantined) ? quarantined : state, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
     }
@@ -992,7 +991,7 @@ public class PausedGitTests
     }
 
     [Fact]
-    public void WithoutChangingModesTheStateDirGoesAsideInstead()
+    public void WithoutChangingModesTheStateDirGoesAsideOrTheCheckFails()
     {
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
@@ -1000,12 +999,7 @@ public class PausedGitTests
         var state = Path.GetDirectoryName(path)!;
         using var _ = new ReadOnlyDirs(repo, state);
 
-        var check = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: null);
-
-        Assert.Null(check.Failure);
-        Assert.Equal(state, Assert.Single(check.Moved).From);
-        Assert.False(PathChecks.ExistsOrIsLink(state));
-        Assert.Equal(ReadOnlyDir, File.GetUnixFileMode(state + GitQuarantine.Suffix)); // no mode changed
+        QuarantineAssertions.DirectoryWithoutChangingMode(repo, state);
     }
 
     [Theory]

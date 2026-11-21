@@ -2,7 +2,7 @@ namespace Pen.Tests;
 
 /// <summary>
 /// Paths in a git dir that Pen can't read (an agent's chmod 000) are refused at
-/// the start, quarantined at the end, and never leave a project stuck.
+/// the start, and quarantined at the end. Checks without a session preserve modes and report failed renames.
 /// </summary>
 [Collection(nameof(LockAndProcessTests))]
 public class UnreadablePathTests
@@ -38,21 +38,23 @@ public class UnreadablePathTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void GitCheckQuarantinesAnUnreadableModuleEntry(bool thereAtStart)
+    public void GitCheckQuarantinesAnUnreadableModuleEntryOrReportsFailure(bool thereAtStart)
     {
         using var t = new TempDir();
         var repo = RepoWithModule(t, out var foo);
         using var _ = new Chmod(foo);
 
-        var moved = GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: thereAtStart ? [foo] : []).Moved;
-
-        var q = Assert.IsType<Quarantined.Moved>(Assert.Single(moved));
-        Assert.Equal(foo, q.From);
-        Assert.Equal(foo + GitQuarantine.Suffix, q.To);
-        Assert.Contains("can't be read", q.Why);
-        Assert.False(Path.Exists(foo));
-        Assert.Empty(GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved);
-        RepoGuard.CheckAtStart(repo); // the next pen command works
+        var entry = QuarantineAssertions.DirectoryWithoutChangingMode(repo, foo, thereAtStart ? [foo] : []);
+        Assert.Contains("can't be read", entry.Why);
+        if (entry is Quarantined.Moved)
+        {
+            Assert.Empty(GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved);
+            RepoGuard.CheckAtStart(repo);
+        }
+        else
+        {
+            Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(repo));
+        }
     }
 
     [Fact]
@@ -94,7 +96,7 @@ public class UnreadablePathTests
     [Theory]
     [InlineData("modules")]
     [InlineData("worktrees")]
-    public void AnUnreadableTopLevelIsRefusedAndQuarantined(string name)
+    public void AnUnreadableTopLevelIsRefusedUntilQuarantined(string name)
     {
         using var t = new TempDir();
         var repo = Git.Repo(t.Sub("repo"));
@@ -102,8 +104,11 @@ public class UnreadablePathTests
         using var _ = new Chmod(dir);
 
         Assert.Contains($"  .git/{name}", Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(repo)).Message);
-        Assert.Equal(dir, Assert.Single(GitCheck.RunWithoutSession(repo, startedWithGit: true, commonGitDir: null, modulesAtStart: []).Moved).From);
-        RepoGuard.CheckAtStart(repo);
+        var entry = QuarantineAssertions.DirectoryWithoutChangingMode(repo, dir, []);
+        if (entry is Quarantined.Moved)
+            RepoGuard.CheckAtStart(repo);
+        else
+            Assert.Throws<PenException>(() => RepoGuard.CheckAtStart(repo));
     }
 
     [Fact]

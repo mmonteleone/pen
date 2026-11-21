@@ -39,7 +39,7 @@ public class RecipeTests
         Assert.True(RecipeCatalog.Embedded.TryGet("dotnet", out var recipe));
         Assert.False(recipe.Hidden);
         Assert.True(recipe.Multiple);
-        Assert.Equal("10", recipe.Default);
+        Assert.Equal("11", recipe.Default);
         Assert.Contains("dotnet", RecipeCatalog.Embedded.DescribeAvailable());
         Assert.Equal(
             [".nuget.org", "builds.dotnet.microsoft.com", "aka.ms", "www.microsoft.com", "crl3.digicert.com", "ocsp.digicert.com"],
@@ -73,9 +73,11 @@ public class RecipeTests
     {
         Assert.True(RecipeCatalog.Embedded.TryGet("dotnet", out var recipe));
         Assert.Equal(
-            ["ASPNETCORE_HTTP_PORTS", "DOTNET_RUNNING_IN_CONTAINER", "DOTNET_GENERATE_ASPNET_CERTIFICATE", "DOTNET_USE_POLLING_FILE_WATCHER",
-             "NUGET_XMLDOC_MODE", "POWERSHELL_DISTRIBUTION_CHANNEL", "DOTNET_NOLOGO", "DOTNET_CLI_TELEMETRY_OPTOUT"],
+            ["APP_UID", "ASPNETCORE_HTTP_PORTS", "DOTNET_RUNNING_IN_CONTAINER", "DOTNET_GENERATE_ASPNET_CERTIFICATE", "DOTNET_USE_POLLING_FILE_WATCHER",
+             "VSTEST_ARTIFACTS_BASE_DIRECTORY", "NUGET_XMLDOC_MODE", "POWERSHELL_DISTRIBUTION_CHANNEL", "DOTNET_NOLOGO", "DOTNET_CLI_TELEMETRY_OPTOUT"],
             recipe.Env.Select(e => e.Key));
+        Assert.Contains(new KeyValuePair<string, string>("APP_UID", "1654"), recipe.Env);
+        Assert.Contains(new KeyValuePair<string, string>("VSTEST_ARTIFACTS_BASE_DIRECTORY", "/tmp"), recipe.Env);
         Assert.Contains(new KeyValuePair<string, string>("ASPNETCORE_HTTP_PORTS", "8080"), recipe.Env);
         Assert.Contains(new KeyValuePair<string, string>("DOTNET_CLI_TELEMETRY_OPTOUT", "1"), recipe.Env);
         foreach (var leftOut in new[] { "DOTNET_VERSION", "ASPNET_VERSION", "DOTNET_SDK_VERSION" })

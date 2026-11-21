@@ -1,0 +1,151 @@
+name: CI
+
+# Build, unit tests on macOS and Linux, then the smoke suite on Linux (rootful
+# Docker). Only docs-only PRs skip these jobs. The release workflow calls this
+# too. Rootless Docker and macOS smoke runs stay manual (CONTRIBUTING.md).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: 1
+
+jobs:
+  changes:
+    name: Check for docs-only changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-26.04
+    outputs:
+      mode: ${{ steps.classify.outputs.mode }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify the full PR diff
+        id: classify
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          paths="$RUNNER_TEMP/pen-pr-paths"
+          mode=full
+          # Use the PR's merge base and see both paths of any rename.
+          if ! merge_base=$(git merge-base --all "$BASE_SHA" "$HEAD_SHA") ||
+             [[ -z "$merge_base" || "$merge_base" == *$'\n'* ]] ||
+             ! git diff --no-renames --name-only -z "$merge_base" "$HEAD_SHA" -- > "$paths"; then
+            mode=unknown
+          elif [[ -s "$paths" ]]; then
+            mode=docs-only
+            while IFS= read -r -d '' path; do
+              case "$path" in
+                docs/*.md|README.md|CONTRIBUTING.md) ;;
+                *) mode=full; break ;;
+              esac
+            done < "$paths"
+          fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+
+  unit:
+    name: Build and unit tests (${{ matrix.os }})
+    needs: changes
+    if: ${{ !cancelled() && !(needs.changes.result == 'success' && needs.changes.outputs.mode == 'docs-only') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-26.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: cli/global.json
+      - name: Install shells for unit tests
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zsh fish
+      - name: Build
+        working-directory: cli
+        run: dotnet build
+      - name: Unit tests
+        working-directory: cli
+        run: dotnet test
+
+  smoke:
+    name: Smoke tests (Linux, rootful Docker)
+    needs: unit
+    runs-on: ubuntu-26.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: cli/global.json
+      - name: Install fish for smoke tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fish
+      - name: Install pen
+        run: |
+          cli/install.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Check session startup
+        run: |
+          pen --version
+          project=$(mktemp -d "$RUNNER_TEMP/pen-smoke-start.XXXXXX")
+          cd "$project"
+          pen run true
+      - name: Smoke tests
+        working-directory: cli
+        run: dotnet run --project Pen.SmokeTests
+
+  result:
+    name: CI result
+    needs: [changes, unit, smoke]
+    if: ${{ always() }}
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Report the result
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          CI_MODE: ${{ needs.changes.outputs.mode }}
+          UNIT_RESULT: ${{ needs.unit.result }}
+          SMOKE_RESULT: ${{ needs.smoke.result }}
+        run: |
+          if [[ "$CHANGES_RESULT" == success && "$CI_MODE" == docs-only &&
+                "$UNIT_RESULT" == skipped && "$SMOKE_RESULT" == skipped ]]; then
+            echo 'Docs-only PR. Unit and smoke tests skipped.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [[ "$EVENT_NAME" == pull_request &&
+                ( "$CHANGES_RESULT" != success || ( "$CI_MODE" != full && "$CI_MODE" != docs-only ) ) ]]; then
+            echo '::warning::Could not classify the full PR diff. Checking the full test run.'
+          fi
+
+          echo "Build and unit tests: $UNIT_RESULT. Smoke tests: $SMOKE_RESULT." >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$UNIT_RESULT" != success || "$SMOKE_RESULT" != success ]]; then
+            echo "::error::Build and unit tests: $UNIT_RESULT. Smoke tests: $SMOKE_RESULT."
+            exit 1
+          fi

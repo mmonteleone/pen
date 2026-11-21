@@ -2,7 +2,7 @@
 # Pen base image. Builds natively on arm64 (Mac/OrbStack) and amd64 (server).
 # Nothing is installed into /home/agent: all of $HOME is a per-project volume.
 
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 ARG TARGETARCH
 
@@ -39,7 +39,7 @@ RUN install -d -m 0755 /etc/apt/keyrings; \
     echo "deb [arch=${TARGETARCH} signed-by=/etc/apt/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" \
       > /etc/apt/sources.list.d/github-cli.list; \
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc; \
-    echo "deb [arch=${TARGETARCH} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" \
+    echo "deb [arch=${TARGETARCH} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu resolute stable" \
       > /etc/apt/sources.list.d/docker.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends gh docker-ce-cli docker-buildx-plugin docker-compose-plugin; \
