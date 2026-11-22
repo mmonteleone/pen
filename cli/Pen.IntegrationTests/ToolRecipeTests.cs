@@ -171,7 +171,9 @@ public sealed class ToolRecipeTests(ToolRecipeTests.Fixture fixture) : IClassFix
                 work=$(mktemp -d)
                 trap 'rm -rf -- "$work"' EXIT
                 mvn=https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.16/apache-maven-3.9.16-bin.tar.gz
-                curl -fsSL --retry 3 --retry-all-errors --retry-max-time 60 --max-time 30 -o "$work/maven.tar.gz" "$mvn"
+                # Maven Central rate-limits shared CI addresses with 429s: back off for up to 5 minutes,
+                # honoring Retry-After, before failing.
+                curl -fsSL --retry 7 --retry-all-errors --retry-max-time 300 --max-time 60 -o "$work/maven.tar.gz" "$mvn"
                 tar -xzf "$work/maven.tar.gz" -C "$work"
                 cd jv
                 "$work/apache-maven-3.9.16/bin/mvn" -B -q package
