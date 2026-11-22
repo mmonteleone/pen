@@ -1,12 +1,13 @@
 name: CI
 
 # Build, unit tests on macOS and Linux, then the integration suite on Linux (rootful
-# Docker). Only docs-only PRs skip these jobs. The release workflow calls this
-# too. Rootless Docker and macOS integration runs stay manual (CONTRIBUTING.md).
+# Docker). PRs that touch only docs skip these jobs. The release workflow calls
+# this too. Rootless Docker and macOS integration runs stay manual (CONTRIBUTING.md).
+#
+# Pushes to main don't run CI: the main ruleset requires an up-to-date PR with a
+# passing "CI result", so the merged tree is the tree CI tested.
 
 on:
-  push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
   workflow_call:
@@ -25,6 +26,8 @@ env:
 jobs:
   changes:
     name: Check for docs-only changes
+    # Docs-only means every path is under docs/, LICENSE, or Markdown outside the
+    # embedded and code folders (templates/ ships Markdown inside the CLI).
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-26.04
     outputs:
@@ -52,7 +55,8 @@ jobs:
             mode=docs-only
             while IFS= read -r -d '' path; do
               case "$path" in
-                docs/*.md|README.md|CONTRIBUTING.md) ;;
+                cli/*|image/*|proxy/*|templates/*|tools/*) mode=full; break ;;
+                docs/*|*.md|LICENSE) ;;
                 *) mode=full; break ;;
               esac
             done < "$paths"

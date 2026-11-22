@@ -142,7 +142,9 @@ cli/install.sh
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `dotnet build` and `dotnet test` on macOS and Linux, then `cli/install.sh` and the integration suite on Linux with rootful Docker and fish. The CI integration run uses no agent credentials and leaves the slow checks disabled. Run macOS and rootless Docker integration tests locally as described above.
 
-Pull requests skip the build, unit tests and integration tests when the entire PR diff touches only Markdown under `docs/`, `README.md` or `CONTRIBUTING.md`, counting both paths of a rename. All other PRs, pushes to `main`, manual runs and release runs use the full CI workflow. The `CI result` check reports the docs-only skip or the test outcomes and is the check to require for merging.
+Pull requests skip the build, unit tests and integration tests when every path in the PR diff, counting both paths of a rename, is under `docs/`, is `LICENSE`, or is Markdown outside `cli/`, `image/`, `proxy/`, `templates/` and `tools/`. Those folders are excluded because the CLI embeds some of their Markdown. All other PRs, manual runs and release runs use the full CI workflow. The `CI result` check reports the docs-only skip or the test outcomes.
+
+A ruleset on `main` blocks direct pushes, force pushes and deletion. It also requires a pull request with a passing `CI result` on a branch that is up to date with `main`. Because the merged tree is the tree CI tested, pushes to `main` don't run CI again. Admins can bypass these requirements, but only when merging a pull request. For a change that can't affect behavior but isn't covered by the docs-only skip, such as comment edits, put `[skip ci]` in the head commit's message so no run starts, then merge with the bypass.
 
 ## Releasing
 
