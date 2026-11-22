@@ -10,8 +10,8 @@ Every session includes Node LTS, npm, Python, pip, uv, Git and C build tools. Pe
 ## Adding tools
 
 ```sh
-pen tools                                # list agents, tools and default versions
-pen --tool go claude                      # add Go for this session
+pen tools                                   # list agents, tools and default versions
+pen --tool go claude                        # add Go for this session
 pen --tool dotnet:8 --tool dotnet:10 codex  # pick versions
 ```
 
