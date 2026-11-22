@@ -1,4 +1,5 @@
-<p align="center"><img src="docs/assets/pen-logo.png" alt="Pen logo" width="256"></p>
+<img src="./docs/assets/pen-logo-black.svg#gh-light-mode-only" alt="Pen Logo" width="192">
+<img src="./docs/assets/pen-logo-white.svg#gh-dark-mode-only" alt="Pen Logo" width="192">
 
 # Pen
 
