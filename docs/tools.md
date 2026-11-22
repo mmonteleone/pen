@@ -2,15 +2,10 @@
 
 Every session includes Node LTS, npm, Python, pip, uv, Git and C build tools. Pen installs agents and other toolchains on request and reuses the image across projects that select the same tools.
 
-- [Tools and agents](#tools-and-agents)
-  - [Adding tools](#adding-tools)
-  - [Agents](#agents)
-  - [Node and Python](#node-and-python)
-  - [.NET](#net)
-  - [Go](#go)
-  - [Rust](#rust)
-  - [Java](#java)
-  - [CodeGraph](#codegraph)
+- [Adding tools](#adding-tools)
+- [Agents](#agents)
+- [Node and Python](#node-and-python)
+- Toolchain notes: [.NET](#net), [Go](#go), [Rust](#rust), [Java](#java) and [CodeGraph](#codegraph)
 
 ## Adding tools
 
